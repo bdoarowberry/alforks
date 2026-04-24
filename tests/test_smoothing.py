@@ -222,5 +222,28 @@ class TestStatsFromTrimmedBoundary(unittest.TestCase):
         self.assertEqual(out["elev_gain_m"], 5)
 
 
+class TestStatsFromTrimmedAvgSpeed(unittest.TestCase):
+    """Regression: avg_speed in _stats_from_trimmed used wall-clock duration
+    as the denominator, so a ski day with 50% lift time reported artificially
+    low pace. Denominator is now riding time only."""
+
+    def test_avg_speed_uses_riding_time_only(self):
+        # 2 riding points (10 km in 1 hr), then 2 assisted points (1 km in 1 hr)
+        pts = [
+            {"lat": 0, "lon": 0, "ele": 1000, "dist_km": 0.0,  "time": "2024-01-01T10:00:00", "speed": 10},
+            {"lat": 0, "lon": 0, "ele": 1000, "dist_km": 10.0, "time": "2024-01-01T11:00:00", "speed": 10},
+            {"lat": 0, "lon": 0, "ele": 1100, "dist_km": 11.0, "time": "2024-01-01T12:00:00", "speed": 1},
+        ]
+        segments = [
+            {"type": "riding",   "start": 0, "end": 1},
+            {"type": "assisted", "start": 1, "end": 2},
+        ]
+        out = app._stats_from_trimmed(pts, segments, base_stats={})
+        # Riding: 10 km in 1 hr → 10 km/h. Assisted: excluded from both.
+        self.assertEqual(out["avg_speed_kmh"], 10.0)
+        # Wall-clock duration is preserved for display.
+        self.assertEqual(out["duration_sec"], 2 * 3600)
+
+
 if __name__ == "__main__":
     unittest.main()

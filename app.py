@@ -568,6 +568,7 @@ def parse_gpx(path: Path) -> dict:
 
     total_dist = riding_dist = 0.0
     elev_gain = elev_loss = assisted_gain = max_speed = 0.0
+    riding_dur_sec = 0.0
     points = []
 
     for i, pt in enumerate(raw):
@@ -579,6 +580,7 @@ def parse_gpx(path: Path) -> dict:
                     assisted_gain += p['ele_delta']
             else:
                 riding_dist += p['dist']
+                riding_dur_sec += p['dt']
                 if p['ele_delta'] > 0:
                     elev_gain += p['ele_delta']
                 elif p['ele_delta'] < 0:
@@ -597,7 +599,10 @@ def parse_gpx(path: Path) -> dict:
 
     start, end = raw[0].time, raw[-1].time
     dur       = (end - start).total_seconds() if start and end else None
-    avg_speed = (riding_dist / 1000) / (dur / 3600) if dur else None
+    # avg_speed uses riding time only — lift/assisted segments are excluded
+    # from both numerator and denominator so the number reflects pace when
+    # actually moving, not overall wall-clock pace.
+    avg_speed = (riding_dist / 1000) / (riding_dur_sec / 3600) if riding_dur_sec > 0 else None
 
     lats = [p["lat"] for p in points]
     lons = [p["lon"] for p in points]
@@ -615,7 +620,7 @@ def parse_gpx(path: Path) -> dict:
             "elev_gain_m":     round(elev_gain),
             "elev_loss_m":     round(elev_loss),
             "assisted_gain_m": round(assisted_gain),
-            "avg_speed_kmh":   round(avg_speed, 1) if avg_speed else None,
+            "avg_speed_kmh":   round(avg_speed, 1) if avg_speed is not None else None,
             "max_speed_kmh":   round(max_speed, 1),
             "lift_count":      sum(1 for s in segments if s["type"] == "assisted"),
             "peak_ele_m":      round(max((p["ele"] for p in points if p["ele"] is not None), default=0)) or None,
@@ -1993,7 +1998,16 @@ def _stats_from_trimmed(pts: list, segments: list, base_stats: dict) -> dict:
         if s.get("type") == "assisted":
             for k in range(s["start"] + 1, s["end"] + 1):
                 assisted.add(k)
+    # Parse per-point times once so we can accumulate riding duration
+    # (avg_speed uses riding time only — see convention in parse_gpx).
+    parsed_times: list = []
+    for p in pts:
+        try:
+            parsed_times.append(datetime.fromisoformat(p["time"]))
+        except Exception:
+            parsed_times.append(None)
     riding_dist = riding_gain = riding_loss = assisted_gain = 0.0
+    riding_dur_sec = 0.0
     for i in range(1, n):
         dd = pts[i]["dist_km"] - pts[i-1]["dist_km"]
         e_prev, e_cur = pts[i-1].get("ele"), pts[i].get("ele")
@@ -2004,9 +2018,14 @@ def _stats_from_trimmed(pts: list, segments: list, base_stats: dict) -> dict:
             riding_dist += dd
             if   de > 0: riding_gain += de
             elif de < 0: riding_loss -= de
+            tp, tc = parsed_times[i-1], parsed_times[i]
+            if tp is not None and tc is not None:
+                dt = (tc - tp).total_seconds()
+                if dt > 0:
+                    riding_dur_sec += dt
     speeds    = [p["speed"] for p in pts if p.get("speed") is not None]
     max_speed = max(speeds) if speeds else base_stats.get("max_speed_kmh")
-    avg_speed = (riding_dist / (duration / 3600)) if duration > 0 else None
+    avg_speed = (riding_dist / (riding_dur_sec / 3600)) if riding_dur_sec > 0 else None
     return {
         **base_stats,
         "distance_km":     round(riding_dist, 2),
@@ -2014,7 +2033,7 @@ def _stats_from_trimmed(pts: list, segments: list, base_stats: dict) -> dict:
         "elev_gain_m":     round(riding_gain),
         "elev_loss_m":     round(riding_loss),
         "assisted_gain_m": round(assisted_gain),
-        "avg_speed_kmh":   round(avg_speed, 1) if avg_speed else None,
+        "avg_speed_kmh":   round(avg_speed, 1) if avg_speed is not None else None,
         "max_speed_kmh":   max_speed,
     }
 

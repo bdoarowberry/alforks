@@ -164,6 +164,7 @@ def _compute_algo_stats(is_assisted: list[bool], per_pt: list) -> dict:
     """Compute riding stats for a given is_assisted flag array."""
     n = len(per_pt)
     riding_dist = elev_gain = elev_loss = assisted_gain = 0.0
+    riding_dur_sec = 0.0
     lift_count = 0
     in_lift = False
     for i in range(1, n):
@@ -179,6 +180,7 @@ def _compute_algo_stats(is_assisted: list[bool], per_pt: list) -> dict:
                 assisted_gain += p['ele_delta']
         else:
             riding_dist += p['dist']
+            riding_dur_sec += p['dt']
             if   p['ele_delta'] > 0: elev_gain += p['ele_delta']
             elif p['ele_delta'] < 0: elev_loss -= p['ele_delta']
     return {
@@ -187,6 +189,7 @@ def _compute_algo_stats(is_assisted: list[bool], per_pt: list) -> dict:
         "elev_loss_m":     round(elev_loss),
         "assisted_gain_m": round(assisted_gain),
         "lift_count":      lift_count,
+        "riding_dur_sec":  riding_dur_sec,
     }
 
 
@@ -195,9 +198,11 @@ def _merge_stats(is_assisted: list[bool], per_pt: list, base_stats: dict) -> dic
     fields that depend on the original recording (duration, max_speed, peak)."""
     s = _compute_algo_stats(is_assisted, per_pt)
     duration = base_stats.get('duration_sec')
+    # avg_speed uses riding time only (see convention in app.parse_gpx).
     avg_speed = None
-    if duration and s['distance_km'] > 0:
-        avg_speed = round(s['distance_km'] / (duration / 3600), 1)
+    riding_dur = s['riding_dur_sec']
+    if riding_dur > 0 and s['distance_km'] > 0:
+        avg_speed = round(s['distance_km'] / (riding_dur / 3600), 1)
     return {
         'distance_km':     s['distance_km'],
         'duration_sec':    duration,
@@ -564,7 +569,7 @@ DETECTION_ALGORITHMS: list[tuple] = [
 # Signature string for cache invalidation. Consumed by app.py to compute the
 # CACHE_VERSION hash — bump when threshold values or algorithm logic changes.
 ALGO_SIG = (
-    f"v8-peak-ele,{_STATION_THRESH_M},{_LIFT_MIN_RIDE_SEC},{_LIFT_MAX_RIDE_SEC},{_LIFT_MIN_NET_GAIN},"
+    f"v9-riding-avg,{_STATION_THRESH_M},{_LIFT_MIN_RIDE_SEC},{_LIFT_MAX_RIDE_SEC},{_LIFT_MIN_NET_GAIN},"
     f"{_ASSISTED_MIN_DT_SEC},{_ASSISTED_MIN_GAIN_M},"
     f"{_LIFT_SPEED_MIN},{_LIFT_SPEED_MAX},{_LIFT_SPEED_STD},"
     f"{_LIFT_SINUOSITY},{_LIFT_WIN_GAIN},{_LIFT_MIN_GAIN},{_LIFT_MIN_DUR},"

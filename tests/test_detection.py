@@ -136,6 +136,24 @@ class TestStatsComputation(unittest.TestCase):
         s = detection._compute_algo_stats(flags, per_pt)
         self.assertEqual(s["lift_count"], 2)
 
+    def test_merge_stats_avg_speed_excludes_lift_time(self):
+        # 1 km riding in 60 s, 0.1 km "assisted" across 600 s of lift time.
+        # Wall-clock avg would include the lift (660 s for 1 km = 5.45 km/h).
+        # Riding-only avg: 1 km in 60 s = 60 km/h.
+        per_pt = [{'dt': 0, 'dist': 0, 'speed': 0, 'ele_delta': 0}]
+        # 10 riding transitions, each 6 s / 100 m
+        per_pt += [{'dt': 6, 'dist': 100, 'speed': 60, 'ele_delta': 0}] * 10
+        # 10 assisted transitions, each 60 s / 10 m (slow lift)
+        per_pt += [{'dt': 60, 'dist': 10, 'speed': 0.6, 'ele_delta': 5.0}] * 10
+        flags = [False]*11 + [True]*10
+        base = {'duration_sec': 660, 'max_speed_kmh': 60, 'peak_ele_m': 1050}
+        stats = detection._merge_stats(flags, per_pt, base)
+        # Numerator is riding distance only (1.0 km), denominator is riding
+        # time only (60 s). 1.0 / (60/3600) = 60.0 km/h.
+        self.assertEqual(stats['avg_speed_kmh'], 60.0)
+        # duration_sec is preserved from base_stats (wall-clock).
+        self.assertEqual(stats['duration_sec'], 660)
+
 
 if __name__ == "__main__":
     unittest.main()
