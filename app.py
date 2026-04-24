@@ -248,19 +248,31 @@ def _fetch_osm_lifts(bbox) -> list[dict]:
 
 _metadata_cache: dict | None = None
 _metadata_lock  = threading.Lock()
+# Set when metadata.json failed to parse on load. Reads fall back to {} so
+# the sidebar doesn't 500, but writes are refused — otherwise the first PATCH
+# would silently overwrite the corrupt file with an empty dict and destroy
+# everything. Manual repair / restore from backups/ is required to clear this.
+_metadata_corrupt = False
 
 
 def load_metadata() -> dict:
-    global _metadata_cache
+    global _metadata_cache, _metadata_corrupt
     if _metadata_cache is not None:
         return _metadata_cache
     with _metadata_lock:
         if _metadata_cache is not None:
             return _metadata_cache
-        _metadata_cache = (
-            json.loads(METADATA_FILE.read_text(encoding="utf-8"))
-            if METADATA_FILE.exists() else {}
-        )
+        if METADATA_FILE.exists():
+            try:
+                _metadata_cache = json.loads(METADATA_FILE.read_text(encoding="utf-8"))
+            except Exception as e:
+                print(f"[metadata] failed to parse {METADATA_FILE.name}: {e} — "
+                      f"reads will use empty dict; writes will be refused until repaired",
+                      file=sys.stderr)
+                _metadata_cache = {}
+                _metadata_corrupt = True
+        else:
+            _metadata_cache = {}
         return _metadata_cache
 
 
@@ -274,6 +286,11 @@ def save_metadata(meta: dict, changed_filenames: list[str] | None = None):
     migration that rewrote the whole file).
     """
     global _metadata_cache
+    if _metadata_corrupt:
+        raise RuntimeError(
+            f"Refusing to write {METADATA_FILE.name}: file was corrupt on load. "
+            f"Restore from backups/ or fix the file manually, then restart."
+        )
     _atomic_write(METADATA_FILE, json.dumps(meta, indent=2, ensure_ascii=False))
     with _metadata_lock:
         _metadata_cache = meta
@@ -771,7 +788,7 @@ def _load_geocode_cache() -> dict:
 
 def _save_geocode_cache(cache: dict) -> None:
     try:
-        _GEOCODE_CACHE_FILE.write_text(json.dumps(cache), encoding="utf-8")
+        _atomic_write(_GEOCODE_CACHE_FILE, json.dumps(cache))
     except Exception:
         pass
 
@@ -968,7 +985,7 @@ def api_activity(filename):
 
 
 # ─── Activity deletion (archives the GPX rather than hard-deleting) ────────
-ARCHIVE_DIR = GPX_DIR.parent / "tracks" / "_archive_dedup"
+ARCHIVE_DIR = GPX_DIR / "_archive_dedup"
 
 
 def _archive_activity(filename: str) -> bool:
@@ -1012,7 +1029,7 @@ def api_bulk_delete():
 
 @app.route("/api/bulk-metadata", methods=["PATCH"])
 def api_bulk_metadata():
-    body      = request.get_json(force=True)
+    body      = request.get_json(force=True) or {}
     filenames = body.get("filenames", [])
     allowed   = {"type", "title", "location", "notes"}
     update    = {k: v for k, v in body.items() if k in allowed}
@@ -1038,7 +1055,7 @@ def api_bulk_metadata():
 def api_save_metadata(filename):
     if _safe_gpx_path(filename) is None or not (GPX_DIR / filename).exists():
         abort(404)
-    body    = request.get_json(force=True)
+    body    = request.get_json(force=True) or {}
     allowed = {"type", "title", "location", "notes", "trim", "issues_approved",
                "smoothing", "excluded_from_stats", "regions_pinned"}
     update  = {k: v for k, v in body.items() if k in allowed}
@@ -1084,7 +1101,7 @@ def api_save_segments(filename):
             if not meta[filename]:
                 del meta[filename]
     else:
-        overrides = request.get_json(force=True).get("segment_overrides")
+        overrides = (request.get_json(force=True) or {}).get("segment_overrides")
         if overrides is not None:
             meta.setdefault(filename, {})["segment_overrides"] = overrides
     save_metadata(meta, changed_filenames=[filename])
@@ -1094,7 +1111,7 @@ def api_save_segments(filename):
 @app.route("/api/config", methods=["GET", "POST"])
 def api_config():
     if request.method == "POST":
-        body = request.get_json(force=True)
+        body = request.get_json(force=True) or {}
         cfg  = load_config()
         if "mapbox_token" in body:
             cfg["mapbox_token"] = body["mapbox_token"].strip()
@@ -1728,7 +1745,11 @@ def debug_hr_day(date_str):
     fp = HR_CACHE_DIR / f"{date_str}.json"
     if not fp.exists():
         return f"No HR cache for {date_str}", 404
-    payload = json.loads(fp.read_text(encoding="utf-8"))
+    try:
+        payload = json.loads(fp.read_text(encoding="utf-8"))
+    except Exception as e:
+        print(f"[debug_hr_day] failed to parse {fp.name}: {e}", file=sys.stderr)
+        return f"HR cache for {date_str} is corrupt", 500
     samples = [[ms, bpm] for ms, bpm in (payload.get("samples") or []) if bpm is not None]
     return render_template("debug_hr.html", date_str=date_str, samples=json.dumps(samples),
                            resting=payload.get("resting"), max_day=payload.get("max_day"),
@@ -2438,7 +2459,7 @@ def setup_page():
 def api_types():
     if request.method == "POST":
         import uuid, re
-        body  = request.get_json(force=True)
+        body  = request.get_json(force=True) or {}
         label = body.get("label", "").strip() or "New Type"
         # Build an id from the label — lowercase, alphanumeric, max 16 chars
         base = re.sub(r"[^a-z0-9]", "_", label.lower()).strip("_")[:16] or str(uuid.uuid4())[:8]
@@ -2481,7 +2502,7 @@ def api_type(type_id):
             save_metadata(meta, changed_filenames=changed_fns)
         types.pop(idx)
     else:
-        body = request.get_json(force=True)
+        body = request.get_json(force=True) or {}
         for k in ("label", "color", "bg"):
             if k in body:
                 types[idx][k] = body[k]
@@ -2557,7 +2578,8 @@ def api_regions_search():
         with urllib.request.urlopen(req, timeout=8) as resp:
             payload = json.loads(resp.read().decode("utf-8"))
     except Exception as e:
-        return jsonify({"results": [], "error": str(e)}), 502
+        print(f"[regions/search] OSM lookup failed: {e}", file=sys.stderr)
+        return jsonify({"results": [], "error": "region search failed"}), 502
     DENY_CLASSES = set(_get_osm_deny_classes())
     results = []
     for r in payload:
@@ -2655,7 +2677,7 @@ def api_region_usage(region_id):
 def api_regions():
     if request.method == "POST":
         import uuid
-        body    = request.get_json(force=True)
+        body    = request.get_json(force=True) or {}
         regions = load_regions()
         region  = {
             "id":                  str(uuid.uuid4())[:8],
@@ -2682,7 +2704,7 @@ def api_region(region_id):
     if request.method == "DELETE":
         regions.pop(idx)
     else:
-        body = request.get_json(force=True)
+        body = request.get_json(force=True) or {}
         for k in ("name", "color", "geometry", "default_type",
                   "winter_default_type", "winter_months"):
             if k in body:
