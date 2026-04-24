@@ -718,7 +718,12 @@ def get_activity(filename: str) -> dict | None:
 def _prewarm():
     """Parse every GPX file in parallel at startup, newest first so the
     activity list populates with recent rides quickly."""
-    files = sorted(GPX_DIR.glob("*.gpx"), key=lambda f: f.stat().st_mtime, reverse=True)
+    def _mtime_or_zero(f):
+        try:
+            return f.stat().st_mtime
+        except OSError:
+            return 0
+    files = sorted(GPX_DIR.glob("*.gpx"), key=_mtime_or_zero, reverse=True)
     with ThreadPoolExecutor(max_workers=6) as pool:
         list(pool.map(lambda f: get_activity(f.name), files))
     all_activities()
@@ -1569,6 +1574,11 @@ def _downsample_polyline(points: list, n: int = 50) -> list:
 def _difficulty_score(distance_km: float | None, elev_gain_m: float | None) -> int | None:
     """Cheap terrain-difficulty heuristic. Combines distance and elevation per km
     so a flat ride scores by length and a hilly ride scores higher per km.
+
+    Rough calibration: a 10 km flat ride ≈ 3; 20 km flat ≈ 4; 10 km with 1000 m
+    gain ≈ 6; 20 km with 1500 m gain ≈ 8. The scale is arbitrary — good for
+    relative comparison between rides, not for reproducing any external
+    standard. Always rounds up to at least 1.
     """
     if not distance_km or distance_km <= 0:
         return None

@@ -75,8 +75,13 @@ def haversine(p1, p2) -> float:
 
 
 def _sinuosity(start: tuple, end: tuple, path_dist: float) -> float:
+    # Epsilon of 1 m guards against a zero-division when start and end are
+    # effectively the same point (GPS noise or a closed loop) while still
+    # letting the real (large) sinuosity surface when the straight-line
+    # distance is genuinely small but the path wandered — prevents a noisy
+    # short segment from being clamped to 1.0 and misdetected as a lift.
     straight = haversine(start, end)
-    return path_dist / straight if straight > 10 else 1.0
+    return path_dist / straight if straight > 1 else 1.0
 
 
 def _median_filter(values: list, k: int = 5) -> list:
@@ -447,7 +452,10 @@ def _try_snap_to_osm(start: int, end: int, latlons: list, osm_lifts: list) -> tu
 
 
 def _trim_segment_boundaries(start: int, end: int, per_pt: list) -> tuple[int, int]:
-    """Trim slow loading/unloading zones from a segment's boundaries."""
+    """Advance the start / retreat the end to the FIRST point in each tail that
+    is moving at cable speed (>= _LIFT_SPEED_MIN), so the flagged segment
+    excludes slow loading / unloading zones at each end. If no fast point is
+    found within the trim window, leaves the boundary unchanged."""
     trim = min(_SMART_TRIM_MAX, (end - start) // 4)
     new_start = start
     for k in range(start, start + trim):
