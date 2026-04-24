@@ -101,6 +101,23 @@ class TestStationLifts(unittest.TestCase):
         self.assertEqual(detection._detect_station_lifts(latlons, per_pt, []), [False]*5)
 
 
+class TestAlgoSig(unittest.TestCase):
+    def test_sig_changes_when_mtb_threshold_changes(self):
+        # Tuning any MTB constant must bump the cache signature so stale
+        # MTB segmentation is invalidated.
+        tokens = detection.ALGO_SIG.split(",")
+        mtb_constants = (
+            "_SHUTTLE_SPEED_MIN",
+            "_SHUTTLE_WIN_SEC",
+            "_SHUTTLE_MIN_GAIN",
+            "_MTB_ELEV_THRESHOLD",
+            "_MTB_ELEV_MIN_GAIN",
+        )
+        for name in mtb_constants:
+            self.assertIn(str(getattr(detection, name)), tokens,
+                          f"{name} must contribute to ALGO_SIG")
+
+
 class TestStatsComputation(unittest.TestCase):
     def test_compute_algo_stats_all_riding(self):
         per_pt = [{'dt': 0, 'dist': 0, 'speed': 0, 'ele_delta': 0}]
