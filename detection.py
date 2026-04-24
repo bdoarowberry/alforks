@@ -148,10 +148,27 @@ def _detect_station_lifts(latlons: list, per_pt: list, lifts: list[dict]) -> lis
     for i in range(1, n):
         cum_gain[i] = cum_gain[i - 1] + per_pt[i]["ele_delta"]
 
+    # Cheap lat/lon-degree bbox pre-filter around each station. 0.003 degrees
+    # is ~335 m of latitude everywhere, and ~215 m of longitude at latitude 50
+    # (where this app is used). That comfortably contains the 100 m STATION
+    # threshold with margin. Above roughly latitude 72 the longitude scale
+    # shrinks enough that 0.003 could reject valid candidates — not a concern
+    # for the mid-latitude resorts this app targets, but worth revisiting if
+    # the app ever ingests polar tracks. Unsafe-latitude boundary derivation:
+    # arccos(_STATION_THRESH_M / (111_000 * _BBOX_TOL)) ≈ 72.5°.
+    _BBOX_TOL = 0.003
     for lift in lifts:
         for bottom, top in [(lift["a"], lift["b"]), (lift["b"], lift["a"])]:
-            near_b = [haversine(latlons[j], bottom) <= _STATION_THRESH_M for j in range(n)]
-            near_t = [haversine(latlons[j], top)    <= _STATION_THRESH_M for j in range(n)]
+            blat, blon = bottom
+            tlat, tlon = top
+            near_b = [False] * n
+            near_t = [False] * n
+            for j in range(n):
+                lat, lon = latlons[j]
+                if abs(lat - blat) < _BBOX_TOL and abs(lon - blon) < _BBOX_TOL:
+                    near_b[j] = haversine(latlons[j], bottom) <= _STATION_THRESH_M
+                if abs(lat - tlat) < _BBOX_TOL and abs(lon - tlon) < _BBOX_TOL:
+                    near_t[j] = haversine(latlons[j], top) <= _STATION_THRESH_M
 
             i = 0
             while i < n:

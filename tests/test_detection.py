@@ -100,6 +100,33 @@ class TestStationLifts(unittest.TestCase):
         latlons = [(0, 0)] * 5
         self.assertEqual(detection._detect_station_lifts(latlons, per_pt, []), [False]*5)
 
+    def test_bbox_prefilter_still_finds_points_near_station(self):
+        """Regression: adding the lat/lon bbox pre-filter must not cause
+        a true near-station point to be rejected. Craft a track where one
+        point is within the 100 m station threshold but far from all
+        others, and assert the lift is still detected."""
+        # 300 points per_pt: 1 s cadence, 1 m gain each → plausible lift
+        per_pt = [{'dt': 0, 'ele_delta': 0}] + \
+                 [{'dt': 1, 'ele_delta': 1}] * 299
+        # Most points far from the lift (at (50.0, -116.0))
+        # Index 10 sits *at a bbox corner* — non-zero Δlat AND Δlon at once,
+        # exercising the case where both axis checks must pass simultaneously.
+        # Offset 0.0006° lat + 0.0006° lon at latitude 50 is:
+        #   sqrt((0.0006 * 111_000)^2 + (0.0006 * 111_000 * cos(50°))^2)
+        #   = sqrt(66.6^2 + 42.8^2) ≈ 79 m  — well inside the 100 m threshold.
+        latlons = [(49.0, -115.0)] * 300
+        latlons[10] = (50.0006, -115.9994)     # ~79 m NE of bottom station
+        latlons[120] = (50.0010, -116.0000)    # top station exactly
+        lifts = [{"a": (50.0000, -116.0000), "b": (50.0010, -116.0000), "name": "Test"}]
+        flags = detection._detect_station_lifts(latlons, per_pt, lifts)
+        # Indices 10..120 inclusive should be flagged (lift ride)
+        self.assertTrue(flags[10])
+        self.assertTrue(flags[120])
+        self.assertTrue(all(flags[10:121]))
+        # Points far from both stations should remain False
+        self.assertFalse(flags[0])
+        self.assertFalse(flags[200])
+
 
 class TestMedianFilter(unittest.TestCase):
     """Regression: the k=5 hot path is a separate implementation from the
