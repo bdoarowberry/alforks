@@ -1977,10 +1977,16 @@ def _stats_from_trimmed(pts: list, segments: list, base_stats: dict) -> dict:
         duration = int((t1 - t0).total_seconds())
     except Exception:
         pass
+    # _build_segments shares boundary indices between adjacent segments for
+    # rendering continuity (assisted segment starts at i-1 when the transition
+    # hits index i). For per-point stats, index i's delta-to-arrive belongs to
+    # is_assisted[i]'s type — which is the NEXT segment's type, not this one's
+    # boundary share. Skip each segment's start index so attribution matches
+    # _compute_algo_stats.
     assisted = set()
     for s in segments or []:
         if s.get("type") == "assisted":
-            for k in range(s["start"], s["end"] + 1):
+            for k in range(s["start"] + 1, s["end"] + 1):
                 assisted.add(k)
     riding_dist = riding_gain = riding_loss = assisted_gain = 0.0
     for i in range(1, n):

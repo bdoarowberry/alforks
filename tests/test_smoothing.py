@@ -194,5 +194,33 @@ class TestOutOfOrderTimestamps(unittest.TestCase):
             fpath.unlink(missing_ok=True)
 
 
+class TestStatsFromTrimmedBoundary(unittest.TestCase):
+    """Regression: _build_segments shares the transition index between adjacent
+    segments for rendering continuity. _stats_from_trimmed used to iterate
+    [start, end+1) inclusive of start, which mis-attributed the boundary
+    point's delta to the wrong segment type. Fix: iterate [start+1, end+1)."""
+
+    def test_boundary_delta_is_not_double_counted(self):
+        # 4 points: small riding climb, then a sharp lift gain, then a lift
+        # tail. If boundary is counted as assisted, assisted_gain picks up
+        # the riding 5 m and reports 60; correct answer is 55.
+        pts = [
+            {"lat": 0, "lon": 0, "ele": 1000, "dist_km": 0.0,  "time": "2024-01-01T10:00:00", "speed": 10},
+            {"lat": 0, "lon": 0, "ele": 1005, "dist_km": 0.1,  "time": "2024-01-01T10:00:10", "speed": 10},
+            {"lat": 0, "lon": 0, "ele": 1055, "dist_km": 0.15, "time": "2024-01-01T10:01:00", "speed": 2},
+            {"lat": 0, "lon": 0, "ele": 1060, "dist_km": 0.2,  "time": "2024-01-01T10:02:00", "speed": 2},
+        ]
+        # Segments as _build_segments would emit for is_assisted=[F, F, T, T]:
+        segments = [
+            {"type": "riding",   "start": 0, "end": 1},
+            {"type": "assisted", "start": 1, "end": 3},
+        ]
+        out = app._stats_from_trimmed(pts, segments, base_stats={})
+        # Only the 1→2 and 2→3 deltas are assisted: 50 + 5 = 55
+        self.assertEqual(out["assisted_gain_m"], 55)
+        # Riding gain is only the 0→1 delta: 5
+        self.assertEqual(out["elev_gain_m"], 5)
+
+
 if __name__ == "__main__":
     unittest.main()
