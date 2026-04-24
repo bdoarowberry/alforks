@@ -156,5 +156,43 @@ class TestUnparseableSentinel(unittest.TestCase):
             fpath.unlink(missing_ok=True)
 
 
+class TestOutOfOrderTimestamps(unittest.TestCase):
+    """Regression: a backwards-jumping timestamp (dt < 0) used to pass the
+    dt > 0 speed guard but still get its haversine distance accumulated,
+    silently inflating total_dist / riding_dist. Now dt < 0 zeroes both."""
+
+    def _write_gpx(self, pts: list[tuple[float, float, str]]) -> "Path":
+        from pathlib import Path
+        lines = ['<?xml version="1.0"?>',
+                 '<gpx version="1.1"><trk><trkseg>']
+        for lat, lon, t in pts:
+            lines.append(f'<trkpt lat="{lat}" lon="{lon}"><ele>1000</ele><time>{t}</time></trkpt>')
+        lines.append('</trkseg></trk></gpx>')
+        fname = "_ooo_ts_regression.gpx"
+        fpath: Path = app.GPX_DIR / fname
+        fpath.write_text("\n".join(lines), encoding="utf-8")
+        return fpath
+
+    def test_out_of_order_timestamp_does_not_inflate_distance(self):
+        # 3 points. First step moves ~111 m; second step would move another
+        # ~111 m but its timestamp is BEFORE the previous — dt < 0. The
+        # distance for that step must not be added to total_dist.
+        pts = [
+            (50.000, -116.000, "2024-01-01T10:00:00Z"),
+            (50.001, -116.000, "2024-01-01T10:00:10Z"),
+            (50.002, -116.000, "2024-01-01T10:00:05Z"),  # time went backwards
+        ]
+        fpath = self._write_gpx(pts)
+        try:
+            data = app.parse_gpx(fpath)
+            self.assertIsNotNone(data)
+            # First step only: ~111 m → ~0.111 km. If the bug regressed,
+            # distance would be ~222 m.
+            self.assertLess(data["stats"]["distance_km"], 0.15,
+                            "out-of-order step must not contribute to distance")
+        finally:
+            fpath.unlink(missing_ok=True)
+
+
 if __name__ == "__main__":
     unittest.main()

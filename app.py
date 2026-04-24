@@ -537,6 +537,11 @@ def parse_gpx(path: Path) -> dict:
         prev, curr = raw[i - 1], raw[i]
         d   = haversine((prev.latitude, prev.longitude), (curr.latitude, curr.longitude))
         dt  = (curr.time - prev.time).total_seconds() if prev.time and curr.time else 0
+        # Duplicate or out-of-order GPS timestamps (dt < 0) can't be trusted for
+        # distance either — drop both so they don't inflate total_dist / riding_dist.
+        if dt < 0:
+            dt = 0
+            d = 0.0
         spd = None
         if dt > 0 and d > 0:
             spd = (d / dt) * 3.6
