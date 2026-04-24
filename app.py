@@ -1229,30 +1229,27 @@ def api_heatmap_stream():
     sample_n = 5
 
     def generate():
-        meta  = load_metadata()
-        files = sorted(GPX_DIR.glob("*.gpx"))
-        total = len(files)
+        # Filter against the already-cached sidebar entries so we skip the
+        # directory glob and avoid calling get_activity() — which loads the
+        # full parsed point data — for activities that won't pass the
+        # year/type filter anyway.
+        candidates = []
+        for act in all_activities():
+            if year and (not act.get("date") or not act["date"].startswith(year)):
+                continue
+            if act_type and (act.get("meta") or {}).get("type", "") != act_type:
+                continue
+            candidates.append(act)
+        total = len(candidates)
         yield f"data: {json.dumps({'total': total})}\n\n"
 
-        for gpx_file in files:
-            data = get_activity(gpx_file.name)
+        for act in candidates:
+            data = get_activity(act["filename"])
             if not data:
                 yield f"data: {json.dumps({'skip': True})}\n\n"
                 continue
-
-            file_meta = meta.get(gpx_file.name, {})
-            if year     and (not data["date"] or not data["date"].startswith(year)):
-                yield f"data: {json.dumps({'skip': True})}\n\n"
-                continue
-            if act_type and file_meta.get("type", "") != act_type:
-                yield f"data: {json.dumps({'skip': True})}\n\n"
-                continue
-
-            polyline = [
-                [p["lat"], p["lon"]]
-                for i, p in enumerate(data["points"])
-                if i % sample_n == 0
-            ]
+            file_meta = act.get("meta") or {}
+            polyline = [[p["lat"], p["lon"]] for p in data["points"][::sample_n]]
             payload = {
                 "activity": {
                     "filename":    data["filename"],
