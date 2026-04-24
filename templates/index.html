@@ -1,0 +1,2635 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AlForks – Ride Logs</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/leaflet-rotate@0.2.8/dist/leaflet-rotate-src.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8/hammer.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
+  <script src="/static/utils.js"></script>
+  <script src="/static/sync_toast.js" defer></script>
+  <link rel="stylesheet" href="/static/base.css">
+
+  <link href="https://api.mapbox.com/mapbox-gl-js/v3.3.0/mapbox-gl.css" rel="stylesheet">
+  <script src="https://api.mapbox.com/mapbox-gl-js/v3.3.0/mapbox-gl.js"></script>
+  <style>
+    body { height: 100vh; display: flex; flex-direction: column; }
+    /* Activity header — dedicated strip above the chart area (inside #content) */
+    /* position+z-index so the region popover (inside this strip) can render
+       above Leaflet map panes (which reach z-index 700) further down the page. */
+    #activity-header { background: #0e1117; border-bottom: 1px solid #2a2d35; padding: 10px 20px; display: flex; align-items: center; gap: 20px; flex-shrink: 0; position: relative; z-index: 1100; }
+    .ah-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+    .ah-row-1 { display: flex; align-items: center; gap: 10px; min-width: 0; }
+    .ah-row-2 { font-size: 0.72rem; color: #fff; padding-left: 2px; min-height: 14px; line-height: 1.3; }
+    .ah-context { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; text-align: right; flex-shrink: 0; }
+    .ah-context-top { display: flex; align-items: center; gap: 10px; }
+    /* Header action buttons — visible borders always, colour-coded at rest */
+    .ah-action-btn { background: #1a1d23; border: 1px solid #3a3d45; color: #bbb; font-size: 0.92rem; cursor: pointer; padding: 4px 10px; border-radius: 4px; font-family: inherit; flex-shrink: 0; transition: color 0.12s, border-color 0.12s, background 0.12s; line-height: 1; }
+    .ah-action-btn:hover { color: #fff; }
+    #exclude-activity-btn { color: #f59e0b; border-color: #4a3a1f; }
+    #exclude-activity-btn:hover { color: #f59e0b; border-color: #f59e0b; background: #2a1f0e; }
+    #exclude-activity-btn.active { color: #fff; border-color: #f59e0b; background: #f59e0b; }
+    #exclude-activity-btn.active:hover { background: #d97706; border-color: #d97706; }
+    #delete-activity-btn { color: #ef4444; border-color: #4a2020; }
+    #delete-activity-btn:hover { color: #fff; border-color: #ef4444; background: #ef4444; }
+
+    #header-title { flex: 1; min-width: 0; font-size: 1.2rem; color: #fff; font-weight: 500; background: transparent; border: none; border-bottom: 1px solid transparent; text-align: left; padding: 2px 4px; font-family: inherit; letter-spacing: 0.01em; transition: border-color 0.15s; }
+    #header-title:focus { outline: none; border-bottom-color: #3b82f6; }
+    #header-title:hover:not(:focus) { border-bottom-color: #2a2d35; }
+    #header-title::placeholder { color: #fff; opacity: 0.85; }
+    .save-confirm { font-size: 0.7rem; color: #22c55e; opacity: 0; transition: opacity 0.2s; padding: 0 6px; flex-shrink: 0; }
+    .save-confirm.visible { opacity: 1; }
+
+    #header-datetime { font-size: 1rem; color: #fff; font-weight: 500; white-space: nowrap; letter-spacing: 0.01em; }
+    #header-datetime .ht-time { color: #fff; margin-left: 8px; font-weight: 400; }
+    #header-weather { font-size: 0.78rem; color: #fff; white-space: nowrap; }
+    #header-weather:empty { display: none; }
+
+    .layout { display: flex; flex: 1; overflow: hidden; }
+
+    /* Sidebar */
+    #sidebar { width: 270px; background: #12151a; border-right: 1px solid #2a2d35; display: flex; flex-direction: column; flex-shrink: 0; overflow: hidden; transition: width 0.18s ease; }
+    #sidebar.collapsed { width: 0; border-right: none; }
+    #sidebar-toggle { width: 14px; flex-shrink: 0; background: #12151a; border: none; border-right: 1px solid #2a2d35; color: #555; cursor: pointer; font-size: 9px; padding: 0; display: flex; align-items: center; justify-content: center; transition: background 0.12s, color 0.12s; }
+    #sidebar-toggle:hover { background: #1e2128; color: #aaa; }
+    #sidebar-header { padding: 8px 16px; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em; color: #ccc; border-bottom: 1px solid #2a2d35; flex-shrink: 0; display: flex; align-items: center; justify-content: space-between; }
+    #bulk-toggle-btn { font-size: 0.68rem; padding: 2px 8px; border-radius: 3px; border: 1px solid #2a2d35; background: #1a1d23; color: #ccc; cursor: pointer; transition: all 0.12s; }
+    #bulk-toggle-btn:hover { border-color: #3b82f6; color: #fff; }
+    #bulk-toggle-btn.active { background: #1a2a3a; color: #3b82f6; border-color: #3b82f6; }
+    #sidebar-bulk-bar { display: none; padding: 10px 14px; background: #0e1117; border-bottom: 1px solid #2a2d35; flex-shrink: 0; }
+    #sidebar-bulk-bar.visible { display: block; }
+    #sidebar-bulk-bar .bulk-row { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; }
+    #sidebar-bulk-bar .bulk-row:last-child { margin-bottom: 0; }
+    #bulk-count-label { font-size: 0.72rem; color: #3b82f6; font-weight: 600; flex: 1; }
+    #sidebar-bulk-type { flex: 1; background: #1a1d23; border: 1px solid #2a2d35; border-radius: 4px; color: #ccc; font-size: 0.75rem; padding: 4px 6px; }
+    #sidebar-bulk-apply { padding: 4px 10px; border-radius: 4px; border: none; background: #3b82f6; color: #fff; font-size: 0.72rem; cursor: pointer; white-space: nowrap; }
+    #sidebar-bulk-apply:hover { background: #2563eb; }
+    #sidebar-bulk-apply:disabled { opacity: 0.4; cursor: default; }
+    .activity-cb { display: none; margin-right: 6px; accent-color: #3b82f6; width: 13px; height: 13px; cursor: pointer; flex-shrink: 0; }
+    .bulk-active .activity-cb { display: inline-block; }
+    .bulk-active .activity-item { display: flex; align-items: flex-start; }
+    .bulk-active .activity-item .item-body { flex: 1; min-width: 0; }
+    #sort-filter-bar { padding: 7px 10px; border-bottom: 1px solid #2a2d35; background: #0e1117; flex-shrink: 0; display: flex; flex-direction: column; gap: 5px; }
+    #search-input { width: 100%; background: #1a1d23; border: 1px solid #2a2d35; border-radius: 3px; color: #e0e0e0; font-size: 0.75rem; padding: 4px 8px; font-family: inherit; }
+    #search-input:focus { outline: none; border-color: #3b82f6; }
+    #search-input::placeholder { color: #666; }
+    .sfrow { display: flex; align-items: center; gap: 5px; }
+    .sflabel { font-size: 0.62rem; color: #bbb; text-transform: uppercase; letter-spacing: 0.06em; width: 32px; flex-shrink: 0; }
+    .sfselect { flex: 1; background: #1a1d23; border: 1px solid #2a2d35; border-radius: 3px; color: #e0e0e0; font-size: 0.72rem; padding: 3px 5px; min-width: 0; }
+    .sfselect:focus { outline: none; border-color: #3b82f6; }
+    #sort-dir-btn { padding: 2px 7px; border: 1px solid #2a2d35; background: #1a1d23; color: #ccc; border-radius: 3px; cursor: pointer; font-size: 0.72rem; flex-shrink: 0; transition: all 0.12s; }
+    #sort-dir-btn:hover { border-color: #3b82f6; color: #fff; }
+    #activity-count { font-size: 0.62rem; color: #aaa; margin-left: auto; }
+    #activity-list { overflow-y: auto; flex: 1; }
+    .activity-item { padding: 10px 16px; border-bottom: 1px solid #1e2128; cursor: pointer; transition: background 0.12s; }
+    .activity-item:hover { background: #1e2128; }
+    .activity-item.active { background: #1a2a3a; border-left: 3px solid #3b82f6; padding-left: 13px; }
+    .activity-item .date { font-size: 0.7rem; color: #bbb; margin-bottom: 2px; display: flex; align-items: center; gap: 6px; }
+    .activity-item .date .hr-flag { margin-left: auto; color: #ef4444; display: flex; align-items: center; }
+    .activity-item .date .hr-flag svg { width: 12px; height: 12px; display: block; }
+    .activity-item .date .issue-flag { color: #f59e0b; font-size: 0.85rem; line-height: 1; cursor: help; margin-left: auto; }
+    .activity-item .date .issue-flag + .hr-flag { margin-left: 6px; }
+    .activity-item.excluded .name, .activity-item.excluded .date, .activity-item.excluded .meta { opacity: 0.45; }
+    .activity-item.excluded .name::after { content: ' (excluded)'; font-size: 0.65rem; color: #f59e0b; opacity: 0.9; font-weight: normal; }
+    .activity-item .date .hr-flag + .type-badge { margin-left: 0; }
+    .activity-item .date .type-badge { margin-left: auto; }
+    .activity-item .name { font-size: 0.85rem; color: #e0e0e0; margin-bottom: 4px; display: flex; align-items: center; gap: 6px; }
+    .activity-item.active .name { color: #fff; }
+    .activity-item .meta { font-size: 0.72rem; color: #bbb; display: flex; gap: 10px; align-items: center; }
+    .activity-item .spark { margin-left: auto; opacity: 0.7; flex-shrink: 0; }
+    .activity-item.active .spark { opacity: 1; }
+    .type-badge { font-size: 0.6rem; padding: 1px 6px; border-radius: 3px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; flex-shrink: 0; }
+
+    /* Edit panel */
+    #edit-panel { border-top: 1px solid #2a2d35; background: #0e1117; flex-shrink: 0; }
+    #edit-toggle { width: 100%; padding: 8px 16px; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em; color: #ccc; background: none; border: none; cursor: pointer; text-align: left; display: flex; align-items: center; justify-content: space-between; transition: color 0.12s; }
+    #edit-toggle:hover { color: #fff; }
+    #edit-toggle.open { color: #3b82f6; }
+    #edit-fields { display: none; padding: 8px 16px 14px; }
+    #edit-fields.open { display: block; }
+    .field { margin-bottom: 10px; }
+    .field label { display: block; font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.07em; color: #ccc; margin-bottom: 4px; }
+    .field select, .field input, .field textarea { width: 100%; background: #1a1d23; border: 1px solid #2a2d35; border-radius: 4px; color: #ccc; font-size: 0.8rem; padding: 5px 8px; font-family: inherit; resize: none; }
+    .field select:focus, .field input:focus, .field textarea:focus { outline: none; border-color: #3b82f6; }
+    #save-btn { width: 100%; padding: 6px; background: #1a2a3a; border: 1px solid #3b82f6; border-radius: 4px; color: #3b82f6; font-size: 0.78rem; cursor: pointer; transition: all 0.12s; }
+    #save-btn:hover { background: #3b82f6; color: #fff; }
+    #save-confirm { font-size: 0.7rem; color: #22c55e; text-align: center; margin-top: 6px; height: 14px; }
+
+    /* Main content */
+    #content { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+
+    /* Stats bar — now at top of content */
+    #stats-bar { background: #12151a; border-bottom: 1px solid #2a2d35; padding: 10px 20px; display: flex; flex-shrink: 0; }
+    .stat { flex: 1; text-align: center; padding: 4px 8px; border-right: 1px solid #2a2d35; }
+    .stat:last-child { border-right: none; }
+    .stat-value { font-size: 1rem; font-weight: 600; color: #fff; }
+    .stat-value .assisted-inline { font-size: 0.7rem; font-weight: 500; color: #f59e0b; margin-left: 4px; }
+    .stat-label { font-size: 0.62rem; color: #bbb; text-transform: uppercase; letter-spacing: 0.07em; margin-top: 1px; }
+    .hrz-bar { display: flex; height: 14px; width: 110px; border-radius: 3px; overflow: hidden; background: #1a1d23; }
+    .hrz-bar span { display: block; transition: width 0.3s; }
+    .hrz-bar span[data-z="1"] { background: #6b7280; }
+    .hrz-bar span[data-z="2"] { background: #3b82f6; }
+    .hrz-bar span[data-z="3"] { background: #10b981; }
+    .hrz-bar span[data-z="4"] { background: #f59e0b; }
+    .hrz-bar span[data-z="5"] { background: #ef4444; }
+
+    /* Map */
+    #map-wrap { flex: 1; position: relative; min-height: 0; }
+    #map { width: 100%; height: 100%; }
+    #map-legend { position: absolute; bottom: 24px; right: 10px; z-index: 1000; background: rgba(18,21,26,0.9); border: 1px solid #2a2d35; border-radius: 6px; padding: 8px 12px; font-size: 0.72rem; color: #aaa; display: none; }
+    #map-legend.visible { display: block; }
+    .legend-row { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+    .legend-row:last-child { margin-bottom: 0; }
+    .legend-line { width: 24px; height: 3px; border-radius: 2px; background: #3b82f6; }
+    .legend-dashed { background: repeating-linear-gradient(90deg, #f59e0b 0, #f59e0b 7px, transparent 7px, transparent 14px); height: 2px; }
+    #view-toggle { position: absolute; top: 10px; right: 10px; z-index: 1000; display: flex; border: 1px solid #2a2d35; border-radius: 4px; overflow: hidden; }
+    .vtbtn { padding: 4px 11px; background: rgba(18,21,26,0.88); color: #ccc; border: none; border-right: 1px solid #2a2d35; cursor: pointer; font-size: 0.72rem; font-family: inherit; transition: all 0.12s; }
+    .vtbtn:last-child { border-right: none; }
+    .vtbtn:hover { color: #fff; }
+    .vtbtn.active { background: #1a2a3a; color: #3b82f6; }
+    .vtbtn:disabled { opacity: 0.35; cursor: default; }
+    #map-3d { position: absolute; inset: 0; display: none; }
+    #exag-ctrl { display: none; position: absolute; bottom: 36px; left: 14px; z-index: 1000; background: rgba(18,21,26,0.88); border: 1px solid #2a2d35; border-radius: 6px; padding: 8px 12px; align-items: center; gap: 8px; font-size: 0.7rem; color: #888; }
+    #exag-ctrl input { accent-color: #3b82f6; width: 90px; }
+    #exag-val { min-width: 28px; color: #ccc; }
+    .mapboxgl-ctrl-group { background: rgba(18,21,26,0.9) !important; border: 1px solid #2a2d35 !important; }
+    .mapboxgl-ctrl button { background-color: transparent !important; }
+    .mapboxgl-ctrl button .mapboxgl-ctrl-icon { filter: invert(0.7); }
+    .mapboxgl-ctrl-attrib { background: rgba(18,21,26,0.7) !important; color: #555 !important; font-size: 10px; }
+    .mapboxgl-ctrl-attrib a { color: #555 !important; }
+
+    /* Chart panel */
+    #chart-panel { background: #12151a; border-top: 1px solid #2a2d35; padding: 10px 16px 12px; display: flex; flex-direction: column; flex-shrink: 0; }
+    #chart-toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; flex-wrap: wrap; }
+    .chart-title { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em; color: #ccc; flex: 1; min-width: 0; }
+    .chart-btn { font-size: 0.7rem; padding: 2px 10px; border-radius: 3px; border: 1px solid #2a2d35; background: #1a1d23; color: #ccc; cursor: pointer; transition: all 0.12s; white-space: nowrap; }
+    .chart-btn:hover { border-color: #aaa; color: #fff; }
+    .chart-btn.active { background: #1a2a3a; color: #3b82f6; border-color: #3b82f6; }
+    .chart-btn.edit-active { background: #2a1a1a; color: #ef4444; border-color: #ef4444; }
+    /* Trim mode overlay */
+    #trim-overlay { position: absolute; inset: 0; pointer-events: none; display: none; }
+    #trim-overlay.visible { display: block; }
+    .trim-mask { position: absolute; top: 0; bottom: 0; background: rgba(0,0,0,0.55); pointer-events: none; }
+    .trim-handle { position: absolute; top: 0; bottom: 0; width: 14px; margin-left: -7px; cursor: ew-resize; pointer-events: auto; display: flex; align-items: center; justify-content: center; z-index: 5; }
+    .trim-handle::before { content: ''; display: block; width: 3px; height: 100%; background: #3b82f6; box-shadow: 0 0 6px rgba(59,130,246,0.8); }
+    .trim-handle::after { content: ''; position: absolute; top: 50%; transform: translateY(-50%); width: 12px; height: 32px; background: #3b82f6; border-radius: 3px; }
+    /* Smoothing range overlay — green tint shows the zone being smoothed */
+    #smooth-overlay { position: absolute; inset: 0; pointer-events: none; display: none; }
+    #smooth-overlay.visible { display: block; }
+    .smooth-zone { position: absolute; top: 0; bottom: 0; background: rgba(34,197,94,0.12); border-left: 1px dashed rgba(34,197,94,0.5); border-right: 1px dashed rgba(34,197,94,0.5); pointer-events: none; }
+    .smooth-handle { position: absolute; top: 0; bottom: 0; width: 14px; margin-left: -7px; cursor: ew-resize; pointer-events: auto; display: flex; align-items: center; justify-content: center; z-index: 5; }
+    .smooth-handle::before { content: ''; display: block; width: 3px; height: 100%; background: #22c55e; box-shadow: 0 0 6px rgba(34,197,94,0.8); }
+    .smooth-handle::after { content: ''; position: absolute; top: 50%; transform: translateY(-50%); width: 12px; height: 32px; background: #22c55e; border-radius: 3px; }
+    #trim-bar, #smooth-bar { display: none; align-items: center; gap: 8px; padding: 6px 8px; margin-top: 6px; background: #12151a; border: 1px solid #2a2d35; border-radius: 4px; font-size: 0.74rem; color: #ccc; }
+    #trim-bar.visible, #smooth-bar.visible { display: flex; }
+    #chart-wrapper { height: 150px; position: relative; overflow: hidden; transition: height 0.2s ease; }
+    #chart-wrapper.collapsed { height: 0; }
+    #elevation-chart { width: 100% !important; height: 100% !important; }
+    #btn-chart-collapse { margin-left: auto; font-size: 0.8rem; padding: 1px 8px; line-height: 1; }
+
+    /* Segment edit bar */
+    #seg-edit-bar { display: none; border-top: 1px solid #2a2d35; margin-top: 6px; padding-top: 8px; flex-direction: column; gap: 6px; }
+    #seg-edit-bar.visible { display: flex; }
+    #seg-instructions { background: #0e1117; border: 1px solid #2a2d35; border-radius: 5px; padding: 8px 12px; display: grid; grid-template-columns: 1fr 1fr; gap: 3px 20px; }
+    .seg-ins-row { display: flex; align-items: baseline; gap: 6px; font-size: 0.68rem; }
+    .seg-ins-key { color: #3b82f6; font-weight: 600; white-space: nowrap; min-width: 90px; }
+    .seg-ins-desc { color: #ccc; }
+    #seg-edit-actions { display: flex; align-items: center; gap: 8px; }
+    #seg-save-confirm { font-size: 0.68rem; color: #22c55e; flex: 1; }
+    .seg-action-btn { font-size: 0.7rem; padding: 3px 10px; border-radius: 3px; border: 1px solid #2a2d35; background: #1a1d23; color: #ccc; cursor: pointer; transition: all 0.12s; white-space: nowrap; }
+    .seg-action-btn:hover { border-color: #aaa; color: #fff; }
+    .seg-action-btn.primary { border-color: #3b82f6; color: #3b82f6; }
+    .seg-action-btn.primary:hover { background: #3b82f6; color: #fff; }
+    .seg-action-btn.danger { border-color: #ef4444; color: #ef4444; }
+    .seg-action-btn.danger:hover { background: #ef4444; color: #fff; }
+
+
+    /* Type badge + region chips — now in the second-row activity header */
+    #header-type { position: absolute; opacity: 0; pointer-events: none; width: 1px; height: 1px; }
+    #header-type option { background: #12151a; color: #e0e0e0; }
+    #header-type-icon { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; border-radius: 6px; cursor: pointer; border: 1px solid transparent; flex-shrink: 0; user-select: none; transition: filter 0.1s; }
+    #header-type-icon:hover { filter: brightness(1.2); }
+    #header-type-icon::before { content: ''; display: block; width: 22px; height: 22px; background-color: currentColor; -webkit-mask: var(--icon-url) center / contain no-repeat; mask: var(--icon-url) center / contain no-repeat; }
+    .ah-row-place { font-size: 0.72rem; color: #fff; padding: 2px 4px; min-height: 1em; }
+    #header-issues { background: #2a1f0e; border: 1px solid #f59e0b; border-radius: 4px; padding: 6px 10px; margin-top: 6px; font-size: 0.74rem; color: #f59e0b; display: flex; align-items: flex-start; gap: 10px; }
+    #header-issues .issues-text { flex: 1; color: #ccc; }
+    #header-issues .issues-text strong { color: #f59e0b; display: block; margin-bottom: 2px; }
+    #header-issues button { background: #1a2a3a; border: 1px solid #3b82f6; color: #3b82f6; padding: 4px 10px; border-radius: 4px; font-size: 0.72rem; cursor: pointer; font-family: inherit; flex-shrink: 0; align-self: center; }
+    #header-issues button:hover { background: #3b82f6; color: #fff; }
+    #header-regions { display: inline-flex; align-items: center; gap: 0; flex-wrap: wrap; }
+    .header-region-chip { font-weight: 500; white-space: nowrap; }
+    .header-region-chip:not(:last-of-type)::after { content: ' · '; color: #555; font-weight: normal; }
+    /* Region picker — popover anchored to the "+" button */
+    .region-pin-wrap { position: relative; display: inline-block; margin-left: 8px; }
+    .region-pin-btn { background: #1a1d23; border: 1px solid #3a3d45; color: #bbb; font-size: 0.72rem; cursor: pointer; padding: 2px 8px; border-radius: 3px; font-family: inherit; transition: all 0.12s; line-height: 1.4; }
+    .region-pin-btn:hover { color: #fff; border-color: #60a5fa; }
+    .region-pin-btn.has-pins { color: #60a5fa; border-color: #60a5fa; background: #1a2a3a; }
+    .region-popover { position: absolute; top: calc(100% + 4px); left: 0; background: #12151a; border: 1px solid #2a2d35; border-radius: 6px; min-width: 240px; max-width: 320px; max-height: 340px; overflow: hidden; display: none; flex-direction: column; z-index: 100; box-shadow: 0 4px 16px rgba(0,0,0,0.5); font-size: 0.78rem; }
+    .region-popover.visible { display: flex; }
+    .region-popover-search { padding: 8px; border-bottom: 1px solid #2a2d35; }
+    .region-popover-search input { width: 100%; background: #1a1d23; border: 1px solid #2a2d35; border-radius: 3px; color: #e0e0e0; font-size: 0.78rem; padding: 4px 8px; font-family: inherit; box-sizing: border-box; }
+    .region-popover-search input:focus { outline: none; border-color: #3b82f6; }
+    .region-popover-list { overflow-y: auto; flex: 1; }
+    .region-popover-row { padding: 8px 12px; cursor: pointer; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid #1e2128; transition: background 0.1s; }
+    .region-popover-row:hover { background: #1e2128; }
+    .region-popover-row .rp-check { width: 14px; color: #60a5fa; flex-shrink: 0; text-align: center; }
+    .region-popover-row .rp-name { flex: 1; color: #e0e0e0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .region-popover-row .rp-auto { font-size: 0.62rem; color: #888; text-transform: uppercase; letter-spacing: 0.06em; flex-shrink: 0; }
+    .region-popover-row .rp-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+    .region-popover-footer { padding: 10px 12px; background: #0e1117; border-top: 1px solid #2a2d35; font-size: 0.74rem; color: #60a5fa; cursor: pointer; text-align: left; transition: background 0.1s; }
+    .region-popover-footer:hover { background: #1a2a3a; color: #fff; }
+    .region-popover-empty { padding: 16px; text-align: center; color: #666; font-size: 0.72rem; }
+
+    /* Activity details bar (notes + regions + save) */
+    #activity-bar { background: #0e1117; border-bottom: 1px solid #2a2d35; padding: 6px 20px; display: none; align-items: center; gap: 12px; flex-shrink: 0; flex-wrap: wrap; }
+    #activity-bar.visible { display: flex; }
+    #ab-save-confirm { font-size: 0.7rem; color: #22c55e; margin-left: 4px; }
+    .ab-label { font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.07em; color: #bbb; }
+    .ab-notes { flex: 1; background: transparent; border: none; border-bottom: 1px solid transparent; color: #e0e0e0; font-size: 0.78rem; font-family: inherit; padding: 2px 4px; resize: none; height: 22px; min-width: 200px; overflow: hidden; transition: border-color 0.12s, height 0.2s; }
+    .ab-notes:focus { outline: none; border-bottom-color: #3b82f6; height: 56px; }
+    .ab-notes::placeholder { color: #555; }
+    #ab-save { padding: 3px 12px; border-radius: 4px; border: 1px solid #3b82f6; background: #1a2a3a; color: #3b82f6; font-size: 0.72rem; cursor: pointer; display: none; transition: all 0.12s; }
+    #ab-save:hover { background: #3b82f6; color: #fff; }
+    #ab-save.dirty { display: inline-block; }
+
+    /* Color/markers controls — both UI options shown for comparison */
+    #map-controls { position: absolute; top: 48px; right: 10px; z-index: 1000; display: flex; flex-direction: column; gap: 8px; align-items: flex-end; }
+    /* Segmented color control */
+    #color-segmented { display: inline-flex; border: 1px solid #2a2d35; border-radius: 4px; overflow: hidden; background: rgba(18,21,26,0.88); }
+    #color-segmented button { background: transparent; border: none; color: #ccc; font-size: 0.7rem; padding: 5px 10px; cursor: pointer; font-family: inherit; transition: all 0.12s; border-right: 1px solid #2a2d35; }
+    #color-segmented button:last-child { border-right: none; }
+    #color-segmented button:hover { color: #fff; }
+    #color-segmented button.active { background: #1a2a3a; color: #3b82f6; }
+
+    /* KM marks pill */
+    .pill-toggle { background: rgba(18,21,26,0.88); border: 1px solid #2a2d35; border-radius: 4px; color: #ccc; font-size: 0.7rem; padding: 5px 12px; cursor: pointer; font-family: inherit; transition: all 0.12s; }
+    .pill-toggle:hover { border-color: #aaa; color: #fff; }
+    .pill-toggle.active { background: #1a2a3a; border-color: #3b82f6; color: #3b82f6; }
+
+    /* KM marker icons on the map */
+    .km-mark { background: #1a2a3a; border: 1px solid #3b82f6; color: #fff; font-size: 0.62rem; font-weight: 600; border-radius: 50%; width: 20px; height: 20px; display: flex; align-items: center; justify-content: center; box-shadow: 0 0 4px rgba(0,0,0,0.5); }
+    #speed-legend { position: absolute; bottom: 24px; right: 10px; z-index: 1000; background: rgba(18,21,26,0.92); border: 1px solid #2a2d35; border-radius: 6px; padding: 8px 12px; font-size: 0.7rem; color: #ccc; display: none; }
+    #speed-legend.visible { display: block; }
+    .spd-row { display: flex; align-items: center; gap: 8px; margin-bottom: 3px; }
+    .spd-row:last-child { margin-bottom: 0; }
+    .spd-dot { width: 12px; height: 4px; border-radius: 2px; }
+
+    /* Run statistics drawer (slides from right edge of map area) */
+    #runs-tab { position: absolute; top: 50%; right: 0; transform: translateY(-50%); z-index: 1001; background: rgba(18,21,26,0.92); border: 1px solid #2a2d35; border-right: none; color: #ccc; font-size: 0.68rem; padding: 10px 4px; cursor: pointer; writing-mode: vertical-rl; text-orientation: mixed; letter-spacing: 0.08em; text-transform: uppercase; border-radius: 4px 0 0 4px; font-family: inherit; display: none; transition: all 0.12s; }
+    #runs-tab.visible { display: block; }
+    #runs-tab:hover { color: #fff; border-color: #3b82f6; }
+    #runs-tab.open { background: #1a2a3a; border-color: #3b82f6; color: #3b82f6; right: 320px; }
+    #runs-drawer { position: absolute; top: 0; right: 0; bottom: 0; width: 320px; background: #12151a; border-left: 1px solid #2a2d35; z-index: 1000; transform: translateX(100%); transition: transform 0.2s ease; overflow-y: auto; }
+    #runs-drawer.open { transform: translateX(0); }
+    #runs-drawer h3 { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.08em; color: #ccc; padding: 10px 14px; border-bottom: 1px solid #2a2d35; }
+    #runs-summary { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; padding: 12px 14px; border-bottom: 1px solid #2a2d35; }
+    .run-sum-stat { font-size: 0.72rem; }
+    .run-sum-val { font-size: 1rem; font-weight: 600; color: #fff; }
+    .run-sum-lbl { font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.07em; color: #bbb; margin-top: 2px; }
+    .runs-table { width: 100%; border-collapse: collapse; font-size: 0.7rem; }
+    .runs-table th { font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.07em; color: #bbb; padding: 5px 10px; text-align: right; border-bottom: 1px solid #2a2d35; font-weight: 500; background: #0e1117; position: sticky; top: 0; }
+    .runs-table th:first-child { text-align: left; }
+    .runs-table td { padding: 5px 10px; color: #ccc; text-align: right; border-bottom: 1px solid #1e2128; }
+    .runs-table td:first-child { color: #fff; text-align: left; }
+    .runs-table tbody tr:hover td { background: #1e2128; cursor: pointer; }
+    .runs-table tbody tr.best td { color: #f59e0b; }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>AlForks</h1>
+  <nav>
+    <a href="/summary">Summary</a>
+    <a href="/" class="active">Ride Logs</a>
+    <a href="/comparison">Compare Logs</a>
+    <a href="/heatmap">Heat Map</a>
+    <a href="/setup">Setup</a>
+  </nav>
+</header>
+
+
+<div class="layout">
+  <div id="sidebar">
+    <div id="sidebar-header">
+      <span>Activities</span>
+      <button id="bulk-toggle-btn" onclick="toggleBulk()">Select</button>
+    </div>
+    <div id="sort-filter-bar">
+      <div class="sfrow">
+        <input id="search-input" type="text" placeholder="Search title, location, notes…" oninput="renderActivityList()">
+      </div>
+      <div class="sfrow">
+        <span class="sflabel">Sort</span>
+        <select id="sort-field" class="sfselect" onchange="renderActivityList()">
+          <option value="date">Date</option>
+          <option value="distance">Distance</option>
+          <option value="duration">Duration</option>
+        </select>
+        <button id="sort-dir-btn" onclick="toggleSortDir()" title="Toggle direction">▼</button>
+        <span id="activity-count"></span>
+      </div>
+      <div class="sfrow">
+        <span class="sflabel">Year</span>
+        <select id="filter-year" class="sfselect" onchange="renderActivityList()">
+          <option value="all">All</option>
+        </select>
+      </div>
+      <div class="sfrow">
+        <span class="sflabel">Type</span>
+        <select id="filter-type" class="sfselect" onchange="renderActivityList()">
+          <option value="all">All</option>
+          <option value="__untagged__">Untagged</option>
+        </select>
+      </div>
+    </div>
+    <div id="activity-list"><div style="padding:16px;color:#555;font-size:0.8rem">Loading...</div></div>
+    <div id="sidebar-bulk-bar">
+      <div class="bulk-row">
+        <span id="bulk-count-label">0 selected</span>
+      </div>
+      <div class="bulk-row">
+        <select id="sidebar-bulk-type">
+          <option value="">Set type…</option>
+        </select>
+        <button id="sidebar-bulk-apply" onclick="applyBulk()" disabled>Apply</button>
+      </div>
+      <div class="bulk-row">
+        <button id="sidebar-bulk-delete" onclick="deleteBulk()" disabled
+                style="background:#2a1010;border:1px solid #ef4444;color:#ef4444;padding:4px 10px;border-radius:4px;font-size:0.72rem;cursor:pointer;font-family:inherit;">
+          Delete selected…
+        </button>
+      </div>
+    </div>
+
+  </div>
+
+  <button id="sidebar-toggle" onclick="toggleSidebar()" title="Toggle panel">◀</button>
+
+  <div id="content">
+    <div id="activity-header">
+      <div class="ah-main">
+        <div class="ah-row-1">
+          <span id="header-type-icon" title="Activity type" onclick="openTypePicker()"></span>
+          <select id="header-type" onchange="abMarkDirty()"></select>
+          <input id="header-title" type="text" placeholder="—" autocomplete="off" spellcheck="false">
+          <span id="title-save-confirm" class="save-confirm"></span>
+        </div>
+        <div class="ah-row-2"><span id="header-regions"></span></div>
+        <div class="ah-row-place"><span id="header-place"></span></div>
+        <div id="header-issues" style="display:none;"></div>
+      </div>
+      <div class="ah-context">
+        <div class="ah-context-top">
+          <span id="header-datetime"></span>
+          <button id="exclude-activity-btn" class="ah-action-btn" onclick="toggleExcluded()"
+                  title="Exclude from statistics">⊘</button>
+          <button id="delete-activity-btn" class="ah-action-btn" onclick="deleteCurrent()"
+                  title="Delete this ride log">🗑</button>
+        </div>
+        <span id="header-weather"></span>
+      </div>
+    </div>
+    <div id="activity-bar" style="display:none">
+      <span class="ab-label">Notes</span>
+      <textarea id="ab-notes" class="ab-notes" placeholder="Notes…" oninput="abMarkDirty()"></textarea>
+      <button id="ab-save" onclick="saveMeta()">Save</button>
+      <span id="ab-save-confirm"></span>
+    </div>
+    <div id="stats-bar">
+      <div class="stat"><div class="stat-value" id="s-dist">--</div><div class="stat-label">Distance</div></div>
+      <div class="stat"><div class="stat-value" id="s-dur">--</div><div class="stat-label">Duration</div></div>
+      <div class="stat"><div class="stat-value"><span id="s-gain">--</span><span class="assisted-inline" id="s-assisted"></span></div><div class="stat-label">Climbing</div></div>
+      <div class="stat"><div class="stat-value" id="s-loss">--</div><div class="stat-label">Descent</div></div>
+      <div class="stat"><div class="stat-value" id="s-avg">--</div><div class="stat-label">Avg Speed</div></div>
+      <div class="stat"><div class="stat-value" id="s-max">--</div><div class="stat-label">Max Speed</div></div>
+      <div class="stat" id="stat-difficulty"><div class="stat-value" id="s-difficulty">--</div><div class="stat-label">Difficulty</div></div>
+      <div class="stat" id="stat-hravg"><div class="stat-value" id="s-hravg">--</div><div class="stat-label">Avg HR</div></div>
+      <div class="stat" id="stat-hrmax"><div class="stat-value" id="s-hrmax">--</div><div class="stat-label">Max HR</div></div>
+      <div class="stat" id="stat-hrzones">
+        <div class="stat-value" style="display:flex;flex-direction:column;align-items:center;gap:3px;">
+          <div class="hrz-bar"><span data-z="1"></span><span data-z="2"></span><span data-z="3"></span><span data-z="4"></span><span data-z="5"></span></div>
+        </div>
+        <div class="stat-label" id="hrzones-label">HR Zones</div>
+      </div>
+    </div>
+
+    <div id="map-wrap">
+      <div id="map"></div>
+      <div id="map-3d"></div>
+      <div id="map-legend">
+        <div class="legend-row"><div class="legend-line"></div> Riding</div>
+        <div class="legend-row"><div class="legend-line legend-dashed"></div> Shuttle / Lift</div>
+      </div>
+      <div id="view-toggle">
+        <button class="vtbtn active" id="vt-map"       onclick="setMapView('map')">Map</button>
+        <button class="vtbtn"        id="vt-satellite" onclick="setMapView('satellite')">Satellite</button>
+        <button class="vtbtn"        id="vt-3d"        onclick="setMapView('3d')"{% if not mapbox_token %} disabled title="No Mapbox token configured"{% endif %}>3D</button>
+      </div>
+      <div id="map-controls">
+        <div id="color-segmented">
+          <button data-mode="default" class="active" onclick="setColorMode('default')">Default</button>
+          <button data-mode="speed"        onclick="setColorMode('speed')">Speed</button>
+          <button data-mode="gradient"     onclick="setColorMode('gradient')">Gradient</button>
+          <button data-mode="progression"  onclick="setColorMode('progression')">Time</button>
+        </div>
+        <button id="km-toggle" class="pill-toggle" onclick="toggleKmMarks()">KM marks</button>
+      </div>
+      <div id="speed-legend">
+        <div style="font-size:0.62rem;text-transform:uppercase;letter-spacing:0.07em;color:#bbb;margin-bottom:5px;">Speed</div>
+        <div class="spd-row"><div class="spd-dot" style="background:#1e40af"></div>&lt; 5 km/h</div>
+        <div class="spd-row"><div class="spd-dot" style="background:#3b82f6"></div>5 – 15</div>
+        <div class="spd-row"><div class="spd-dot" style="background:#10b981"></div>15 – 30</div>
+        <div class="spd-row"><div class="spd-dot" style="background:#f59e0b"></div>30 – 50</div>
+        <div class="spd-row"><div class="spd-dot" style="background:#ef4444"></div>50 – 80</div>
+        <div class="spd-row"><div class="spd-dot" style="background:#7c3aed"></div>80+ km/h</div>
+      </div>
+      <div id="exag-ctrl">
+        Terrain <input type="range" id="exaggeration" min="1" max="4" step="0.1" value="1.5"
+          oninput="onExagChange(this.value)">
+        <span id="exag-val">1.5×</span>
+      </div>
+      <button id="runs-tab" onclick="toggleRunsDrawer()">Runs</button>
+      <div id="runs-drawer">
+        <h3>Run Statistics</h3>
+        <div id="runs-summary"></div>
+        <div id="runs-table-wrap"></div>
+      </div>
+    </div>
+
+    <div id="chart-panel">
+      <div id="chart-toolbar">
+        <span class="chart-title" id="chart-title">Elevation</span>
+        <button class="chart-btn active" id="btn-elevation" onclick="switchChart('elevation')">Elevation</button>
+        <button class="chart-btn" id="btn-speed" onclick="switchChart('speed')">Speed</button>
+        <button class="chart-btn" id="btn-hr" onclick="switchChart('hr')" style="display:none">HR</button>
+        <button class="chart-btn" id="btn-reset-zoom" onclick="resetChartZoom()" style="display:none">Reset Zoom</button>
+        <button class="chart-btn" id="btn-edit-segs" onclick="toggleEditMode()">Edit Segments</button>
+        <button class="chart-btn" id="btn-trim" onclick="toggleTrimMode()">Trim Ends</button>
+        <button class="chart-btn" id="btn-smooth" onclick="toggleSmoothMode()">Smooth GPS</button>
+        <button class="chart-btn" id="btn-chart-collapse" onclick="toggleChartPanel()" title="Hide/show chart">▼</button>
+      </div>
+      <div id="chart-wrapper" style="position:relative;">
+        <canvas id="elevation-chart"></canvas>
+        <div id="trim-overlay">
+          <div class="trim-mask trim-mask-left"></div>
+          <div class="trim-mask trim-mask-right"></div>
+          <div class="trim-handle trim-handle-left"  data-side="left"></div>
+          <div class="trim-handle trim-handle-right" data-side="right"></div>
+        </div>
+        <div id="smooth-overlay">
+          <div class="smooth-zone"></div>
+          <div class="smooth-handle smooth-handle-left"  data-side="left"></div>
+          <div class="smooth-handle smooth-handle-right" data-side="right"></div>
+        </div>
+      </div>
+      <div id="trim-bar">
+        <span id="trim-info"></span>
+        <div style="margin-left:auto;display:flex;gap:6px;">
+          <button class="chart-btn" onclick="resetTrim()">Reset Trim</button>
+          <button class="chart-btn" onclick="cancelTrim()">Cancel</button>
+          <button class="chart-btn" onclick="applyTrim()" style="border-color:#3b82f6;color:#3b82f6;">Apply Trim</button>
+        </div>
+      </div>
+      <div id="smooth-bar">
+        <span style="display:flex;align-items:center;gap:8px;">
+          Window
+          <input type="range" id="smooth-slider" min="1" max="15" value="5" step="1" style="width:160px;">
+          <span id="smooth-window-label">5</span> pts
+        </span>
+        <span id="smooth-range-info" style="margin-left:14px;color:#ccc;">Drag the green handles to limit the smoothed range.</span>
+        <span id="smooth-info" style="margin-left:14px;color:#888;"></span>
+        <div style="margin-left:auto;display:flex;gap:6px;">
+          <button class="chart-btn" onclick="resetSmoothRange()" title="Smooth the whole track">Full track</button>
+          <button class="chart-btn" onclick="resetSmooth()">Clear</button>
+          <button class="chart-btn" onclick="cancelSmooth()">Cancel</button>
+          <button class="chart-btn" onclick="applySmooth()" style="border-color:#3b82f6;color:#3b82f6;">Apply</button>
+        </div>
+      </div>
+      <div id="seg-edit-bar">
+        <div id="seg-instructions">
+          <div class="seg-ins-row"><span class="seg-ins-key">Click band</span><span class="seg-ins-desc">Toggle Ride ↔ Lift</span></div>
+          <div class="seg-ins-row"><span class="seg-ins-key">Shift + click</span><span class="seg-ins-desc">Add a new split point</span></div>
+          <div class="seg-ins-row"><span class="seg-ins-key">Click boundary</span><span class="seg-ins-desc">Remove that split</span></div>
+          <div class="seg-ins-row"><span class="seg-ins-key">Hover chart</span><span class="seg-ins-desc">Pin location on map</span></div>
+        </div>
+        <div id="seg-edit-actions">
+          <span id="seg-save-confirm"></span>
+          <button class="seg-action-btn" id="btn-undo" onclick="undoEdit()" disabled>Undo</button>
+          <button class="seg-action-btn danger" onclick="clearSegmentOverrides()">Clear Overrides</button>
+          <button class="seg-action-btn primary" onclick="saveSegmentOverrides()">Save</button>
+          <button class="seg-action-btn" onclick="exitEditMode()">Done</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const TYPES = {{ types_json | safe }};
+const TYPE_LABELS = Object.fromEntries(TYPES.map(t => [t.id, t.label]));
+const TYPE_COLORS = Object.fromEntries(TYPES.map(t => [t.id, t.color]));
+const TYPE_BG     = Object.fromEntries(TYPES.map(t => [t.id, t.bg]));
+
+function typeShortLabel(id) {
+  const lbl = TYPE_LABELS[id] || id;
+  // Abbreviate common types for compact display
+  if (lbl === 'Mountain Bike') return 'MTB';
+  return lbl;
+}
+
+// Populate the header type selector + sidebar filter + bulk type dropdowns
+(function populateTypeSelects() {
+  function fill(sel, emptyLabel) {
+    if (!sel) return;
+    // Keep existing special options
+    const special = Array.from(sel.options).map(o => ({value: o.value, text: o.textContent}));
+    sel.innerHTML = '';
+    special.forEach(({value, text}) => {
+      const o = document.createElement('option');
+      o.value = value; o.textContent = text;
+      sel.appendChild(o);
+    });
+    TYPES.forEach(t => {
+      const o = document.createElement('option');
+      o.value = t.id; o.textContent = t.label;
+      sel.appendChild(o);
+    });
+  }
+  fill(document.getElementById('header-type'));
+  fill(document.getElementById('filter-type'));
+  fill(document.getElementById('sidebar-bulk-type'));
+})();
+
+// Build a small SVG sparkline of an elevation profile for an activity list item.
+// Takes an array of elevation values and a hex colour; returns an <svg> node.
+function buildSparkline(eles, color) {
+  const W = 60, H = 18;
+  const min = Math.min(...eles), max = Math.max(...eles);
+  const range = (max - min) || 1;
+  const step  = W / (eles.length - 1);
+  let path = '';
+  eles.forEach((e, i) => {
+    const x = i * step;
+    const y = H - ((e - min) / range) * (H - 2) - 1;
+    path += (i === 0 ? 'M' : 'L') + x.toFixed(1) + ',' + y.toFixed(1) + ' ';
+  });
+  // Fill area beneath the line
+  const fillPath = path + `L${W},${H} L0,${H} Z`;
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('class', 'spark');
+  svg.setAttribute('width', W);
+  svg.setAttribute('height', H);
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  svg.innerHTML = `
+    <path d="${fillPath}" fill="${color}" opacity="0.18"/>
+    <path d="${path}" fill="none" stroke="${color}" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round"/>`;
+  return svg;
+}
+
+// Type icons live in /static/icons/<type-id>.svg (monochrome — they're tinted via CSS mask).
+// Drop in a new file with the matching id to swap an icon. Falls back to unknown.svg.
+const KNOWN_TYPE_ICONS = new Set(['mtb', 'fat_biking', 'snowboard', 'ski', 'hike', 'other']);
+
+function iconUrlForType(typeId) {
+  const id = KNOWN_TYPE_ICONS.has(typeId) ? typeId : 'unknown';
+  return `url('/static/icons/${id}.svg')`;
+}
+
+function openTypePicker() {
+  const sel = document.getElementById('header-type');
+  if (sel.showPicker) { try { sel.showPicker(); return; } catch (e) {} }
+  sel.focus();
+}
+
+function applyTypeStyle(el, typeId) {
+  const t = TYPES.find(t => t.id === typeId);
+  const icon = document.getElementById('header-type-icon');
+  if (icon) {
+    icon.style.setProperty('--icon-url', iconUrlForType(typeId));
+    if (t) {
+      icon.style.background  = t.bg;
+      icon.style.color       = t.color;
+      icon.style.borderColor = t.color;
+      icon.title = t.label;
+    } else {
+      icon.style.background  = '#1a1d23';
+      icon.style.color       = '#bbb';
+      icon.style.borderColor = '#2a2d35';
+      icon.title = 'Unknown type — click to set';
+    }
+  }
+}
+
+let trackData     = null;
+let activeSegments = [];   // segments in use — may be overridden by user edits
+let activeIndex   = -1;
+let chartMode     = 'elevation';
+let trackLayers   = [];
+let hoverMarker   = null, startMarker = null, endMarker = null;
+let currentFilename = null;
+
+// ─── Segment editor state ────────────────────────────────────────────────────
+let _mouseDownX  = null;   // track drag vs click on chart canvas
+let segEditMode  = false;
+let editSplits   = [];   // dist_km boundaries: [0, d1, d2, ..., maxDist]
+let editTypes    = [];   // type per gap: length = editSplits.length - 1
+let editDirty    = false;
+let editHistory  = [];   // stack of {splits, types} snapshots for undo
+
+// ─── Map ──────────────────────────────────────────────────────────────────────
+const map = L.map('map', { zoomControl: true, rotate: true, touchRotate: true }).setView([51, -114], 12);
+map.addControl(new L.Control.Rotate({ closeOnZeroBearing: false }));
+
+const streetLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  maxZoom: 19, attribution: '© <a href="https://openstreetmap.org/copyright">OpenStreetMap</a>',
+});
+const satelliteLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+  maxZoom: 19, attribution: '© <a href="https://www.esri.com/">Esri</a> World Imagery',
+});
+streetLayer.addTo(map);
+
+// ─── 3D map (Mapbox GL) ───────────────────────────────────────────────────────
+const MAPBOX_TOKEN = '{{ mapbox_token }}';
+let mapbox3D = null, mapbox3DReady = false;
+let currentView = 'map';
+
+function setMapView(view) {
+  currentView = view;
+  ['map', 'satellite', '3d'].forEach(v =>
+    document.getElementById(`vt-${v}`).classList.toggle('active', v === view));
+  const leafletEl = document.getElementById('map');
+  const mb3dEl    = document.getElementById('map-3d');
+  const exagEl    = document.getElementById('exag-ctrl');
+  if (view === '3d') {
+    leafletEl.style.display = 'none';
+    mb3dEl.style.display    = 'block';
+    exagEl.style.display    = 'flex';
+    init3D();
+  } else {
+    leafletEl.style.display = '';
+    mb3dEl.style.display    = 'none';
+    exagEl.style.display    = 'none';
+    map.removeLayer(view === 'map' ? satelliteLayer : streetLayer);
+    (view === 'map' ? streetLayer : satelliteLayer).addTo(map);
+    map.invalidateSize();
+  }
+}
+
+function init3D() {
+  if (mapbox3D) { mapbox3D.resize(); if (trackData) apply3DTrack(); return; }
+  if (!MAPBOX_TOKEN) return;
+  mapboxgl.accessToken = MAPBOX_TOKEN;
+  const center = trackData ? [trackData.points[0].lon, trackData.points[0].lat] : [-114.74, 50.89];
+  mapbox3D = new mapboxgl.Map({
+    container: 'map-3d',
+    style: 'mapbox://styles/mapbox/satellite-streets-v12',
+    center, zoom: 11, pitch: 60, bearing: -20, antialias: true,
+  });
+  mapbox3D.addControl(new mapboxgl.NavigationControl({ visualizePitch: true }), 'top-left');
+  mapbox3D.on('load',         () => { add3DLayers(); mapbox3DReady = true; if (trackData) apply3DTrack(); });
+  mapbox3D.on('style.load',   () => { add3DLayers(); if (trackData) apply3DTrack(); });
+}
+
+function add3DLayers() {
+  if (!mapbox3D.getSource('mapbox-dem')) {
+    mapbox3D.addSource('mapbox-dem', { type: 'raster-dem', url: 'mapbox://mapbox.mapbox-terrain-dem-v1', tileSize: 512, maxzoom: 14 });
+  }
+  mapbox3D.setTerrain({ source: 'mapbox-dem', exaggeration: parseFloat(document.getElementById('exaggeration').value) });
+  if (!mapbox3D.getLayer('sky')) {
+    mapbox3D.addLayer({ id: 'sky', type: 'sky', paint: { 'sky-type': 'atmosphere', 'sky-atmosphere-sun': [0.0, 90.0], 'sky-atmosphere-sun-intensity': 15 }});
+  }
+  if (!mapbox3D.getSource('track3d')) {
+    mapbox3D.addSource('track3d', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+  }
+  if (!mapbox3D.getLayer('track3d-riding')) {
+    mapbox3D.addLayer({ id: 'track3d-riding', type: 'line', source: 'track3d',
+      filter: ['==', ['get', 'segtype'], 'riding'],
+      layout: { 'line-join': 'round', 'line-cap': 'round' },
+      paint: { 'line-color': '#3b82f6', 'line-width': 4, 'line-opacity': 0.9 },
+    });
+    mapbox3D.addLayer({ id: 'track3d-assisted', type: 'line', source: 'track3d',
+      filter: ['==', ['get', 'segtype'], 'assisted'],
+      layout: { 'line-join': 'round', 'line-cap': 'butt' },
+      paint: { 'line-color': '#f59e0b', 'line-width': 3, 'line-dasharray': [2, 2], 'line-opacity': 0.9 },
+    });
+    // Speed-map overlay layer — colored per feature via 'speedColor' property
+    mapbox3D.addLayer({ id: 'track3d-speed', type: 'line', source: 'track3d',
+      filter: ['==', ['get', 'segtype'], 'speed'],
+      layout: { 'line-join': 'round', 'line-cap': 'round' },
+      paint: { 'line-color': ['get', 'speedColor'], 'line-width': 4, 'line-opacity': 0.9 },
+    });
+  }
+}
+
+function apply3DTrack() {
+  if (!mapbox3D || !mapbox3DReady || !trackData) return;
+  let features;
+  if (colorMode !== 'default') {
+    const pts = trackData.points;
+    features = [];
+    if (pts.length >= 2) {
+      let curColor = colorForPoint(0, pts, colorMode);
+      let coords = [[pts[0].lon, pts[0].lat]];
+      for (let i = 1; i < pts.length; i++) {
+        const c = colorForPoint(i, pts, colorMode);
+        coords.push([pts[i].lon, pts[i].lat]);
+        if (c !== curColor || i === pts.length - 1) {
+          if (coords.length >= 2) {
+            features.push({ type: 'Feature',
+              properties: { segtype: 'speed', speedColor: curColor },
+              geometry: { type: 'LineString', coordinates: coords } });
+          }
+          coords = [[pts[i].lon, pts[i].lat]];
+          curColor = c;
+        }
+      }
+    }
+  } else {
+    features = activeSegments.map(seg => ({
+      type: 'Feature', properties: { segtype: seg.type },
+      geometry: { type: 'LineString',
+        coordinates: trackData.points.slice(seg.start, seg.end + 1).map(p => [p.lon, p.lat]),
+      },
+    }));
+  }
+  // KM marker features (rendered as a separate symbol layer)
+  if (kmMarksOn && trackData.points?.length) {
+    let nextKm = 1;
+    const pts = trackData.points;
+    for (let i = 1; i < pts.length; i++) {
+      if (pts[i].dist_km >= nextKm) {
+        features.push({ type: 'Feature',
+          properties: { segtype: 'km', label: String(nextKm) },
+          geometry: { type: 'Point', coordinates: [pts[i].lon, pts[i].lat] } });
+        nextKm++;
+      }
+    }
+    if (!mapbox3D.getLayer('track3d-km')) {
+      mapbox3D.addLayer({ id: 'track3d-km', type: 'symbol', source: 'track3d',
+        filter: ['==', ['get', 'segtype'], 'km'],
+        layout: { 'text-field': ['get', 'label'], 'text-size': 11, 'text-allow-overlap': true },
+        paint: { 'text-color': '#fff', 'text-halo-color': '#1a2a3a', 'text-halo-width': 2 },
+      });
+    }
+  }
+  mapbox3D.getSource('track3d')?.setData({ type: 'FeatureCollection', features });
+  if (trackData.bbox) {
+    const [s, w, n, e] = trackData.bbox;
+    mapbox3D.fitBounds([[w, s], [e, n]], { padding: 80, pitch: 60, bearing: -20, duration: 1200 });
+  }
+}
+
+function onExagChange(v) {
+  document.getElementById('exag-val').textContent = `${parseFloat(v).toFixed(1)}×`;
+  if (mapbox3D?.getTerrain()) mapbox3D.setTerrain({ source: 'mapbox-dem', exaggeration: parseFloat(v) });
+}
+
+const hoverIcon = L.divIcon({
+  className: '',
+  html: '<div style="width:12px;height:12px;border-radius:50%;background:#ef4444;border:2px solid #fff;box-shadow:0 0 4px rgba(0,0,0,0.5)"></div>',
+  iconSize: [12,12], iconAnchor: [6,6],
+});
+function dotIcon(color) {
+  return L.divIcon({
+    className: '',
+    html: `<div style="width:10px;height:10px;border-radius:50%;background:${color};border:2px solid #fff;box-shadow:0 0 4px rgba(0,0,0,0.4)"></div>`,
+    iconSize: [10,10], iconAnchor: [5,5],
+  });
+}
+
+const SEGMENT_STYLES = {
+  riding:   { color: '#3b82f6', weight: 3, opacity: 0.85 },
+  assisted: { color: '#f59e0b', weight: 3, opacity: 0.9, dashArray: '10 7' },
+};
+
+// ─── Segment helpers ──────────────────────────────────────────────────────────
+function applySegmentOverrides(data) {
+  const overrides = data.meta?.segment_overrides;
+  if (!overrides?.length) return data.segments;
+  const pts  = data.points;
+  const segs = [];
+  for (const ov of overrides) {
+    let start = pts.findIndex(p => p.dist_km >= ov.from_dist);
+    if (start < 0) start = 0;
+    let end = start;
+    for (let i = start; i < pts.length; i++) {
+      if (pts[i].dist_km <= ov.to_dist) end = i;
+    }
+    if (end > start) segs.push({ type: ov.type, start, end });
+  }
+  return segs.length ? segs : data.segments;
+}
+
+function recomputeStats(segments) {
+  if (!trackData) return null;
+  const pts = trackData.points;
+  const n   = pts.length;
+  const assisted = new Array(n).fill(false);
+  for (const seg of segments) {
+    if (seg.type === 'assisted') {
+      for (let k = seg.start; k <= seg.end; k++) assisted[k] = true;
+    }
+  }
+  let ridingDist = 0, elevGain = 0, elevLoss = 0, assistedGain = 0;
+  for (let i = 1; i < n; i++) {
+    const dd = pts[i].dist_km - pts[i - 1].dist_km;
+    const de = (pts[i].ele != null && pts[i - 1].ele != null) ? pts[i].ele - pts[i - 1].ele : 0;
+    if (assisted[i]) {
+      if (de > 0) assistedGain += de;
+    } else {
+      ridingDist += dd;
+      if (de > 0)      elevGain += de;
+      else if (de < 0) elevLoss -= de;
+    }
+  }
+  const base = trackData.stats;
+  const avgSpeed = base.duration_sec ? ridingDist / (base.duration_sec / 3600) : null;
+  return {
+    distance_km:     Math.round(ridingDist * 100) / 100,
+    duration_sec:    base.duration_sec,
+    elev_gain_m:     Math.round(elevGain),
+    elev_loss_m:     Math.round(elevLoss),
+    assisted_gain_m: Math.round(assistedGain),
+    avg_speed_kmh:   avgSpeed ? Math.round(avgSpeed * 10) / 10 : null,
+    max_speed_kmh:   base.max_speed_kmh,
+    hr_avg:          base.hr_avg,
+    hr_max:          base.hr_max,
+    hr_zones:        base.hr_zones,
+    hr_max_used:     base.hr_max_used,
+  };
+}
+
+function renderTrackLayers(segments) {
+  trackLayers.forEach(l => l.remove()); trackLayers = [];
+  kmMarkLayers.forEach(l => l.remove()); kmMarkLayers = [];
+  clearRunHighlight();
+  if (!trackData) return;
+  if (colorMode !== 'default') {
+    renderColoredLayers(trackData.points, colorMode);
+  } else {
+    segments.forEach(seg => {
+      const pts = trackData.points.slice(seg.start, seg.end + 1).map(p => [p.lat, p.lon]);
+      if (pts.length < 2) return;
+      const layer = L.polyline(pts, SEGMENT_STYLES[seg.type] || SEGMENT_STYLES.riding).addTo(map);
+      if (seg.type === 'riding') layer.on('click', e => setActiveIndex(nearestIndex(e.latlng)));
+      trackLayers.push(layer);
+    });
+  }
+  if (kmMarksOn) renderKmMarks(trackData.points);
+}
+
+let kmMarkLayers = [];
+function renderKmMarks(pts) {
+  let nextKm = 1;
+  for (let i = 1; i < pts.length; i++) {
+    if (pts[i].dist_km >= nextKm) {
+      const icon = L.divIcon({ className: '', html: `<div class="km-mark">${nextKm}</div>`, iconSize: [20, 20], iconAnchor: [10, 10] });
+      const m = L.marker([pts[i].lat, pts[i].lon], { icon, interactive: false }).addTo(map);
+      kmMarkLayers.push(m);
+      nextKm++;
+    }
+  }
+}
+
+// Generic point colorer — returns a hex/rgb string for the i-th point
+function colorForPoint(i, pts, mode) {
+  if (mode === 'speed') return speedBandColor(pts[i].speed);
+  if (mode === 'gradient') {
+    if (i === 0) return gradientLineColor(0);
+    const distM = haversineKm(pts[i-1].lat, pts[i-1].lon, pts[i].lat, pts[i].lon) * 1000;
+    const grade = distM > 0.5 ? ((pts[i].ele - pts[i-1].ele) / distM) * 100 : 0;
+    return gradientLineColor(grade);
+  }
+  if (mode === 'progression') {
+    const t = i / Math.max(1, pts.length - 1);
+    // Hue from blue (240) -> red (0)
+    return `hsl(${Math.round(240 - 240 * t)}, 80%, 55%)`;
+  }
+  return '#3b82f6';
+}
+
+function gradientLineColor(grade) {
+  if (grade > 18)  return '#14532d';
+  if (grade > 8)   return '#16a34a';
+  if (grade > 3)   return '#86efac';
+  if (grade < -18) return '#7f1d1d';
+  if (grade < -8)  return '#dc2626';
+  if (grade < -3)  return '#fca5a5';
+  return '#9ca3af';
+}
+
+function haversineKm(lat1, lon1, lat2, lon2) {
+  const R = 6371, toRad = d => d * Math.PI / 180;
+  const dLat = toRad(lat2 - lat1), dLon = toRad(lon2 - lon1);
+  const a = Math.sin(dLat/2)**2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon/2)**2;
+  return R * 2 * Math.asin(Math.sqrt(a));
+}
+
+function renderColoredLayers(pts, mode) {
+  if (pts.length < 2) return;
+  let curColor = colorForPoint(0, pts, mode);
+  let seg = [[pts[0].lat, pts[0].lon]];
+  for (let i = 1; i < pts.length; i++) {
+    const c = colorForPoint(i, pts, mode);
+    seg.push([pts[i].lat, pts[i].lon]);
+    if (c !== curColor || i === pts.length - 1) {
+      if (seg.length >= 2) {
+        trackLayers.push(L.polyline(seg, { color: curColor, weight: 3, opacity: 0.9 }).addTo(map));
+      }
+      seg = [[pts[i].lat, pts[i].lon]];
+      curColor = c;
+    }
+  }
+}
+
+// ─── Segment editor ───────────────────────────────────────────────────────────
+// Map a chart dataIndex back to a track-points index. HR mode has its own
+// dataset (one entry per HR sample, not per track point), so dataIndex doesn't
+// map directly — we look up the sample's dist_km and find the nearest point.
+function pointIdxFromDataIdx(dataIdx) {
+  if (!trackData) return -1;
+  if (chartMode === 'hr' && trackData.hr_samples?.length) {
+    const sample = trackData.hr_samples[dataIdx];
+    if (!sample) return -1;
+    return nearestPointIdxByDistKm(sample[0]);
+  }
+  return dataIdx;
+}
+
+// Look up HR (bpm) at a given dist_km by binary search over hr_samples.
+// Returns null if no HR data or if no sample is within ~0.5 km of the query.
+function hrAtDistKm(km) {
+  const s = trackData?.hr_samples;
+  if (!s?.length) return null;
+  let lo = 0, hi = s.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (s[mid][0] < km) lo = mid + 1; else hi = mid;
+  }
+  let best = lo;
+  if (lo > 0 && Math.abs(s[lo - 1][0] - km) < Math.abs(s[lo][0] - km)) best = lo - 1;
+  return Math.abs(s[best][0] - km) < 0.5 ? s[best][1] : null;
+}
+
+function nearestPointIdxByDistKm(km) {
+  const pts = trackData.points;
+  let lo = 0, hi = pts.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (pts[mid].dist_km < km) lo = mid + 1; else hi = mid;
+  }
+  if (lo > 0 && Math.abs(pts[lo - 1].dist_km - km) < Math.abs(pts[lo].dist_km - km)) return lo - 1;
+  return lo;
+}
+
+function nearestDistKm(dist) {
+  if (!trackData) return dist;
+  let best = trackData.points[0].dist_km, bestDiff = Infinity;
+  for (const p of trackData.points) {
+    const d = Math.abs(p.dist_km - dist);
+    if (d < bestDiff) { bestDiff = d; best = p.dist_km; }
+  }
+  return best;
+}
+
+function editSplitsToSegments() {
+  const pts = trackData.points;
+  const segs = [];
+  for (let i = 0; i < editTypes.length; i++) {
+    let start = pts.findIndex(p => p.dist_km >= editSplits[i]);
+    if (start < 0) start = 0;
+    let end = start;
+    for (let j = start; j < pts.length; j++) {
+      if (pts[j].dist_km <= editSplits[i + 1]) end = j;
+    }
+    if (end > start) segs.push({ type: editTypes[i], start, end });
+  }
+  return segs;
+}
+
+function applyEditToTrack() {
+  activeSegments = editSplitsToSegments();
+  renderTrackLayers(activeSegments);
+  updateStats(recomputeStats(activeSegments));
+  document.getElementById('map-legend').classList.toggle('visible',
+    activeSegments.some(s => s.type === 'assisted'));
+  if (currentView === '3d') apply3DTrack();
+}
+
+function toggleEditMode() {
+  segEditMode ? exitEditMode() : enterEditMode();
+}
+
+function pushHistory() {
+  editHistory.push({ splits: [...editSplits], types: [...editTypes] });
+  document.getElementById('btn-undo').disabled = false;
+}
+
+function undoEdit() {
+  if (!editHistory.length) return;
+  const prev = editHistory.pop();
+  editSplits = prev.splits;
+  editTypes  = prev.types;
+  document.getElementById('btn-undo').disabled = editHistory.length === 0;
+  editDirty = editHistory.length > 0;
+  applyEditToTrack();
+  elevationChart.update('none');
+}
+
+function resetChartZoom() {
+  elevationChart.resetZoom();
+  document.getElementById('btn-reset-zoom').style.display = 'none';
+}
+
+let chartCollapsed = false;
+function toggleChartPanel() {
+  chartCollapsed = !chartCollapsed;
+  document.getElementById('chart-wrapper').classList.toggle('collapsed', chartCollapsed);
+  document.getElementById('btn-chart-collapse').textContent = chartCollapsed ? '▲' : '▼';
+  if (!chartCollapsed) setTimeout(() => map.invalidateSize(), 220);
+  else map.invalidateSize();
+}
+
+function enterEditMode() {
+  if (!trackData) return;
+  segEditMode = true;
+  editDirty   = false;
+  editHistory = [];
+  const pts = trackData.points;
+  const maxDist = pts[pts.length - 1].dist_km;
+  editSplits = [0];
+  editTypes  = [];
+  for (let i = 0; i < activeSegments.length; i++) {
+    if (i > 0) editSplits.push(pts[activeSegments[i].start].dist_km);
+    editTypes.push(activeSegments[i].type);
+  }
+  editSplits.push(maxDist);
+  document.getElementById('btn-edit-segs').classList.add('edit-active');
+  document.getElementById('seg-edit-bar').classList.add('visible');
+  canvas.style.cursor = 'crosshair';
+  elevationChart.update('none');
+}
+
+function exitEditMode() {
+  segEditMode = false;
+  editDirty   = false;
+  editHistory = [];
+  document.getElementById('btn-edit-segs').classList.remove('edit-active');
+  document.getElementById('seg-edit-bar').classList.remove('visible');
+  document.getElementById('seg-save-confirm').textContent = '';
+  document.getElementById('btn-undo').disabled = true;
+  canvas.style.cursor = '';
+  elevationChart.update('none');
+}
+
+async function saveSegmentOverrides() {
+  if (!currentFilename) return;
+  const overrides = editTypes.map((type, i) => ({
+    type,
+    from_dist: Math.round(editSplits[i]     * 1000) / 1000,
+    to_dist:   Math.round(editSplits[i + 1] * 1000) / 1000,
+  }));
+  await fetch(`/api/activity/${encodeURIComponent(currentFilename)}/segments`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ segment_overrides: overrides }),
+  });
+  if (!trackData.meta) trackData.meta = {};
+  trackData.meta.segment_overrides = overrides;
+  editDirty = false;
+  document.getElementById('seg-save-confirm').textContent = 'Saved';
+  setTimeout(() => document.getElementById('seg-save-confirm').textContent = '', 2000);
+}
+
+async function clearSegmentOverrides() {
+  if (!currentFilename) return;
+  await fetch(`/api/activity/${encodeURIComponent(currentFilename)}/segments`, { method: 'DELETE' });
+  if (trackData.meta) delete trackData.meta.segment_overrides;
+  activeSegments = trackData.segments;
+  exitEditMode();
+  renderTrackLayers(activeSegments);
+  updateStats(trackData.stats);
+  document.getElementById('map-legend').classList.toggle('visible',
+    activeSegments.some(s => s.type === 'assisted'));
+  if (currentView === '3d') apply3DTrack();
+}
+
+// ─── Chart ────────────────────────────────────────────────────────────────────
+const segmentBandPlugin = {
+  id: 'segmentBands',
+  beforeDatasetsDraw(chart) {
+    if (!segEditMode || !editTypes.length) return;
+    const { ctx, chartArea: ca, scales: { x } } = chart;
+    ctx.save();
+    for (let i = 0; i < editTypes.length; i++) {
+      const x0 = Math.max(ca.left,  x.getPixelForValue(editSplits[i]));
+      const x1 = Math.min(ca.right, x.getPixelForValue(editSplits[i + 1]));
+      if (x1 <= x0) continue;
+      ctx.fillStyle = editTypes[i] === 'assisted' ? 'rgba(245,158,11,0.15)' : 'rgba(59,130,246,0.10)';
+      ctx.fillRect(x0, ca.top, x1 - x0, ca.bottom - ca.top);
+      ctx.fillStyle = editTypes[i] === 'assisted' ? '#f59e0b' : '#3b82f6';
+      ctx.font = 'bold 9px system-ui';
+      ctx.textAlign = 'left';
+      ctx.fillText(editTypes[i] === 'assisted' ? 'Lift' : 'Ride', x0 + 4, ca.bottom - 6);
+    }
+    // Boundary lines
+    ctx.strokeStyle = '#666';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 3]);
+    for (let i = 1; i < editSplits.length - 1; i++) {
+      const px = x.getPixelForValue(editSplits[i]);
+      if (px < ca.left || px > ca.right) continue;
+      ctx.beginPath(); ctx.moveTo(px, ca.top); ctx.lineTo(px, ca.bottom); ctx.stroke();
+    }
+    ctx.setLineDash([]);
+    ctx.restore();
+  }
+};
+
+const crosshairPlugin = {
+  id: 'crosshair',
+  afterDraw(chart) {
+    if (activeIndex < 0) return;
+    const meta = chart.getDatasetMeta(0);
+    if (!meta.data[activeIndex]) return;
+    const x = meta.data[activeIndex].x;
+    const { top, bottom } = chart.chartArea;
+    const ctx = chart.ctx;
+    ctx.save();
+    ctx.beginPath(); ctx.moveTo(x, top); ctx.lineTo(x, bottom);
+    ctx.strokeStyle = '#ef4444'; ctx.lineWidth = 1.5; ctx.setLineDash([4, 3]); ctx.stroke();
+    ctx.beginPath(); ctx.arc(x, meta.data[activeIndex].y, 4, 0, Math.PI * 2);
+    ctx.fillStyle = '#ef4444'; ctx.fill();
+    ctx.restore();
+  }
+};
+// gradientBandPlugin registered below after its definition
+
+const elevationChart = new Chart(
+  document.getElementById('elevation-chart').getContext('2d'), {
+  type: 'line',
+  data: { datasets: [] },
+  options: {
+    animation: false, responsive: true, maintainAspectRatio: false,
+    interaction: { mode: 'index', intersect: false },
+    plugins: {
+      legend: { display: false },
+      tooltip: {
+        enabled: true,
+        backgroundColor: 'rgba(18,21,26,0.95)', borderColor: '#2a2d35', borderWidth: 1,
+        titleColor: '#888', bodyColor: '#fff', padding: 8,
+        callbacks: {
+          title(items) {
+            if (!trackData) return '';
+            const pt = trackData.points[pointIdxFromDataIdx(items[0].dataIndex)];
+            if (!pt) return '';
+            // GPX wall-clock — TrailForks tags local time as +00:00, so we
+            // skip Date parsing and just take the HH:MM substring.
+            const t = pt.time ? `${pt.time.slice(11, 13)}:${pt.time.slice(14, 16)}` : '';
+            const km = `${pt.dist_km.toFixed(2)} km`;
+            return t ? `${km} · ${t}` : km;
+          },
+          label(item) {
+            if (!trackData) return '';
+            // The HR overlay dataset on elevation mode handles its own line —
+            // suppress it here; the Elevation label below looks up HR by
+            // distance so the two readings line up even though the datasets
+            // have different point counts.
+            if (item.dataset?.label === 'HR' && chartMode === 'elevation') return '';
+            const pt = trackData.points[pointIdxFromDataIdx(item.dataIndex)];
+            if (!pt) return '';
+            if (chartMode === 'hr') return `HR: ${item.parsed.y} bpm`;
+            if (chartMode === 'elevation') {
+              const lines = [`Elevation: ${pt.ele} m`];
+              const hr = hrAtDistKm(pt.dist_km);
+              if (hr != null) lines.push(`HR: ${hr} bpm`);
+              return lines;
+            }
+            return pt.speed != null ? `Speed: ${pt.speed} km/h` : 'Speed: N/A';
+          }
+        }
+      },
+      zoom: {
+        zoom: {
+          wheel: { enabled: true },
+          pinch: { enabled: true },
+          mode: 'x',
+          onZoom() { document.getElementById('btn-reset-zoom').style.display = ''; },
+        },
+        pan: { enabled: true, mode: 'x' },
+      },
+    },
+    scales: {
+      x: { type: 'linear', title: { display: true, text: 'Distance (km)', color: '#ccc', font: { size: 10 } }, ticks: { color: '#ccc', font: { size: 10 } }, grid: { color: '#1e2128' } },
+      y: { title: { display: true, text: 'Elevation (m)', color: '#ccc', font: { size: 10 } }, ticks: { color: '#ccc', font: { size: 10 } }, grid: { color: '#1e2128' } },
+      y1: { display: false, position: 'right', title: { display: true, text: 'HR (bpm)', color: '#ef4444', font: { size: 10 } }, ticks: { color: '#ef4444', font: { size: 10 } }, grid: { display: false } }
+    },
+  }
+});
+
+const canvas = document.getElementById('elevation-chart');
+
+let _rafPending = false;
+canvas.addEventListener('mousemove', (e) => {
+  if (!trackData || _rafPending) return;
+  _rafPending = true;
+  requestAnimationFrame(() => {
+    _rafPending = false;
+    const els = elevationChart.getElementsAtEventForMode(e, 'index', { intersect: false }, false);
+    if (els.length > 0) setActiveIndex(pointIdxFromDataIdx(els[0].index));
+  });
+});
+canvas.addEventListener('mouseleave', () => { _rafPending = false; setActiveIndex(-1); });
+
+canvas.addEventListener('mousedown', (e) => { _mouseDownX = e.offsetX; });
+
+canvas.addEventListener('click', (e) => {
+  if (!segEditMode || !trackData) return;
+  // Ignore if the user dragged (panned) rather than clicked
+  if (_mouseDownX !== null && Math.abs(e.offsetX - _mouseDownX) > 5) return;
+  const xScale = elevationChart.scales.x;
+  const ca     = elevationChart.chartArea;
+  if (e.offsetX < ca.left || e.offsetX > ca.right) return;
+
+  const clickDist = xScale.getValueForPixel(e.offsetX);
+  // Proximity threshold in dist_km equivalent to 10 screen pixels
+  const pxDist = Math.abs(xScale.getValueForPixel(ca.left + 10) - xScale.getValueForPixel(ca.left));
+
+  // Check if near an existing interior split
+  let nearIdx = -1;
+  for (let i = 1; i < editSplits.length - 1; i++) {
+    if (Math.abs(editSplits[i] - clickDist) <= pxDist) { nearIdx = i; break; }
+  }
+
+  if (nearIdx >= 0) {
+    pushHistory();
+    editSplits.splice(nearIdx, 1);
+    editTypes.splice(nearIdx, 1);
+  } else if (e.shiftKey) {
+    const snapped = nearestDistKm(clickDist);
+    if (snapped <= editSplits[0] || snapped >= editSplits[editSplits.length - 1]) return;
+    if (editSplits.some(s => Math.abs(s - snapped) < 0.02)) return;
+    pushHistory();
+    const insertAt = editSplits.findIndex(s => s > snapped);
+    editSplits.splice(insertAt, 0, snapped);
+    const origType = editTypes[insertAt - 1];
+    editTypes.splice(insertAt - 1, 1, origType, origType);
+  } else {
+    let segIdx = 0;
+    for (let i = 0; i < editSplits.length - 1; i++) {
+      if (clickDist >= editSplits[i] && clickDist < editSplits[i + 1]) { segIdx = i; break; }
+    }
+    pushHistory();
+    editTypes[segIdx] = editTypes[segIdx] === 'assisted' ? 'riding' : 'assisted';
+  }
+
+  editDirty = true;
+  applyEditToTrack();
+  elevationChart.update('none');
+});
+
+// ─── Sync map ↔ chart ─────────────────────────────────────────────────────────
+function setActiveIndex(idx) {
+  activeIndex = idx;
+  elevationChart.update('none');
+  if (!trackData || idx < 0) { hoverMarker?.remove(); return; }
+  const pt = trackData.points[idx];
+  if (!hoverMarker) {
+    hoverMarker = L.marker([pt.lat, pt.lon], { icon: hoverIcon, zIndexOffset: 1000 }).addTo(map);
+  } else {
+    hoverMarker.setLatLng([pt.lat, pt.lon]);
+    if (!map.hasLayer(hoverMarker)) hoverMarker.addTo(map);
+  }
+}
+
+function nearestIndex(latlng) {
+  if (!trackData) return -1;
+  let best = -1, bestD = Infinity;
+  trackData.points.forEach((pt, i) => {
+    const d = map.distance(latlng, [pt.lat, pt.lon]);
+    if (d < bestD) { bestD = d; best = i; }
+  });
+  return best;
+}
+
+// ─── Chart helpers ────────────────────────────────────────────────────────────
+// ─── Gradient band helpers ────────────────────────────────────────────────────
+const GRADE_WINDOW_KM = 0.2;   // average gradient over 200 m windows
+
+function buildGradients(pts) {
+  return pts.map((p, i) => {
+    if (i === 0 || pts[i-1].ele == null || p.ele == null) return 0;
+    const distM = (p.dist_km - pts[i-1].dist_km) * 1000;
+    return distM > 0.5 ? ((p.ele - pts[i-1].ele) / distM) * 100 : 0;
+  });
+}
+
+// Returns an rgba for a given signed gradient %:
+// greens for climbing, reds for descent, transparent for flat
+function gradeBandColor(grade) {
+  if (grade > 35)  return 'rgba(20,83,45,0.38)';    // very steep climb — deep green
+  if (grade > 18)  return 'rgba(22,163,74,0.30)';   // steep climb — green
+  if (grade >  8)  return 'rgba(74,222,128,0.22)';  // moderate climb — light green
+  if (grade < -35) return 'rgba(127,29,29,0.38)';   // very steep descent — deep red
+  if (grade < -18) return 'rgba(220,38,38,0.30)';   // steep descent — red
+  if (grade <  -8) return 'rgba(252,165,165,0.24)'; // moderate descent — light red
+  return null;                                       // flat — no band
+}
+
+const gradientBandPlugin = {
+  id: 'gradientBands',
+  beforeDatasetsDraw(chart) {
+    if (chartMode !== 'elevation' || !trackData) return;
+    const { ctx, chartArea: ca, scales: { x, y } } = chart;
+    const pts = trackData.points;
+    if (!pts || pts.length < 2 || !y) return;
+
+    const gradients = buildGradients(pts);
+
+    ctx.save();
+    // Clip to the area under the elevation line so bands sit beneath the curve.
+    ctx.beginPath();
+    ctx.moveTo(ca.left, ca.bottom);
+    for (const p of pts) {
+      const px = Math.min(ca.right, Math.max(ca.left, x.getPixelForValue(p.dist_km)));
+      const py = Math.min(ca.bottom, Math.max(ca.top, y.getPixelForValue(p.ele)));
+      ctx.lineTo(px, py);
+    }
+    ctx.lineTo(ca.right, ca.bottom);
+    ctx.closePath();
+    ctx.clip();
+
+    let i = 0;
+    while (i < pts.length) {
+      const startDist = pts[i].dist_km;
+      let j = i + 1;
+      while (j < pts.length && pts[j].dist_km - startDist < GRADE_WINDOW_KM) j++;
+
+      // Signed average gradient across this window (preserves direction)
+      const slice = gradients.slice(i, j);
+      const avg   = slice.reduce((s, g) => s + g, 0) / (slice.length || 1);
+      const color = gradeBandColor(avg);
+
+      if (color) {
+        const endDist = pts[Math.min(j, pts.length - 1)].dist_km;
+        const x0 = Math.max(ca.left,  x.getPixelForValue(startDist));
+        const x1 = Math.min(ca.right, x.getPixelForValue(endDist));
+        if (x1 > x0) {
+          ctx.fillStyle = color;
+          ctx.fillRect(x0, ca.top, x1 - x0, ca.bottom - ca.top);
+        }
+      }
+      i = j;
+    }
+    ctx.restore();
+  }
+};
+
+Chart.register(crosshairPlugin, segmentBandPlugin, gradientBandPlugin);
+
+function buildChartData(mode) {
+  if (!trackData) return { datasets: [] };
+  const pts = trackData.points;
+  if (mode === 'hr' && trackData.hr_samples?.length) {
+    return {
+      datasets: [{
+        data: trackData.hr_samples.map(([x, y]) => ({ x, y })),
+        borderColor: '#ef4444',
+        backgroundColor: 'rgba(239,68,68,0.08)',
+        fill: true, borderWidth: 2, pointRadius: 0, tension: 0.15, spanGaps: true,
+      }]
+    };
+  }
+  const isElev = mode === 'elevation';
+  const datasets = [{
+    label: isElev ? 'Elevation' : 'Speed',
+    data: pts.map(p => ({ x: p.dist_km, y: isElev ? p.ele : p.speed })),
+    borderColor: isElev ? '#3b82f6' : '#10b981',
+    backgroundColor: isElev ? 'rgba(59,130,246,0.08)' : 'rgba(16,185,129,0.08)',
+    fill: isElev, borderWidth: 2, pointRadius: 0, tension: 0, spanGaps: !isElev,
+    yAxisID: 'y',
+  }];
+  // Overlay HR on the elevation chart when HR data is available
+  if (isElev && trackData.hr_samples?.length) {
+    datasets.push({
+      label: 'HR',
+      data: trackData.hr_samples.map(([x, y]) => ({ x, y })),
+      borderColor: '#ef4444',
+      backgroundColor: 'transparent',
+      fill: false, borderWidth: 1.4, pointRadius: 0, tension: 0.15, spanGaps: true,
+      yAxisID: 'y1',
+    });
+  }
+  return { datasets };
+}
+
+function switchChart(mode) {
+  chartMode = mode;
+  document.getElementById('btn-elevation').classList.toggle('active', mode === 'elevation');
+  document.getElementById('btn-speed').classList.toggle('active',     mode === 'speed');
+  document.getElementById('btn-hr').classList.toggle('active',        mode === 'hr');
+  const title = mode === 'elevation' ? 'Elevation' : mode === 'speed' ? 'Speed' : 'Heart Rate';
+  const yLbl  = mode === 'elevation' ? 'Elevation (m)' : mode === 'speed' ? 'Speed (km/h)' : 'HR (bpm)';
+  document.getElementById('chart-title').textContent = title;
+  elevationChart.options.scales.y.title.text = yLbl;
+  elevationChart.data = buildChartData(mode);
+  // Show right-side HR axis only for elevation mode when HR data is present
+  const showHrAxis = mode === 'elevation' && trackData?.hr_samples?.length;
+  elevationChart.options.scales.y1.display = !!showHrAxis;
+  elevationChart.update();
+}
+
+// Format "Apr 18, 2026 · 10:09 – 13:56" using the raw clock time from the ISO
+// string (GPX exports can have wrong timezone offsets, but the wall-clock
+// HH:MM is the user's local time).
+function fmtDateTimeRange(iso, durationSec) {
+  if (!iso) return '';
+  const date = fmtDate(iso);
+  const hh = iso.slice(11, 13), mm = iso.slice(14, 16);
+  if (!hh || !mm) return date;
+  let out = `${date} <span class="ht-time">${hh}:${mm}</span>`;
+  if (durationSec) {
+    const total = (+hh) * 60 + (+mm) + Math.round(durationSec / 60);
+    const eH = String(Math.floor(total / 60) % 24).padStart(2, '0');
+    const eM = String(total % 60).padStart(2, '0');
+    out = `${date} <span class="ht-time">${hh}:${mm} – ${eH}:${eM}</span>`;
+  }
+  return out;
+}
+
+// ─── Weather ──────────────────────────────────────────────────────────────────
+function weatherIcon(code) {
+  if (code == null) return '';
+  if (code === 0) return '☀';
+  if (code <= 3)  return '⛅';
+  if (code <= 48) return '🌫';
+  if (code <= 67) return '🌧';
+  if (code <= 77) return '❄';
+  if (code <= 82) return '🌧';
+  if (code <= 86) return '❄';
+  return '⛈';
+}
+
+async function loadWeather(filename) {
+  const el = document.getElementById('header-weather');
+  el.textContent = '';
+  el.title = '';
+  try {
+    const res = await fetch(`/api/activity/${encodeURIComponent(filename)}/weather`);
+    if (!res.ok) return;
+    const w = await res.json();
+    if (w.tmin == null && w.tmax == null) return;
+    const icon = weatherIcon(w.code);
+    const temp = (w.tmin != null && w.tmax != null)
+      ? `${Math.round(w.tmin)}° / ${Math.round(w.tmax)}°`
+      : `${Math.round(w.tmax ?? w.tmin)}°`;
+    const extras = [];
+    if (w.snow && w.snow > 0)        extras.push(`❄ ${w.snow.toFixed(1)} cm`);
+    else if (w.precip && w.precip > 0) extras.push(`💧 ${w.precip.toFixed(1)} mm`);
+    if (w.wind)  extras.push(`💨 ${Math.round(w.wind)}`);
+    el.textContent = `${icon} ${temp}${extras.length ? ' · ' + extras.join(' · ') : ''}`;
+    el.title = 'Historical weather — Open-Meteo';
+  } catch (e) {}
+}
+
+// ─── Activity details bar ─────────────────────────────────────────────────────
+let _allRegions = [];
+fetch('/api/regions').then(r => r.json()).then(d => {
+  _allRegions = d;
+  // Re-render so sidebar default names can include region names
+  if (typeof renderActivityList === 'function' && allActivitiesData) renderActivityList(currentFilename);
+});
+
+function abMarkDirty() {
+  document.getElementById('ab-save').classList.add('dirty');
+}
+
+// Computed default name for an activity, used as the title placeholder and in the sidebar
+function defaultActivityName(meta, regionIds) {
+  const typeLabel = TYPES.find(x => x.id === meta?.type)?.label || '';
+  const regionNames = (regionIds || [])
+    .map(id => _allRegions.find(x => x.id === id)?.name)
+    .filter(Boolean);
+  return [typeLabel, regionNames.join(' · ')].filter(Boolean).join(' — ');
+}
+
+function populateActivityBar(meta, regions) {
+  const typeSelect = document.getElementById('header-type');
+  // Select reflects the explicit user choice (blank if none); the icon shows
+  // the effective type (which may come from the matched region's default).
+  typeSelect.value = meta.type || '';
+  applyTypeStyle(typeSelect, trackData?.effective_type || meta.type || '');
+
+  document.getElementById('ab-notes').value = meta.notes || '';
+  document.getElementById('ab-save').classList.remove('dirty');
+  document.getElementById('ab-save-confirm').textContent = '';
+  document.getElementById('activity-bar').classList.add('visible');
+
+  // Default title placeholder: "Type — Region(s)" — only shown when the user hasn't set a title
+  const titleInput = document.getElementById('header-title');
+  titleInput.placeholder = defaultActivityName(meta, regions) || '—';
+
+  // Region names in the header — plain coloured text, middot-separated —
+  // followed by a "+" button that opens the region picker popover.
+  renderHeaderRegions(regions || [], meta);
+}
+
+function _activityBboxQuery() {
+  const pts = trackData?.points;
+  if (!pts || !pts.length) return '';
+  let w = pts[0].lon, e = pts[0].lon, s = pts[0].lat, n = pts[0].lat;
+  for (const p of pts) {
+    if (p.lon < w) w = p.lon; if (p.lon > e) e = p.lon;
+    if (p.lat < s) s = p.lat; if (p.lat > n) n = p.lat;
+  }
+  return `&bbox=${w},${s},${e},${n}`;
+}
+
+// Render the regions strip: chips for currently-associated regions (either
+// geometry-matched or user-pinned) + a "+" button that opens a popover.
+function renderHeaderRegions(regions, meta) {
+  const regionEl = document.getElementById('header-regions');
+  regionEl.innerHTML = '';
+  const pinned = new Set(meta.regions_pinned || []);
+
+  regions.forEach(id => {
+    const r = _allRegions.find(x => x.id === id);
+    if (!r) return;
+    const chip = document.createElement('span');
+    chip.className = 'header-region-chip';
+    chip.style.color = '#fff';
+    chip.textContent = r.name;
+    regionEl.appendChild(chip);
+  });
+
+  // Button + popover wrapper
+  const wrap = document.createElement('span');
+  wrap.className = 'region-pin-wrap';
+  const btn = document.createElement('button');
+  btn.className = 'region-pin-btn' + (pinned.size ? ' has-pins' : '');
+  btn.type = 'button';
+  btn.title = 'Pick or add a region';
+  btn.textContent = pinned.size ? `+ ${pinned.size}` : '+';
+  wrap.appendChild(btn);
+
+  const pop = document.createElement('div');
+  pop.className = 'region-popover';
+  wrap.appendChild(pop);
+
+  btn.onclick = (e) => {
+    e.stopPropagation();
+    const isOpen = pop.classList.toggle('visible');
+    if (isOpen) renderRegionPopover(pop, regions, meta);
+  };
+  regionEl.appendChild(wrap);
+}
+
+function renderRegionPopover(pop, activeRegions, meta) {
+  const active = new Set(activeRegions);           // anything currently showing as a chip
+  const pinned = new Set(meta.regions_pinned || []);
+
+  // Search + list + footer
+  pop.innerHTML = `
+    <div class="region-popover-search"><input type="text" placeholder="Search regions…" autocomplete="off"></div>
+    <div class="region-popover-list"></div>
+    <div class="region-popover-footer">+ New region in Setup…</div>
+  `;
+  const listEl = pop.querySelector('.region-popover-list');
+  const searchEl = pop.querySelector('.region-popover-search input');
+  const footer = pop.querySelector('.region-popover-footer');
+
+  function renderList(filterText) {
+    listEl.innerHTML = '';
+    const ft = (filterText || '').toLowerCase().trim();
+    const sorted = [..._allRegions].sort((a, b) => a.name.localeCompare(b.name));
+    const matches = sorted.filter(r => !ft || r.name.toLowerCase().includes(ft));
+    if (!matches.length) {
+      const e = document.createElement('div');
+      e.className = 'region-popover-empty';
+      e.textContent = _allRegions.length ? 'No matches' : 'No regions yet';
+      listEl.appendChild(e);
+      return;
+    }
+    matches.forEach(r => {
+      const isActive = active.has(r.id);
+      const isPinned = pinned.has(r.id);
+      const isGeomOnly = isActive && !isPinned;  // matched but not pinned
+      const row = document.createElement('div');
+      row.className = 'region-popover-row';
+      row.innerHTML = `
+        <span class="rp-check">${isActive ? '✓' : ''}</span>
+        <span class="rp-dot" style="background:${r.color || '#3b82f6'}"></span>
+        <span class="rp-name"></span>
+        ${isGeomOnly ? '<span class="rp-auto">auto</span>' : ''}
+      `;
+      row.querySelector('.rp-name').textContent = r.name;
+      row.onclick = (ev) => {
+        ev.stopPropagation();
+        toggleRegionPin(r.id, !isPinned);
+      };
+      listEl.appendChild(row);
+    });
+  }
+
+  searchEl.oninput = () => renderList(searchEl.value);
+  renderList('');
+  footer.onclick = (ev) => {
+    ev.stopPropagation();
+    window.location.href = `/setup?tab=regions${_activityBboxQuery()}`;
+  };
+  // Autofocus the search so typing filters immediately
+  setTimeout(() => searchEl.focus(), 0);
+}
+
+async function toggleRegionPin(regionId, pin) {
+  if (!currentFilename) return;
+  const meta = trackData?.meta || {};
+  const current = Array.isArray(meta.regions_pinned) ? [...meta.regions_pinned] : [];
+  const next = pin
+    ? (current.includes(regionId) ? current : [...current, regionId])
+    : current.filter(id => id !== regionId);
+  await fetch(`/api/activity/${encodeURIComponent(currentFilename)}/metadata`, {
+    method: 'PATCH', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ regions_pinned: next }),
+  });
+  await loadActivity(currentFilename);
+  await fetchActivities(currentFilename);
+}
+
+// Close any open region popover on outside click
+document.addEventListener('click', (e) => {
+  document.querySelectorAll('.region-popover.visible').forEach(pop => {
+    if (!pop.contains(e.target) && !pop.parentElement.contains(e.target)) {
+      pop.classList.remove('visible');
+    }
+  });
+});
+
+// Update type badge colour when user picks a new type
+document.getElementById('header-type').addEventListener('change', e => {
+  applyTypeStyle(e.target, e.target.value);
+});
+
+// ─── Trim mode ───────────────────────────────────────────────────────────────
+let trimMode      = false;
+let trimUntrimmed = null;     // full-track activity data while editing
+let trimStart     = 0;        // current handle positions in km
+let trimEnd       = 0;
+let trimDragSide  = null;     // 'left' | 'right' while dragging
+
+async function toggleTrimMode() {
+  if (trimMode) { cancelTrim(); return; }
+  if (!currentFilename) return;
+  // Always work against the un-trimmed track so the user can extend trim outward
+  const r = await fetch(`/api/activity/${encodeURIComponent(currentFilename)}?notrim=1`);
+  if (!r.ok) return;
+  trimUntrimmed = await r.json();
+  const fullDist = trimUntrimmed.points[trimUntrimmed.points.length - 1].dist_km;
+  const meta = trackData?.meta || {};
+  trimStart = (meta.trim?.start_km != null) ? meta.trim.start_km : 0;
+  trimEnd   = (meta.trim?.end_km   != null) ? meta.trim.end_km   : fullDist;
+  // Render the chart with the un-trimmed data
+  trackData = trimUntrimmed;
+  activeSegments = applySegmentOverrides(trackData);
+  elevationChart.data = buildChartData(chartMode);
+  elevationChart.options.scales.y1.display = chartMode === 'elevation' && !!trackData?.hr_samples?.length;
+  elevationChart.update();
+  renderTrackLayers(activeSegments);
+  trimMode = true;
+  document.getElementById('btn-trim').classList.add('edit-active');
+  document.getElementById('trim-overlay').classList.add('visible');
+  document.getElementById('trim-bar').classList.add('visible');
+  positionTrimHandles();
+  updateTrimInfo();
+}
+
+function positionTrimHandles() {
+  if (!trimMode || !trimUntrimmed) return;
+  const xScale = elevationChart.scales.x;
+  const ca = elevationChart.chartArea;
+  const wrap = document.getElementById('chart-wrapper').getBoundingClientRect();
+  const canvas = document.getElementById('elevation-chart').getBoundingClientRect();
+  // Convert chart-area coords to wrapper-relative coords
+  const offsetX = canvas.left - wrap.left;
+  const xPx = (km) => offsetX + xScale.getPixelForValue(km);
+  const left  = document.querySelector('.trim-handle-left');
+  const right = document.querySelector('.trim-handle-right');
+  const maskL = document.querySelector('.trim-mask-left');
+  const maskR = document.querySelector('.trim-mask-right');
+  const lpx = xPx(trimStart), rpx = xPx(trimEnd);
+  left.style.left  = `${lpx}px`;
+  right.style.left = `${rpx}px`;
+  maskL.style.left  = `${offsetX + xScale.getPixelForValue(xScale.min)}px`;
+  maskL.style.width = `${Math.max(0, lpx - (offsetX + xScale.getPixelForValue(xScale.min)))}px`;
+  maskR.style.left  = `${rpx}px`;
+  maskR.style.width = `${Math.max(0, (offsetX + xScale.getPixelForValue(xScale.max)) - rpx)}px`;
+}
+
+function updateTrimInfo() {
+  const fullDist = trimUntrimmed.points[trimUntrimmed.points.length - 1].dist_km;
+  const kept = Math.max(0, trimEnd - trimStart);
+  document.getElementById('trim-info').innerHTML =
+    `Keep <strong style="color:#fff">${kept.toFixed(2)} km</strong> · ` +
+    `start <strong style="color:#fff">${trimStart.toFixed(2)}</strong> km · ` +
+    `end <strong style="color:#fff">${trimEnd.toFixed(2)}</strong> km · ` +
+    `(full ${fullDist.toFixed(2)} km)`;
+}
+
+(function initTrimDrag() {
+  document.querySelectorAll('.trim-handle').forEach(h => {
+    h.addEventListener('mousedown', (e) => {
+      e.preventDefault(); trimDragSide = h.dataset.side;
+    });
+  });
+  window.addEventListener('mousemove', (e) => {
+    if (!trimMode || !trimDragSide) return;
+    const xScale = elevationChart.scales.x;
+    const canvas = document.getElementById('elevation-chart').getBoundingClientRect();
+    const xRel = Math.max(0, Math.min(canvas.width, e.clientX - canvas.left));
+    let km = xScale.getValueForPixel(xRel);
+    const fullDist = trimUntrimmed.points[trimUntrimmed.points.length - 1].dist_km;
+    km = Math.max(0, Math.min(fullDist, km));
+    if (trimDragSide === 'left')  trimStart = Math.min(km, trimEnd - 0.05);
+    else                          trimEnd   = Math.max(km, trimStart + 0.05);
+    positionTrimHandles();
+    updateTrimInfo();
+  });
+  window.addEventListener('mouseup', () => { trimDragSide = null; });
+  // Re-position handles when chart resizes / zooms
+  window.addEventListener('resize', () => { if (trimMode) positionTrimHandles(); });
+})();
+
+async function applyTrim() {
+  if (!trimMode || !currentFilename) return;
+  const fullDist = trimUntrimmed.points[trimUntrimmed.points.length - 1].dist_km;
+  // If the handles span the whole track, treat it as "no trim" (clear it)
+  const trim = (trimStart <= 0.01 && trimEnd >= fullDist - 0.01)
+    ? {}
+    : { start_km: round(trimStart, 3), end_km: round(trimEnd, 3) };
+  await fetch(`/api/activity/${encodeURIComponent(currentFilename)}/metadata`, {
+    method: 'PATCH', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ trim }),
+  });
+  exitTrimMode();
+  await loadActivity(currentFilename);
+}
+
+async function resetTrim() {
+  if (!currentFilename) return;
+  await fetch(`/api/activity/${encodeURIComponent(currentFilename)}/metadata`, {
+    method: 'PATCH', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ trim: {} }),
+  });
+  exitTrimMode();
+  await loadActivity(currentFilename);
+}
+
+function cancelTrim() {
+  exitTrimMode();
+  if (currentFilename) loadActivity(currentFilename);
+}
+
+function exitTrimMode() {
+  trimMode = false; trimUntrimmed = null; trimDragSide = null;
+  document.getElementById('btn-trim').classList.remove('edit-active');
+  document.getElementById('trim-overlay').classList.remove('visible');
+  document.getElementById('trim-bar').classList.remove('visible');
+}
+
+function round(n, dp) { const m = Math.pow(10, dp); return Math.round(n * m) / m; }
+
+// ─── Smoothing mode ──────────────────────────────────────────────────────────
+let smoothMode     = false;
+let smoothOriginal = null;   // { points: [...], stats: {...} } before smoothing
+let smoothStart    = 0;      // range handle positions in km (original distances)
+let smoothEnd      = 0;
+let smoothDragSide = null;   // 'left' | 'right' while dragging
+
+function _haversineKm(a, b) {
+  const R = 6371, toRad = d => d * Math.PI / 180;
+  const dLat = toRad(b.lat - a.lat), dLon = toRad(b.lon - a.lon);
+  const x = Math.sin(dLat/2)**2 + Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * Math.sin(dLon/2)**2;
+  return R * 2 * Math.asin(Math.sqrt(x));
+}
+
+// Moving-average smoothing over a sub-range [startKm, endKm]. Points outside
+// the range keep their raw lat/lon. Mirrors _apply_smoothing server-side.
+function _smoothPoints(pts, window, startKm, endKm) {
+  if (window <= 1 || pts.length < window) return pts.map(p => ({...p}));
+  const half = Math.floor(window / 2);
+  const fullDist = pts.length ? pts[pts.length - 1].dist_km : 0;
+  const lo = (startKm == null) ? 0 : startKm;
+  const hi = (endKm   == null) ? fullDist : endKm;
+  const out = [];
+  for (let i = 0; i < pts.length; i++) {
+    const p = pts[i];
+    const inZone = (p.dist_km >= lo && p.dist_km <= hi);
+    if (inZone) {
+      const wlo = Math.max(0, i - half);
+      const whi = Math.min(pts.length, i + half + 1);
+      let slat = 0, slon = 0;
+      for (let j = wlo; j < whi; j++) { slat += pts[j].lat; slon += pts[j].lon; }
+      const n = whi - wlo;
+      out.push({ ...p, lat: slat / n, lon: slon / n });
+    } else {
+      out.push({ ...p });
+    }
+  }
+  // Re-derive cumulative dist_km from the new positions
+  let cum = 0;
+  out[0].dist_km = 0;
+  for (let i = 1; i < out.length; i++) {
+    cum += _haversineKm(out[i-1], out[i]);
+    out[i].dist_km = +cum.toFixed(4);
+  }
+  return out;
+}
+
+async function toggleSmoothMode() {
+  if (smoothMode) { cancelSmooth(); return; }
+  if (!currentFilename) return;
+  const r = await fetch(`/api/activity/${encodeURIComponent(currentFilename)}?nosmoothing=1`);
+  if (!r.ok) return;
+  smoothOriginal = await r.json();
+  trackData = smoothOriginal;
+  activeSegments = applySegmentOverrides(trackData);
+  smoothMode = true;
+  document.getElementById('btn-smooth').classList.add('edit-active');
+  document.getElementById('smooth-bar').classList.add('visible');
+  document.getElementById('smooth-overlay').classList.add('visible');
+  // Initialize slider + range handles from current saved smoothing state
+  const sm = trackData.meta?.smoothing || {};
+  const fullDist = smoothOriginal.points.length
+    ? smoothOriginal.points[smoothOriginal.points.length - 1].dist_km : 0;
+  const initWindow = Number(sm.window) || 5;
+  smoothStart = (sm.start_km != null) ? sm.start_km : 0;
+  smoothEnd   = (sm.end_km   != null) ? sm.end_km   : fullDist;
+  const slider = document.getElementById('smooth-slider');
+  slider.value = initWindow;
+  slider.oninput = () => previewSmooth(parseInt(slider.value, 10));
+  // Re-render chart with raw points so the overlay pixel math lines up
+  elevationChart.data = buildChartData(chartMode);
+  elevationChart.update();
+  previewSmooth(initWindow);
+  positionSmoothHandles();
+}
+
+function previewSmooth(window) {
+  document.getElementById('smooth-window-label').textContent = window;
+  if (!smoothOriginal) return;
+  const smoothedPts = _smoothPoints(smoothOriginal.points, window, smoothStart, smoothEnd);
+  // Shallow update for chart + map preview
+  trackData = { ...smoothOriginal, points: smoothedPts };
+  renderTrackLayers(activeSegments);
+  elevationChart.data = buildChartData(chartMode);
+  elevationChart.update('none');
+  // Show before/after distance for context
+  const origDist = smoothOriginal.points.length ? smoothOriginal.points[smoothOriginal.points.length - 1].dist_km : 0;
+  const newDist  = smoothedPts.length ? smoothedPts[smoothedPts.length - 1].dist_km : 0;
+  document.getElementById('smooth-info').textContent =
+    `Distance: ${origDist.toFixed(2)} km → ${newDist.toFixed(2)} km`;
+  updateSmoothRangeInfo();
+  positionSmoothHandles();
+}
+
+function updateSmoothRangeInfo() {
+  const fullDist = smoothOriginal?.points?.length
+    ? smoothOriginal.points[smoothOriginal.points.length - 1].dist_km : 0;
+  const label = document.getElementById('smooth-range-info');
+  if (smoothStart <= 0.01 && smoothEnd >= fullDist - 0.01) {
+    label.innerHTML = `Range <strong style="color:#fff">whole track</strong> (${fullDist.toFixed(2)} km)`;
+  } else {
+    label.innerHTML =
+      `Range <strong style="color:#fff">${smoothStart.toFixed(2)}</strong>–` +
+      `<strong style="color:#fff">${smoothEnd.toFixed(2)}</strong> km ` +
+      `(${(smoothEnd - smoothStart).toFixed(2)} km of ${fullDist.toFixed(2)})`;
+  }
+}
+
+function positionSmoothHandles() {
+  if (!smoothMode || !smoothOriginal) return;
+  const xScale = elevationChart.scales.x;
+  const ca = elevationChart.chartArea;
+  const wrap = document.getElementById('chart-wrapper').getBoundingClientRect();
+  const canvas = document.getElementById('elevation-chart').getBoundingClientRect();
+  const offsetX = canvas.left - wrap.left;
+  const xPx = (km) => offsetX + xScale.getPixelForValue(km);
+  const left  = document.querySelector('.smooth-handle-left');
+  const right = document.querySelector('.smooth-handle-right');
+  const zone  = document.querySelector('.smooth-zone');
+  const lpx = xPx(smoothStart), rpx = xPx(smoothEnd);
+  left.style.left  = `${lpx}px`;
+  right.style.left = `${rpx}px`;
+  zone.style.left  = `${lpx}px`;
+  zone.style.width = `${Math.max(0, rpx - lpx)}px`;
+}
+
+(function initSmoothDrag() {
+  document.querySelectorAll('.smooth-handle').forEach(h => {
+    h.addEventListener('mousedown', (e) => {
+      e.preventDefault(); smoothDragSide = h.dataset.side;
+    });
+  });
+  window.addEventListener('mousemove', (e) => {
+    if (!smoothMode || !smoothDragSide) return;
+    const xScale = elevationChart.scales.x;
+    const canvas = document.getElementById('elevation-chart').getBoundingClientRect();
+    const xRel = Math.max(0, Math.min(canvas.width, e.clientX - canvas.left));
+    let km = xScale.getValueForPixel(xRel);
+    const fullDist = smoothOriginal.points[smoothOriginal.points.length - 1].dist_km;
+    km = Math.max(0, Math.min(fullDist, km));
+    if (smoothDragSide === 'left')  smoothStart = Math.min(km, smoothEnd - 0.05);
+    else                            smoothEnd   = Math.max(km, smoothStart + 0.05);
+    // Live preview — re-smooth with the new range
+    const w = parseInt(document.getElementById('smooth-slider').value, 10);
+    previewSmooth(w);
+  });
+  window.addEventListener('mouseup', () => { smoothDragSide = null; });
+  window.addEventListener('resize', () => { if (smoothMode) positionSmoothHandles(); });
+})();
+
+async function applySmooth() {
+  if (!smoothMode || !currentFilename) return;
+  const window = parseInt(document.getElementById('smooth-slider').value, 10);
+  const fullDist = smoothOriginal.points.length
+    ? smoothOriginal.points[smoothOriginal.points.length - 1].dist_km : 0;
+  // If handles span the whole track, save as whole-track smoothing (no range)
+  const isWhole = (smoothStart <= 0.01 && smoothEnd >= fullDist - 0.01);
+  let smoothing;
+  if (window <= 1) {
+    smoothing = {};
+  } else if (isWhole) {
+    smoothing = { window };
+  } else {
+    smoothing = { window, start_km: round(smoothStart, 3), end_km: round(smoothEnd, 3) };
+  }
+  await fetch(`/api/activity/${encodeURIComponent(currentFilename)}/metadata`, {
+    method: 'PATCH', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ smoothing }),
+  });
+  exitSmoothMode();
+  await loadActivity(currentFilename);
+}
+
+// Reset the range to the whole track, leaving the slider value alone
+function resetSmoothRange() {
+  if (!smoothMode || !smoothOriginal) return;
+  smoothStart = 0;
+  smoothEnd = smoothOriginal.points.length
+    ? smoothOriginal.points[smoothOriginal.points.length - 1].dist_km : 0;
+  const w = parseInt(document.getElementById('smooth-slider').value, 10);
+  previewSmooth(w);
+}
+
+async function resetSmooth() {
+  if (!currentFilename) return;
+  await fetch(`/api/activity/${encodeURIComponent(currentFilename)}/metadata`, {
+    method: 'PATCH', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ smoothing: {} }),
+  });
+  exitSmoothMode();
+  await loadActivity(currentFilename);
+}
+
+function cancelSmooth() {
+  exitSmoothMode();
+  if (currentFilename) loadActivity(currentFilename);
+}
+
+function exitSmoothMode() {
+  smoothMode = false; smoothOriginal = null; smoothDragSide = null;
+  document.getElementById('btn-smooth').classList.remove('edit-active');
+  document.getElementById('smooth-bar').classList.remove('visible');
+  document.getElementById('smooth-overlay').classList.remove('visible');
+}
+
+async function toggleExcluded() {
+  if (!currentFilename) return;
+  const newVal = !trackData?.excluded;
+  await fetch(`/api/activity/${encodeURIComponent(currentFilename)}/metadata`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ excluded_from_stats: newVal }),
+  });
+  await loadActivity(currentFilename);
+  await fetchActivities(currentFilename);
+}
+
+async function approveIssues() {
+  if (!currentFilename) return;
+  if (!confirm('Approve this recording? The warnings will be permanently suppressed for this activity, even if you trim or edit it later.')) return;
+  await fetch(`/api/activity/${encodeURIComponent(currentFilename)}/metadata`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ issues_approved: true }),
+  });
+  await loadActivity(currentFilename);
+  await fetchActivities(currentFilename);
+}
+
+async function deleteCurrent() {
+  if (!currentFilename) return;
+  const label = trackData?.meta?.title || currentFilename;
+  if (!confirm(`Delete this ride log?\n\n  ${label}\n\nIt'll be moved to tracks/_archive_dedup/ — restorable by hand.`)) return;
+  await fetch(`/api/activity/${encodeURIComponent(currentFilename)}`, { method: 'DELETE' });
+  await fetchActivities(null);  // load whatever the next default is
+}
+
+async function saveMeta() {
+  if (!currentFilename) return;
+  const payload = {
+    type:  document.getElementById('header-type').value,
+    title: document.getElementById('header-title').value.trim(),
+  };
+  await fetch(`/api/activity/${encodeURIComponent(currentFilename)}/metadata`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+  });
+  const confirm = document.getElementById('title-save-confirm');
+  confirm.textContent = '✓ Saved';
+  confirm.classList.add('visible');
+  clearTimeout(saveMeta._fadeTimer);
+  saveMeta._fadeTimer = setTimeout(() => confirm.classList.remove('visible'), 1500);
+  await fetchActivities(currentFilename);
+}
+
+// ─── Map coloring + KM marks state ────────────────────────────────────────────
+let colorMode  = 'default';   // 'default' | 'speed' | 'gradient' | 'progression'
+let kmMarksOn  = false;
+
+function setColorMode(mode) {
+  colorMode = mode;
+  document.querySelectorAll('#color-segmented button').forEach(b =>
+    b.classList.toggle('active', b.dataset.mode === mode));
+  // Show/hide speed legend (only meaningful for the speed mode)
+  document.getElementById('speed-legend').classList.toggle('visible', mode === 'speed');
+  const hasAssisted = trackData && activeSegments?.some(s => s.type === 'assisted');
+  document.getElementById('map-legend')?.classList.toggle('visible', mode === 'default' && hasAssisted);
+  if (trackData) renderTrackLayers(activeSegments);
+  if (currentView === '3d') apply3DTrack();
+}
+
+function toggleKmMarks() {
+  kmMarksOn = !kmMarksOn;
+  document.getElementById('km-toggle').classList.toggle('active', kmMarksOn);
+  if (trackData) renderTrackLayers(activeSegments);
+  if (currentView === '3d') apply3DTrack();
+}
+const SPEED_BANDS = [
+  { max: 5,        color: '#1e40af' },
+  { max: 15,       color: '#3b82f6' },
+  { max: 30,       color: '#10b981' },
+  { max: 50,       color: '#f59e0b' },
+  { max: 80,       color: '#ef4444' },
+  { max: Infinity, color: '#7c3aed' },
+];
+
+function speedBandColor(kmh) {
+  if (kmh == null) return '#444';
+  for (const b of SPEED_BANDS) if (kmh < b.max) return b.color;
+  return SPEED_BANDS[SPEED_BANDS.length - 1].color;
+}
+
+// Auto-save: debounce title typing, save type changes immediately
+let _saveTimer = null;
+function scheduleSave(delay = 600) {
+  abMarkDirty();
+  clearTimeout(_saveTimer);
+  _saveTimer = setTimeout(() => { _saveTimer = null; saveMeta(); }, delay);
+}
+document.getElementById('header-title').addEventListener('input', () => scheduleSave());
+document.getElementById('header-title').addEventListener('blur', () => {
+  if (_saveTimer) { clearTimeout(_saveTimer); _saveTimer = null; saveMeta(); }
+});
+document.getElementById('header-type').addEventListener('change', () => scheduleSave(0));
+
+// ─── Run statistics (ski / snowboard) ────────────────────────────────────────
+function computeRuns(segments, points) {
+  const runs = [];
+  segments.filter(s => s.type === 'riding').forEach((seg, idx) => {
+    const pts = points.slice(seg.start, seg.end + 1);
+    if (pts.length < 2) return;
+    const eles   = pts.map(p => p.ele).filter(e => e != null);
+    const speeds = pts.map(p => p.speed).filter(s => s != null);
+    if (!eles.length) return;
+    const drop   = Math.max(0, eles[0] - eles[eles.length - 1]);
+    const dist   = pts[pts.length - 1].dist_km - pts[0].dist_km;
+    const maxSpd = speeds.length ? Math.max(...speeds) : null;
+    let dur = null;
+    if (pts[0].time && pts[pts.length-1].time)
+      dur = (new Date(pts[pts.length-1].time) - new Date(pts[0].time)) / 1000;
+    if (drop < 15 && dist < 0.05) return; // filter transitions / flat segments
+    runs.push({ idx: idx + 1, drop, dist, maxSpd, dur, start: seg.start, end: seg.end });
+  });
+  return runs;
+}
+
+function toggleRunsDrawer() {
+  const drawer = document.getElementById('runs-drawer');
+  const tab    = document.getElementById('runs-tab');
+  const open   = drawer.classList.toggle('open');
+  tab.classList.toggle('open', open);
+}
+
+function renderRunStats(meta) {
+  const tab    = document.getElementById('runs-tab');
+  const drawer = document.getElementById('runs-drawer');
+  const isSkiSport = ['ski','snowboard'].includes(meta?.type);
+  if (!isSkiSport || !trackData || !activeSegments.length) {
+    tab.classList.remove('visible');
+    drawer.classList.remove('open');
+    tab.classList.remove('open');
+    return;
+  }
+  const runs = computeRuns(activeSegments, trackData.points);
+  if (!runs.length) {
+    tab.classList.remove('visible');
+    drawer.classList.remove('open');
+    tab.classList.remove('open');
+    return;
+  }
+
+  const totalDrop = runs.reduce((s, r) => s + r.drop, 0);
+  const maxDrop   = Math.max(...runs.map(r => r.drop));
+  const maxSpd    = Math.max(...runs.map(r => r.maxSpd ?? 0));
+  const bestDrop  = runs.find(r => r.drop === maxDrop);
+
+  document.getElementById('runs-summary').innerHTML = `
+    <div class="run-sum-stat"><div class="run-sum-val">${runs.length}</div><div class="run-sum-lbl">Runs</div></div>
+    <div class="run-sum-stat"><div class="run-sum-val">${Math.round(totalDrop).toLocaleString()} m</div><div class="run-sum-lbl">Total Vertical</div></div>
+    <div class="run-sum-stat"><div class="run-sum-val">${Math.round(maxDrop)} m</div><div class="run-sum-lbl">Best Drop</div></div>
+    <div class="run-sum-stat"><div class="run-sum-val">${maxSpd ? Math.round(maxSpd)+' km/h' : '--'}</div><div class="run-sum-lbl">Top Speed</div></div>
+  `;
+
+  const tbody = runs.map(r => `
+    <tr class="${r === bestDrop ? 'best' : ''}" onclick="highlightRun(${r.start},${r.end})">
+      <td>${r.idx}</td>
+      <td>${Math.round(r.drop)} m</td>
+      <td>${r.maxSpd != null ? Math.round(r.maxSpd) : '--'}</td>
+      <td>${r.dur != null ? fmtDuration(r.dur, { showSeconds: true }) : '--'}</td>
+    </tr>`).join('');
+
+  document.getElementById('runs-table-wrap').innerHTML = `
+    <table class="runs-table">
+      <thead><tr><th>Run</th><th>Drop</th><th>Max km/h</th><th>Dur</th></tr></thead>
+      <tbody>${tbody}</tbody>
+    </table>`;
+
+  tab.classList.add('visible');
+}
+
+let _runHighlight = null;
+
+function clearRunHighlight() {
+  if (_runHighlight) { _runHighlight.remove(); _runHighlight = null; }
+}
+
+function highlightRun(start, end) {
+  if (!trackData) return;
+  clearRunHighlight();
+  const latlngs = trackData.points.slice(start, end + 1).map(p => [p.lat, p.lon]);
+  if (!latlngs.length) return;
+
+  // Yellow halo drawn behind the track, creating a thick outline effect
+  _runHighlight = L.polyline(latlngs, {
+    color: '#facc15', weight: 9, opacity: 0.85, interactive: false, lineCap: 'round', lineJoin: 'round',
+  }).addTo(map);
+  _runHighlight.bringToBack();
+
+  map.fitBounds(L.latLngBounds(latlngs), { padding: [40, 40] });
+}
+
+// ─── Stats ────────────────────────────────────────────────────────────────────
+function updateStats(stats) {
+  document.getElementById('s-dist').textContent = stats.distance_km  != null ? `${stats.distance_km} km`  : '--';
+  document.getElementById('s-dur').textContent  = fmtDuration(stats.duration_sec, { showSeconds: true });
+  document.getElementById('s-gain').textContent = stats.elev_gain_m  != null ? `${stats.elev_gain_m.toLocaleString()} m`   : '--';
+  const asst = stats.assisted_gain_m;
+  document.getElementById('s-assisted').textContent = asst ? `(+${asst.toLocaleString()} ass.)` : '';
+
+  // Difficulty score (always visible — '--' when distance unknown)
+  const diff = (stats.distance_km && stats.distance_km > 0)
+    ? Math.max(1, Math.round(Math.sqrt(stats.distance_km * (1 + ((stats.elev_gain_m||0) / stats.distance_km) / 50))))
+    : null;
+  document.getElementById('s-difficulty').textContent = diff != null ? diff : '--';
+
+  // HR stats — always visible, '--' when no HR data
+  const hasHr = stats.hr_avg != null;
+  document.getElementById('btn-hr').style.display = hasHr ? '' : 'none';
+  document.getElementById('s-hravg').textContent = hasHr ? `${stats.hr_avg} bpm` : '--';
+  document.getElementById('s-hrmax').textContent = hasHr ? `${stats.hr_max} bpm` : '--';
+  // HR zone breakdown bar — proportions of total HR-recorded time per zone
+  const zones = stats.hr_zones || [];
+  const totalZone = zones.reduce((s, v) => s + v, 0);
+  const hasZones = hasHr && totalZone > 0;
+  const bar = document.querySelector('#stat-hrzones .hrz-bar');
+  if (hasZones) {
+    bar.title = zones.map((sec, i) => `Z${i+1}: ${fmtDuration(sec)}`).join(' · ');
+    bar.querySelectorAll('span').forEach((sp, i) => {
+      sp.style.width = `${(zones[i] / totalZone * 100).toFixed(1)}%`;
+    });
+  } else {
+    bar.title = 'No HR data';
+    bar.querySelectorAll('span').forEach(sp => { sp.style.width = '0%'; });
+  }
+  if (!hasHr && chartMode === 'hr') {
+    // Activity has no HR but we were viewing HR — switch back to Elevation
+    switchChart('elevation');
+  }
+  document.getElementById('s-loss').textContent = stats.elev_loss_m  != null ? `${stats.elev_loss_m} m`   : '--';
+  document.getElementById('s-avg').textContent  = stats.avg_speed_kmh != null ? `${stats.avg_speed_kmh} km/h` : '--';
+  document.getElementById('s-max').textContent  = stats.max_speed_kmh != null ? `${stats.max_speed_kmh} km/h` : '--';
+}
+
+// ─── Activity loading ─────────────────────────────────────────────────────────
+async function loadActivity(filename) {
+  if (segEditMode) exitEditMode();
+  currentFilename = filename;
+  document.querySelectorAll('.activity-item').forEach(el =>
+    el.classList.toggle('active', el.dataset.filename === filename));
+
+  let res;
+  try {
+    res = await fetch(`/api/activity/${encodeURIComponent(filename)}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  } catch (err) {
+    document.getElementById('header-title').value = `⚠ Failed to load activity: ${err.message}`;
+    return;
+  }
+  trackData = await res.json();
+  activeIndex = -1;
+
+  activeSegments = applySegmentOverrides(trackData);
+
+  const meta = trackData.meta || {};
+  document.getElementById('header-title').value = meta.title || '';
+  const place = trackData.place || {};
+  const placeStr = [place.province, place.country].filter(Boolean).join(', ');
+  document.getElementById('header-place').textContent = placeStr;
+
+  // Excluded-from-stats toggle button reflects current state
+  const excludeBtn = document.getElementById('exclude-activity-btn');
+  excludeBtn.classList.toggle('active', !!trackData.excluded);
+  excludeBtn.title = trackData.excluded
+    ? 'Excluded from statistics — click to include'
+    : 'Exclude from statistics';
+
+  // Issue warnings + Approve button
+  const issuesEl = document.getElementById('header-issues');
+  const issues = trackData.issues || [];
+  if (issues.length) {
+    issuesEl.innerHTML = `
+      <div class="issues-text">
+        <strong>⚠ ${issues.length} possible issue${issues.length===1?'':'s'}</strong>
+        <ul style="margin:0 0 0 18px;padding:0;">${issues.map(i => `<li></li>`).join('')}</ul>
+      </div>
+      <button onclick="approveIssues()">Approve</button>`;
+    issuesEl.querySelectorAll('li').forEach((li, i) => { li.textContent = issues[i].msg; });
+    issuesEl.style.display = 'flex';
+  } else {
+    issuesEl.style.display = 'none';
+    issuesEl.innerHTML = '';
+  }
+  document.getElementById('header-datetime').innerHTML = fmtDateTimeRange(trackData.date, trackData.stats?.duration_sec);
+  loadWeather(filename);
+  populateActivityBar(meta, trackData.regions || []);
+
+  hoverMarker?.remove(); hoverMarker = null;
+  startMarker?.remove(); startMarker = null;
+  endMarker?.remove();   endMarker   = null;
+
+  renderTrackLayers(activeSegments);
+  renderRunStats(trackData.meta);
+
+  const hasAssisted = activeSegments.some(s => s.type === 'assisted');
+  document.getElementById('map-legend').classList.toggle('visible', colorMode === 'default' && hasAssisted);
+
+  let allBounds = [];
+  activeSegments.forEach(seg => {
+    const pts = trackData.points.slice(seg.start, seg.end + 1).map(p => [p.lat, p.lon]);
+    allBounds.push(...pts);
+  });
+
+  const first = trackData.points[0], last = trackData.points[trackData.points.length - 1];
+  startMarker = L.marker([first.lat, first.lon], { icon: dotIcon('#22c55e'), title: 'Start' }).addTo(map);
+  endMarker   = L.marker([last.lat,  last.lon],  { icon: dotIcon('#f97316'), title: 'End'   }).addTo(map);
+  if (allBounds.length) map.fitBounds(L.latLngBounds(allBounds), { padding: [30, 30] });
+
+  elevationChart.resetZoom();
+  document.getElementById('btn-reset-zoom').style.display = 'none';
+  const maxDist = trackData.points[trackData.points.length - 1].dist_km;
+  elevationChart.options.plugins.zoom.limits = { x: { min: 0, max: maxDist, minRange: 0.2 } };
+  elevationChart.data = buildChartData(chartMode);
+  elevationChart.options.scales.y1.display = chartMode === 'elevation' && !!trackData?.hr_samples?.length;
+  elevationChart.update();
+
+  const stats = meta.segment_overrides?.length ? recomputeStats(activeSegments) : trackData.stats;
+  updateStats(stats);
+
+  if (currentView === '3d') apply3DTrack();
+}
+
+// ─── Bulk edit ────────────────────────────────────────────────────────────────
+let bulkMode = false;
+let bulkSelected = new Set();
+
+function toggleBulk() { bulkMode ? exitBulk() : enterBulk(); }
+function enterBulk() {
+  bulkMode = true;
+  document.getElementById('activity-list').classList.add('bulk-active');
+  document.getElementById('bulk-toggle-btn').classList.add('active');
+  document.getElementById('bulk-toggle-btn').textContent = 'Cancel';
+  updateBulkBar();
+}
+function exitBulk() {
+  bulkMode = false; bulkSelected.clear();
+  document.getElementById('activity-list').classList.remove('bulk-active');
+  document.getElementById('bulk-toggle-btn').classList.remove('active');
+  document.getElementById('bulk-toggle-btn').textContent = 'Select';
+  document.getElementById('sidebar-bulk-bar').classList.remove('visible');
+  document.querySelectorAll('.activity-cb').forEach(cb => cb.checked = false);
+  document.querySelectorAll('.activity-item').forEach(el => el.classList.remove('selected'));
+}
+function updateBulkBar() {
+  const n = bulkSelected.size;
+  document.getElementById('sidebar-bulk-bar').classList.toggle('visible', n > 0);
+  document.getElementById('bulk-count-label').textContent = `${n} selected`;
+  document.getElementById('sidebar-bulk-apply').disabled =
+    n === 0 || !document.getElementById('sidebar-bulk-type').value;
+  document.getElementById('sidebar-bulk-delete').disabled = n === 0;
+}
+
+async function deleteBulk() {
+  const n = bulkSelected.size;
+  if (!n) return;
+  if (!confirm(`Delete ${n} ride log${n === 1 ? '' : 's'}?\n\nFiles will be moved to tracks/_archive_dedup/ — you can restore them by hand if needed.`)) return;
+  const btn = document.getElementById('sidebar-bulk-delete');
+  btn.disabled = true; btn.textContent = '…';
+  await fetch('/api/activities/bulk-delete', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ filenames: [...bulkSelected] }),
+  });
+  const wasSelected = bulkSelected.has(currentFilename);
+  exitBulk();
+  await fetchActivities(wasSelected ? null : currentFilename);
+  btn.textContent = 'Delete selected…';
+}
+document.getElementById('sidebar-bulk-type').addEventListener('change', updateBulkBar);
+
+async function applyBulk() {
+  const type = document.getElementById('sidebar-bulk-type').value;
+  if (!type || bulkSelected.size === 0) return;
+  const btn = document.getElementById('sidebar-bulk-apply');
+  btn.disabled = true; btn.textContent = '…';
+  await fetch('/api/bulk-metadata', {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ filenames: [...bulkSelected], type }),
+  });
+  exitBulk();
+  await fetchActivities(currentFilename);
+  btn.textContent = 'Apply';
+}
+
+// ─── Sidebar ──────────────────────────────────────────────────────────────────
+let allActivitiesData = [];
+let sortField = 'date';
+let sortDesc  = true;
+
+function toggleSortDir() {
+  sortDesc = !sortDesc;
+  document.getElementById('sort-dir-btn').textContent = sortDesc ? '▼' : '▲';
+  renderActivityList();
+}
+
+function populateYearFilter() {
+  const years = [...new Set(
+    allActivitiesData.filter(a => a.date).map(a => new Date(a.date).getFullYear())
+  )].sort((a, b) => b - a);
+  const sel = document.getElementById('filter-year');
+  const prev = sel.value;
+  sel.innerHTML = '<option value="all">All</option>';
+  years.forEach(y => {
+    const o = document.createElement('option');
+    o.value = String(y); o.textContent = String(y);
+    if (String(y) === prev) o.selected = true;
+    sel.appendChild(o);
+  });
+}
+
+function renderActivityList(reSelectFilename) {
+  const year   = document.getElementById('filter-year').value;
+  const type   = document.getElementById('filter-type').value;
+  const search = (document.getElementById('search-input')?.value || '').toLowerCase().trim();
+  sortField   = document.getElementById('sort-field').value;
+
+  let acts = allActivitiesData.filter(act => {
+    if (year !== 'all' && (!act.date || !act.date.startsWith(year))) return false;
+    if (type !== 'all') {
+      // Use effective_type so activities tagged via a region default count as
+      // tagged; "Untagged" only matches activities with neither an explicit
+      // type nor a region default.
+      const t = act.effective_type || act.meta?.type || '';
+      if (type === '__untagged__' ? t !== '' : t !== type) return false;
+    }
+    if (search) {
+      const hay = [
+        act.meta?.title || '', act.name || '', act.filename || '',
+        act.meta?.notes || '', act.meta?.location || '',
+      ].join(' ').toLowerCase();
+      if (!hay.includes(search)) return false;
+    }
+    return true;
+  });
+
+  acts.sort((a, b) => {
+    let av, bv;
+    if      (sortField === 'date')     { av = a.date || ''; bv = b.date || ''; }
+    else if (sortField === 'distance') { av = a.stats.distance_km  || 0; bv = b.stats.distance_km  || 0; }
+    else                               { av = a.stats.duration_sec || 0; bv = b.stats.duration_sec || 0; }
+    if (av < bv) return sortDesc ? 1 : -1;
+    if (av > bv) return sortDesc ? -1 : 1;
+    return 0;
+  });
+
+  document.getElementById('activity-count').textContent =
+    acts.length < allActivitiesData.length ? `${acts.length} / ${allActivitiesData.length}` : `${acts.length}`;
+
+  const list = document.getElementById('activity-list');
+  const frag = document.createDocumentFragment();
+
+  acts.forEach(act => {
+    const el = document.createElement('div');
+    el.className = 'activity-item' + (act.filename === currentFilename ? ' active' : '')
+                                   + (act.excluded ? ' excluded' : '');
+    if (bulkSelected.has(act.filename)) el.classList.add('selected');
+    el.dataset.filename = act.filename;
+
+    const meta = act.meta || {};
+    // Use effective_type (explicit ?? region-default) for the badge so untyped
+    // activities matching a region with a default still show the right colour.
+    const typeKey = act.effective_type || meta.type || '';
+    const regionPart = (act.regions || [])
+      .map(id => _allRegions.find(x => x.id === id)?.name)
+      .filter(Boolean).join(' · ');
+    const typeLabel = TYPES.find(t => t.id === typeKey)?.label || '';
+    const displayName = meta.title || regionPart || typeLabel || act.filename;
+    const dist = act.stats.distance_km != null ? `${act.stats.distance_km} km` : '';
+    const dur  = fmtDuration(act.stats.duration_sec, { showSeconds: true });
+
+    // Build DOM nodes to avoid any XSS from filename/title content
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.className = 'activity-cb';
+    cb.checked = bulkSelected.has(act.filename);
+    cb.addEventListener('click', (e) => {
+      e.stopPropagation();
+      bulkSelected[cb.checked ? 'add' : 'delete'](act.filename);
+      el.classList.toggle('selected', cb.checked);
+      updateBulkBar();
+    });
+
+    const body = document.createElement('div');
+    body.className = 'item-body';
+
+    const dateDiv = document.createElement('div');
+    dateDiv.className = 'date';
+    const dateText = document.createElement('span');
+    dateText.textContent = fmtDate(act.date);
+    dateDiv.appendChild(dateText);
+    if ((act.issues || []).length) {
+      const warn = document.createElement('span');
+      warn.className = 'issue-flag';
+      warn.title = 'Possible recording issues:\n' + act.issues.map(i => `• ${i.msg}`).join('\n');
+      warn.textContent = '⚠';
+      dateDiv.appendChild(warn);
+    }
+    if (act.has_hr) {
+      const hr = document.createElement('span');
+      hr.className = 'hr-flag';
+      hr.title = 'Heart rate data available';
+      hr.innerHTML = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 21s-7-4.5-9.5-9A5.5 5.5 0 0 1 12 6a5.5 5.5 0 0 1 9.5 6c-2.5 4.5-9.5 9-9.5 9z"/></svg>';
+      dateDiv.appendChild(hr);
+    }
+    if (typeKey) {
+      const badge = document.createElement('span');
+      badge.className = 'type-badge';
+      const t = TYPES.find(t => t.id === typeKey);
+      if (t) {
+        badge.style.background = t.bg;
+        badge.style.color      = t.color;
+      }
+      badge.textContent = typeShortLabel(typeKey);
+      dateDiv.appendChild(badge);
+    }
+
+    const nameDiv = document.createElement('div');
+    nameDiv.className = 'name';
+    nameDiv.textContent = displayName;
+
+    const metaDiv = document.createElement('div');
+    metaDiv.className = 'meta';
+    const distSpan = document.createElement('span'); distSpan.textContent = dist;
+    const durSpan  = document.createElement('span'); durSpan.textContent  = dur;
+    metaDiv.appendChild(distSpan);
+    metaDiv.appendChild(durSpan);
+
+    // Elevation sparkline
+    if (act.spark && act.spark.length >= 2) {
+      const color = typeKey && TYPES.find(t=>t.id===typeKey)?.color || '#60a5fa';
+      metaDiv.appendChild(buildSparkline(act.spark, color));
+    }
+
+    body.appendChild(dateDiv);
+    body.appendChild(nameDiv);
+    body.appendChild(metaDiv);
+    el.appendChild(cb);
+    el.appendChild(body);
+
+    el.addEventListener('click', () => {
+      // Row click always loads the activity (updates the map). In bulk mode,
+      // selection is handled exclusively via the checkbox so you can preview
+      // each ride before deciding whether to include it in the bulk action.
+      loadActivity(act.filename);
+    });
+    frag.appendChild(el);
+  });
+
+  list.innerHTML = '';
+  list.appendChild(frag);
+
+  const target = reSelectFilename
+    || (acts.find(a => a.filename === currentFilename) ? currentFilename : null)
+    || (acts.length > 0 ? acts[0].filename : null);
+  if (target && target !== currentFilename) loadActivity(target);
+}
+
+async function fetchActivities(reSelectFilename) {
+  const res = await fetch('/api/activities');
+  allActivitiesData = await res.json();
+  populateYearFilter();
+  renderActivityList(reSelectFilename);
+}
+
+// ─── Sidebar collapse ─────────────────────────────────────────────────────────
+function toggleSidebar() {
+  const sidebar = document.getElementById('sidebar');
+  const btn     = document.getElementById('sidebar-toggle');
+  const collapsed = sidebar.classList.toggle('collapsed');
+  btn.textContent = collapsed ? '▶' : '◀';
+  setTimeout(() => map.invalidateSize(), 200);
+}
+
+// ─── URL state persistence ────────────────────────────────────────────────────
+// Keep ?file=... &q=... &year=... &type=... &sort=... &dir=...  in sync with UI
+// so reload/back preserves the user's context.
+
+function applyUrlState() {
+  const p = new URLSearchParams(window.location.search);
+  if (p.has('q'))    document.getElementById('search-input').value  = p.get('q');
+  if (p.has('year')) document.getElementById('filter-year').value   = p.get('year');
+  if (p.has('type')) document.getElementById('filter-type').value   = p.get('type');
+  if (p.has('sort')) document.getElementById('sort-field').value    = p.get('sort');
+  if (p.has('dir')) {
+    sortDesc = p.get('dir') !== 'asc';
+    document.getElementById('sort-dir-btn').textContent = sortDesc ? '▼' : '▲';
+  }
+}
+
+function writeUrlState() {
+  const p = new URLSearchParams();
+  const q    = document.getElementById('search-input').value.trim();
+  const yr   = document.getElementById('filter-year').value;
+  const tp   = document.getElementById('filter-type').value;
+  const sf   = document.getElementById('sort-field').value;
+  if (q)    p.set('q', q);
+  if (yr && yr !== 'all')  p.set('year', yr);
+  if (tp && tp !== 'all')  p.set('type', tp);
+  if (sf && sf !== 'date') p.set('sort', sf);
+  if (!sortDesc) p.set('dir', 'asc');
+  if (currentFilename) p.set('file', currentFilename);
+  const qs = p.toString();
+  const url = qs ? `/?${qs}` : '/';
+  history.replaceState(null, '', url);
+}
+
+// Wrap state-mutating handlers so they persist to URL
+['search-input', 'filter-year', 'filter-type', 'sort-field'].forEach(id => {
+  const el = document.getElementById(id);
+  if (el) el.addEventListener(el.tagName === 'SELECT' ? 'change' : 'input', writeUrlState);
+});
+// Sort-dir button: wrap the existing toggle
+const _origToggleSortDir = toggleSortDir;
+toggleSortDir = function() { _origToggleSortDir(); writeUrlState(); };
+// loadActivity → writeUrlState after it sets currentFilename
+const _origLoadActivity = loadActivity;
+loadActivity = async function(filename) { await _origLoadActivity(filename); writeUrlState(); };
+
+// Initial load: apply URL state before first fetch, then render
+applyUrlState();
+const urlFile = new URLSearchParams(window.location.search).get('file');
+fetchActivities(urlFile || undefined);
+</script>
+</body>
+</html>

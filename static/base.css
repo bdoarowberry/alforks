@@ -1,0 +1,59 @@
+/* Shared base styles for AlForks pages.
+   Included by every template after its own <title>. Template-specific styles
+   live in that template's inline <style>. */
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: system-ui, -apple-system, sans-serif;
+  background: #1a1d23;
+  color: #e0e0e0;
+}
+
+/* Header + navigation */
+header {
+  background: #12151a;
+  padding: 0 20px;
+  height: 52px;
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  border-bottom: 1px solid #2a2d35;
+  flex-shrink: 0;
+  position: relative;
+}
+header h1 {
+  font-size: 1rem;
+  font-weight: 600;
+  color: #fff;
+  letter-spacing: 0.03em;
+  margin-right: 8px;
+}
+nav {
+  display: flex;
+}
+nav a {
+  font-size: 0.8rem;
+  color: #bbb;
+  text-decoration: none;
+  padding: 4px 10px;
+  border-radius: 4px;
+  transition: all 0.12s;
+}
+nav a:hover   { color: #fff; background: #1e2128; }
+nav a.active  { color: #3b82f6; background: #1a2a3a; }
+
+/* Filter button group (Summary + Heatmap) */
+.filter-btn {
+  font-size: 0.78rem;
+  padding: 4px 12px;
+  border-radius: 4px;
+  border: 1px solid #2a2d35;
+  background: #1a1d23;
+  color: #ccc;
+  cursor: pointer;
+  font-family: inherit;
+  transition: all 0.12s;
+}
+.filter-btn:hover { border-color: #aaa; color: #fff; }
+.filter-btn.active { background: #1a2a3a; color: #3b82f6; border-color: #3b82f6; }

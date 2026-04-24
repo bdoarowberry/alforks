@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AlForks – Compare Logs</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="/static/utils.js"></script>
+  <script src="/static/sync_toast.js" defer></script>
+  <link rel="stylesheet" href="/static/base.css">
+  <style>
+    body { display: flex; flex-direction: column; min-height: 100vh; }
+    main { padding: 18px 22px 32px; max-width: 1680px; margin: 0 auto; width: 100%; }
+
+    /* Filter bar */
+    #filters { background: #12151a; border: 1px solid #2a2d35; border-radius: 8px; padding: 12px 16px; margin-bottom: 18px; display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+    .filter-group { display: flex; gap: 6px; align-items: center; }
+    .filter-label { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.07em; color: #888; }
+    .chip { padding: 4px 10px; border-radius: 4px; border: 1px solid #2a2d35; background: #1a1d23; color: #ccc; font-size: 0.74rem; cursor: pointer; font-family: inherit; transition: all 0.12s; }
+    .chip:hover { border-color: #888; color: #fff; }
+    .chip.active { background: #1a2a3a; border-color: #3b82f6; color: #3b82f6; }
+    input[type="date"] { background: #1a1d23; border: 1px solid #2a2d35; border-radius: 4px; color: #e0e0e0; font-size: 0.78rem; padding: 5px 8px; font-family: inherit; color-scheme: dark; }
+    #count-label { font-size: 0.74rem; color: #888; margin-left: auto; }
+
+    /* Activity rows */
+    #rows { display: flex; flex-direction: column; }
+    .day-gap { background: linear-gradient(to bottom, transparent, rgba(59,130,246,0.08), transparent); margin: 0; cursor: pointer; transition: height 0.2s, background 0.15s; position: relative; }
+    .day-gap:hover { background: linear-gradient(to bottom, transparent, rgba(59,130,246,0.18), transparent); }
+    .day-gap-label { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); font-size: 0.66rem; color: #777; background: #0e1117; padding: 1px 8px; border-radius: 10px; border: 1px solid #2a2d35; white-space: nowrap; opacity: 0; transition: opacity 0.15s; }
+    .day-gap:hover .day-gap-label { opacity: 1; }
+    .day-gap.collapsed { height: 28px !important; background: #12151a; }
+    .day-gap.collapsed .day-gap-label { opacity: 1; color: #aaa; }
+
+    .comp-row { background: #12151a; border: 1px solid #2a2d35; border-radius: 8px; padding: 12px; display: grid; grid-template-columns: 128px 1fr; gap: 14px; cursor: pointer; transition: border-color 0.15s, transform 0.15s; }
+    .comp-row:hover { border-color: #3b82f6; transform: translateY(-1px); }
+    .comp-map { width: 128px; height: 96px; border-radius: 4px; background: #0a0c10; overflow: hidden; }
+    .comp-map .leaflet-container { background: #0a0c10; }
+    .comp-side { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+    .comp-top { display: flex; align-items: center; gap: 12px; }
+    .comp-top-left { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; }
+    .comp-top-right { display: flex; align-items: center; gap: 8px; flex-shrink: 0; font-size: 0.72rem; color: #fff; }
+    .comp-top-right .sep { color: #555; }
+    .issues-block { background: #2a1f0e; border: 1px solid #f59e0b; border-radius: 4px; padding: 6px 10px; }
+    .issues-head { font-size: 0.74rem; color: #f59e0b; font-weight: 600; margin-bottom: 4px; }
+    .issues-list { margin: 0 0 0 18px; padding: 0; font-size: 0.72rem; color: #ccc; }
+    .issues-list li { margin: 2px 0; }
+    .issues-row { display: flex; align-items: center; gap: 10px; }
+    .issues-approve { background: #1a2a3a; border: 1px solid #3b82f6; color: #3b82f6; padding: 5px 12px; border-radius: 4px; font-size: 0.72rem; cursor: pointer; font-family: inherit; flex-shrink: 0; }
+    .issues-approve:hover { background: #3b82f6; color: #fff; }
+    .comp-title { font-size: 0.95rem; color: #fff; font-weight: 500; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .type-icon { width: 26px; height: 26px; border-radius: 5px; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; border: 1px solid transparent; }
+    .type-icon::before { content: ''; display: block; width: 18px; height: 18px; background-color: currentColor; -webkit-mask: var(--icon-url) center / contain no-repeat; mask: var(--icon-url) center / contain no-repeat; }
+    .region-chip { font-weight: 500; white-space: nowrap; color: #fff; }
+    .region-chip:not(:last-child)::after { content: ' · '; color: #555; font-weight: normal; }
+    .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 8px 14px; }
+    .stat-cell { display: flex; flex-direction: column; gap: 2px; }
+    .stat-cell .v { font-size: 0.85rem; color: #fff; font-weight: 500; }
+    .stat-cell .v.muted { color: #555; }
+    .stat-cell .l { font-size: 0.6rem; color: #888; text-transform: uppercase; letter-spacing: 0.06em; }
+    .sparkbar { height: 4px; background: #3a3d45; border-radius: 2px; overflow: hidden; margin-top: 1px; }
+    .sparkbar > span { display: block; height: 100%; transition: width 0.2s; }
+    .sb-distance > span { background: #10b981; }
+    .sb-climb > span    { background: #f59e0b; }
+    .sb-descent > span  { background: #f59e0b; opacity: 0.7; }
+    .sb-duration > span { background: #a78bfa; }
+    .sb-avg > span      { background: #3b82f6; }
+    .sb-max > span      { background: #3b82f6; opacity: 0.7; }
+    .sb-hravg > span    { background: #ef4444; }
+    .sb-hrmax > span    { background: #ef4444; opacity: 0.7; }
+    .sb-difficulty > span { background: #60a5fa; }
+    .sb-intensity > span  { background: #ef4444; }
+    .badge-cell { display: flex; flex-direction: column; gap: 2px; align-items: flex-start; }
+    .badge-cell .l { font-size: 0.6rem; color: #888; text-transform: uppercase; letter-spacing: 0.06em; }
+    .difficulty { color: #60a5fa; font-weight: 600; }
+    .intensity-badge { color: #ef4444; font-weight: 600; }
+    /* Excluded-from-stats toggle — same glyph/colour as the main activity page */
+    .exclude-btn { background: transparent; border: 1px solid transparent; color: #666; font-size: 0.9rem; cursor: pointer; padding: 2px 8px; border-radius: 4px; font-family: inherit; flex-shrink: 0; transition: color 0.12s, border-color 0.12s, background 0.12s; }
+    .exclude-btn:hover { color: #f59e0b; border-color: #f59e0b; background: #2a1f0e; }
+    .exclude-btn.active { color: #f59e0b; border-color: #f59e0b; background: #2a1f0e; }
+    .comp-row.excluded .comp-title,
+    .comp-row.excluded .stats-grid,
+    .comp-row.excluded .comp-top-right,
+    .comp-row.excluded .type-icon { opacity: 0.45; }
+    .comp-row.excluded .comp-title::after { content: ' (excluded)'; font-size: 0.7rem; color: #f59e0b; opacity: 0.9; font-weight: normal; }
+    /* Highlight the cell holding the highest value across the visible list,
+       tinted to match the metric's sparkbar colour. */
+    .stat-cell.is-max { border-radius: 4px; padding: 2px 6px; margin: -2px -6px; }
+    .stat-cell.is-max:has(.sb-distance)   { background: rgba(16,185,129,0.14); }
+    .stat-cell.is-max:has(.sb-distance) .v { color: #10b981; }
+    .stat-cell.is-max:has(.sb-climb)      { background: rgba(245,158,11,0.14); }
+    .stat-cell.is-max:has(.sb-climb) .v   { color: #f59e0b; }
+    .stat-cell.is-max:has(.sb-descent)    { background: rgba(245,158,11,0.10); }
+    .stat-cell.is-max:has(.sb-descent) .v { color: #f59e0b; }
+    .stat-cell.is-max:has(.sb-duration)   { background: rgba(167,139,250,0.14); }
+    .stat-cell.is-max:has(.sb-duration) .v { color: #a78bfa; }
+    .stat-cell.is-max:has(.sb-avg)        { background: rgba(59,130,246,0.14); }
+    .stat-cell.is-max:has(.sb-avg) .v     { color: #60a5fa; }
+    .stat-cell.is-max:has(.sb-max)        { background: rgba(59,130,246,0.10); }
+    .stat-cell.is-max:has(.sb-max) .v     { color: #60a5fa; }
+    .stat-cell.is-max:has(.sb-hravg)      { background: rgba(239,68,68,0.14); }
+    .stat-cell.is-max:has(.sb-hravg) .v   { color: #ef4444; }
+    .stat-cell.is-max:has(.sb-hrmax)      { background: rgba(239,68,68,0.10); }
+    .stat-cell.is-max:has(.sb-hrmax) .v   { color: #ef4444; }
+    .stat-cell.is-max:has(.sb-difficulty) { background: rgba(96,165,250,0.14); }
+    .stat-cell.is-max:has(.sb-intensity)  { background: rgba(239,68,68,0.14); }
+
+    #empty-msg { padding: 40px; text-align: center; color: #666; font-size: 0.85rem; }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>AlForks</h1>
+  <nav>
+    <a href="/summary">Summary</a>
+    <a href="/">Ride Logs</a>
+    <a href="/comparison" class="active">Compare Logs</a>
+    <a href="/heatmap">Heat Map</a>
+    <a href="/setup">Setup</a>
+  </nav>
+</header>
+
+<main>
+  <div id="filters">
+    <div class="filter-group">
+      <span class="filter-label">Type:</span>
+      <div id="type-chips" style="display:flex;gap:6px;flex-wrap:wrap;"></div>
+    </div>
+    <div class="filter-group">
+      <span class="filter-label">From:</span>
+      <input type="date" id="date-start">
+      <span class="filter-label">To:</span>
+      <input type="date" id="date-end">
+    </div>
+    <label class="filter-group" style="cursor:pointer;color:#ccc;font-size:0.74rem;">
+      <input type="checkbox" id="issues-only" onchange="load()" style="margin:0;">
+      <span>Show only flagged ⚠</span>
+    </label>
+    <span id="count-label"></span>
+  </div>
+
+  <div id="rows"></div>
+</main>
+
+<script>
+const TYPES = {{ types_json | safe }};
+const TYPE_LOOKUP = Object.fromEntries(TYPES.map(t => [t.id, t]));
+
+let activeType = 'all';
+let dateStart = '';
+let dateEnd   = '';
+
+// Default range = last 90 days
+{
+  const today = new Date();
+  const past  = new Date(); past.setDate(today.getDate() - 90);
+  const iso = d => d.toISOString().slice(0, 10);
+  dateStart = iso(past); dateEnd = iso(today);
+}
+
+function renderTypeChips() {
+  const wrap = document.getElementById('type-chips');
+  wrap.innerHTML = '';
+  const mk = (id, label) => {
+    const b = document.createElement('button');
+    b.className = 'chip' + (id === activeType ? ' active' : '');
+    b.textContent = label;
+    b.onclick = () => { activeType = id; load(); };
+    wrap.appendChild(b);
+  };
+  mk('all', 'All');
+  TYPES.forEach(t => mk(t.id, t.label));
+}
+
+function init() {
+  document.getElementById('date-start').value = dateStart;
+  document.getElementById('date-end').value   = dateEnd;
+  document.getElementById('date-start').onchange = e => { dateStart = e.target.value; load(); };
+  document.getElementById('date-end').onchange   = e => { dateEnd   = e.target.value; load(); };
+  renderTypeChips();
+  load();
+}
+
+// ─── Lazy maps ──────────────────────────────────────────────────────────────
+const MAX_ACTIVE_MAPS = 20;
+const mapInstances = new Map();        // filename → Leaflet map
+const mapAccess    = new Map();        // filename → last-touch ts (for LRU eviction)
+
+function evictIfOver() {
+  if (mapInstances.size <= MAX_ACTIVE_MAPS) return;
+  // Drop the least-recently-touched maps that are off-screen
+  const sorted = [...mapAccess.entries()].sort((a, b) => a[1] - b[1]);
+  for (const [fn] of sorted) {
+    if (mapInstances.size <= MAX_ACTIVE_MAPS) break;
+    const m = mapInstances.get(fn);
+    if (!m) continue;
+    const el = m._container;
+    const r = el.getBoundingClientRect();
+    const visible = r.bottom > -200 && r.top < (window.innerHeight + 200);
+    if (visible) continue;
+    m.remove();
+    mapInstances.delete(fn);
+    mapAccess.delete(fn);
+    el.dataset.mapInit = '';  // allow re-init when scrolled back into view
+  }
+}
+
+function initMap(rowEl) {
+  const fn = rowEl.dataset.filename;
+  if (mapInstances.has(fn)) { mapAccess.set(fn, Date.now()); return; }
+  const polyline = JSON.parse(rowEl.dataset.polyline || '[]');
+  if (!polyline.length) return;
+  const mapEl = rowEl.querySelector('.comp-map');
+  const m = L.map(mapEl, { zoomControl: false, attributionControl: false, dragging: false, scrollWheelZoom: false, doubleClickZoom: false, boxZoom: false, keyboard: false, touchZoom: false });
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 17 }).addTo(m);
+  L.polyline(polyline, { color: '#3b82f6', weight: 3, opacity: 0.9 }).addTo(m);
+  m.fitBounds(L.latLngBounds(polyline), { padding: [10, 10] });
+  mapInstances.set(fn, m);
+  mapAccess.set(fn, Date.now());
+  rowEl.dataset.mapInit = '1';
+  evictIfOver();
+}
+
+const observer = new IntersectionObserver(entries => {
+  for (const e of entries) {
+    if (e.isIntersecting) initMap(e.target);
+    else evictIfOver();
+  }
+}, { rootMargin: '300px' });
+
+// ─── Render ─────────────────────────────────────────────────────────────────
+function fmt(n, dp = 0) { return n == null ? '—' : Number(n).toFixed(dp); }
+
+// Computed per-metric maxes across the currently-rendered list (set in load())
+let metricMax = {};
+
+function sparkbar(cls, value, max) {
+  if (value == null || !max) return '';
+  const pct = Math.min(100, (value / max) * 100);
+  return `<div class="sparkbar ${cls}"><span style="width:${pct.toFixed(1)}%"></span></div>`;
+}
+
+function statCell(label, valueText, isMuted, sbClass, sbValue) {
+  const isMax = sbValue != null && metricMax[sbClass] != null && sbValue >= metricMax[sbClass];
+  return `<div class="stat-cell ${isMax ? 'is-max' : ''}">
+    <span class="l">${label}</span>
+    <span class="v ${isMuted ? 'muted' : ''}">${valueText}</span>
+    ${sparkbar(sbClass, sbValue, metricMax[sbClass])}
+  </div>`;
+}
+
+function renderRow(item) {
+  const row = document.createElement('div');
+  row.className = 'comp-row' + (item.excluded ? ' excluded' : '');
+  row.dataset.filename = item.filename;
+  row.dataset.polyline = JSON.stringify(item.polyline);
+  row.onclick = () => { window.location.href = `/?file=${encodeURIComponent(item.filename)}`; };
+
+  const t = TYPE_LOOKUP[item.type];
+  const KNOWN_ICONS = new Set(['mtb', 'fat_biking', 'snowboard', 'ski', 'hike', 'other']);
+  const iconId = KNOWN_ICONS.has(item.type) ? item.type : 'unknown';
+  const iconHtml = `<span class="type-icon" title="${t ? t.label : 'Unknown type'}" style="--icon-url:url('/static/icons/${iconId}.svg');background:${t ? t.bg : '#1a1d23'};color:${t ? t.color : '#888'};border-color:${t ? t.color : '#2a2d35'}"></span>`;
+  const regionChips = item.regions.length
+    ? item.regions.map(r => `<span class="region-chip">${r.name}</span>`).join('')
+    : '';
+
+  const dateStr = item.date ? new Date(item.date).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' }) : '';
+  const titleStr = item.title || dateStr;
+
+  const diffMax = item.difficulty != null && metricMax['sb-difficulty'] && item.difficulty >= metricMax['sb-difficulty'];
+  const intMax  = item.intensity  != null && metricMax['sb-intensity']  && item.intensity  >= metricMax['sb-intensity'];
+  const diffCell = item.difficulty != null
+    ? `<div class="stat-cell ${diffMax ? 'is-max' : ''}">
+         <span class="l">Difficulty</span>
+         <span class="v difficulty" title="Terrain difficulty (distance + climb)">${item.difficulty}</span>
+         ${sparkbar('sb-difficulty', item.difficulty, metricMax['sb-difficulty'])}
+       </div>`
+    : `<div class="stat-cell"><span class="l">Difficulty</span><span class="v muted">—</span></div>`;
+  const intCell = item.intensity != null
+    ? `<div class="stat-cell ${intMax ? 'is-max' : ''}">
+         <span class="l">HR Intensity</span>
+         <span class="v intensity-badge" title="HR intensity = avg HR ÷ max HR">${item.intensity}%</span>
+         ${sparkbar('sb-intensity', item.intensity, metricMax['sb-intensity'])}
+       </div>`
+    : `<div class="stat-cell"><span class="l">HR Intensity</span><span class="v muted">—</span></div>`;
+
+  const issuesBlock = (item.issues || []).length
+    ? `<div class="issues-block">
+         <div class="issues-row">
+           <div style="flex:1;">
+             <div class="issues-head">⚠ ${item.issues.length} possible issue${item.issues.length===1?'':'s'}</div>
+             <ul class="issues-list">${item.issues.map(i => `<li>${i.msg}</li>`).join('')}</ul>
+           </div>
+           <button class="issues-approve" data-fn="${item.filename}">Approve</button>
+         </div>
+       </div>`
+    : '';
+
+  row.innerHTML = `
+    <div class="comp-map"></div>
+    <div class="comp-side">
+      <div class="comp-top">
+        <div class="comp-top-left">
+          ${iconHtml}
+          <div class="comp-title"></div>
+        </div>
+        <div class="comp-top-right">
+          ${regionChips ? `<span>${regionChips}</span><span class="sep">|</span>` : ''}
+          <span>${dateStr}</span>
+          <button class="exclude-btn ${item.excluded ? 'active' : ''}"
+                  data-fn="${item.filename}"
+                  title="${item.excluded ? 'Re-include in statistics' : 'Exclude from statistics'}">⊘</button>
+        </div>
+      </div>
+      ${issuesBlock}
+      <div class="stats-grid">
+        ${statCell('Distance',  `${fmt(item.distance_km, 1)} km`,    item.distance_km==null,  'sb-distance', item.distance_km)}
+        ${statCell('Climb',     `${fmt(item.elev_gain_m)} m`,         item.elev_gain_m==null,  'sb-climb',    item.elev_gain_m)}
+        ${statCell('Descent',   `${fmt(item.elev_loss_m)} m`,         item.elev_loss_m==null,  'sb-descent',  item.elev_loss_m)}
+        ${statCell('Duration',  fmtDuration(item.duration_sec || 0),  item.duration_sec==null, 'sb-duration', item.duration_sec)}
+        ${statCell('Avg km/h',  fmt(item.avg_speed_kmh, 1),           item.avg_speed_kmh==null,'sb-avg',      item.avg_speed_kmh)}
+        ${statCell('Max km/h',  fmt(item.max_speed_kmh, 1),           item.max_speed_kmh==null,'sb-max',      item.max_speed_kmh)}
+        ${statCell('Avg HR',    `${item.hr_avg ?? '—'}`,              item.hr_avg==null,       'sb-hravg',    item.hr_avg)}
+        ${statCell('Max HR',    `${item.hr_max ?? '—'}`,              item.hr_max==null,       'sb-hrmax',    item.hr_max)}
+        ${diffCell}
+        ${intCell}
+      </div>
+    </div>
+  `;
+  row.querySelector('.comp-title').textContent = titleStr;
+  return row;
+}
+
+function renderGap(daysBetween) {
+  const gap = document.createElement('div');
+  gap.className = 'day-gap';
+  const px = Math.min(80, Math.max(8, daysBetween * 4));
+  gap.style.height = px + 'px';
+  const lbl = document.createElement('div');
+  lbl.className = 'day-gap-label';
+  lbl.textContent = `${daysBetween} day${daysBetween === 1 ? '' : 's'}`;
+  gap.appendChild(lbl);
+  gap.onclick = (ev) => {
+    ev.stopPropagation();
+    if (gap.classList.toggle('collapsed')) gap.dataset.origH = px + 'px';
+    else gap.style.height = (gap.dataset.origH || px + 'px');
+  };
+  return gap;
+}
+
+async function load() {
+  const params = new URLSearchParams();
+  if (activeType !== 'all') params.set('type', activeType);
+  if (dateStart) params.set('start', dateStart);
+  if (dateEnd)   params.set('end',   dateEnd);
+  if (document.getElementById('issues-only')?.checked) params.set('issues_only', '1');
+
+  const wrap = document.getElementById('rows');
+  wrap.innerHTML = '<div id="empty-msg">Loading…</div>';
+
+  // Tear down any existing maps
+  for (const [fn, m] of mapInstances) { m.remove(); }
+  mapInstances.clear(); mapAccess.clear();
+
+  const r = await fetch('/api/comparison?' + params.toString());
+  const d = await r.json();
+  document.getElementById('count-label').textContent = `${d.items.length} ${d.items.length === 1 ? 'activity' : 'activities'}`;
+
+  if (!d.items.length) {
+    wrap.innerHTML = '<div id="empty-msg">No activities in this range.</div>';
+    return;
+  }
+
+  // Compute per-metric maxes for sparkbars (so each metric's bar normalizes
+  // against the largest value in the currently-visible result set).
+  const maxOf = key => Math.max(0, ...d.items.map(i => i[key] || 0));
+  metricMax = {
+    'sb-distance':   maxOf('distance_km'),
+    'sb-climb':      maxOf('elev_gain_m'),
+    'sb-descent':    maxOf('elev_loss_m'),
+    'sb-duration':   maxOf('duration_sec'),
+    'sb-avg':        maxOf('avg_speed_kmh'),
+    'sb-max':        maxOf('max_speed_kmh'),
+    'sb-hravg':      maxOf('hr_avg'),
+    'sb-hrmax':      maxOf('hr_max'),
+    'sb-difficulty': maxOf('difficulty'),
+    'sb-intensity':  maxOf('intensity'),
+  };
+
+  // Sort newest→oldest already from server. Render with day-gap spacers between.
+  wrap.innerHTML = '';
+  let prevDate = null;
+  for (const item of d.items) {
+    if (prevDate) {
+      const a = new Date(prevDate); const b = new Date(item.date);
+      const days = Math.round((a - b) / 86400000);
+      if (days > 0) wrap.appendChild(renderGap(days));
+    }
+    const row = renderRow(item);
+    wrap.appendChild(row);
+    observer.observe(row);
+    // Approve button on the issues block — stop the row's navigation handler
+    const approveBtn = row.querySelector('.issues-approve');
+    if (approveBtn) {
+      approveBtn.addEventListener('click', async (ev) => {
+        ev.stopPropagation();
+        const fn = approveBtn.dataset.fn;
+        if (!confirm('Approve this recording? Warnings for it will be permanently suppressed.')) return;
+        approveBtn.disabled = true; approveBtn.textContent = '…';
+        await fetch(`/api/activity/${encodeURIComponent(fn)}/metadata`, {
+          method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ issues_approved: true }),
+        });
+        load();
+      });
+    }
+    // Exclude-from-stats toggle — flips the metadata flag, reloads the list so
+    // the row picks up its dimmed styling and max-value sparkbars re-normalize.
+    const excludeBtn = row.querySelector('.exclude-btn');
+    if (excludeBtn) {
+      excludeBtn.addEventListener('click', async (ev) => {
+        ev.stopPropagation();
+        const fn = excludeBtn.dataset.fn;
+        const newVal = !item.excluded;
+        excludeBtn.disabled = true;
+        await fetch(`/api/activity/${encodeURIComponent(fn)}/metadata`, {
+          method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ excluded_from_stats: newVal }),
+        });
+        load();
+      });
+    }
+    prevDate = item.date;
+  }
+
+  // Update type chips' active style after potential changes
+  renderTypeChips();
+}
+
+init();
+</script>
+</body>
+</html>

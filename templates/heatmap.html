@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AlForks – Heat Map</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/leaflet-rotate@0.2.8/dist/leaflet-rotate-src.js"></script>
+  <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
+  <link href="https://api.mapbox.com/mapbox-gl-js/v3.3.0/mapbox-gl.css" rel="stylesheet">
+  <script src="https://api.mapbox.com/mapbox-gl-js/v3.3.0/mapbox-gl.js"></script>
+  <link rel="stylesheet" href="/static/base.css">
+  <script src="/static/sync_toast.js" defer></script>
+  <style>
+    body { height: 100vh; display: flex; flex-direction: column; }
+
+    #filter-bar { background: #12151a; border-bottom: 1px solid #2a2d35; padding: 8px 20px; display: flex; align-items: center; gap: 16px; flex-shrink: 0; flex-wrap: wrap; }
+    #filter-bar label { font-size: 0.7rem; color: #bbb; text-transform: uppercase; letter-spacing: 0.07em; }
+    .sep { width: 1px; height: 20px; background: #2a2d35; flex-shrink: 0; }
+
+    #mode-group { margin-left: auto; display: flex; border: 1px solid #2a2d35; border-radius: 5px; overflow: hidden; }
+    .mode-btn { font-size: 0.75rem; padding: 4px 14px; border: none; background: #1a1d23; color: #666; cursor: pointer; transition: all 0.12s; }
+    .mode-btn + .mode-btn { border-left: 1px solid #2a2d35; }
+    .mode-btn.active { background: #1a2a3a; color: #3b82f6; }
+    .mode-btn:disabled { opacity: 0.35; cursor: default; }
+
+    .layer-toggle-btn { background: rgba(18,21,26,0.88); border: 1px solid #2a2d35; color: #ccc; font-size: 0.72rem; padding: 4px 10px; border-radius: 4px; cursor: pointer; font-family: inherit; transition: all 0.12s; }
+    .layer-toggle-btn:hover { border-color: #3b82f6; color: #fff; }
+
+    #map-wrap { flex: 1; position: relative; min-height: 0; display: flex; flex-direction: column; }
+    #map { flex: 1; min-height: 0; }
+    #map-3d { position: absolute; inset: 0; display: none; }
+
+    /* Stats overlay */
+    #stats-overlay { position: absolute; bottom: 30px; left: 10px; z-index: 1000; background: rgba(18,21,26,0.88); border: 1px solid #2a2d35; border-radius: 8px; padding: 12px 16px; display: flex; flex-direction: column; gap: 6px; min-width: 160px; }
+    .ov-stat { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; }
+    .ov-label { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.07em; color: #555; }
+    .ov-value { font-size: 0.95rem; font-weight: 600; color: #fff; }
+
+    /* Type legend */
+    #legend { position: absolute; bottom: 30px; right: 10px; z-index: 1000; background: rgba(18,21,26,0.88); border: 1px solid #2a2d35; border-radius: 8px; padding: 10px 14px; font-size: 0.72rem; display: none; color: #e0e0e0; }
+    /* When the heat legend is visible, push the activity-type legend above it */
+    body:has(#heat-legend.visible) #legend.visible { bottom: 108px; }
+    #legend.visible { display: block; }
+    .leg-row { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; }
+    .leg-row:last-child { margin-bottom: 0; }
+    .leg-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+
+    /* Heat gradient legend */
+    #heat-legend { position: absolute; bottom: 30px; right: 10px; z-index: 1000; background: rgba(18,21,26,0.88); border: 1px solid #2a2d35; border-radius: 8px; padding: 10px 14px; display: none; }
+    #heat-legend.visible { display: block; }
+    #heat-legend .grad-bar { width: 120px; height: 10px; border-radius: 3px; background: linear-gradient(to right, #fde047, #fb923c, #ef4444, #7f1d1d); margin: 6px 0 4px; }
+    #heat-legend .grad-labels { display: flex; justify-content: space-between; font-size: 0.62rem; color: #555; }
+
+    /* 3D terrain exaggeration control */
+    #exag-ctrl-3d { display: none; position: absolute; bottom: 36px; left: 10px; z-index: 1000; background: rgba(18,21,26,0.88); border: 1px solid #2a2d35; border-radius: 6px; padding: 8px 12px; align-items: center; gap: 8px; font-size: 0.7rem; color: #888; }
+    #exag-ctrl-3d input { accent-color: #3b82f6; width: 90px; }
+    #exag-val-3d { min-width: 28px; color: #aaa; }
+
+    /* Mapbox overrides */
+    .mapboxgl-ctrl-group { background: rgba(18,21,26,0.9) !important; border: 1px solid #2a2d35 !important; }
+    .mapboxgl-ctrl button { background-color: transparent !important; }
+    .mapboxgl-ctrl button .mapboxgl-ctrl-icon { filter: invert(0.7); }
+    .mapboxgl-ctrl-attrib { background: rgba(18,21,26,0.7) !important; color: #555 !important; font-size: 10px; }
+    .mapboxgl-ctrl-attrib a { color: #555 !important; }
+
+    /* Loading overlay */
+    #loading { position: absolute; inset: 0; z-index: 2000; background: rgba(18,21,26,0.75); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; }
+    #loading.hidden { display: none; }
+    #loading-text { font-size: 0.85rem; color: #aaa; }
+    #loading-bar-wrap { width: 220px; height: 4px; background: #2a2d35; border-radius: 2px; overflow: hidden; }
+    #loading-bar { height: 100%; width: 0%; background: #3b82f6; border-radius: 2px; transition: width 0.15s; }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>AlForks</h1>
+  <nav>
+    <a href="/summary">Summary</a>
+    <a href="/">Ride Logs</a>
+    <a href="/comparison">Compare Logs</a>
+    <a href="/heatmap" class="active">Heat Map</a>
+    <a href="/setup">Setup</a>
+  </nav>
+</header>
+
+<div id="filter-bar">
+  <label>Year</label>
+  <div id="year-filters" style="display:flex;gap:6px;"></div>
+  <div class="sep"></div>
+  <label>Type</label>
+  <div id="type-filters" style="display:flex;gap:6px;"></div>
+
+  <div id="mode-group">
+    <button class="mode-btn"        id="btn-heat"   onclick="setMode('heat')">Heat</button>
+    <button class="mode-btn active" id="btn-routes" onclick="setMode('routes')">Routes</button>
+    <button class="mode-btn"        id="btn-3d"     onclick="setMode('3d')"{% if not mapbox_token %} disabled title="No Mapbox token configured"{% endif %}>3D</button>
+  </div>
+</div>
+
+<div id="map-wrap">
+  <div id="map"></div>
+  <div id="map-3d"></div>
+
+  <div id="stats-overlay">
+    <div class="ov-stat"><span class="ov-label">Activities</span><span class="ov-value" id="ov-count">--</span></div>
+    <div class="ov-stat"><span class="ov-label">Total Distance</span><span class="ov-value" id="ov-dist">--</span></div>
+    <div class="ov-stat"><span class="ov-label">Rides</span><span class="ov-value" id="ov-rides">--</span></div>
+  </div>
+
+  <div id="heat-legend">
+    <div style="font-size:0.68rem;text-transform:uppercase;letter-spacing:0.07em;color:#555;">Density</div>
+    <div class="grad-bar"></div>
+    <div class="grad-labels"><span>Low</span><span>High</span></div>
+  </div>
+
+  <div id="legend">
+    <div style="font-size:0.68rem;text-transform:uppercase;letter-spacing:0.07em;color:#555;margin-bottom:6px;">Activity Type</div>
+    <div id="legend-rows"></div>
+  </div>
+
+  <div id="exag-ctrl-3d">
+    Terrain
+    <input type="range" id="exaggeration-3d" min="1" max="4" step="0.1" value="1.5"
+      oninput="onExag3DChange(this.value)">
+    <span id="exag-val-3d">1.5×</span>
+  </div>
+
+  <div id="loading">
+    <div id="loading-text">Connecting…</div>
+    <div id="loading-bar-wrap"><div id="loading-bar"></div></div>
+  </div>
+</div>
+
+<script>
+const TYPES = {{ types_json | safe }};
+const TYPE_LABELS = Object.fromEntries(TYPES.map(t => [t.id, t.label]));
+const TYPE_COLORS = Object.fromEntries(TYPES.map(t => [t.id, t.color]));
+const UNTAGGED_COLOR = '#3b82f6';
+const MAPBOX_TOKEN   = '{{ mapbox_token }}';
+const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+let allActivities = [];
+let activeYear = 'all';
+let activeType = 'all';
+let viewMode   = 'routes';
+
+// ─── Leaflet map ──────────────────────────────────────────────────────────────
+const map = L.map('map', { zoomControl: true, preferCanvas: true, rotate: true, touchRotate: true }).setView([51, -114], 11);
+map.addControl(new L.Control.Rotate({ closeOnZeroBearing: false }));
+
+const streetLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  maxZoom: 19, attribution: '© <a href="https://openstreetmap.org/copyright">OpenStreetMap</a>',
+});
+const satelliteLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+  maxZoom: 19, attribution: '© <a href="https://www.esri.com/">Esri</a> World Imagery',
+});
+streetLayer.addTo(map);
+
+const LayerToggle = L.Control.extend({
+  onAdd() {
+    const btn = L.DomUtil.create('button', 'layer-toggle-btn');
+    btn.textContent = 'Satellite';
+    L.DomEvent.disableClickPropagation(btn);
+    let sat = false;
+    btn.onclick = () => {
+      sat = !sat;
+      if (sat) { map.removeLayer(streetLayer);    satelliteLayer.addTo(map); btn.textContent = 'Map'; }
+      else     { map.removeLayer(satelliteLayer); streetLayer.addTo(map);    btn.textContent = 'Satellite'; }
+    };
+    return btn;
+  },
+});
+new LayerToggle({ position: 'topright' }).addTo(map);
+
+let heatLayer  = null;
+let routeGroup = L.layerGroup().addTo(map);
+
+// ─── Mapbox 3D ────────────────────────────────────────────────────────────────
+let mb3d = null, mb3dReady = false;
+
+function init3D() {
+  if (mb3d) { mb3d.resize(); return; }
+  if (!MAPBOX_TOKEN) return;
+  mapboxgl.accessToken = MAPBOX_TOKEN;
+  mb3d = new mapboxgl.Map({
+    container: 'map-3d',
+    style: 'mapbox://styles/mapbox/satellite-streets-v12',
+    center: [-114.74, 50.89], zoom: 10, pitch: 55, bearing: -15, antialias: true,
+  });
+  mb3d.addControl(new mapboxgl.NavigationControl({ visualizePitch: true }), 'top-right');
+  mb3d.on('load', () => {
+    mb3d.addSource('mapbox-dem', { type: 'raster-dem', url: 'mapbox://mapbox.mapbox-terrain-dem-v1', tileSize: 512, maxzoom: 14 });
+    mb3d.setTerrain({ source: 'mapbox-dem', exaggeration: 1.5 });
+    mb3d.addLayer({ id: 'sky', type: 'sky', paint: { 'sky-type': 'atmosphere', 'sky-atmosphere-sun': [0.0, 90.0], 'sky-atmosphere-sun-intensity': 15 }});
+    mb3d.addSource('routes3d', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+    mb3d.addLayer({ id: 'routes3d-layer', type: 'line', source: 'routes3d',
+      layout: { 'line-join': 'round', 'line-cap': 'round' },
+      paint: { 'line-color': ['get', 'color'], 'line-width': 2.5, 'line-opacity': 0.8 },
+    });
+    mb3dReady = true;
+    apply3DRoutes();
+  });
+}
+
+function build3DGeoJSON() {
+  return {
+    type: 'FeatureCollection',
+    features: allActivities.map(act => ({
+      type: 'Feature',
+      properties: { color: TYPE_COLORS[act.type] || UNTAGGED_COLOR },
+      geometry: { type: 'LineString', coordinates: act.polyline.map(([lat, lon]) => [lon, lat]) },
+    })),
+  };
+}
+
+function mostRecentActivity() {
+  return allActivities.reduce((best, a) =>
+    (a.date && (!best || a.date > best.date)) ? a : best, null);
+}
+
+function apply3DRoutes() {
+  if (!mb3d || !mb3dReady) return;
+  mb3d.getSource('routes3d')?.setData(build3DGeoJSON());
+  // Zoom to the most recent ride — fitting to all activities often spans
+  // multiple regions and reads as "zoomed to the world"
+  const recent = mostRecentActivity();
+  if (recent?.polyline?.length) {
+    const lats = recent.polyline.map(([lat]) => lat);
+    const lons = recent.polyline.map(([, lon]) => lon);
+    mb3d.fitBounds(
+      [[Math.min(...lons), Math.min(...lats)], [Math.max(...lons), Math.max(...lats)]],
+      { padding: 80, pitch: 55, bearing: -15, duration: 1000 }
+    );
+  }
+}
+
+function onExag3DChange(v) {
+  document.getElementById('exag-val-3d').textContent = `${parseFloat(v).toFixed(1)}×`;
+  if (mb3d?.getTerrain()) mb3d.setTerrain({ source: 'mapbox-dem', exaggeration: parseFloat(v) });
+}
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+function fmtNum(n, d = 0) {
+  return n != null ? n.toLocaleString('en-CA', { maximumFractionDigits: d, minimumFractionDigits: d }) : '--';
+}
+
+// ─── Render ──────────────────────────────────────────────────────────────────
+function renderHeat() {
+  routeGroup.clearLayers();
+  document.getElementById('heat-legend').classList.add('visible');
+  if (heatLayer) { heatLayer.remove(); heatLayer = null; }
+  const pts = allActivities.flatMap(act => act.polyline.map(([lat, lon]) => [lat, lon, 1]));
+  if (pts.length) {
+    heatLayer = L.heatLayer(pts, {
+      radius: 7, blur: 12, maxZoom: 17, max: 1.0, minOpacity: 0.15,
+      gradient: { 0.15: '#fde047', 0.4: '#fb923c', 0.7: '#ef4444', 1.0: '#7f1d1d' },
+    }).addTo(map);
+  }
+  updateRouteLegend();
+}
+
+function addRouteLayer(act) {
+  const color = TYPE_COLORS[act.type] || UNTAGGED_COLOR;
+  L.polyline(act.polyline, { color, weight: 5, opacity: 0.12, interactive: false }).addTo(routeGroup);
+  L.polyline(act.polyline, { color, weight: 2, opacity: 0.65, interactive: false }).addTo(routeGroup);
+}
+
+function renderRoutes() {
+  if (heatLayer) { heatLayer.remove(); heatLayer = null; }
+  document.getElementById('heat-legend').classList.remove('visible');
+  routeGroup.clearLayers();
+  allActivities.forEach(addRouteLayer);
+  updateRouteLegend();
+}
+
+function render3D() {
+  if (heatLayer) { heatLayer.remove(); heatLayer = null; }
+  document.getElementById('heat-legend').classList.remove('visible');
+  routeGroup.clearLayers();
+  init3D();
+  if (mb3dReady) apply3DRoutes();
+  updateRouteLegend();
+}
+
+function updateRouteLegend() {
+  const typesPresent = new Set(allActivities.map(a => a.type || '__untagged__'));
+  const rows = document.getElementById('legend-rows');
+  rows.innerHTML = '';
+  typesPresent.forEach(t => {
+    const color = t === '__untagged__' ? UNTAGGED_COLOR : (TYPE_COLORS[t] || UNTAGGED_COLOR);
+    const label = t === '__untagged__' ? 'Untagged' : (TYPE_LABELS[t] || t);
+    rows.innerHTML += `<div class="leg-row"><div class="leg-dot" style="background:${color}"></div><span style="color:#aaa">${label}</span></div>`;
+  });
+  document.getElementById('legend').classList.toggle('visible', typesPresent.size > 0);
+}
+
+function fitBounds() {
+  const allPts = allActivities.flatMap(act => act.polyline);
+  if (!allPts.length) return;
+  map.fitBounds(L.latLngBounds(allPts), { padding: [30, 30] });
+}
+
+function updateStats() {
+  const count = allActivities.length;
+  const dist  = allActivities.reduce((s, a) => s + (a.distance_km || 0), 0);
+  document.getElementById('ov-count').textContent = count;
+  document.getElementById('ov-dist').textContent  = `${fmtNum(dist, 1)} km`;
+  document.getElementById('ov-rides').textContent = count ? `${count} ride${count !== 1 ? 's' : ''}` : '--';
+}
+
+// ─── Client-side filtering ────────────────────────────────────────────────────
+// allLoaded holds every activity; visibleActivities is the filtered subset
+// used by render functions. Filter clicks update visibleActivities and re-render
+// without re-streaming.
+let allLoaded = [];
+
+function applyFilter() {
+  allActivities = allLoaded.filter(a => {
+    if (activeYear !== 'all' && (!a.date || !a.date.startsWith(activeYear))) return false;
+    if (activeType !== 'all' && (a.type || '') !== activeType) return false;
+    return true;
+  });
+  render();
+}
+
+function render() {
+  if      (viewMode === 'heat')   renderHeat();
+  else if (viewMode === '3d')     render3D();
+  else                            renderRoutes();
+  if (allActivities.length) fitBounds();
+  updateStats();
+}
+
+// ─── Mode toggle ─────────────────────────────────────────────────────────────
+function setMode(mode) {
+  viewMode = mode;
+  document.getElementById('btn-heat').classList.toggle('active',   mode === 'heat');
+  document.getElementById('btn-routes').classList.toggle('active', mode === 'routes');
+  document.getElementById('btn-3d').classList.toggle('active',     mode === '3d');
+
+  const leafletEl = document.getElementById('map');
+  const mb3dEl    = document.getElementById('map-3d');
+  const exagEl    = document.getElementById('exag-ctrl-3d');
+
+  if (mode === '3d') {
+    leafletEl.style.display = 'none';
+    mb3dEl.style.display    = 'block';
+    exagEl.style.display    = 'flex';
+  } else {
+    leafletEl.style.display = '';
+    mb3dEl.style.display    = 'none';
+    exagEl.style.display    = 'none';
+    map.invalidateSize();
+  }
+
+  if (!activeSource && allActivities.length > 0) render();
+}
+
+// ─── Data loading (SSE) ───────────────────────────────────────────────────────
+let activeSource = null;
+
+// Fetch all tracks once via SSE, cache in allLoaded. After that, filter changes
+// just re-filter in memory — no re-streaming.
+function load() {
+  if (activeSource) { activeSource.close(); activeSource = null; }
+  allLoaded = [];
+  allActivities = [];
+  if (heatLayer) { heatLayer.remove(); heatLayer = null; }
+  routeGroup.clearLayers();
+
+  const loadingEl = document.getElementById('loading');
+  const textEl    = document.getElementById('loading-text');
+  const barEl     = document.getElementById('loading-bar');
+  loadingEl.classList.remove('hidden');
+  textEl.textContent = 'Connecting…';
+  barEl.style.width  = '0%';
+
+  let total = 0, seen = 0;
+
+  const src = new EventSource('/api/heatmap/stream');
+  activeSource = src;
+
+  src.onmessage = (e) => {
+    const msg = JSON.parse(e.data);
+
+    if (msg.total !== undefined) {
+      total = msg.total;
+      textEl.textContent = `Loading tracks… 0 / ${total}`;
+      return;
+    }
+    if (msg.skip || msg.activity) {
+      seen++;
+      barEl.style.width = `${total > 0 ? (seen / total) * 100 : 0}%`;
+      textEl.textContent = `Loading tracks… ${seen} / ${total}`;
+    }
+    if (msg.activity) allLoaded.push(msg.activity);
+    if (msg.done) {
+      src.close(); activeSource = null;
+      loadingEl.classList.add('hidden');
+      applyFilter();   // initial render using current (probably "all") filters
+    }
+  };
+
+  src.onerror = () => {
+    src.close(); activeSource = null;
+    document.getElementById('loading-text').textContent = 'Error loading tracks. Try refreshing.';
+  };
+}
+
+// ─── Filters ─────────────────────────────────────────────────────────────────
+// Fetched once from /api/activities/filters (lightweight — no stats or points).
+// Filter options always reflect ALL activities so selecting "MTB" doesn't drop
+// years from the year filter.
+
+let _filterYears = [];
+let _filterTypes = [];
+
+function buildFilterUI() {
+  function makeGroup(containerId, items, getActive, setActive) {
+    const div = document.getElementById(containerId);
+    div.innerHTML = '';
+    [['all', 'All'], ...items].forEach(([val, label]) => {
+      const btn = document.createElement('button');
+      btn.className = 'filter-btn' + (val === getActive() ? ' active' : '');
+      btn.textContent = label;
+      btn.onclick = () => { setActive(val); buildFilterUI(); applyFilter(); };
+      div.appendChild(btn);
+    });
+  }
+  makeGroup('year-filters', _filterYears.map(y => [String(y), String(y)]), () => activeYear, v => { activeYear = v; });
+  makeGroup('type-filters', _filterTypes.map(t => [t, TYPE_LABELS[t] || t]),  () => activeType, v => { activeType = v; });
+}
+
+async function initFilters() {
+  try {
+    const res  = await fetch('/api/activities/filters');
+    const acts = await res.json();
+    _filterYears = [...new Set(acts.filter(a => a.date).map(a => new Date(a.date).getFullYear()))].sort((a, b) => b - a);
+    _filterTypes = [...new Set(acts.map(a => a.type).filter(Boolean))].sort();
+    buildFilterUI();
+  } catch (e) {
+    // Non-fatal — filters just won't appear
+  }
+}
+
+(async () => { await initFilters(); load(); })();
+</script>
+</body>
+</html>

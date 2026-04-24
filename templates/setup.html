@@ -1,0 +1,980 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AlForks – Setup</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.css"/>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js"></script>
+  <script src="/static/utils.js"></script>
+  <script src="/static/sync_toast.js" defer></script>
+  <link rel="stylesheet" href="/static/base.css">
+  <style>
+    body { height: 100vh; display: flex; flex-direction: column; }
+
+    /* Section tabs */
+    #tab-bar { background: #0e1117; border-bottom: 1px solid #2a2d35; padding: 0 20px; display: flex; flex-shrink: 0; }
+    .tab-btn { background: none; border: none; border-bottom: 2px solid transparent; color: #bbb; font-size: 0.82rem; font-family: inherit; padding: 12px 18px; cursor: pointer; transition: all 0.12s; }
+    .tab-btn:hover { color: #fff; }
+    .tab-btn.active { color: #3b82f6; border-bottom-color: #3b82f6; }
+
+    main { flex: 1; overflow: hidden; }
+    .tab-panel { display: none; height: 100%; }
+    .tab-panel.active { display: flex; }
+
+    /* ===== Types panel ===== */
+    #types-panel { flex-direction: column; padding: 24px; overflow-y: auto; }
+    #types-panel h2 { font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.08em; color: #bbb; margin-bottom: 16px; font-weight: 500; }
+
+    #types-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; max-width: 1200px; }
+    .type-card { background: #12151a; border: 1px solid #2a2d35; border-radius: 8px; padding: 14px 16px; display: flex; align-items: center; gap: 12px; }
+    .type-swatch { width: 36px; height: 36px; border-radius: 6px; flex-shrink: 0; cursor: pointer; border: 2px solid transparent; transition: border-color 0.1s; display: flex; align-items: center; justify-content: center; font-weight: 600; font-size: 0.68rem; }
+    .type-swatch:hover { border-color: #3b82f6; }
+    .type-info { flex: 1; min-width: 0; }
+    .type-label-input { background: transparent; border: none; border-bottom: 1px solid transparent; color: #e0e0e0; font-size: 0.9rem; font-weight: 500; font-family: inherit; padding: 2px 4px; width: 100%; transition: border-color 0.1s; }
+    .type-label-input:focus { outline: none; border-bottom-color: #3b82f6; }
+    .type-id { font-size: 0.62rem; color: #666; text-transform: uppercase; letter-spacing: 0.06em; margin-top: 2px; font-family: ui-monospace, monospace; padding-left: 4px; }
+    .type-actions { display: flex; gap: 6px; }
+    .t-btn { font-size: 0.65rem; padding: 3px 9px; border-radius: 3px; border: 1px solid #2a2d35; background: #1a1d23; color: #ccc; cursor: pointer; transition: all 0.12s; }
+    .t-btn:hover { border-color: #aaa; color: #fff; }
+    .t-btn.danger { border-color: #ef4444; color: #ef4444; }
+    .t-btn.danger:hover { background: #ef4444; color: #fff; }
+
+    #types-add { margin-top: 20px; display: flex; gap: 8px; align-items: center; max-width: 600px; }
+    #new-type-input { flex: 1; background: #1a1d23; border: 1px solid #2a2d35; border-radius: 4px; color: #e0e0e0; font-size: 0.85rem; padding: 8px 10px; font-family: inherit; }
+    #new-type-input:focus { outline: none; border-color: #3b82f6; }
+    #add-type-btn { padding: 8px 16px; border-radius: 4px; border: 1px solid #3b82f6; background: #1a2a3a; color: #3b82f6; font-size: 0.82rem; cursor: pointer; transition: all 0.12s; }
+    #add-type-btn:hover { background: #3b82f6; color: #fff; }
+
+    /* Colour picker popover */
+    #color-popover { position: fixed; background: #12151a; border: 1px solid #2a2d35; border-radius: 6px; padding: 10px; z-index: 10000; display: none; box-shadow: 0 4px 16px rgba(0,0,0,0.5); }
+    #color-popover.visible { display: block; }
+    #color-popover .swatch-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; }
+    .color-pick { width: 24px; height: 24px; border-radius: 50%; cursor: pointer; border: 2px solid transparent; }
+    .color-pick:hover { border-color: #fff; }
+
+    /* ===== Regions panel ===== */
+    #regions-panel { }
+    #regions-sidebar { width: 280px; background: #12151a; border-right: 1px solid #2a2d35; display: flex; flex-direction: column; flex-shrink: 0; overflow: hidden; }
+    #regions-sidebar-header { padding: 12px 16px; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em; color: #ccc; border-bottom: 1px solid #2a2d35; display: flex; align-items: center; justify-content: space-between; }
+    #draw-btn { padding: 4px 12px; border-radius: 4px; border: 1px solid #3b82f6; background: #1a2a3a; color: #3b82f6; font-size: 0.72rem; cursor: pointer; transition: all 0.12s; }
+    #draw-btn:hover, #draw-btn.active { background: #3b82f6; color: #fff; }
+    #draw-instructions { padding: 10px 16px; font-size: 0.75rem; color: #bbb; border-bottom: 1px solid #2a2d35; line-height: 1.5; display: none; }
+    #draw-instructions.visible { display: block; }
+    #region-list { flex: 1; overflow-y: auto; }
+    .region-item { padding: 10px 16px; border-bottom: 1px solid #1e2128; cursor: pointer; transition: background 0.1s; }
+    .region-item:hover { background: #1e2128; }
+    .region-color { width: 12px; height: 12px; border-radius: 50%; display: inline-block; margin-right: 8px; flex-shrink: 0; }
+    .region-name-row { display: flex; align-items: center; margin-bottom: 4px; }
+    .region-name { font-size: 0.85rem; color: #e0e0e0; font-weight: 500; flex: 1; }
+    .region-source-badge { font-size: 0.55rem; font-weight: 700; letter-spacing: 0.04em; color: #60a5fa; background: #1a2a3a; border: 1px solid #2a3a55; border-radius: 3px; padding: 1px 5px; margin-left: 6px; flex-shrink: 0; }
+    #osm-filters { border-top: 1px solid #2a2d35; background: #0a0d12; flex-shrink: 0; }
+    #osm-filters-header { padding: 8px 12px; font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.07em; color: #888; cursor: pointer; display: flex; align-items: center; user-select: none; }
+    #osm-filters-header:hover { color: #ccc; }
+    #osm-filters-body { padding: 8px 12px 12px; }
+    .osm-deny-chip { font-size: 0.7rem; padding: 2px 4px 2px 8px; border-radius: 3px; background: #1a1d23; border: 1px solid #2a2d35; color: #ccc; display: inline-flex; align-items: center; gap: 4px; }
+    .osm-deny-chip button { background: transparent; border: none; color: #666; cursor: pointer; padding: 0 4px; font-size: 0.85rem; line-height: 1; }
+    .osm-deny-chip button:hover { color: #ef4444; }
+    .region-default-icon { width: 16px; height: 16px; margin-left: 6px; flex-shrink: 0; }
+    .region-default-icon::before { content: ''; display: block; width: 100%; height: 100%; background-color: currentColor; -webkit-mask: var(--icon-url) center / contain no-repeat; mask: var(--icon-url) center / contain no-repeat; }
+    .region-actions { display: flex; gap: 6px; margin-top: 6px; }
+    .r-btn { font-size: 0.65rem; padding: 2px 8px; border-radius: 3px; border: 1px solid #2a2d35; background: #1a1d23; color: #ccc; cursor: pointer; transition: all 0.12s; }
+    .r-btn:hover { border-color: #aaa; color: #fff; }
+    .r-btn.danger { border-color: #ef4444; color: #ef4444; }
+    .r-btn.danger:hover { background: #ef4444; color: #fff; }
+    #edit-region-card { border-top: 1px solid #2a2d35; padding: 12px 16px; background: #0e1117; flex-shrink: 0; display: none; position: relative; max-height: 50vh; overflow-y: auto; }
+    #region-edit-close:hover { color: #fff; }
+    #edit-region-card.visible { display: block; }
+    #edit-region-card h3 { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.08em; color: #bbb; margin-bottom: 10px; }
+    .rfield { margin-bottom: 10px; }
+    .rfield label { display: block; font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.07em; color: #bbb; margin-bottom: 4px; }
+    .rfield input { width: 100%; background: #1a1d23; border: 1px solid #2a2d35; border-radius: 4px; color: #e0e0e0; font-size: 0.82rem; padding: 5px 8px; font-family: inherit; }
+    .rfield input:focus { outline: none; border-color: #3b82f6; }
+    .color-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
+    .color-swatch { width: 22px; height: 22px; border-radius: 50%; cursor: pointer; border: 2px solid transparent; transition: border-color 0.1s; }
+    .color-swatch.selected { border-color: #fff; }
+    #save-region-btn { width: 100%; padding: 6px; background: #1a2a3a; border: 1px solid #3b82f6; border-radius: 4px; color: #3b82f6; font-size: 0.78rem; cursor: pointer; transition: all 0.12s; }
+    #save-region-btn:hover { background: #3b82f6; color: #fff; }
+    #region-save-confirm { font-size: 0.7rem; color: #22c55e; text-align: center; margin-top: 6px; height: 14px; }
+    #no-regions { padding: 20px 16px; color: #666; font-size: 0.82rem; text-align: center; line-height: 1.6; }
+    #map { flex: 1; }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>AlForks</h1>
+  <nav>
+    <a href="/summary">Summary</a>
+    <a href="/">Ride Logs</a>
+    <a href="/comparison">Compare Logs</a>
+    <a href="/heatmap">Heat Map</a>
+    <a href="/setup" class="active">Setup</a>
+  </nav>
+</header>
+
+<div id="tab-bar">
+  <button class="tab-btn active" onclick="showTab('regions')">Regions</button>
+  <button class="tab-btn" onclick="showTab('types')">Activity Types</button>
+  <button class="tab-btn" onclick="showTab('fitness')">Fitness</button>
+  <button class="tab-btn" onclick="showTab('sync')">Sync</button>
+</div>
+
+<main>
+  <!-- Types panel -->
+  <div id="types-panel" class="tab-panel">
+    <h2>Activity Types</h2>
+    <div id="types-list"></div>
+
+    <div id="types-add">
+      <input id="new-type-input" type="text" placeholder="New type label (e.g. Fat Bike, Running)…">
+      <button id="add-type-btn" onclick="addType()">+ Add Type</button>
+    </div>
+  </div>
+
+  <!-- Regions panel -->
+  <div id="regions-panel" class="tab-panel active">
+    <div id="regions-sidebar">
+      <div id="regions-sidebar-header">
+        <span>Regions</span>
+        <button id="draw-btn" onclick="startDraw()">+ Draw</button>
+      </div>
+      <div id="draw-instructions">
+        Click on the map to add polygon vertices. Right-click to remove the last point. Double-click to finish.
+      </div>
+      <div id="region-search" style="padding: 8px 12px; border-bottom: 1px solid #2a2d35;">
+        <div style="display: flex; gap: 6px;">
+          <input id="region-search-input" type="text" placeholder="Search OSM for a park / area…"
+                 style="flex:1; background:#1a1d23; border:1px solid #2a2d35; border-radius:4px; color:#e0e0e0; font-size:0.78rem; padding:5px 8px; font-family:inherit;"
+                 onkeydown="if(event.key==='Enter')searchOsmRegions()">
+          <button onclick="searchOsmRegions()" id="region-search-btn"
+                  style="padding:5px 10px; border-radius:4px; border:1px solid #3b82f6; background:#1a2a3a; color:#3b82f6; font-size:0.72rem; cursor:pointer; font-family:inherit;">Search</button>
+        </div>
+        <div id="region-search-results" style="margin-top:6px; max-height:200px; overflow-y:auto;"></div>
+      </div>
+      <div style="padding: 8px 12px; border-bottom: 1px solid #2a2d35;">
+        <input id="region-list-filter" type="text" placeholder="Filter regions…"
+               oninput="renderRegionList()"
+               style="width:100%; background:#1a1d23; border:1px solid #2a2d35; border-radius:4px; color:#e0e0e0; font-size:0.78rem; padding:5px 8px; font-family:inherit;">
+      </div>
+      <div id="region-list"></div>
+      <div id="edit-region-card">
+        <button id="region-edit-close" onclick="closeRegionEditPanel()" title="Close"
+                style="position:absolute; top:8px; right:10px; background:transparent; border:none; color:#888; font-size:1rem; cursor:pointer; padding:2px 6px; line-height:1;">×</button>
+        <h3 id="edit-title-label">New Region</h3>
+        <div class="rfield">
+          <label>Name</label>
+          <input id="r-name" type="text" placeholder="e.g. Canada Olympic Park">
+        </div>
+        <div class="rfield">
+          <label>Colour</label>
+          <div class="color-row" id="region-color-swatches"></div>
+        </div>
+        <div class="rfield">
+          <label>Default activity type</label>
+          <select id="r-default-type" style="width:100%;background:#1a1d23;border:1px solid #2a2d35;border-radius:4px;color:#e0e0e0;font-size:0.82rem;padding:5px 8px;font-family:inherit;">
+            <option value="">— none —</option>
+          </select>
+          <div style="font-size:0.65rem;color:#777;margin-top:3px;">Used for untyped rides matching this region (any month).</div>
+        </div>
+        <div class="rfield">
+          <label>Winter activity type (overrides default in winter months)</label>
+          <select id="r-winter-type" style="width:100%;background:#1a1d23;border:1px solid #2a2d35;border-radius:4px;color:#e0e0e0;font-size:0.82rem;padding:5px 8px;font-family:inherit;">
+            <option value="">— none (use default year-round) —</option>
+          </select>
+          <div style="display:flex;gap:6px;align-items:center;margin-top:6px;font-size:0.72rem;color:#aaa;">
+            Winter starts month
+            <input id="r-winter-start" type="number" min="1" max="12" value="11"
+                   style="width:55px;background:#1a1d23;border:1px solid #2a2d35;border-radius:3px;color:#e0e0e0;font-size:0.78rem;padding:3px 6px;font-family:inherit;">
+            ends month
+            <input id="r-winter-end" type="number" min="1" max="12" value="4"
+                   style="width:55px;background:#1a1d23;border:1px solid #2a2d35;border-radius:3px;color:#e0e0e0;font-size:0.78rem;padding:3px 6px;font-family:inherit;">
+            <span style="color:#777;">(11–4 = Nov–Apr)</span>
+          </div>
+        </div>
+        <button id="save-region-btn" onclick="saveRegion()">Save Region</button>
+        <div id="region-save-confirm"></div>
+      </div>
+      <div id="osm-filters">
+        <div id="osm-filters-header" onclick="toggleOsmFilters()">
+          <span style="flex:1;">OSM search exclusions</span>
+          <span id="osm-filters-arrow">▸</span>
+        </div>
+        <div id="osm-filters-body" style="display:none;">
+          <div style="font-size:0.7rem;color:#888;margin-bottom:6px;">
+            OSM <code>class</code> values to drop from search results.
+          </div>
+          <div id="osm-deny-chips" style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:8px;"></div>
+          <div style="display:flex;gap:4px;">
+            <input id="osm-deny-input" type="text" placeholder="add class…"
+                   onkeydown="if(event.key==='Enter')addOsmDenyClass()"
+                   style="flex:1;background:#1a1d23;border:1px solid #2a2d35;border-radius:3px;color:#e0e0e0;font-size:0.74rem;padding:4px 6px;font-family:inherit;">
+            <button onclick="addOsmDenyClass()" class="r-btn">Add</button>
+            <button onclick="resetOsmDenyClasses()" class="r-btn" title="Restore defaults">Reset</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div id="map"></div>
+  </div>
+
+  <!-- Sync panel -->
+  <div id="sync-panel" class="tab-panel" style="flex-direction: column; padding: 24px; overflow-y: auto;">
+    <h2 style="font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.08em; color: #bbb; margin-bottom: 16px; font-weight: 500;">
+      Data Sync
+    </h2>
+    <div style="display:flex;gap:14px;max-width:920px;margin-bottom:18px;flex-wrap:wrap;">
+      <div class="sync-card" id="sync-card-strava">
+        <div class="sync-head"><span class="sync-name">Strava</span><span class="sync-state" id="strava-state">—</span></div>
+        <div class="sync-meta" id="strava-meta">Loading…</div>
+        <button onclick="kickSync('strava')" id="strava-btn">Sync now</button>
+      </div>
+      <div class="sync-card" id="sync-card-garmin">
+        <div class="sync-head"><span class="sync-name">Garmin</span><span class="sync-state" id="garmin-state">—</span></div>
+        <div class="sync-meta" id="garmin-meta">Loading…</div>
+        <button onclick="kickSync('garmin')" id="garmin-btn">Sync now</button>
+      </div>
+    </div>
+    <button onclick="kickSync('all')" id="sync-all-btn"
+            style="padding:10px 20px;border-radius:4px;border:1px solid #3b82f6;background:#1a2a3a;color:#3b82f6;font-size:0.85rem;cursor:pointer;font-family:inherit;max-width:180px;margin-bottom:24px;">
+      Sync All Sources
+    </button>
+
+    <h2 style="font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.08em; color: #bbb; margin-bottom: 12px; font-weight: 500;">
+      Auto-sync on Startup
+    </h2>
+    <div style="background:#12151a;border:1px solid #2a2d35;border-radius:8px;padding:14px 18px;max-width:520px;display:flex;flex-direction:column;gap:8px;">
+      <label style="display:flex;align-items:center;gap:10px;font-size:0.85rem;color:#e0e0e0;cursor:pointer;">
+        <input type="checkbox" id="auto-strava" onchange="saveAutoSync()">
+        Run Strava sync when AlForks starts
+      </label>
+      <label style="display:flex;align-items:center;gap:10px;font-size:0.85rem;color:#e0e0e0;cursor:pointer;">
+        <input type="checkbox" id="auto-garmin" onchange="saveAutoSync()">
+        Run Garmin sync when AlForks starts
+      </label>
+      <div id="autosync-confirm" style="font-size:0.72rem;color:#22c55e;height:14px;"></div>
+    </div>
+
+    <style>
+      .sync-card { flex: 1 1 280px; background: #12151a; border: 1px solid #2a2d35; border-radius: 8px; padding: 14px 16px; display: flex; flex-direction: column; gap: 8px; }
+      .sync-head { display: flex; align-items: center; justify-content: space-between; }
+      .sync-name { font-size: 1rem; color: #fff; font-weight: 500; }
+      .sync-state { font-size: 0.7rem; padding: 2px 8px; border-radius: 10px; background: #1a1d23; color: #888; text-transform: uppercase; letter-spacing: 0.06em; }
+      .sync-state.idle    { color: #888; }
+      .sync-state.running { color: #f59e0b; background: #2a1f0e; }
+      .sync-state.ok      { color: #22c55e; background: #0e2a18; }
+      .sync-state.err     { color: #ef4444; background: #2a1010; }
+      .sync-meta { font-size: 0.78rem; color: #aaa; line-height: 1.5; min-height: 36px; }
+      .sync-card button { padding: 6px 14px; border-radius: 4px; border: 1px solid #3b82f6; background: #1a2a3a; color: #3b82f6; font-size: 0.78rem; cursor: pointer; font-family: inherit; align-self: flex-start; }
+      .sync-card button:disabled { opacity: 0.5; cursor: not-allowed; }
+    </style>
+  </div>
+
+  <!-- Fitness panel -->
+  <div id="fitness-panel" class="tab-panel" style="flex-direction: column; padding: 24px; overflow-y: auto;">
+    <h2 style="font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.08em; color: #bbb; margin-bottom: 16px; font-weight: 500;">
+      Max Heart Rate
+    </h2>
+    <div style="background:#12151a;border:1px solid #2a2d35;border-radius:8px;padding:18px 20px;max-width:520px;margin-bottom:14px;">
+      <div style="display:flex;gap:24px;margin-bottom:18px;">
+        <div>
+          <div style="font-size:0.62rem;text-transform:uppercase;letter-spacing:0.08em;color:#888;margin-bottom:4px;">Observed (from your data)</div>
+          <div id="hr-observed" style="font-size:1.6rem;font-weight:500;color:#fff;">—</div>
+          <div style="font-size:0.7rem;color:#888;">99.5th percentile of cached samples</div>
+        </div>
+        <div>
+          <div style="font-size:0.62rem;text-transform:uppercase;letter-spacing:0.08em;color:#888;margin-bottom:4px;">Effective (used for zones)</div>
+          <div id="hr-effective" style="font-size:1.6rem;font-weight:500;color:#3b82f6;">—</div>
+        </div>
+      </div>
+      <div style="display:flex;gap:10px;align-items:center;">
+        <label style="font-size:0.78rem;color:#ccc;min-width:80px;">Override:</label>
+        <input id="hr-override" type="number" min="100" max="230" placeholder="leave blank for observed"
+               style="flex:1;background:#1a1d23;border:1px solid #2a2d35;border-radius:4px;color:#e0e0e0;font-size:0.85rem;padding:6px 10px;font-family:inherit;">
+        <button onclick="saveMaxHr()" style="padding:6px 14px;border-radius:4px;border:1px solid #3b82f6;background:#1a2a3a;color:#3b82f6;font-size:0.78rem;cursor:pointer;">Save</button>
+      </div>
+      <div id="hr-save-confirm" style="font-size:0.72rem;color:#22c55e;margin-top:8px;height:14px;"></div>
+    </div>
+    <div style="background:#0e1117;border:1px solid #2a2d35;border-radius:8px;padding:14px 18px;max-width:520px;font-size:0.78rem;color:#aaa;line-height:1.6;">
+      <strong style="color:#e0e0e0;">Heart-rate zones</strong> are computed as percentages of your effective max HR:
+      <ul style="margin:8px 0 0 18px;padding:0;">
+        <li>Z1 Recovery — &lt; 60%</li>
+        <li>Z2 Endurance — 60–70%</li>
+        <li>Z3 Tempo — 70–80%</li>
+        <li>Z4 Threshold — 80–90%</li>
+        <li>Z5 VO2max — &gt; 90%</li>
+      </ul>
+    </div>
+  </div>
+</main>
+
+<!-- Floating colour picker for types -->
+<div id="color-popover">
+  <div class="swatch-grid" id="color-popover-swatches"></div>
+</div>
+
+<script>
+let TYPES = {{ types_json | safe }};
+const PALETTE = ['#4ade80','#60a5fa','#a78bfa','#fb923c','#9ca3af','#22c55e','#ef4444','#f59e0b','#ec4899','#06b6d4','#8b5cf6','#14b8a6','#f97316','#a3e635','#f472b6','#38bdf8','#fbbf24','#fb7185'];
+const BG_FOR = c => c + '1f';  // hex alpha ~12%
+
+// ─── Tabs ─────────────────────────────────────────────────────────────────────
+function showTab(name) {
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  document.querySelector(`.tab-btn[onclick*="'${name}'"]`).classList.add('active');
+  document.getElementById(`${name}-panel`).classList.add('active');
+  if (name === 'regions') setTimeout(() => map && map.invalidateSize(), 50);
+}
+
+// ─── Types management ────────────────────────────────────────────────────────
+function renderTypes() {
+  const list = document.getElementById('types-list');
+  list.innerHTML = '';
+  TYPES.forEach(t => {
+    const card = document.createElement('div');
+    card.className = 'type-card';
+
+    const swatch = document.createElement('div');
+    swatch.className = 'type-swatch';
+    swatch.style.background = t.bg;
+    swatch.style.color = t.color;
+    swatch.textContent = t.label.slice(0, 3).toUpperCase();
+    swatch.title = 'Click to change colour';
+    swatch.onclick = (e) => openColorPopover(e, t);
+
+    const info = document.createElement('div');
+    info.className = 'type-info';
+
+    const label = document.createElement('input');
+    label.className = 'type-label-input';
+    label.value = t.label;
+    label.onchange = () => saveType(t.id, { label: label.value.trim() || t.label });
+
+    const id = document.createElement('div');
+    id.className = 'type-id';
+    id.textContent = t.id;
+
+    info.appendChild(label);
+    info.appendChild(id);
+
+    const actions = document.createElement('div');
+    actions.className = 'type-actions';
+    const del = document.createElement('button');
+    del.className = 't-btn danger';
+    del.textContent = 'Delete';
+    del.onclick = () => deleteType(t.id);
+    actions.appendChild(del);
+
+    card.appendChild(swatch);
+    card.appendChild(info);
+    card.appendChild(actions);
+    list.appendChild(card);
+  });
+}
+
+function openColorPopover(e, type) {
+  const pop = document.getElementById('color-popover');
+  const grid = document.getElementById('color-popover-swatches');
+  grid.innerHTML = '';
+  PALETTE.forEach(color => {
+    const sw = document.createElement('div');
+    sw.className = 'color-pick';
+    sw.style.background = color;
+    sw.onclick = () => {
+      saveType(type.id, { color, bg: BG_FOR(color) });
+      pop.classList.remove('visible');
+    };
+    grid.appendChild(sw);
+  });
+  const rect = e.target.getBoundingClientRect();
+  pop.style.left = (rect.left + rect.width + 8) + 'px';
+  pop.style.top  = rect.top + 'px';
+  pop.classList.add('visible');
+  // Close on outside click
+  setTimeout(() => {
+    const close = (ev) => {
+      if (!pop.contains(ev.target)) { pop.classList.remove('visible'); document.removeEventListener('click', close); }
+    };
+    document.addEventListener('click', close);
+  }, 0);
+}
+
+async function saveType(id, patch) {
+  await fetch(`/api/types/${id}`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(patch),
+  });
+  await reloadTypes();
+}
+
+async function deleteType(id) {
+  const t = TYPES.find(x => x.id === id);
+  const label = t?.label || id;
+  // Check usage first so we can tell the user what will be affected
+  let count = 0;
+  try {
+    const r = await fetch(`/api/types/${id}/usage`);
+    if (r.ok) count = (await r.json()).count || 0;
+  } catch (e) {}
+  const msg = count
+    ? `Delete "${label}"?\n\n${count} activit${count===1?'y is':'ies are'} currently tagged with this type — they will become untagged.`
+    : `Delete "${label}"? (No activities currently use it.)`;
+  if (!confirm(msg)) return;
+  await fetch(`/api/types/${id}`, { method: 'DELETE' });
+  await reloadTypes();
+}
+
+async function addType() {
+  const input = document.getElementById('new-type-input');
+  const label = input.value.trim();
+  if (!label) return;
+  const color = PALETTE[TYPES.length % PALETTE.length];
+  await fetch('/api/types', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ label, color, bg: BG_FOR(color) }),
+  });
+  input.value = '';
+  await reloadTypes();
+}
+
+async function reloadTypes() {
+  const res = await fetch('/api/types');
+  TYPES = await res.json();
+  renderTypes();
+}
+
+renderTypes();
+
+// ─── Regions management ──────────────────────────────────────────────────────
+let regions = [];
+let selectedColor = PALETTE[0];
+let editingId = null;
+let pendingLayer = null;
+
+const map = L.map('map').setView([51, -114], 9);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  maxZoom: 19, attribution: '© <a href="https://openstreetmap.org/copyright">OpenStreetMap</a>',
+}).addTo(map);
+
+const drawnItems = new L.FeatureGroup().addTo(map);
+const regionLayers = {};
+const drawControl = new L.Control.Draw({
+  draw: { polygon: { shapeOptions: { color: selectedColor, weight: 2, fillOpacity: 0.15 } },
+          polyline: false, rectangle: false, circle: false, circlemarker: false, marker: false },
+  edit: { featureGroup: drawnItems, remove: false },
+});
+
+map.on(L.Draw.Event.CREATED, (e) => {
+  pendingLayer = e.layer;
+  pendingLayer.setStyle({ color: selectedColor, weight: 2, fillOpacity: 0.15 });
+  drawnItems.addLayer(pendingLayer);
+  document.getElementById('draw-btn').classList.remove('active');
+  document.getElementById('draw-instructions').classList.remove('visible');
+  showRegionEditPanel(null);
+  document.getElementById('r-name').focus();
+});
+
+function buildRegionSwatches() {
+  const container = document.getElementById('region-color-swatches');
+  container.innerHTML = '';
+  PALETTE.forEach(color => {
+    const el = document.createElement('div');
+    el.className = 'color-swatch' + (color === selectedColor ? ' selected' : '');
+    el.style.background = color;
+    el.onclick = () => {
+      selectedColor = color;
+      buildRegionSwatches();
+      if (pendingLayer) pendingLayer.setStyle({ color });
+      if (editingId) {
+        const r = regions.find(r => r.id === editingId);
+        if (r && regionLayers[r.id]) regionLayers[r.id].setStyle({ color, fillColor: color });
+      }
+    };
+    container.appendChild(el);
+  });
+}
+buildRegionSwatches();
+
+let _activeDrawHandler = null;
+
+// ─── OSM (Nominatim) region search ──────────────────────────────────────────
+let _osmPreviewLayer = null;
+let _osmResultsCache = [];
+
+// ─── OSM search exclusion list (deny classes) ───────────────────────────────
+let _osmDenyClasses = [];
+
+function toggleOsmFilters() {
+  const body = document.getElementById('osm-filters-body');
+  const arrow = document.getElementById('osm-filters-arrow');
+  const open = body.style.display === 'none';
+  body.style.display = open ? 'block' : 'none';
+  arrow.textContent = open ? '▾' : '▸';
+  if (open && !_osmDenyClasses.length) loadOsmDenyClasses();
+}
+
+async function loadOsmDenyClasses() {
+  const r = await fetch('/api/regions/search-filters');
+  const d = await r.json();
+  _osmDenyClasses = d.deny_classes || [];
+  renderOsmDenyChips();
+}
+
+function renderOsmDenyChips() {
+  const wrap = document.getElementById('osm-deny-chips');
+  wrap.innerHTML = '';
+  if (!_osmDenyClasses.length) {
+    wrap.innerHTML = '<span style="font-size:0.7rem;color:#666;">(empty — no exclusions)</span>';
+    return;
+  }
+  _osmDenyClasses.forEach(cls => {
+    const chip = document.createElement('span');
+    chip.className = 'osm-deny-chip';
+    chip.innerHTML = `<span></span><button title="Remove">×</button>`;
+    chip.querySelector('span').textContent = cls;
+    chip.querySelector('button').onclick = () => removeOsmDenyClass(cls);
+    wrap.appendChild(chip);
+  });
+}
+
+async function _saveOsmDenyClasses() {
+  await fetch('/api/regions/search-filters', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ deny_classes: _osmDenyClasses }),
+  });
+}
+
+async function addOsmDenyClass() {
+  const input = document.getElementById('osm-deny-input');
+  const v = input.value.trim().toLowerCase();
+  if (!v) return;
+  if (_osmDenyClasses.includes(v)) { input.value = ''; return; }
+  _osmDenyClasses.push(v);
+  _osmDenyClasses.sort();
+  input.value = '';
+  renderOsmDenyChips();
+  _saveOsmDenyClasses();
+}
+
+async function removeOsmDenyClass(cls) {
+  _osmDenyClasses = _osmDenyClasses.filter(c => c !== cls);
+  renderOsmDenyChips();
+  _saveOsmDenyClasses();
+}
+
+async function resetOsmDenyClasses() {
+  const r = await fetch('/api/regions/search-filters');
+  const d = await r.json();
+  _osmDenyClasses = (d.defaults || []).slice();
+  renderOsmDenyChips();
+  _saveOsmDenyClasses();
+}
+
+async function searchOsmRegions() {
+  const q = document.getElementById('region-search-input').value.trim();
+  const out = document.getElementById('region-search-results');
+  if (!q) { out.innerHTML = ''; return; }
+  out.innerHTML = '<div style="font-size:0.72rem;color:#888;padding:4px;">Searching OSM…</div>';
+  try {
+    const r = await fetch(`/api/regions/search?q=${encodeURIComponent(q)}`);
+    const d = await r.json();
+    _osmResultsCache = d.results || [];
+    if (!_osmResultsCache.length) {
+      out.innerHTML = '<div style="font-size:0.72rem;color:#888;padding:4px;">No polygon results found.</div>';
+      return;
+    }
+    out.innerHTML = '';
+    _osmResultsCache.forEach((res, i) => {
+      const el = document.createElement('div');
+      el.style.cssText = 'padding:6px 8px;border:1px solid #2a2d35;border-radius:4px;margin-bottom:4px;background:#12151a;';
+      el.innerHTML = `
+        <div style="font-size:0.74rem;color:#e0e0e0;line-height:1.3;"></div>
+        <div style="font-size:0.62rem;color:#777;margin:2px 0 6px;"></div>
+        <div style="display:flex;gap:6px;">
+          <button class="r-btn" data-act="preview">Preview</button>
+          <button class="r-btn" data-act="use" style="border-color:#3b82f6;color:#3b82f6;">Use this</button>
+        </div>`;
+      el.querySelector('div').textContent = res.display_name;
+      el.querySelectorAll('div')[1].textContent = res.type;
+      el.querySelector('[data-act="preview"]').onclick = () => previewOsmResult(i);
+      el.querySelector('[data-act="use"]').onclick     = () => useOsmResult(i);
+      out.appendChild(el);
+    });
+  } catch (e) {
+    out.innerHTML = `<div style="font-size:0.72rem;color:#ef4444;padding:4px;">Search failed: ${e.message}</div>`;
+  }
+}
+
+function _clearOsmPreview() {
+  if (_osmPreviewLayer) { map.removeLayer(_osmPreviewLayer); _osmPreviewLayer = null; }
+}
+
+function previewOsmResult(i) {
+  const res = _osmResultsCache[i];
+  if (!res) return;
+  _clearOsmPreview();
+  _osmPreviewLayer = L.geoJSON(res.geometry, {
+    style: { color: '#3b82f6', weight: 2, dashArray: '5 4', fillColor: '#3b82f6', fillOpacity: 0.1 },
+  }).addTo(map);
+  map.fitBounds(_osmPreviewLayer.getBounds(), { padding: [40, 40] });
+}
+
+function useOsmResult(i) {
+  const res = _osmResultsCache[i];
+  if (!res) return;
+  _clearOsmPreview();
+  // Drop the existing free-draw pending layer (if any) and use the OSM polygon
+  if (pendingLayer) { drawnItems.removeLayer(pendingLayer); }
+  pendingLayer = L.geoJSON(res.geometry, {
+    style: { color: selectedColor, weight: 2, fillOpacity: 0.15 },
+  }).getLayers()[0];
+  drawnItems.addLayer(pendingLayer);
+  // Open the edit panel pre-filled with the OSM name
+  document.getElementById('draw-btn').classList.remove('active');
+  document.getElementById('draw-instructions').classList.remove('visible');
+  showRegionEditPanel(null);
+  // Trim Nominatim's verbose display_name to just the leading part for sanity
+  const shortName = (res.display_name || '').split(',')[0].trim();
+  document.getElementById('r-name').value = shortName || 'New Region';
+  document.getElementById('r-name').focus();
+  map.fitBounds(pendingLayer.getBounds(), { padding: [40, 40] });
+  // Tag the in-flight region as OSM-sourced so saveRegion() persists it
+  _pendingSource = 'osm';
+}
+
+let _pendingSource = '';
+
+function startDraw() {
+  editingId = null;
+  pendingLayer = null;
+  document.getElementById('draw-btn').classList.add('active');
+  document.getElementById('draw-instructions').classList.add('visible');
+  document.getElementById('edit-region-card').classList.remove('visible');
+  map.addControl(drawControl);
+  _activeDrawHandler = new L.Draw.Polygon(map, drawControl.options.draw.polygon);
+  _activeDrawHandler.enable();
+}
+
+// Right-click while drawing removes the most recently added vertex.
+map.on('contextmenu', (e) => {
+  if (_activeDrawHandler && _activeDrawHandler._enabled) {
+    _activeDrawHandler.deleteLastVertex();
+    L.DomEvent.preventDefault(e.originalEvent);
+  }
+});
+
+map.on(L.Draw.Event.DRAWSTOP,    () => { _activeDrawHandler = null; });
+map.on(L.Draw.Event.DRAWVERTEX,  () => {});
+
+function closeRegionEditPanel() {
+  // Drop any in-flight free-draw / OSM-import polygon that hasn't been saved
+  if (pendingLayer) {
+    try { drawnItems.removeLayer(pendingLayer); } catch (e) {}
+    pendingLayer = null;
+  }
+  _pendingSource = '';
+  try { map.removeControl(drawControl); } catch (e) {}
+  document.getElementById('edit-region-card').classList.remove('visible');
+  document.getElementById('draw-btn').classList.remove('active');
+  document.getElementById('draw-instructions').classList.remove('visible');
+  editingId = null;
+}
+
+function showRegionEditPanel(id) {
+  editingId = id;
+  const panel = document.getElementById('edit-region-card');
+  panel.classList.add('visible');
+  document.getElementById('edit-title-label').textContent = id ? 'Edit Region' : 'New Region';
+  document.getElementById('region-save-confirm').textContent = '';
+  if (id) {
+    const r = regions.find(r => r.id === id);
+    document.getElementById('r-name').value = r?.name || '';
+    document.getElementById('r-default-type').value = r?.default_type || '';
+    document.getElementById('r-winter-type').value  = r?.winter_default_type || '';
+    const wm = r?.winter_months || [11,12,1,2,3,4];
+    document.getElementById('r-winter-start').value = wm[0] || 11;
+    document.getElementById('r-winter-end').value   = wm[wm.length - 1] || 4;
+    selectedColor = r?.color || PALETTE[0];
+  } else {
+    document.getElementById('r-name').value = '';
+    document.getElementById('r-default-type').value = '';
+    document.getElementById('r-winter-type').value  = '';
+    document.getElementById('r-winter-start').value = 11;
+    document.getElementById('r-winter-end').value   = 4;
+    selectedColor = PALETTE[regions.length % PALETTE.length];
+  }
+  buildRegionSwatches();
+  buildDefaultTypeOptions();
+}
+
+function buildDefaultTypeOptions() {
+  for (const id of ['r-default-type', 'r-winter-type']) {
+    const sel = document.getElementById(id);
+    if (!sel) continue;
+    const current = sel.value;
+    const placeholder = sel.querySelector('option[value=""]')?.textContent || '— none —';
+    sel.innerHTML = `<option value="">${placeholder}</option>`;
+    TYPES.forEach(t => {
+      const o = document.createElement('option');
+      o.value = t.id; o.textContent = t.label;
+      sel.appendChild(o);
+    });
+    sel.value = current;
+  }
+}
+
+// Build a list of months from a [start, end] inclusive range, wrapping at year-end.
+function _monthsRange(start, end) {
+  start = Math.max(1, Math.min(12, parseInt(start) || 11));
+  end   = Math.max(1, Math.min(12, parseInt(end)   || 4));
+  const out = [];
+  let m = start;
+  for (let i = 0; i < 12; i++) {
+    out.push(m);
+    if (m === end) break;
+    m = m === 12 ? 1 : m + 1;
+  }
+  return out;
+}
+
+async function saveRegion() {
+  const name = document.getElementById('r-name').value.trim() || 'Unnamed Region';
+  const default_type        = document.getElementById('r-default-type').value;
+  const winter_default_type = document.getElementById('r-winter-type').value;
+  const winter_months       = _monthsRange(
+    document.getElementById('r-winter-start').value,
+    document.getElementById('r-winter-end').value,
+  );
+  if (editingId) {
+    await fetch(`/api/regions/${editingId}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, color: selectedColor, default_type, winter_default_type, winter_months }),
+    });
+  } else {
+    if (!pendingLayer) return;
+    const geojson = pendingLayer.toGeoJSON().geometry;
+    await fetch('/api/regions', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, color: selectedColor, geometry: geojson, default_type, winter_default_type, winter_months, source: _pendingSource }),
+    });
+    drawnItems.removeLayer(pendingLayer);
+    pendingLayer = null;
+    _pendingSource = '';
+  }
+  try { map.removeControl(drawControl); } catch (e) {}
+  document.getElementById('region-save-confirm').textContent = 'Saved';
+  setTimeout(() => document.getElementById('region-save-confirm').textContent = '', 2000);
+  document.getElementById('edit-region-card').classList.remove('visible');
+  await loadRegions();
+}
+
+async function deleteRegion(id) {
+  const r = regions.find(x => x.id === id);
+  const name = r?.name || id;
+  let count = 0;
+  try {
+    const res = await fetch(`/api/regions/${id}/usage`);
+    if (res.ok) count = (await res.json()).count || 0;
+  } catch (e) {}
+  const msg = count
+    ? `Delete region "${name}"?\n\n${count} activit${count===1?'y falls':'ies fall'} inside it and will lose this region tag.`
+    : `Delete region "${name}"? (No activities currently match it.)`;
+  if (!confirm(msg)) return;
+  await fetch(`/api/regions/${id}`, { method: 'DELETE' });
+  await loadRegions();
+}
+
+function zoomToRegion(id) {
+  const layer = regionLayers[id];
+  if (layer) map.fitBounds(layer.getBounds(), { padding: [40, 40] });
+}
+
+async function loadRegions() {
+  const res = await fetch('/api/regions');
+  regions = await res.json();
+  renderRegionList();
+  renderRegionLayers();
+}
+
+function renderRegionLayers() {
+  Object.values(regionLayers).forEach(l => map.removeLayer(l));
+  Object.keys(regionLayers).forEach(k => delete regionLayers[k]);
+  regions.forEach(r => {
+    const layer = L.geoJSON(r.geometry, {
+      style: { color: r.color, weight: 2, fillColor: r.color, fillOpacity: 0.12 },
+    }).addTo(map);
+    layer.on('click', () => { zoomToRegion(r.id); showRegionEditPanel(r.id); });
+    regionLayers[r.id] = layer;
+  });
+}
+
+function renderRegionList() {
+  const list = document.getElementById('region-list');
+  if (!regions.length) {
+    list.innerHTML = '<div id="no-regions">No regions yet.<br>Click <strong>+ Draw</strong> to create one.</div>';
+    return;
+  }
+  // Sort alphabetically (case-insensitive); apply text filter from the input
+  const filterEl = document.getElementById('region-list-filter');
+  const filter   = (filterEl?.value || '').toLowerCase().trim();
+  const sorted = [...regions].sort((a, b) => (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' }));
+  const visible = filter ? sorted.filter(r => (r.name || '').toLowerCase().includes(filter)) : sorted;
+  list.innerHTML = '';
+  if (!visible.length) {
+    list.innerHTML = '<div id="no-regions">No regions match the filter.</div>';
+    return;
+  }
+  visible.forEach(r => {
+    const el = document.createElement('div');
+    el.className = 'region-item';
+    const KNOWN_ICONS = new Set(['mtb', 'fat_biking', 'snowboard', 'ski', 'hike', 'other']);
+    const iconHtml = (typeId, label) => {
+      const t = TYPES.find(t => t.id === typeId);
+      if (!t) return '';
+      const fname = KNOWN_ICONS.has(t.id) ? t.id : 'unknown';
+      return `<span class="region-default-icon" title="${label}: ${t.label}"
+                    style="--icon-url:url('/static/icons/${fname}.svg');color:${t.color}"></span>`;
+    };
+    const summerIcon = iconHtml(r.default_type,        'Default');
+    const winterIcon = iconHtml(r.winter_default_type, 'Winter');
+    const dtIcon = `${summerIcon}${winterIcon}`;
+    const sourceBadge = r.source === 'osm'
+      ? '<span class="region-source-badge" title="Polygon imported from OpenStreetMap">OSM</span>'
+      : '';
+    el.innerHTML = `
+      <div class="region-name-row">
+        <span class="region-color" style="background:${r.color}"></span>
+        <span class="region-name"></span>
+        ${sourceBadge}
+        ${dtIcon}
+      </div>
+      <div class="region-actions">
+        <button class="r-btn" data-action="zoom">Zoom</button>
+        <button class="r-btn" data-action="edit">Edit</button>
+        <button class="r-btn danger" data-action="delete">Delete</button>
+      </div>`;
+    el.querySelector('.region-name').textContent = r.name;
+    el.querySelector('[data-action="zoom"]').onclick   = () => zoomToRegion(r.id);
+    el.querySelector('[data-action="edit"]').onclick   = () => showRegionEditPanel(r.id);
+    el.querySelector('[data-action="delete"]').onclick = () => deleteRegion(r.id);
+    list.appendChild(el);
+  });
+}
+
+loadRegions();
+
+// If linked from an activity, switch to regions tab and zoom map to track bounds
+(function applyDeepLink() {
+  const params = new URLSearchParams(window.location.search);
+  if (params.get('tab') === 'regions') showTab('regions');
+  const bbox = params.get('bbox');
+  if (bbox) {
+    const [w, s, e, n] = bbox.split(',').map(Number);
+    if ([w, s, e, n].every(Number.isFinite)) {
+      setTimeout(() => {
+        map.invalidateSize();
+        map.fitBounds([[s, w], [n, e]], { padding: [40, 40] });
+      }, 100);
+    }
+  }
+})();
+
+// ─── Fitness: max HR ─────────────────────────────────────────────────────────
+async function loadMaxHr() {
+  try {
+    const r = await fetch('/api/fitness/max-hr');
+    const d = await r.json();
+    document.getElementById('hr-observed').textContent = d.observed != null ? `${d.observed} bpm` : '—';
+    document.getElementById('hr-effective').textContent = d.effective != null ? `${d.effective} bpm` : '—';
+    document.getElementById('hr-override').value = d.override ?? '';
+  } catch (e) {}
+}
+
+async function saveMaxHr() {
+  const v = document.getElementById('hr-override').value.trim();
+  await fetch('/api/fitness/max-hr', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ override: v ? parseInt(v, 10) : null }),
+  });
+  document.getElementById('hr-save-confirm').textContent = 'Saved';
+  setTimeout(() => document.getElementById('hr-save-confirm').textContent = '', 2000);
+  loadMaxHr();
+}
+
+loadMaxHr();
+
+// ─── Sync tab ────────────────────────────────────────────────────────────────
+function fmtAgo(unixSec) {
+  if (!unixSec) return 'never';
+  const d = Date.now() / 1000 - unixSec;
+  if (d < 60) return 'just now';
+  if (d < 3600) return `${Math.round(d/60)} min ago`;
+  if (d < 86400) return `${Math.round(d/3600)} h ago`;
+  return `${Math.round(d/86400)} d ago`;
+}
+
+async function loadSyncStatus() {
+  try {
+    const r = await fetch('/api/sync/status');
+    const s = await r.json();
+    for (const src of ['strava', 'garmin']) {
+      const st = s[src];
+      const stateEl = document.getElementById(`${src}-state`);
+      const metaEl  = document.getElementById(`${src}-meta`);
+      const btnEl   = document.getElementById(`${src}-btn`);
+      stateEl.classList.remove('idle','running','ok','err');
+      if (st.running) {
+        stateEl.textContent = 'running'; stateEl.classList.add('running');
+        btnEl.disabled = true; btnEl.textContent = 'Syncing…';
+      } else {
+        if (st.ok === true)  { stateEl.textContent = 'ok';     stateEl.classList.add('ok'); }
+        else if (st.ok === false) { stateEl.textContent = 'error'; stateEl.classList.add('err'); }
+        else                 { stateEl.textContent = 'idle';   stateEl.classList.add('idle'); }
+        btnEl.disabled = false; btnEl.textContent = 'Sync now';
+      }
+      const lines = [];
+      if (st.finished_at) lines.push(`Last run: ${fmtAgo(st.finished_at)}`);
+      if (st.message)     lines.push(st.message);
+      metaEl.textContent = lines.length ? lines.join(' · ') : 'Never run.';
+    }
+  } catch (e) {}
+}
+
+async function kickSync(source) {
+  await fetch(`/api/sync/${source}`, { method: 'POST' });
+  loadSyncStatus();
+  // Poll while any sync is running
+  const poll = setInterval(async () => {
+    await loadSyncStatus();
+    const r = await fetch('/api/sync/status'); const s = await r.json();
+    if (!s.strava.running && !s.garmin.running) clearInterval(poll);
+  }, 2000);
+}
+
+async function loadAutoSync() {
+  try {
+    const r = await fetch('/api/sync/settings');
+    const s = await r.json();
+    document.getElementById('auto-strava').checked = s.auto_strava;
+    document.getElementById('auto-garmin').checked = s.auto_garmin;
+  } catch (e) {}
+}
+
+async function saveAutoSync() {
+  const body = {
+    auto_strava: document.getElementById('auto-strava').checked,
+    auto_garmin: document.getElementById('auto-garmin').checked,
+  };
+  await fetch('/api/sync/settings', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
+  document.getElementById('autosync-confirm').textContent = 'Saved';
+  setTimeout(() => document.getElementById('autosync-confirm').textContent = '', 1500);
+}
+
+loadSyncStatus();
+loadAutoSync();
+</script>
+</body>
+</html>

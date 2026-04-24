@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3 -c ' *)",
+      "Bash(python3 *)",
+      "Bash(curl *)",
+      "Bash(pkill -f \"python app.py\")",
+      "Bash(python app.py)",
+      "Bash(taskkill /F /IM python.exe)",
+      "Bash(python -c ' *)",
+      "Bash(python *)",
+      "Bash(taskkill //F //IM python.exe)",
+      "Bash(netstat -ano)",
+      "Bash(taskkill //PID 2360 //F)",
+      "Bash(taskkill //PID 26768 //F)",
+      "Bash(taskkill //PID 22152 //F)",
+      "Bash(powershell *)",
+      "Bash(grep -n \"nav a \\\\|body { font-family\\\\|header h1\\\\|filter-btn\\\\|\\\\\\\\.sep \" \"/c/Users/arowberry/OneDrive - BDO Canada LLP/Documents/Personal/Claude Code Projects/GPX Files/templates/heatmap.html\")",
+      "Bash(grep *)",
+      "Bash(gh --version)",
+      "Bash(gh auth *)"
+    ]
+  }
+}

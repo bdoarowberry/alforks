@@ -1,0 +1,39 @@
+# Project-specific data (user/local)
+tracks/
+sync/
+metadata.json
+regions.json
+config.json
+
+# Python & Flask
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+venv/
+.venv/
+env/
+.env
+*.log
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Project caching/backups
+cache/
+backups/
+
+# OS
+.DS_Store
+Thumbs.db
