@@ -627,6 +627,11 @@ _mem_cache     = LRUCache(400)
 _file_locks:   dict[str, threading.Lock] = {}
 _file_locks_mu = threading.Lock()
 
+# Sentinel cached in _mem_cache when parse_gpx can't produce usable data
+# (e.g. a single-point GPX). Prevents re-parsing the same broken file on
+# every request; get_activity returns None for these.
+_UNPARSEABLE = object()
+
 
 def _lock_for(filename: str) -> threading.Lock:
     with _file_locks_mu:
@@ -670,11 +675,15 @@ def _safe_gpx_path(filename: str) -> Path | None:
 
 def get_activity(filename: str) -> dict | None:
     cached = _mem_cache.get(filename)
+    if cached is _UNPARSEABLE:
+        return None
     if cached is not None:
         return cached
 
     with _lock_for(filename):
         cached = _mem_cache.get(filename)
+        if cached is _UNPARSEABLE:
+            return None
         if cached is not None:
             return cached
 
@@ -691,6 +700,8 @@ def get_activity(filename: str) -> dict | None:
 
         if data:
             _mem_cache.set(filename, data)
+        else:
+            _mem_cache.set(filename, _UNPARSEABLE)
         return data
 
 

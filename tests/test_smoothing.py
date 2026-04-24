@@ -115,5 +115,46 @@ class TestDebugHrDateValidation(unittest.TestCase):
         self.assertEqual(resp.status_code, 400)
 
 
+class TestUnparseableSentinel(unittest.TestCase):
+    """Regression: a file that parse_gpx can't handle (e.g. 1-point track)
+    used to be re-parsed on every request. get_activity now caches an
+    _UNPARSEABLE sentinel so the second call returns None without touching
+    the parser."""
+
+    def test_unparseable_is_cached_and_returns_none(self):
+        import tempfile
+        from pathlib import Path
+
+        # Write a minimal 1-point GPX inside GPX_DIR so _safe_gpx_path accepts it
+        fname = "_unparseable_regression.gpx"
+        fpath = app.GPX_DIR / fname
+        fpath.write_text(
+            '<?xml version="1.0"?>\n'
+            '<gpx version="1.1"><trk><trkseg>'
+            '<trkpt lat="50.0" lon="-116.0"><ele>1000</ele></trkpt>'
+            '</trkseg></trk></gpx>',
+            encoding="utf-8",
+        )
+        try:
+            # Clear any existing cache entry
+            app._mem_cache.cache.pop(fname, None) if hasattr(app._mem_cache, "cache") else None
+
+            call_count = {"n": 0}
+            real_parse_gpx = app.parse_gpx
+            def counting_parse(path):
+                call_count["n"] += 1
+                return real_parse_gpx(path)
+            app.parse_gpx = counting_parse
+            try:
+                self.assertIsNone(app.get_activity(fname))
+                self.assertIsNone(app.get_activity(fname))
+                self.assertEqual(call_count["n"], 1,
+                                 "parse_gpx must only be called once; the sentinel should short-circuit")
+            finally:
+                app.parse_gpx = real_parse_gpx
+        finally:
+            fpath.unlink(missing_ok=True)
+
+
 if __name__ == "__main__":
     unittest.main()
