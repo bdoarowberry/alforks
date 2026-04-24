@@ -1330,7 +1330,12 @@ def _merge_hr_into_data(data: dict) -> dict:
             if not t:
                 pt_utc_ms.append(None)
                 continue
-            dt = datetime.fromisoformat(t).replace(tzinfo=None).replace(tzinfo=tz)
+            # Strip tzinfo (see comment above) and re-anchor at `tz`. During the
+            # fall-back DST hour the wall-clock is ambiguous; fold=0 resolves
+            # to the pre-transition (DST) instance, which is what riders
+            # usually intend. During the spring-forward gap the wall-clock
+            # doesn't exist and either fold is an arbitrary pick.
+            dt = datetime.fromisoformat(t).replace(tzinfo=None, fold=0).replace(tzinfo=tz)
             pt_utc_ms.append(int(dt.timestamp() * 1000))
     except Exception:
         return data
