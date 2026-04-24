@@ -1,6 +1,5 @@
 # Project-specific data (user/local)
 tracks/
-sync/
 metadata.json
 regions.json
 config.json
