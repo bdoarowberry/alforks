@@ -89,6 +89,20 @@ def _median_filter(values: list, k: int = 5) -> list:
     return out
 
 
+def _prefix_sum(per_pt: list, field: str) -> list[float]:
+    """Cumulative sum of per_pt[i][field]. prefix[0] = 0; prefix[i+1] = sum(per_pt[0..i][field]).
+    Segment gain from index a to b inclusive = prefix[b + 1] - prefix[a].
+    Lets us replace O(seg_len) sum() calls inside lift-candidate loops with O(1) lookups.
+    """
+    n = len(per_pt)
+    prefix = [0.0] * (n + 1)
+    cum = 0.0
+    for i in range(n):
+        cum += per_pt[i][field]
+        prefix[i + 1] = cum
+    return prefix
+
+
 # ─── Station-proximity lift detector ─────────────────────────────────────────
 
 def _detect_station_lifts(latlons: list, per_pt: list, lifts: list[dict]) -> list[bool]:
@@ -312,6 +326,8 @@ def _detect_elev_rate_param(per_pt: list, threshold_m_per_min: float,
     """
     n = len(per_pt)
     assisted = [False] * n
+    ele_prefix = _prefix_sum(per_pt, 'ele_delta')
+    dt_prefix  = _prefix_sum(per_pt, 'dt')
     i = 1
     while i < n:
         j, gain, dur = i, 0.0, 0.0
@@ -331,8 +347,8 @@ def _detect_elev_rate_param(per_pt: list, threshold_m_per_min: float,
                     j = k
                 else:
                     break
-            seg_gain = sum(per_pt[k]['ele_delta'] for k in range(i, j))
-            seg_dur  = sum(per_pt[k]['dt']        for k in range(i, j))
+            seg_gain = ele_prefix[j] - ele_prefix[i]
+            seg_dur  = dt_prefix[j]  - dt_prefix[i]
             if seg_gain >= min_gain_m and seg_dur >= min_dur_sec:
                 for k in range(i, j):
                     assisted[k] = True
@@ -433,9 +449,10 @@ def _algo_speed_osm(per_pt: list, latlons: list, osm_lifts: list) -> list[bool]:
     candidates = [c or t for c, t in zip(candidates, tg)]
     lift_cands = [s for s in _build_segments(candidates) if s['type'] == 'assisted']
     final = [False] * n
+    ele_prefix = _prefix_sum(per_pt, 'ele_delta')
     for seg in lift_cands:
         start, end = seg['start'], seg['end']
-        seg_gain = sum(per_pt[k]['ele_delta'] for k in range(start, end + 1))
+        seg_gain = ele_prefix[end + 1] - ele_prefix[start]
         if seg_gain < _LIFT_MIN_NET_GAIN:
             continue
         snapped = _try_snap_to_osm(start, end, latlons, osm_lifts) if osm_lifts else None
@@ -458,9 +475,10 @@ def _algo_smart_combined(per_pt: list, latlons: list, osm_lifts: list) -> list[b
     candidates = [e or s or t for e, s, t in zip(elev, spd, tg)]
     lift_cands = [s for s in _build_segments(candidates) if s['type'] == 'assisted']
     final = [False] * n
+    ele_prefix = _prefix_sum(per_pt, 'ele_delta')
     for seg in lift_cands:
         start, end = seg['start'], seg['end']
-        seg_gain = sum(per_pt[k]['ele_delta'] for k in range(start, end + 1))
+        seg_gain = ele_prefix[end + 1] - ele_prefix[start]
         if seg_gain < _LIFT_MIN_NET_GAIN:
             continue
         snapped = _try_snap_to_osm(start, end, latlons, osm_lifts) if osm_lifts else None
@@ -514,9 +532,10 @@ def _algo_lift(per_pt: list, latlons: list, osm_lifts: list) -> list[bool]:
     candidates = [e or t for e, t in zip(elev, tg)]
     lift_cands = [s for s in _build_segments(candidates) if s['type'] == 'assisted']
     final = [False] * n
+    ele_prefix = _prefix_sum(per_pt, 'ele_delta')
     for seg in lift_cands:
         start, end = seg['start'], seg['end']
-        seg_gain = sum(per_pt[k]['ele_delta'] for k in range(start, end + 1))
+        seg_gain = ele_prefix[end + 1] - ele_prefix[start]
         if seg_gain < _LIFT_MIN_NET_GAIN:
             continue
         snapped = _try_snap_to_osm(start, end, latlons, osm_lifts) if osm_lifts else None
@@ -541,9 +560,10 @@ def _algo_mtb(per_pt: list, latlons: list, osm_lifts: list) -> list[bool]:
     candidates = [e or t or s or o for e, t, s, o in zip(elev, tg, shuttle, osm_f)]
     lift_cands = [s for s in _build_segments(candidates) if s['type'] == 'assisted']
     final = [False] * n
+    ele_prefix = _prefix_sum(per_pt, 'ele_delta')
     for seg in lift_cands:
         start, end = seg['start'], seg['end']
-        seg_gain = sum(per_pt[k]['ele_delta'] for k in range(start, end + 1))
+        seg_gain = ele_prefix[end + 1] - ele_prefix[start]
         if seg_gain < _LIFT_MIN_NET_GAIN:
             continue
         snapped = _try_snap_to_osm(start, end, latlons, osm_lifts) if osm_lifts else None
