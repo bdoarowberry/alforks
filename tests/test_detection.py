@@ -101,6 +101,48 @@ class TestStationLifts(unittest.TestCase):
         self.assertEqual(detection._detect_station_lifts(latlons, per_pt, []), [False]*5)
 
 
+class TestMedianFilter(unittest.TestCase):
+    """Regression: the k=5 hot path is a separate implementation from the
+    generic path. Assert they produce identical output so a future generic
+    tweak can't silently diverge."""
+
+    def _generic_k5(self, values):
+        # The exact implementation the hot path replaces, inlined for the test.
+        import statistics
+        half = 2
+        n = len(values)
+        out = []
+        for i, v in enumerate(values):
+            window = [values[j] for j in range(max(0, i - half), min(n, i + half + 1))
+                      if values[j] is not None]
+            out.append(statistics.median(window) if window else v)
+        return out
+
+    def test_k5_matches_generic_on_simple(self):
+        values = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+        self.assertEqual(detection._median_filter(values, k=5), self._generic_k5(values))
+
+    def test_k5_matches_generic_with_nones(self):
+        values = [None, 1, 2, None, 5, 4, None, 7, None, 10]
+        self.assertEqual(detection._median_filter(values, k=5), self._generic_k5(values))
+
+    def test_k5_empty_preserves_original(self):
+        # All None → output keeps the None placeholders
+        values = [None, None, None, None, None]
+        self.assertEqual(detection._median_filter(values, k=5), values)
+
+    def test_k5_single_value(self):
+        self.assertEqual(detection._median_filter([42], k=5), [42])
+
+    def test_k5_even_window_averages(self):
+        # Window of 4 non-None values should return mean of the two middle ones
+        values = [1, 2, 3, 4]
+        # At i=0 the window is [1,2,3] (indices 0..2). With None treated as absent,
+        # the window is all 3 values, median = 2. Cross-check with the generic.
+        out = detection._median_filter(values, k=5)
+        self.assertEqual(out, self._generic_k5(values))
+
+
 class TestAlgoSig(unittest.TestCase):
     def test_sig_changes_when_mtb_threshold_changes(self):
         # Tuning any MTB constant must bump the cache signature so stale

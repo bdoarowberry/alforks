@@ -80,10 +80,36 @@ def _sinuosity(start: tuple, end: tuple, path_dist: float) -> float:
 
 
 def _median_filter(values: list, k: int = 5) -> list:
+    """Sliding-window median filter. Hardcoded-fast path for k=5 (the only
+    size used in the app) — avoids statistics.median's sort-and-call
+    overhead on a million-plus filter calls during prewarm. The generic
+    path covers other k values for completeness and tests."""
+    n = len(values)
+    out: list = []
+    if k == 5:
+        # Inline median for windows of size 1–5. len-branching is faster
+        # than sorted(...)[mid] in a hot loop at this size.
+        for i in range(n):
+            lo = i - 2 if i - 2 >= 0 else 0
+            hi = i + 3 if i + 3 <= n else n
+            window = [x for x in values[lo:hi] if x is not None]
+            wl = len(window)
+            if wl == 0:
+                out.append(values[i])
+            elif wl == 1:
+                out.append(window[0])
+            else:
+                window.sort()
+                if wl % 2:
+                    out.append(window[wl // 2])
+                else:
+                    mid = wl // 2
+                    out.append((window[mid - 1] + window[mid]) / 2)
+        return out
+    # Generic path (kept for completeness; not on the hot code path)
     half = k // 2
-    out = []
     for i, v in enumerate(values):
-        window = [values[j] for j in range(max(0, i - half), min(len(values), i + half + 1))
+        window = [values[j] for j in range(max(0, i - half), min(n, i + half + 1))
                   if values[j] is not None]
         out.append(statistics.median(window) if window else v)
     return out
