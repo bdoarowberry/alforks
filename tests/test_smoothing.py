@@ -245,5 +245,82 @@ class TestStatsFromTrimmedAvgSpeed(unittest.TestCase):
         self.assertEqual(out["duration_sec"], 2 * 3600)
 
 
+class TestWriteEndpointValidation(unittest.TestCase):
+    """Regression: write endpoints used to persist any JSON shape, so a bad
+    client could corrupt metadata.json (e.g. trim.start_km = "foo") and
+    every subsequent read would 500. Validators now reject bad payloads
+    with 400."""
+
+    def setUp(self):
+        # Need a real GPX file on disk so _safe_gpx_path passes
+        self.fname = "_validation_regression.gpx"
+        self.fpath = app.GPX_DIR / self.fname
+        self.fpath.write_text(
+            '<?xml version="1.0"?>\n<gpx version="1.1"><trk><trkseg>'
+            '<trkpt lat="50.0" lon="-116.0"><ele>1000</ele><time>2024-01-01T10:00:00Z</time></trkpt>'
+            '<trkpt lat="50.001" lon="-116.0"><ele>1001</ele><time>2024-01-01T10:00:10Z</time></trkpt>'
+            '</trkseg></trk></gpx>',
+            encoding="utf-8",
+        )
+
+    def tearDown(self):
+        self.fpath.unlink(missing_ok=True)
+
+    def test_trim_must_be_object(self):
+        client = app.app.test_client()
+        resp = client.patch(f"/api/activity/{self.fname}/metadata",
+                            json={"trim": "not-an-object"})
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("trim", resp.get_json()["error"])
+
+    def test_trim_numeric_fields(self):
+        client = app.app.test_client()
+        resp = client.patch(f"/api/activity/{self.fname}/metadata",
+                            json={"trim": {"start_km": "foo"}})
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("start_km", resp.get_json()["error"])
+
+    def test_smoothing_window_must_be_int(self):
+        client = app.app.test_client()
+        resp = client.patch(f"/api/activity/{self.fname}/metadata",
+                            json={"smoothing": {"window": "abc"}})
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("window", resp.get_json()["error"])
+
+    def test_segment_overrides_must_be_list(self):
+        client = app.app.test_client()
+        resp = client.patch(f"/api/activity/{self.fname}/segments",
+                            json={"segment_overrides": {"not": "a list"}})
+        self.assertEqual(resp.status_code, 400)
+
+    def test_segment_override_bad_type(self):
+        client = app.app.test_client()
+        resp = client.patch(f"/api/activity/{self.fname}/segments",
+                            json={"segment_overrides": [{"type": "flying", "start": 0, "end": 5}]})
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("type", resp.get_json()["error"])
+
+    def test_segment_override_negative_start(self):
+        client = app.app.test_client()
+        resp = client.patch(f"/api/activity/{self.fname}/segments",
+                            json={"segment_overrides": [{"type": "riding", "start": -1, "end": 5}]})
+        self.assertEqual(resp.status_code, 400)
+
+    def test_valid_trim_passes(self):
+        client = app.app.test_client()
+        resp = client.patch(f"/api/activity/{self.fname}/metadata",
+                            json={"trim": {"start_km": 0.5, "end_km": 1.5}})
+        self.assertEqual(resp.status_code, 200)
+
+    def test_valid_segment_overrides_pass(self):
+        client = app.app.test_client()
+        resp = client.patch(f"/api/activity/{self.fname}/segments",
+                            json={"segment_overrides": [
+                                {"type": "riding", "start": 0, "end": 5},
+                                {"type": "assisted", "start": 6, "end": 10},
+                            ]})
+        self.assertEqual(resp.status_code, 200)
+
+
 if __name__ == "__main__":
     unittest.main()

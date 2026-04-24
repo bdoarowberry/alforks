@@ -1005,6 +1005,81 @@ def api_activity(filename):
     return resp
 
 
+# ─── Request-body validators ──────────────────────────────────────────────
+# Shape-check payloads for write endpoints so a malformed client can't
+# persist state that later crashes a read path (e.g. trim.start_km = "foo"
+# would raise ValueError inside _apply_trim on every request thereafter).
+
+def _bad(msg: str):
+    resp = jsonify({"error": msg})
+    resp.status_code = 400
+    abort(resp)
+
+
+def _validate_trim(v) -> dict:
+    if not isinstance(v, dict):
+        _bad("trim must be an object")
+    out: dict = {}
+    for k in ("start_km", "end_km"):
+        if k in v and v[k] is not None:
+            try:
+                n = float(v[k])
+            except (TypeError, ValueError):
+                _bad(f"trim.{k} must be a number")
+            if n < 0:
+                _bad(f"trim.{k} must be >= 0")
+            out[k] = n
+    return out
+
+
+def _validate_smoothing(v) -> dict:
+    if not isinstance(v, dict):
+        _bad("smoothing must be an object")
+    out: dict = {}
+    if "window" in v and v["window"] is not None:
+        try:
+            w = int(v["window"])
+        except (TypeError, ValueError):
+            _bad("smoothing.window must be an integer")
+        if w < 1:
+            _bad("smoothing.window must be >= 1")
+        out["window"] = w
+    for k in ("start_km", "end_km"):
+        if k in v and v[k] is not None:
+            try:
+                n = float(v[k])
+            except (TypeError, ValueError):
+                _bad(f"smoothing.{k} must be a number")
+            if n < 0:
+                _bad(f"smoothing.{k} must be >= 0")
+            out[k] = n
+    return out
+
+
+_ALLOWED_SEG_TYPES = frozenset({"riding", "assisted"})
+
+
+def _validate_segment_overrides(v) -> list:
+    if not isinstance(v, list):
+        _bad("segment_overrides must be a list")
+    out: list = []
+    for idx, seg in enumerate(v):
+        if not isinstance(seg, dict):
+            _bad(f"segment_overrides[{idx}] must be an object")
+        t = seg.get("type")
+        if t not in _ALLOWED_SEG_TYPES:
+            _bad(f"segment_overrides[{idx}].type must be 'riding' or 'assisted'")
+        try:
+            start = int(seg["start"])
+            end = int(seg["end"])
+        except (KeyError, TypeError, ValueError):
+            _bad(f"segment_overrides[{idx}].start/end must be integers")
+        if start < 0 or end < start:
+            _bad(f"segment_overrides[{idx}] must satisfy 0 <= start <= end")
+        out.append({"type": t, "start": start, "end": end})
+    return out
+
+
 # ─── Activity deletion (archives the GPX rather than hard-deleting) ────────
 ARCHIVE_DIR = GPX_DIR / "_archive_dedup"
 
@@ -1080,11 +1155,16 @@ def api_save_metadata(filename):
     allowed = {"type", "title", "location", "notes", "trim", "issues_approved",
                "smoothing", "excluded_from_stats", "regions_pinned"}
     update  = {k: v for k, v in body.items() if k in allowed}
+    # Shape-check structured fields so a bad payload doesn't corrupt metadata.
+    if "trim" in update and update["trim"]:
+        update["trim"] = _validate_trim(update["trim"])
+    if "smoothing" in update and update["smoothing"]:
+        update["smoothing"] = _validate_smoothing(update["smoothing"])
     # Normalize regions_pinned: accept a list of strings, dedupe, drop empties
     if "regions_pinned" in update:
         pins = update["regions_pinned"] or []
         if not isinstance(pins, list):
-            abort(400)
+            _bad("regions_pinned must be a list of strings")
         seen: set[str] = set()
         cleaned: list[str] = []
         for rid in pins:
@@ -1124,7 +1204,7 @@ def api_save_segments(filename):
     else:
         overrides = (request.get_json(force=True) or {}).get("segment_overrides")
         if overrides is not None:
-            meta.setdefault(filename, {})["segment_overrides"] = overrides
+            meta.setdefault(filename, {})["segment_overrides"] = _validate_segment_overrides(overrides)
     save_metadata(meta, changed_filenames=[filename])
     return jsonify({"ok": True})
 
