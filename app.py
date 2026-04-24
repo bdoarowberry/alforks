@@ -1472,11 +1472,14 @@ def _merge_hr_into_data(data: dict) -> dict:
 
     # Time in HR zones based on the user's effective max HR. Walk consecutive
     # samples (skipping gaps over 5 min) and accumulate the average-bpm interval
-    # into the matching zone.
+    # into the matching zone. Restricted to the exact activity window — the
+    # 2-min buffer used for hr_avg/hr_max would count trailhead resting HR as
+    # zone time, which skews the distribution.
     max_hr = _effective_max_hr()
     zones = [0, 0, 0, 0, 0]
     if max_hr:
-        ordered = [(ms, bpm) for ms, bpm in in_window if bpm is not None]
+        ordered = [(ms, bpm) for ms, bpm in in_window
+                   if bpm is not None and first_ms <= ms <= last_ms]
         ordered.sort(key=lambda x: x[0])
         for i in range(1, len(ordered)):
             ms_prev, bpm_prev = ordered[i-1]
