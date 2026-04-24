@@ -322,5 +322,144 @@ class TestWriteEndpointValidation(unittest.TestCase):
         self.assertEqual(resp.status_code, 200)
 
 
+class TestParseGpxEdgeCases(unittest.TestCase):
+    """Coverage for low-signal GPX inputs that used to slip through untested."""
+
+    def _write_gpx(self, body: str) -> "Path":
+        from pathlib import Path
+        fname = "_edge_case.gpx"
+        fpath: Path = app.GPX_DIR / fname
+        fpath.write_text(
+            '<?xml version="1.0"?>\n<gpx version="1.1"><trk><trkseg>'
+            + body +
+            '</trkseg></trk></gpx>',
+            encoding="utf-8",
+        )
+        return fpath
+
+    def test_no_time_elements(self):
+        # Two points with no <time> → dt=0 throughout, avg_speed None
+        body = (
+            '<trkpt lat="50.0" lon="-116.0"><ele>1000</ele></trkpt>'
+            '<trkpt lat="50.001" lon="-116.0"><ele>1001</ele></trkpt>'
+        )
+        fpath = self._write_gpx(body)
+        try:
+            data = app.parse_gpx(fpath)
+            self.assertIsNotNone(data)
+            self.assertIsNone(data["stats"]["avg_speed_kmh"])
+            # Distance still computed from haversine
+            self.assertGreater(data["stats"]["distance_km"], 0)
+        finally:
+            fpath.unlink(missing_ok=True)
+
+    def test_zero_elevation_track(self):
+        # All points at the same elevation → zero gain and loss
+        body = "".join(
+            f'<trkpt lat="{50 + i * 0.0001}" lon="-116.0"><ele>1000</ele>'
+            f'<time>2024-01-01T10:00:{i:02d}Z</time></trkpt>'
+            for i in range(10)
+        )
+        fpath = self._write_gpx(body)
+        try:
+            data = app.parse_gpx(fpath)
+            self.assertIsNotNone(data)
+            self.assertEqual(data["stats"]["elev_gain_m"], 0)
+            self.assertEqual(data["stats"]["elev_loss_m"], 0)
+        finally:
+            fpath.unlink(missing_ok=True)
+
+
+class TestApplyTrimBoundaries(unittest.TestCase):
+    """Regression: _apply_trim had several edge-case paths that were
+    untested — trim beyond track length, start > end, empty result."""
+
+    def _make_data(self, n: int = 10):
+        pts = [{
+            "lat": 50.0 + i * 0.0001, "lon": -116.0, "ele": 1000 + i,
+            "dist_km": round(i * 0.1, 3),
+            "time": f"2024-01-01T10:{i:02d}:00",
+            "speed": 10,
+        } for i in range(n)]
+        return {
+            "filename": "test.gpx", "name": "t", "date": "2024-01-01",
+            "bbox": [50.0, -116.0, 50.01, -115.99],
+            "points": pts,
+            "segments": [{"type": "riding", "start": 0, "end": n - 1}],
+            "stats": {"distance_km": 0.9, "duration_sec": 540,
+                      "elev_gain_m": 9, "elev_loss_m": 0,
+                      "assisted_gain_m": 0, "avg_speed_kmh": 6,
+                      "max_speed_kmh": 10, "lift_count": 0,
+                      "peak_ele_m": 1009},
+        }
+
+    def test_trim_beyond_full_distance_is_noop(self):
+        d = self._make_data()
+        out = app._apply_trim(d, {"start_km": 0, "end_km": 999})
+        self.assertIs(out, d)
+
+    def test_start_greater_than_end_returns_original(self):
+        d = self._make_data()
+        out = app._apply_trim(d, {"start_km": 0.8, "end_km": 0.2})
+        # start_idx finds first pt where dist >= 0.8 → idx 8
+        # end_idx walks back to last pt where dist <= 0.2 → idx 2
+        # end_idx (2) <= start_idx (8) → return unchanged
+        self.assertIs(out, d)
+
+    def test_empty_trim_dict_noop(self):
+        d = self._make_data()
+        out = app._apply_trim(d, {})
+        self.assertIs(out, d)
+
+    def test_trim_slice_re_bases_distance_to_zero(self):
+        d = self._make_data()
+        out = app._apply_trim(d, {"start_km": 0.3, "end_km": 0.7})
+        self.assertEqual(out["points"][0]["dist_km"], 0.0)
+        self.assertGreater(out["points"][-1]["dist_km"], 0)
+        self.assertIn("trim_full_distance_km", out)
+
+
+class TestMergeHrIntoDataEdgeCases(unittest.TestCase):
+    """Regression: _merge_hr_into_data has several early-return paths for
+    activities that don't have enough time/location data to align HR."""
+
+    def test_empty_points_returns_unchanged(self):
+        data = {"points": [], "date": "2024-01-01T10:00:00", "stats": {}}
+        self.assertIs(app._merge_hr_into_data(data), data)
+
+    def test_missing_date_returns_unchanged(self):
+        data = {"points": [{"lat": 50, "lon": -116}], "stats": {}}
+        self.assertIs(app._merge_hr_into_data(data), data)
+
+    def test_no_start_iso_returns_unchanged(self):
+        data = {"points": [{"lat": 50, "lon": -116}], "date": "", "stats": {}}
+        self.assertIs(app._merge_hr_into_data(data), data)
+
+
+class TestPointInPolygon(unittest.TestCase):
+    """Ray-casting point-in-polygon. Interior and exterior are well-defined;
+    points exactly on an edge are implementation-dependent (ray-casting).
+    Pin down current behaviour with tests so future changes are deliberate."""
+
+    # Unit square with corners at (0,0), (0,1), (1,1), (1,0)
+    # Stored as [[lat, lon], ...] per the _point_in_polygon contract
+    SQUARE = [[0, 0], [0, 1], [1, 1], [1, 0]]
+
+    def test_interior_point(self):
+        self.assertTrue(app._point_in_polygon(0.5, 0.5, self.SQUARE))
+
+    def test_exterior_point(self):
+        self.assertFalse(app._point_in_polygon(2.0, 2.0, self.SQUARE))
+
+    def test_empty_ring_is_outside(self):
+        self.assertFalse(app._point_in_polygon(0.5, 0.5, []))
+
+    def test_concave_polygon_hole_is_outside(self):
+        # L-shape: outside the carved-out quadrant
+        l_shape = [[0, 0], [0, 2], [1, 2], [1, 1], [2, 1], [2, 0]]
+        self.assertFalse(app._point_in_polygon(1.5, 1.5, l_shape))
+        self.assertTrue(app._point_in_polygon(0.5, 1.5, l_shape))
+
+
 if __name__ == "__main__":
     unittest.main()
