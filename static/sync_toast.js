@@ -107,4 +107,36 @@
 
   // First check kicks off shortly after page load
   setTimeout(tick, 1000);
+
+  // Global helper: any page can call window.triggerSyncAll() to kick off a
+  // Strava+Garmin sync without leaving its current view. The toast then
+  // surfaces progress and result. Returns the parsed response from
+  // /api/sync/all so callers can see which sources actually started.
+  window.triggerSyncAll = async function () {
+    try {
+      const resp = await fetch('/api/sync/all', { method: 'POST' });
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      const data = await resp.json();
+      // Show an immediate "syncing" hint even before the next poll fires.
+      const started = (data.started || []);
+      if (started.length) {
+        show(started.map(s => rowHtml(
+          s === 'strava' ? 'Strava' : 'Garmin',
+          { running: true, message: 'starting…' }
+        )).join(''));
+        // Reset hide timer; the regular poll will take over.
+        clearTimeout(hideTimer);
+        // Poll faster while we expect activity to start
+        setTimeout(tick, 500);
+      } else {
+        show('<div style="color:#888">Sync already running.</div>');
+        scheduleHide();
+      }
+      return data;
+    } catch (e) {
+      show('<div style="color:#ef4444">Sync trigger failed: ' + e.message + '</div>');
+      scheduleHide();
+      return null;
+    }
+  };
 })();
