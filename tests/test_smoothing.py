@@ -16,6 +16,20 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # OK for these tests — the prewarm thread is gated behind ALFORKS_PREWARM and
 # won't spin up on import.
 import app
+from flask import jsonify as _jsonify
+
+
+# Register synthetic test endpoints at module-load time. Flask 3.x locks the
+# route table after the first request, so these have to be added before any
+# test class instantiates a test_client and dispatches.
+@app.app.route("/__gzip_test_big__")
+def _gzip_test_big():
+    return _jsonify({"values": list(range(2000))})
+
+
+@app.app.route("/__gzip_test_small__")
+def _gzip_test_small():
+    return _jsonify({"ok": True})
 
 
 class TestApplySmoothing(unittest.TestCase):
@@ -459,6 +473,38 @@ class TestPointInPolygon(unittest.TestCase):
         l_shape = [[0, 0], [0, 2], [1, 2], [1, 1], [2, 1], [2, 0]]
         self.assertFalse(app._point_in_polygon(1.5, 1.5, l_shape))
         self.assertTrue(app._point_in_polygon(0.5, 1.5, l_shape))
+
+
+class TestGzipMiddleware(unittest.TestCase):
+    """Regression: the after_request gzip hook should compress JSON above
+    the threshold, skip below, and respect Accept-Encoding."""
+
+    def test_small_response_is_not_compressed(self):
+        client = app.app.test_client()
+        resp = client.get("/__gzip_test_small__", headers={"Accept-Encoding": "gzip"})
+        self.assertEqual(resp.status_code, 200)
+        self.assertNotEqual(resp.headers.get("Content-Encoding"), "gzip")
+        # Vary is still set so caches partition the response — required even
+        # when this individual response wasn't compressed.
+        self.assertEqual(resp.headers.get("Vary"), "Accept-Encoding")
+
+    def test_no_compression_when_client_doesnt_accept(self):
+        client = app.app.test_client()
+        resp = client.get("/__gzip_test_big__", headers={"Accept-Encoding": "identity"})
+        self.assertEqual(resp.status_code, 200)
+        self.assertNotEqual(resp.headers.get("Content-Encoding"), "gzip")
+
+    def test_large_response_is_compressed(self):
+        import gzip
+        client = app.app.test_client()
+        resp = client.get("/__gzip_test_big__", headers={"Accept-Encoding": "gzip"})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.headers.get("Content-Encoding"), "gzip")
+        self.assertEqual(resp.headers.get("Vary"), "Accept-Encoding")
+        # Werkzeug's test client doesn't auto-decompress; do it ourselves
+        decoded = gzip.decompress(resp.data)
+        import json as _json
+        self.assertEqual(len(_json.loads(decoded)["values"]), 2000)
 
 
 if __name__ == "__main__":

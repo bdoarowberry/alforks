@@ -1,5 +1,6 @@
 """Flask backend for GPX activity viewer."""
 
+import gzip
 import hashlib
 import json
 import logging
@@ -127,6 +128,43 @@ def _migrate_cache_layout() -> None:
 _migrate_cache_layout()
 
 app = Flask(__name__)
+
+
+# ─── Response compression ─────────────────────────────────────────────────────
+# Gzip JSON / HTML / JS / CSS responses above 1 KB when the client sends
+# Accept-Encoding: gzip. Halves /api/activities (~500 KB → ~80 KB on a typical
+# library) and any text payload above the threshold. Skips streaming responses
+# (SSE), already-encoded payloads, and 3xx/4xx/5xx statuses. Stdlib only —
+# no flask-compress dep.
+
+_GZIP_MIN_BYTES = 1024
+_GZIP_TYPES = ("application/json", "text/html", "text/css",
+               "text/plain", "application/javascript", "text/javascript")
+
+
+@app.after_request
+def _gzip_response(response):
+    if response.status_code < 200 or response.status_code >= 300:
+        return response
+    ctype = response.headers.get("Content-Type", "")
+    if not any(ctype.startswith(t) for t in _GZIP_TYPES):
+        return response
+    # Compressible content type — declare Vary so caches partition responses
+    # by Accept-Encoding, even on the small responses we leave untouched.
+    response.headers["Vary"] = "Accept-Encoding"
+    if "gzip" not in request.headers.get("Accept-Encoding", "").lower():
+        return response
+    if response.direct_passthrough or response.is_streamed:
+        # send_file-style responses and SSE generators — leave alone
+        return response
+    if response.headers.get("Content-Encoding"):
+        return response
+    data = response.get_data()
+    if len(data) < _GZIP_MIN_BYTES:
+        return response
+    response.set_data(gzip.compress(data, compresslevel=6))
+    response.headers["Content-Encoding"] = "gzip"
+    return response
 
 
 # ─── Config ───────────────────────────────────────────────────────────────────
