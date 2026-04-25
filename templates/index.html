@@ -407,6 +407,8 @@
       <div class="ah-context">
         <div class="ah-context-top">
           <span id="header-datetime"></span>
+          <button id="compare-activity-btn" class="ah-action-btn" onclick="openCompareWith()"
+                  title="Pair this activity with another and overlay them on a map">⇄</button>
           <button id="exclude-activity-btn" class="ah-action-btn" onclick="toggleExcluded()"
                   title="Exclude from statistics">⊘</button>
           <button id="delete-activity-btn" class="ah-action-btn" onclick="deleteCurrent()"
@@ -2027,6 +2029,13 @@ function exitSmoothMode() {
   document.getElementById('btn-smooth').classList.remove('edit-active');
   document.getElementById('smooth-bar').classList.remove('visible');
   document.getElementById('smooth-overlay').classList.remove('visible');
+}
+
+function openCompareWith() {
+  if (!currentFilename) return;
+  // Send the user to the pair-compare page with this activity pre-loaded as A.
+  // The compare page picks up ?a=<file> and lets them choose B from a dropdown.
+  location.href = `/compare?a=${encodeURIComponent(currentFilename)}`;
 }
 
 async function toggleExcluded() {

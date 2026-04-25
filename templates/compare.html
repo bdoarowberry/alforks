@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AlForks – Pair Compare</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="/static/utils.js"></script>
+  <script src="/static/sync_toast.js" defer></script>
+  <link rel="stylesheet" href="/static/base.css">
+  <style>
+    body { display: flex; flex-direction: column; min-height: 100vh; }
+    main { flex: 1; padding: 18px 22px 32px; max-width: 1680px; margin: 0 auto; width: 100%; display: flex; flex-direction: column; gap: 16px; }
+    h2 { font-size: 0.9rem; color: #ddd; font-weight: 500; margin-bottom: 10px; }
+
+    /* Activity pickers */
+    .pickers { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    .picker { background: #12151a; border: 1px solid #2a2d35; border-radius: 8px; padding: 12px 14px; }
+    .picker.a { border-left: 3px solid #3b82f6; }
+    .picker.b { border-left: 3px solid #f59e0b; }
+    .picker-label { font-size: 0.62rem; text-transform: uppercase; letter-spacing: 0.1em; color: #888; margin-bottom: 6px; font-weight: 600; }
+    .picker.a .picker-label { color: #3b82f6; }
+    .picker.b .picker-label { color: #f59e0b; }
+    .picker select { width: 100%; background: #1a1d23; border: 1px solid #2a2d35; border-radius: 4px; color: #e0e0e0; padding: 6px 8px; font-size: 0.82rem; font-family: inherit; }
+    .picker select:focus { outline: none; border-color: #3b82f6; }
+
+    /* Map */
+    #compare-map { height: 460px; border-radius: 8px; border: 1px solid #2a2d35; background: #0a0c10; }
+
+    /* Stats panel */
+    .stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    .stats-card { background: #12151a; border: 1px solid #2a2d35; border-radius: 8px; padding: 12px 14px; }
+    .stats-card.a { border-top: 2px solid #3b82f6; }
+    .stats-card.b { border-top: 2px solid #f59e0b; }
+    .stats-title { font-size: 0.86rem; color: #fff; font-weight: 500; margin-bottom: 4px; }
+    .stats-sub { font-size: 0.7rem; color: #999; margin-bottom: 10px; }
+    .stats-rows { display: grid; grid-template-columns: 1fr auto; row-gap: 4px; column-gap: 12px; font-size: 0.78rem; }
+    .stats-rows .label { color: #888; }
+    .stats-rows .value { color: #e0e0e0; font-weight: 500; }
+
+    /* Diff column */
+    .diff-card { background: #14171c; border: 1px solid #2a2d35; border-radius: 8px; padding: 12px 14px; margin-top: 14px; }
+    .diff-title { font-size: 0.62rem; text-transform: uppercase; letter-spacing: 0.1em; color: #888; margin-bottom: 8px; font-weight: 600; }
+    .diff-rows { display: grid; grid-template-columns: 1fr auto auto auto; column-gap: 12px; row-gap: 4px; font-size: 0.78rem; align-items: baseline; }
+    .diff-rows .label { color: #888; }
+    .diff-rows .a-val  { color: #3b82f6; text-align: right; }
+    .diff-rows .b-val  { color: #f59e0b; text-align: right; }
+    .diff-rows .delta  { text-align: right; font-size: 0.72rem; }
+    .diff-rows .delta.up   { color: #4ade80; }
+    .diff-rows .delta.down { color: #f87171; }
+    .diff-rows .delta.flat { color: #888; }
+
+    .empty { padding: 32px; text-align: center; color: #888; font-size: 0.85rem; }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>AlForks</h1>
+  <nav>
+    <a href="/summary">Summary</a>
+    <a href="/">Ride Logs</a>
+    <a href="/comparison">Compare Logs</a>
+    <a href="/heatmap">Heat Map</a>
+    <a href="/setup">Setup</a>
+    <button class="nav-sync-btn" onclick="triggerSyncAll()" title="Sync Strava + Garmin now">Sync</button>
+  </nav>
+</header>
+
+<main>
+  <div class="pickers">
+    <div class="picker a">
+      <div class="picker-label">Activity A · blue</div>
+      <select id="picker-a"></select>
+    </div>
+    <div class="picker b">
+      <div class="picker-label">Activity B · amber</div>
+      <select id="picker-b"></select>
+    </div>
+  </div>
+
+  <div id="compare-map"></div>
+
+  <div id="stats-area">
+    <div class="empty">Pick two activities to overlay them.</div>
+  </div>
+</main>
+
+<script>
+const TYPES = {{ types_json | safe }};
+
+// ─── State ───────────────────────────────────────────────────────────────
+let allActivities = [];
+let map;
+// Track every overlay we draw so we can remove just our own layers and not
+// (e.g.) the tile layer or any future highlight rectangles.
+let drawnOverlays = [];
+let layerA, layerB;
+
+function colorFor(slot) { return slot === 'a' ? '#3b82f6' : '#f59e0b'; }
+
+// ─── Map ─────────────────────────────────────────────────────────────────
+function initMap() {
+  map = L.map('compare-map', { zoomControl: true });
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+    maxZoom: 19, attribution: '© CartoDB · © OpenStreetMap contributors',
+  }).addTo(map);
+  map.setView([50, -116], 6);  // sensible default; will fit-bounds on load
+}
+
+function readQuery() {
+  const u = new URL(location.href);
+  return { a: u.searchParams.get('a') || '', b: u.searchParams.get('b') || '' };
+}
+
+function writeQuery(a, b) {
+  const u = new URL(location.href);
+  if (a) u.searchParams.set('a', a); else u.searchParams.delete('a');
+  if (b) u.searchParams.set('b', b); else u.searchParams.delete('b');
+  history.replaceState(null, '', u.toString());
+}
+
+// ─── Pickers ─────────────────────────────────────────────────────────────
+function buildPickers() {
+  const sortedActs = [...allActivities].sort((x, y) => (y.date || '').localeCompare(x.date || ''));
+  function options(selected) {
+    const blank = `<option value="">— pick activity —</option>`;
+    const opts = sortedActs.map(a => {
+      const date = (a.date || '').slice(0, 10);
+      const name = a.meta?.title || a.name || a.filename;
+      const dist = a.stats?.distance_km != null ? ` · ${a.stats.distance_km} km` : '';
+      const sel = a.filename === selected ? ' selected' : '';
+      return `<option value="${a.filename}"${sel}>${date} — ${name}${dist}</option>`;
+    }).join('');
+    return blank + opts;
+  }
+  const q = readQuery();
+  const pa = document.getElementById('picker-a');
+  const pb = document.getElementById('picker-b');
+  pa.innerHTML = options(q.a);
+  pb.innerHTML = options(q.b);
+  pa.onchange = () => onPick();
+  pb.onchange = () => onPick();
+}
+
+async function onPick() {
+  const a = document.getElementById('picker-a').value;
+  const b = document.getElementById('picker-b').value;
+  if (a && b && a === b) {
+    document.getElementById('stats-area').innerHTML =
+      '<div class="empty">Pick two different activities to overlay them.</div>';
+    return;
+  }
+  writeQuery(a, b);
+  await render(a, b);
+}
+
+// ─── Render overlay ──────────────────────────────────────────────────────
+async function loadActivity(filename) {
+  if (!filename) return null;
+  try {
+    const r = await fetch(`/api/activity/${encodeURIComponent(filename)}`);
+    if (!r.ok) return null;
+    return await r.json();
+  } catch (e) {
+    return null;
+  }
+}
+
+function fitBoundsBoth(boundsA, boundsB) {
+  if (boundsA && boundsB) {
+    map.fitBounds(boundsA.extend(boundsB.getSouthWest()).extend(boundsB.getNorthEast()), { padding: [24, 24] });
+  } else if (boundsA) {
+    map.fitBounds(boundsA, { padding: [24, 24] });
+  } else if (boundsB) {
+    map.fitBounds(boundsB, { padding: [24, 24] });
+  }
+}
+
+function drawTrack(data, slot) {
+  if (!data || !data.points || data.points.length < 2) return null;
+  const latlngs = data.points.map(p => [p.lat, p.lon]);
+  const layer = L.polyline(latlngs, {
+    color: colorFor(slot),
+    weight: 4,
+    opacity: 0.9,
+  }).addTo(map);
+  drawnOverlays.push(layer);
+  // Start/end markers
+  const startM = L.circleMarker(latlngs[0], { radius: 6, color: '#22c55e', fillColor: '#22c55e', fillOpacity: 0.9, weight: 2 }).addTo(map);
+  const endM   = L.circleMarker(latlngs[latlngs.length - 1], { radius: 6, color: '#ef4444', fillColor: '#ef4444', fillOpacity: 0.9, weight: 2 }).addTo(map);
+  drawnOverlays.push(startM, endM);
+  return layer;
+}
+
+async function render(aFile, bFile) {
+  // Wipe previous overlays only (leaves the tile layer alone).
+  drawnOverlays.forEach(l => map.removeLayer(l));
+  drawnOverlays = [];
+  layerA = layerB = null;
+  document.getElementById('stats-area').innerHTML = aFile || bFile
+    ? '<div class="empty">Loading…</div>'
+    : '<div class="empty">Pick two activities to overlay them.</div>';
+
+  const [dataA, dataB] = await Promise.all([loadActivity(aFile), loadActivity(bFile)]);
+  layerA = drawTrack(dataA, 'a');
+  layerB = drawTrack(dataB, 'b');
+  fitBoundsBoth(layerA?.getBounds(), layerB?.getBounds());
+  renderStats(dataA, dataB);
+}
+
+// ─── Stats panel ─────────────────────────────────────────────────────────
+function statsCardHtml(data, slot) {
+  if (!data) return `<div class="stats-card ${slot}"><div class="empty">Not loaded.</div></div>`;
+  const s = data.stats || {};
+  const meta = data.meta || {};
+  const t = TYPES.find(x => x.id === (meta.type || data.effective_type)) || null;
+  const tBadge = t ? `<span class="type-badge" style="background:${t.color};color:#fff;font-size:0.6rem;padding:1px 5px;border-radius:3px;text-transform:uppercase;letter-spacing:0.05em;font-weight:600;margin-left:6px">${t.label}</span>` : '';
+  const date = (data.date || '').slice(0, 10);
+  const title = meta.title || data.name || data.filename;
+  const rows = [
+    ['Distance',     s.distance_km    != null ? `${fmtNum(s.distance_km, 1)} km` : '--'],
+    ['Climbing',     s.elev_gain_m    != null ? `${fmtNum(s.elev_gain_m)} m` : '--'],
+    ['Descent',      s.elev_loss_m    != null ? `${fmtNum(s.elev_loss_m)} m` : '--'],
+    ['Avg speed',    s.avg_speed_kmh  != null ? `${fmtNum(s.avg_speed_kmh, 1)} km/h` : '--'],
+    ['Max speed',    s.max_speed_kmh  != null ? `${fmtNum(s.max_speed_kmh, 1)} km/h` : '--'],
+    ['Duration',     fmtDuration(s.duration_sec)],
+    ['Lift count',   fmtNum(s.lift_count || 0)],
+  ];
+  return `<div class="stats-card ${slot}">
+    <div class="stats-title">${title}${tBadge}</div>
+    <div class="stats-sub">${date}</div>
+    <div class="stats-rows">
+      ${rows.map(([l, v]) => `<span class="label">${l}</span><span class="value">${v}</span>`).join('')}
+    </div>
+  </div>`;
+}
+
+function deltaHtml(metric, aVal, bVal, fmt, higherIsBetter) {
+  if (aVal == null || bVal == null) {
+    return `<span class="label">${metric}</span><span class="a-val">${aVal != null ? fmt(aVal) : '--'}</span><span class="b-val">${bVal != null ? fmt(bVal) : '--'}</span><span class="delta flat">--</span>`;
+  }
+  const diff   = bVal - aVal;
+  const absD   = Math.abs(diff);
+  const pct    = aVal !== 0 ? (diff / aVal * 100) : 0;
+  const cls    = diff === 0 ? 'flat' : (higherIsBetter ? (diff > 0 ? 'up' : 'down') : (diff > 0 ? 'down' : 'up'));
+  const sign   = diff > 0 ? '+' : (diff < 0 ? '-' : '');
+  // Formatters receive the absolute value so fmtDuration / fmtNum never see a
+  // negative input — the sign is prepended by deltaHtml above.
+  const pctSign = pct > 0 ? '+' : (pct < 0 ? '-' : '');
+  const pctStr = aVal !== 0 ? ` (${pctSign}${Math.abs(pct).toFixed(0)}%)` : '';
+  return `<span class="label">${metric}</span><span class="a-val">${fmt(aVal)}</span><span class="b-val">${fmt(bVal)}</span><span class="delta ${cls}">${sign}${fmt(absD)}${pctStr}</span>`;
+}
+
+function renderStats(dataA, dataB) {
+  const area = document.getElementById('stats-area');
+  if (!dataA && !dataB) {
+    area.innerHTML = '<div class="empty">Pick two activities to overlay them.</div>';
+    return;
+  }
+  let html = `<div class="stats-grid">${statsCardHtml(dataA, 'a')}${statsCardHtml(dataB, 'b')}</div>`;
+  if (dataA && dataB) {
+    const sa = dataA.stats || {}, sb = dataB.stats || {};
+    html += `<div class="diff-card">
+      <div class="diff-title">B − A</div>
+      <div class="diff-rows">
+        <span class="label" style="grid-column:1"></span>
+        <span class="a-val" style="font-size:0.62rem;color:#3b82f6">A</span>
+        <span class="b-val" style="font-size:0.62rem;color:#f59e0b">B</span>
+        <span class="delta" style="font-size:0.62rem;color:#888">Δ</span>
+        ${deltaHtml('Distance',   sa.distance_km,   sb.distance_km,   v => `${fmtNum(v, 1)} km`,    true)}
+        ${deltaHtml('Climbing',   sa.elev_gain_m,   sb.elev_gain_m,   v => `${fmtNum(v)} m`,        true)}
+        ${deltaHtml('Descent',    sa.elev_loss_m,   sb.elev_loss_m,   v => `${fmtNum(v)} m`,        true)}
+        ${deltaHtml('Avg speed',  sa.avg_speed_kmh, sb.avg_speed_kmh, v => `${fmtNum(v, 1)} km/h`,  true)}
+        ${deltaHtml('Max speed',  sa.max_speed_kmh, sb.max_speed_kmh, v => `${fmtNum(v, 1)} km/h`,  true)}
+        ${deltaHtml('Duration',   sa.duration_sec,  sb.duration_sec,  v => fmtDuration(v),          false)}
+        ${deltaHtml('Lift count', sa.lift_count,    sb.lift_count,    v => fmtNum(v),               true)}
+      </div>
+    </div>`;
+  }
+  area.innerHTML = html;
+}
+
+// ─── Init ────────────────────────────────────────────────────────────────
+async function init() {
+  initMap();
+  try {
+    const r = await fetch('/api/activities');
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    allActivities = await r.json();
+    if (!Array.isArray(allActivities)) throw new Error('unexpected response shape');
+  } catch (e) {
+    document.getElementById('stats-area').innerHTML =
+      '<div class="empty" style="color:#ef4444">Failed to load activity list: ' + e.message + '</div>';
+    return;
+  }
+  buildPickers();
+  const q = readQuery();
+  await render(q.a, q.b);
+}
+init();
+</script>
+</body>
+</html>

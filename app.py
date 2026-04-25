@@ -1643,6 +1643,14 @@ def comparison_page():
                            mapbox_token=load_config().get("mapbox_token", ""))
 
 
+@app.route("/compare")
+def compare_overlay_page():
+    """Pair two activities: overlay both polylines on a single map and show
+    stats side-by-side. Filenames come in as ?a=<file>&b=<file>.
+    """
+    return render_template("compare.html", types_json=json.dumps(load_types()))
+
+
 @app.route("/api/comparison")
 def api_comparison():
     type_arg = (request.args.get("type") or "").strip()
