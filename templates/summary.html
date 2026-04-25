@@ -81,6 +81,20 @@
     .record-value { font-size: 1.15rem; font-weight: 600; color: #f59e0b; }
     .record-sub { font-size: 0.7rem; color: #999; margin-top: 3px; }
 
+    /* Per-type records — one card per type, listing that type's bests
+       as compact rows. Sits below the cross-type Records grid. */
+    .pt-records-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }
+    .pt-record-card { background: #12151a; border: 1px solid #2a2d35; border-radius: 8px; padding: 12px 14px; }
+    .pt-record-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; padding-bottom: 7px; border-bottom: 1px solid #1e2128; }
+    .pt-record-swatch { width: 10px; height: 10px; border-radius: 50%; }
+    .pt-record-type { font-size: 0.78rem; font-weight: 600; color: #e0e0e0; }
+    .pt-record-count { font-size: 0.66rem; color: #777; margin-left: auto; }
+    .pt-record-row { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; padding: 4px 0; font-size: 0.74rem; }
+    .pt-record-row-label { color: #888; flex-shrink: 0; }
+    .pt-record-row-value { color: #f59e0b; font-weight: 500; flex-shrink: 0; }
+    .pt-record-row-link { color: #999; text-decoration: none; font-size: 0.68rem; flex: 1; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+    .pt-record-row-link:hover { color: #ccc; }
+
     .type-badge { font-size: 0.58rem; padding: 1px 5px; border-radius: 3px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; display: inline-block; }
   </style>
 </head>
@@ -157,8 +171,14 @@
 
   <!-- Records -->
   <div>
-    <div class="section-title">Records</div>
+    <div class="section-title">Records · Overall</div>
     <div class="records-grid" id="records-grid"></div>
+  </div>
+
+  <!-- Per-type records -->
+  <div>
+    <div class="section-title">Records · By Type</div>
+    <div class="pt-records-grid" id="pt-records-grid"></div>
   </div>
 </main>
 
@@ -607,6 +627,65 @@ function renderRecords() {
     card('Fastest Max Speed',  `${bySpeed.stats.max_speed_kmh} km/h`, bySpeed),
     card('Longest Duration',   fmtDuration(byDur.stats.duration_sec), byDur),
   ].join('');
+
+  renderPerTypeRecords(acts);
+}
+
+// Per-type records — one compact card per activity type that has at least
+// one ride in the filtered set. Each card lists that type's bests for the
+// same five metrics as the overall Records grid.
+function renderPerTypeRecords(acts) {
+  const grid = document.getElementById('pt-records-grid');
+  if (!acts.length) { grid.innerHTML = ''; return; }
+
+  // Bucket by effective_type so an MTB ride in an MTB region without an
+  // explicit meta.type still groups under MTB.
+  const byType = {};
+  acts.forEach(a => {
+    const t = a.effective_type || a.meta?.type || '';
+    if (!t) return;  // skip untagged
+    (byType[t] = byType[t] || []).push(a);
+  });
+
+  // Render in TYPES order so colours and ordering stay consistent with the
+  // rest of the page.
+  const order = TYPES.map(t => t.id).filter(id => byType[id] && byType[id].length);
+  if (!order.length) { grid.innerHTML = '<div class="hero-sub">No tagged activities in this view.</div>'; return; }
+
+  function topBy(typeActs, key) {
+    return [...typeActs].sort((a, b) => (b.stats[key] || 0) - (a.stats[key] || 0))[0];
+  }
+  function row(label, value, act) {
+    if (!act) return '';
+    const name = act.meta?.title || act.name || act.filename;
+    return `<div class="pt-record-row">
+      <span class="pt-record-row-label">${label}</span>
+      <span class="pt-record-row-value">${value}</span>
+      <a href="/?file=${encodeURIComponent(act.filename)}" class="pt-record-row-link" title="${name}">${name}</a>
+    </div>`;
+  }
+
+  grid.innerHTML = order.map(typeId => {
+    const t = TYPES.find(x => x.id === typeId);
+    const tActs = byType[typeId];
+    const dist  = topBy(tActs, 'distance_km');
+    const gain  = topBy(tActs, 'elev_gain_m');
+    const loss  = topBy(tActs, 'elev_loss_m');
+    const speed = topBy(tActs, 'max_speed_kmh');
+    const dur   = topBy(tActs, 'duration_sec');
+    return `<div class="pt-record-card">
+      <div class="pt-record-head">
+        <span class="pt-record-swatch" style="background:${t.color}"></span>
+        <span class="pt-record-type">${t.label}</span>
+        <span class="pt-record-count">${tActs.length} activit${tActs.length === 1 ? 'y' : 'ies'}</span>
+      </div>
+      ${row('Longest',   `${dist.stats.distance_km} km`, dist)}
+      ${row('Climbing',  `${fmtNum(gain.stats.elev_gain_m)} m`, gain)}
+      ${row('Descent',   `${fmtNum(loss.stats.elev_loss_m)} m`, loss)}
+      ${row('Top speed', speed.stats.max_speed_kmh != null ? `${speed.stats.max_speed_kmh} km/h` : '--', speed)}
+      ${row('Duration',  fmtDuration(dur.stats.duration_sec), dur)}
+    </div>`;
+  }).join('');
 }
 
 // ─── Filters UI ──────────────────────────────────────────────────────────────
