@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import logging
 import math
 import os
 import re
@@ -35,6 +36,11 @@ from detection import (
     _per_pt_from_points,
     haversine,
 )
+
+# Module-level logger. Configured in __main__; tests / imports get a default
+# null handler so unconfigured emits don't print warnings to stderr.
+logger = logging.getLogger("alforks")
+logger.addHandler(logging.NullHandler())
 
 _ROOT         = Path(__file__).parent
 GPX_DIR       = _ROOT / "tracks"
@@ -115,7 +121,7 @@ def _migrate_cache_layout() -> None:
     except Exception:
         pass
     if moved:
-        print(f"Cache layout migrated: {moved} file(s) moved to subdirectories")
+        logger.info("Cache layout migrated: %d file(s) moved to subdirectories", moved)
 
 
 _migrate_cache_layout()
@@ -266,9 +272,11 @@ def load_metadata() -> dict:
             try:
                 _metadata_cache = json.loads(METADATA_FILE.read_text(encoding="utf-8"))
             except Exception as e:
-                print(f"[metadata] failed to parse {METADATA_FILE.name}: {e} — "
-                      f"reads will use empty dict; writes will be refused until repaired",
-                      file=sys.stderr)
+                logger.warning(
+                    "Failed to parse %s: %s — reads will use empty dict; "
+                    "writes will be refused until repaired",
+                    METADATA_FILE.name, e,
+                )
                 _metadata_cache = {}
                 _metadata_corrupt = True
         else:
@@ -1864,7 +1872,7 @@ def debug_hr_day(date_str):
     try:
         payload = json.loads(fp.read_text(encoding="utf-8"))
     except Exception as e:
-        print(f"[debug_hr_day] failed to parse {fp.name}: {e}", file=sys.stderr)
+        logger.warning("debug_hr_day: failed to parse %s: %s", fp.name, e)
         return f"HR cache for {date_str} is corrupt", 500
     samples = [[ms, bpm] for ms, bpm in (payload.get("samples") or []) if bpm is not None]
     return render_template("debug_hr.html", date_str=date_str, samples=json.dumps(samples),
@@ -2714,7 +2722,7 @@ def api_regions_search():
         with urllib.request.urlopen(req, timeout=8) as resp:
             payload = json.loads(resp.read().decode("utf-8"))
     except Exception as e:
-        print(f"[regions/search] OSM lookup failed: {e}", file=sys.stderr)
+        logger.warning("regions/search: OSM lookup failed: %s", e)
         return jsonify({"results": [], "error": "region search failed"}), 502
     DENY_CLASSES = set(_get_osm_deny_classes())
     results = []
@@ -2854,11 +2862,18 @@ _maybe_autosync_on_startup()
 
 
 if __name__ == "__main__":
+    # Configure root + alforks logger when running as the Flask entrypoint.
+    # Default level is INFO; ALFORKS_DEBUG=1 bumps to DEBUG.
+    debug = os.environ.get("ALFORKS_DEBUG") == "1"
+    logging.basicConfig(
+        level=logging.DEBUG if debug else logging.INFO,
+        format="%(asctime)s %(levelname)-7s %(name)s: %(message)s",
+        datefmt="%H:%M:%S",
+    )
     # Enable background prewarm only for the Flask entrypoint — not when
     # app.py is imported by tests or tooling.
     os.environ.setdefault("ALFORKS_PREWARM", "1")
     threading.Thread(target=_prewarm, daemon=True, name="cache-prewarm").start()
-    print("Starting GPX viewer at http://localhost:5000")
+    logger.info("Starting GPX viewer at http://localhost:5000")
     # Debug mode leaks tracebacks — opt in via ALFORKS_DEBUG=1 for local dev.
-    debug = os.environ.get("ALFORKS_DEBUG") == "1"
     app.run(debug=debug, threaded=True)
