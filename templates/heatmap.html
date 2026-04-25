@@ -26,8 +26,13 @@
     .mode-btn.active { background: #1a2a3a; color: #3b82f6; }
     .mode-btn:disabled { opacity: 0.35; cursor: default; }
 
-    .layer-toggle-btn { background: rgba(18,21,26,0.88); border: 1px solid #2a2d35; color: #ccc; font-size: 0.72rem; padding: 4px 10px; border-radius: 4px; cursor: pointer; font-family: inherit; transition: all 0.12s; }
-    .layer-toggle-btn:hover { border-color: #3b82f6; color: #fff; }
+    /* Map/Satellite/3D view toggle — overlays the map, matching Ride Logs. */
+    #view-toggle { position: absolute; top: 10px; right: 10px; z-index: 1000; display: flex; border: 1px solid #2a2d35; border-radius: 4px; overflow: hidden; }
+    .vtbtn { padding: 4px 11px; background: rgba(18,21,26,0.88); color: #ccc; border: none; border-right: 1px solid #2a2d35; cursor: pointer; font-size: 0.72rem; font-family: inherit; transition: all 0.12s; }
+    .vtbtn:last-child { border-right: none; }
+    .vtbtn:hover { color: #fff; }
+    .vtbtn.active { background: #1a2a3a; color: #3b82f6; }
+    .vtbtn:disabled { opacity: 0.35; cursor: default; }
 
     #map-wrap { flex: 1; position: relative; min-height: 0; display: flex; flex-direction: column; }
     #map { flex: 1; min-height: 0; }
@@ -98,13 +103,18 @@
   <div id="mode-group">
     <button class="mode-btn"        id="btn-heat"   onclick="setMode('heat')">Heat</button>
     <button class="mode-btn active" id="btn-routes" onclick="setMode('routes')">Routes</button>
-    <button class="mode-btn"        id="btn-3d"     onclick="setMode('3d')"{% if not mapbox_token %} disabled title="No Mapbox token configured"{% endif %}>3D</button>
   </div>
 </div>
 
 <div id="map-wrap">
   <div id="map"></div>
   <div id="map-3d"></div>
+
+  <div id="view-toggle">
+    <button class="vtbtn active" id="vt-map"       onclick="setMapView('map')">Map</button>
+    <button class="vtbtn"        id="vt-satellite" onclick="setMapView('satellite')">Satellite</button>
+    <button class="vtbtn"        id="vt-3d"        onclick="setMapView('3d')"{% if not mapbox_token %} disabled title="No Mapbox token configured"{% endif %}>3D</button>
+  </div>
 
   <div id="stats-overlay">
     <div class="ov-stat"><span class="ov-label">Activities</span><span class="ov-value" id="ov-count">--</span></div>
@@ -147,7 +157,11 @@ const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov
 let allActivities = [];
 let activeYear = 'all';
 let activeType = 'all';
-let viewMode   = 'routes';
+// Two independent axes:
+//   viewMode: 'heat' | 'routes' — visualization (only meaningful in 2D)
+//   mapView:  'map'  | 'satellite' | '3d' — basemap / canvas
+let viewMode = 'routes';
+let mapView  = 'map';
 
 // ─── Leaflet map ──────────────────────────────────────────────────────────────
 const map = L.map('map', { zoomControl: true, preferCanvas: true, rotate: true, touchRotate: true }).setView([51, -114], 11);
@@ -160,22 +174,6 @@ const satelliteLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/
   maxZoom: 19, attribution: '© <a href="https://www.esri.com/">Esri</a> World Imagery',
 });
 streetLayer.addTo(map);
-
-const LayerToggle = L.Control.extend({
-  onAdd() {
-    const btn = L.DomUtil.create('button', 'layer-toggle-btn');
-    btn.textContent = 'Satellite';
-    L.DomEvent.disableClickPropagation(btn);
-    let sat = false;
-    btn.onclick = () => {
-      sat = !sat;
-      if (sat) { map.removeLayer(streetLayer);    satelliteLayer.addTo(map); btn.textContent = 'Map'; }
-      else     { map.removeLayer(satelliteLayer); streetLayer.addTo(map);    btn.textContent = 'Satellite'; }
-    };
-    return btn;
-  },
-});
-new LayerToggle({ position: 'topright' }).addTo(map);
 
 let heatLayer  = null;
 let routeGroup = L.layerGroup().addTo(map);
@@ -324,25 +322,38 @@ function applyFilter() {
 }
 
 function render() {
-  if      (viewMode === 'heat')   renderHeat();
-  else if (viewMode === '3d')     render3D();
-  else                            renderRoutes();
+  if (mapView === '3d')          render3D();
+  else if (viewMode === 'heat')  renderHeat();
+  else                           renderRoutes();
   if (allActivities.length) fitBounds();
   updateStats();
 }
 
-// ─── Mode toggle ─────────────────────────────────────────────────────────────
+// ─── Mode toggle (Heat / Routes — 2D visualization) ──────────────────────────
 function setMode(mode) {
   viewMode = mode;
   document.getElementById('btn-heat').classList.toggle('active',   mode === 'heat');
   document.getElementById('btn-routes').classList.toggle('active', mode === 'routes');
-  document.getElementById('btn-3d').classList.toggle('active',     mode === '3d');
+  // Heat / Routes only matter in 2D. If the user is in 3D, leave the canvas
+  // alone — render() will keep showing the 3D layer; the new mode applies as
+  // soon as they switch back to Map or Satellite.
+  if (!activeSource && allActivities.length > 0) render();
+}
+
+// ─── View toggle (Map / Satellite / 3D — basemap / canvas) ───────────────────
+function setMapView(view) {
+  mapView = view;
+  ['map', 'satellite', '3d'].forEach(v =>
+    document.getElementById(`vt-${v}`).classList.toggle('active', v === view));
+  // Heat/Routes mode buttons are dimmed in 3D since they don't apply there.
+  document.getElementById('btn-heat').disabled   = (view === '3d');
+  document.getElementById('btn-routes').disabled = (view === '3d');
 
   const leafletEl = document.getElementById('map');
   const mb3dEl    = document.getElementById('map-3d');
   const exagEl    = document.getElementById('exag-ctrl-3d');
 
-  if (mode === '3d') {
+  if (view === '3d') {
     leafletEl.style.display = 'none';
     mb3dEl.style.display    = 'block';
     exagEl.style.display    = 'flex';
@@ -350,6 +361,9 @@ function setMode(mode) {
     leafletEl.style.display = '';
     mb3dEl.style.display    = 'none';
     exagEl.style.display    = 'none';
+    // Swap the active basemap tile layer in place.
+    map.removeLayer(view === 'map' ? satelliteLayer : streetLayer);
+    (view === 'map' ? streetLayer : satelliteLayer).addTo(map);
     map.invalidateSize();
   }
 
