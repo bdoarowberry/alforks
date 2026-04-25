@@ -12,3 +12,7 @@ function fmtDate(iso) {
   if (!iso) return '';
   return new Date(iso).toLocaleDateString('en-CA', { year: 'numeric', month: 'short', day: 'numeric' });
 }
+
+function fmtNum(n, d = 0) {
+  return n != null ? n.toLocaleString('en-CA', { maximumFractionDigits: d, minimumFractionDigits: d }) : '--';
+}

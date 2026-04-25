@@ -11,6 +11,7 @@
   <link href="https://api.mapbox.com/mapbox-gl-js/v3.3.0/mapbox-gl.css" rel="stylesheet">
   <script src="https://api.mapbox.com/mapbox-gl-js/v3.3.0/mapbox-gl.js"></script>
   <link rel="stylesheet" href="/static/base.css">
+  <script src="/static/utils.js"></script>
   <script src="/static/sync_toast.js" defer></script>
   <style>
     body { height: 100vh; display: flex; flex-direction: column; }
@@ -240,11 +241,6 @@ function apply3DRoutes() {
 function onExag3DChange(v) {
   document.getElementById('exag-val-3d').textContent = `${parseFloat(v).toFixed(1)}×`;
   if (mb3d?.getTerrain()) mb3d.setTerrain({ source: 'mapbox-dem', exaggeration: parseFloat(v) });
-}
-
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-function fmtNum(n, d = 0) {
-  return n != null ? n.toLocaleString('en-CA', { maximumFractionDigits: d, minimumFractionDigits: d }) : '--';
 }
 
 // ─── Render ──────────────────────────────────────────────────────────────────

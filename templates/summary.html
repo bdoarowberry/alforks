@@ -163,12 +163,9 @@ let allActivities = [];
 let activeYear = 'all', activeType = 'all';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
-function fmtNum(n, d=0) { return n != null ? n.toLocaleString('en-CA', {maximumFractionDigits:d, minimumFractionDigits:d}) : '--'; }
-function fmtHours(sec) {
-  if (sec == null) return '--';
-  const h = Math.floor(sec/3600), m = Math.floor((sec%3600)/60);
-  return h > 0 ? `${h}h ${String(m).padStart(2,'0')}m` : `${m}m`;
-}
+// fmtNum, fmtDate, fmtDuration come from /static/utils.js. fmtHours used to
+// be a local copy — fmtDuration with default showSeconds=false produces the
+// identical "Hh MMm" / "Mm" output, so callers were ported.
 function typeBadge(type) {
   if (!type) return '';
   const t = TYPES.find(x => x.id === type);
@@ -235,7 +232,7 @@ function renderHero() {
     ['Distance',         `${fmtNum(dist, 1)} km`, 'self-powered, excl. lifts'],
     ['Climbing',         `${fmtNum(gain)} m`, assisted > 0 ? `excl. lifts · +${fmtNum(assisted)} m assisted` : 'excl. lifts'],
     ['Descent',          `${fmtNum(loss)} m`, 'excl. lifts'],
-    ['Moving Time',      fmtHours(sec)],
+    ['Moving Time',      fmtDuration(sec)],
     ['Peak Altitude',    peakEle ? `${fmtNum(peakEle)} m` : '--', 'highest point reached'],
     ['Streak',           `${streaks.current} ${streaks.current === 1 ? 'day' : 'days'}`, `longest: ${streaks.longest}`],
   ];
@@ -558,7 +555,7 @@ function renderRecords() {
     card('Most Climbing',      `${fmtNum(byGain.stats.elev_gain_m)} m`, byGain),
     card('Most Descent',       `${fmtNum(byLoss.stats.elev_loss_m)} m`, byLoss),
     card('Fastest Max Speed',  `${bySpeed.stats.max_speed_kmh} km/h`, bySpeed),
-    card('Longest Duration',   fmtHours(byDur.stats.duration_sec), byDur),
+    card('Longest Duration',   fmtDuration(byDur.stats.duration_sec), byDur),
   ].join('');
 }
 
