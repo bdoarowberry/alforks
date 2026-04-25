@@ -31,6 +31,16 @@
     .hero-delta.up   { color: #4ade80; }
     .hero-delta.down { color: #f87171; }
 
+    /* Lifetime strip — sits above the year-filtered hero grid. Styled
+       slightly differently (amber accent, smaller cards) so it's visually
+       distinct from the year hero. */
+    .lifetime-strip { background: #14171c; border: 1px solid #2a2d35; border-left: 3px solid #f59e0b; border-radius: 8px; padding: 12px 18px; margin-bottom: 14px; display: flex; flex-wrap: wrap; gap: 24px; align-items: baseline; }
+    .lifetime-label { font-size: 0.62rem; text-transform: uppercase; letter-spacing: 0.1em; color: #f59e0b; font-weight: 600; flex-shrink: 0; }
+    .lifetime-stats { display: flex; gap: 22px; flex-wrap: wrap; flex: 1; }
+    .lifetime-stat { display: flex; flex-direction: column; gap: 2px; }
+    .lifetime-stat-label { font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.07em; color: #888; }
+    .lifetime-stat-value { font-size: 1rem; font-weight: 600; color: #fff; }
+
     /* Activity calendar */
     .cal-wrap { background: #12151a; border: 1px solid #2a2d35; border-radius: 8px; padding: 18px 20px; }
     .cal-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 12px; }
@@ -98,6 +108,7 @@
 <main>
   <!-- Hero stats -->
   <div>
+    <div class="lifetime-strip" id="lifetime-strip" style="display:none"></div>
     <div class="hero-grid" id="hero-grid"></div>
   </div>
 
@@ -214,6 +225,45 @@ function computeStreaks(acts) {
     }
   }
   return { current, longest };
+}
+
+function renderLifetime() {
+  // Aggregate every activity, ignoring year/type filters — this strip shows
+  // the always-true "since day one" totals.
+  const acts = allActivities;
+  if (!acts.length) {
+    document.getElementById('lifetime-strip').style.display = 'none';
+    return;
+  }
+  const dist     = acts.reduce((s, a) => s + (a.stats.distance_km   || 0), 0);
+  const gain     = acts.reduce((s, a) => s + (a.stats.elev_gain_m   || 0), 0);
+  const loss     = acts.reduce((s, a) => s + (a.stats.elev_loss_m   || 0), 0);
+  const sec      = acts.reduce((s, a) => s + (a.stats.duration_sec  || 0), 0);
+  const earliest = acts
+    .map(a => a.date).filter(Boolean).sort()[0];
+  const sinceLbl = earliest ? `since ${earliest.slice(0, 10)}` : 'lifetime';
+
+  const stats = [
+    ['Activities',  fmtNum(acts.length)],
+    ['Distance',    `${fmtNum(dist, 0)} km`],
+    ['Climbing',    `${fmtNum(gain)} m`],
+    ['Descent',     `${fmtNum(loss)} m`],
+    ['Moving Time', fmtDuration(sec)],
+  ];
+  const strip = document.getElementById('lifetime-strip');
+  strip.style.display = '';
+  strip.innerHTML = `
+    <div class="lifetime-label" title="Always reflects all activities, ignoring year and type filters">
+      Lifetime <span style="color:#888;font-weight:normal;text-transform:none;letter-spacing:0;">· ${sinceLbl}</span>
+    </div>
+    <div class="lifetime-stats">
+      ${stats.map(([lbl, val]) => `
+        <div class="lifetime-stat">
+          <div class="lifetime-stat-label">${lbl}</div>
+          <div class="lifetime-stat-value">${val}</div>
+        </div>`).join('')}
+    </div>
+  `;
 }
 
 function renderHero() {
@@ -640,6 +690,7 @@ function renderSnow() {
 }
 
 function renderAll() {
+  renderLifetime();
   renderHero();
   renderSnow();
   renderCalendar();
