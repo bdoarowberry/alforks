@@ -262,6 +262,52 @@ def gpx_path_for(activity_id: int) -> Path:
     return GPX_DIR / f"strava_{activity_id}.gpx"
 
 
+# Strava's sport_type taxonomy → AlForks meta.type. Anything not listed
+# (Ride, EBikeRide, Run, …) stays untagged so the user can decide; the
+# obvious mappings ride and run aren't necessarily MTB / hike.
+_STRAVA_SPORT_TO_TYPE = {
+    "AlpineSki":          "ski",
+    "BackcountrySki":     "ski",
+    "NordicSki":          "ski",
+    "Snowboard":          "snowboard",
+    "MountainBikeRide":   "mtb",
+    "EMountainBikeRide":  "mtb",
+    "GravelRide":         "mtb",
+    "Hike":               "hike",
+    "Walk":               "hike",
+    "TrailRun":           "hike",
+}
+
+METADATA_FILE = _ROOT / "metadata.json"
+
+
+def _apply_sport_type_tag(filename: str, sport_type: str | None) -> str | None:
+    """Set metadata[filename].type based on Strava sport_type if a mapping
+    exists and the file isn't already tagged. Returns the applied tag, or
+    None if nothing was done. Idempotent — never overwrites a manual tag.
+
+    Note: the Flask app caches metadata.json in memory at process start, so
+    tags written here only become visible after the next Flask restart (or
+    after the user edits any other field, which triggers a reload).
+    """
+    tag = _STRAVA_SPORT_TO_TYPE.get(sport_type or "")
+    if not tag:
+        return None
+    try:
+        meta = json.loads(METADATA_FILE.read_text(encoding="utf-8")) if METADATA_FILE.exists() else {}
+    except Exception:
+        return None
+    entry = meta.get(filename) or {}
+    if entry.get("type"):
+        return None  # already tagged — respect manual edits
+    entry["type"] = tag
+    meta[filename] = entry
+    tmp = METADATA_FILE.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8")
+    tmp.replace(METADATA_FILE)
+    return tag
+
+
 def write_gpx(activity: dict, streams: dict) -> bool:
     """Build a minimal GPX file from an activity's streams. Returns True if
     written, False if the activity has no usable GPS data."""
@@ -347,7 +393,9 @@ def cmd_sync(only_new: bool = True) -> None:
             empty += 1
             continue
         if write_gpx(a, streams):
-            print(f"  + {a.get('start_date_local','?')[:16]}  {a.get('name','')[:60]}  -> {out.name}")
+            applied_tag = _apply_sport_type_tag(out.name, a.get("sport_type") or a.get("type"))
+            tag_msg = f"  [tag: {applied_tag}]" if applied_tag else ""
+            print(f"  + {a.get('start_date_local','?')[:16]}  {a.get('name','')[:60]}  -> {out.name}{tag_msg}")
             written += 1
             try:
                 start_dt = datetime.fromisoformat(a["start_date"].rstrip("Z")).timestamp()
