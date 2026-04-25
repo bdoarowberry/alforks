@@ -1,0 +1,18 @@
+# Runtime dependencies for AlForks.
+# Install: pip install -r requirements.txt
+#
+# Pinned to known-good versions. Bump deliberately when upgrading.
+
+# Web framework — used in app.py
+Flask>=3.0,<4.0
+
+# GPX parsing — used in app.py (the dominant cost in parse_gpx;
+# replacing it with xml.etree.ElementTree is on the enhancement backlog)
+gpxpy>=1.6,<2.0
+
+# Garmin Connect HR sync — used by sync/garmin_sync.py only.
+# Optional for the core viewer; required if you run --login / --sync.
+garminconnect>=0.3,<0.4
+
+# Tests use stdlib unittest and unittest.mock only — no test deps.
+# Strava sync uses stdlib http.server / urllib only — no third-party deps.
