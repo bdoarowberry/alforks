@@ -7,6 +7,7 @@
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="https://unpkg.com/leaflet-rotate@0.2.8/dist/leaflet-rotate-src.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <script src="/static/utils.js"></script>
   <script src="/static/sync_toast.js" defer></script>
   <link rel="stylesheet" href="/static/base.css">
@@ -26,10 +27,33 @@
     .picker select { width: 100%; background: #1a1d23; border: 1px solid #2a2d35; border-radius: 4px; color: #e0e0e0; padding: 6px 8px; font-size: 0.82rem; font-family: inherit; }
     .picker select:focus { outline: none; border-color: #3b82f6; }
 
+    /* Map + chart column layout. Below 1100px the chart column wraps below
+       the map so we don't squeeze either pane. */
+    .map-charts { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(280px, 1fr); gap: 14px; }
+    @media (max-width: 1100px) { .map-charts { grid-template-columns: 1fr; } }
+
     /* Map */
-    #compare-map { height: 460px; border-radius: 8px; border: 1px solid #2a2d35; background: #0a0c10; }
+    #compare-map { height: 540px; border-radius: 8px; border: 1px solid #2a2d35; background: #0a0c10; }
     .layer-toggle-btn { background: rgba(18,21,26,0.88); border: 1px solid #2a2d35; color: #ccc; font-size: 0.72rem; padding: 4px 10px; border-radius: 4px; cursor: pointer; font-family: inherit; transition: all 0.12s; }
     .layer-toggle-btn:hover { border-color: #3b82f6; color: #fff; }
+
+    /* Chart column */
+    .chart-col { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+    .chart-card { background: #12151a; border: 1px solid #2a2d35; border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
+    .chart-head { display: flex; align-items: baseline; gap: 8px; font-size: 0.72rem; color: #ccc; font-weight: 500; }
+    .chart-head .head-sub { color: #777; font-size: 0.66rem; font-weight: normal; margin-left: auto; }
+    .chart-wrap { position: relative; height: 130px; }
+    .chart-empty { font-size: 0.72rem; color: #666; text-align: center; padding: 20px 0; }
+    /* HR-zones bar uses pure CSS so we don't need another Chart.js instance */
+    .zones-grid { display: grid; grid-template-columns: 24px 1fr auto; row-gap: 4px; column-gap: 8px; font-size: 0.7rem; align-items: center; }
+    .zones-grid .z-label { color: #888; }
+    .zones-grid .z-bars { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+    .zones-grid .z-bar { height: 6px; border-radius: 2px; min-width: 1px; }
+    .zones-grid .z-bar.a { background: #3b82f6; }
+    .zones-grid .z-bar.b { background: #f59e0b; }
+    .zones-grid .z-times { color: #999; font-size: 0.64rem; line-height: 1.1; text-align: right; min-width: 80px; }
+    .zones-grid .z-times .a { color: #3b82f6; }
+    .zones-grid .z-times .b { color: #f59e0b; }
 
     /* Stats panel */
     .stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
@@ -83,7 +107,23 @@
     </div>
   </div>
 
-  <div id="compare-map"></div>
+  <div class="map-charts">
+    <div id="compare-map"></div>
+    <div class="chart-col">
+      <div class="chart-card">
+        <div class="chart-head">Elevation profile <span class="head-sub">m vs km</span></div>
+        <div class="chart-wrap"><canvas id="chart-elevation"></canvas></div>
+      </div>
+      <div class="chart-card">
+        <div class="chart-head">Speed profile <span class="head-sub">km/h vs km</span></div>
+        <div class="chart-wrap"><canvas id="chart-speed"></canvas></div>
+      </div>
+      <div class="chart-card" id="hr-zones-card" style="display:none">
+        <div class="chart-head">HR zone time <span class="head-sub">seconds</span></div>
+        <div class="zones-grid" id="hr-zones-body"></div>
+      </div>
+    </div>
+  </div>
 
   <div id="stats-area">
     <div class="empty">Pick two activities to overlay them.</div>
@@ -240,6 +280,122 @@ async function render(aFile, bFile) {
   layerB = drawTrack(dataB, 'b');
   fitBoundsBoth(layerA?.getBounds(), layerB?.getBounds());
   renderStats(dataA, dataB);
+  renderCharts(dataA, dataB);
+}
+
+// ─── Charts ──────────────────────────────────────────────────────────────
+// Two Chart.js line charts (elevation, speed) overlay both activities on
+// distance_km. The HR-zones panel below them is pure CSS bars so we don't
+// spin up a third Chart.js instance for a bar chart with 5 categories.
+let elevationChart = null, speedChart = null;
+const COLOR_A = '#3b82f6', COLOR_B = '#f59e0b';
+
+function lineDataset(label, color, points, valueKey) {
+  return {
+    label, borderColor: color, backgroundColor: color + '33',
+    borderWidth: 1.6, pointRadius: 0, fill: false, tension: 0.15,
+    spanGaps: true,
+    data: points.map(p => ({ x: p.dist_km, y: p[valueKey] })),
+  };
+}
+
+function ensureChart(which) {
+  const id = which === 'elevation' ? 'chart-elevation' : 'chart-speed';
+  const ctx = document.getElementById(id).getContext('2d');
+  return new Chart(ctx, {
+    type: 'line',
+    data: { datasets: [] },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      animation: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            title: items => `${(+items[0].parsed.x).toFixed(2)} km`,
+            label: it => {
+              const v = it.parsed.y;
+              if (v == null) return null;
+              const unit = which === 'elevation' ? ' m' : ' km/h';
+              return `${it.dataset.label}: ${fmtNum(v, which === 'elevation' ? 0 : 1)}${unit}`;
+            },
+          },
+        },
+      },
+      scales: {
+        x: {
+          type: 'linear',
+          ticks: { color: '#666', font: { size: 10 }, callback: v => `${v}` },
+          grid:  { color: '#1e2128' },
+        },
+        y: {
+          ticks: { color: '#666', font: { size: 10 } },
+          grid:  { color: '#1e2128' },
+        },
+      },
+    },
+  });
+}
+
+function setChart(chart, dataA, dataB, valueKey) {
+  const datasets = [];
+  if (dataA?.points?.length) datasets.push(lineDataset('A', COLOR_A, dataA.points, valueKey));
+  if (dataB?.points?.length) datasets.push(lineDataset('B', COLOR_B, dataB.points, valueKey));
+  chart.data.datasets = datasets;
+  chart.update('none');
+}
+
+function fmtZoneTime(sec) {
+  if (!sec) return '0';
+  const m = Math.round(sec / 60);
+  return m >= 60 ? `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, '0')}m` : `${m}m`;
+}
+
+function renderHrZones(dataA, dataB) {
+  const card = document.getElementById('hr-zones-card');
+  const za = dataA?.stats?.hr_zones, zb = dataB?.stats?.hr_zones;
+  // Show the card only when at least one side has zone data — otherwise the
+  // empty bars are noise. When only one is present, show its bars alone.
+  if (!(Array.isArray(za) && za.some(v => v > 0)) &&
+      !(Array.isArray(zb) && zb.some(v => v > 0))) {
+    card.style.display = 'none';
+    return;
+  }
+  card.style.display = '';
+  const labels = ['Z1', 'Z2', 'Z3', 'Z4', 'Z5'];
+  // Normalize bar widths against the largest cell across both rides so each
+  // zone's relative magnitude is comparable.
+  const maxAll = Math.max(
+    ...(za || [0, 0, 0, 0, 0]),
+    ...(zb || [0, 0, 0, 0, 0]),
+    1,  // avoid /0
+  );
+  const body = document.getElementById('hr-zones-body');
+  body.innerHTML = labels.map((lbl, i) => {
+    const va = za?.[i] || 0;
+    const vb = zb?.[i] || 0;
+    const wa = (va / maxAll * 100).toFixed(1);
+    const wb = (vb / maxAll * 100).toFixed(1);
+    return `
+      <div class="z-label">${lbl}</div>
+      <div class="z-bars">
+        <div class="z-bar a" style="width:${wa}%"></div>
+        <div class="z-bar b" style="width:${wb}%"></div>
+      </div>
+      <div class="z-times">
+        <div class="a">${fmtZoneTime(va)}</div>
+        <div class="b">${fmtZoneTime(vb)}</div>
+      </div>`;
+  }).join('');
+}
+
+function renderCharts(dataA, dataB) {
+  if (!elevationChart) elevationChart = ensureChart('elevation');
+  if (!speedChart)     speedChart     = ensureChart('speed');
+  setChart(elevationChart, dataA, dataB, 'ele');
+  setChart(speedChart,     dataA, dataB, 'speed');
+  renderHrZones(dataA, dataB);
 }
 
 // ─── Stats panel ─────────────────────────────────────────────────────────
