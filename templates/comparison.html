@@ -215,7 +215,10 @@ function initMap(rowEl) {
   const mapEl = rowEl.querySelector('.comp-map');
   const m = L.map(mapEl, { zoomControl: false, attributionControl: false, dragging: false, scrollWheelZoom: false, doubleClickZoom: false, boxZoom: false, keyboard: false, touchZoom: false });
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 17 }).addTo(m);
-  L.polyline(polyline, { color: '#3b82f6', weight: 3, opacity: 0.9 }).addTo(m);
+  // Use the activity's type colour so the mini map matches the badge / icon.
+  // Falls back to blue for untagged activities.
+  const polyColor = rowEl.dataset.typeColor || '#3b82f6';
+  L.polyline(polyline, { color: polyColor, weight: 3, opacity: 0.9 }).addTo(m);
   m.fitBounds(L.latLngBounds(polyline), { padding: [10, 10] });
   mapInstances.set(fn, m);
   mapAccess.set(fn, Date.now());
@@ -256,6 +259,10 @@ function renderRow(item) {
   row.className = 'comp-row' + (item.excluded ? ' excluded' : '');
   row.dataset.filename = item.filename;
   row.dataset.polyline = JSON.stringify(item.polyline);
+  // Stash the type colour on the row so the lazy initMap() below can use it
+  // without re-parsing item.type at draw time.
+  const _t = TYPE_LOOKUP[item.type];
+  row.dataset.typeColor = _t ? _t.color : '#3b82f6';
   row.onclick = () => { window.location.href = `/?file=${encodeURIComponent(item.filename)}`; };
 
   const t = TYPE_LOOKUP[item.type];
