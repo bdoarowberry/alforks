@@ -13,6 +13,8 @@
   <script src="/static/utils.js"></script>
   <script src="/static/sync_toast.js" defer></script>
   <link rel="stylesheet" href="/static/base.css">
+  <link rel="stylesheet" href="/static/preview.css">
+  <script src="/static/preview-toggle.js" defer></script>
 
   <link href="https://api.mapbox.com/mapbox-gl-js/v3.3.0/mapbox-gl.css" rel="stylesheet">
   <script src="https://api.mapbox.com/mapbox-gl-js/v3.3.0/mapbox-gl.js"></script>
@@ -406,6 +408,8 @@
     <a href="/comparison">Compare Logs</a>
     <a href="/heatmap">Heat Map</a>
     <a href="/setup">Setup</a>
+    <button id="preview-toggle-btn" class="preview-toggle-btn" onclick="togglePreviewStyles()"
+            title="Toggle style-cleanup preview (sticky across pages)">Preview</button>
     <button class="nav-sync-btn" onclick="triggerSyncAll()" title="Sync Strava + Garmin now">Sync</button>
   </nav>
 </header>

@@ -1,0 +1,15 @@
+/* Style-cleanup preview overrides.
+ *
+ * Every rule in this file is scoped under `body.preview`. With the toggle
+ * on (button in the global nav), these rules apply on top of the existing
+ * styles to show the proposed cleanup. Toggle off and the page reverts.
+ *
+ * Once each round is approved, the rules will be promoted into base.css /
+ * the per-template <style> blocks and this file will shrink.
+ */
+
+/* ─── Round 1: TBD (grays + accents) ────────────────────────────────────── */
+
+/* ─── Round 2: TBD (button consolidation) ──────────────────────────────── */
+
+/* ─── Round 3: TBD (small fixes) ───────────────────────────────────────── */

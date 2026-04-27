@@ -59,6 +59,23 @@ nav a.active  { color: #3b82f6; background: #1a2a3a; }
 .nav-sync-btn:hover { color: #fff; background: #1e2128; border-color: #3b82f6; }
 .nav-sync-btn:active { transform: translateY(1px); }
 
+/* Style-cleanup preview toggle. Sits next to the Sync button. .on highlights
+   the active state so it's clear when the preview is applied. */
+.preview-toggle-btn {
+  font-size: 0.75rem;
+  padding: 4px 10px;
+  border-radius: 4px;
+  border: 1px dashed #2a2d35;
+  background: #1a1d23;
+  color: #888;
+  cursor: pointer;
+  transition: all 0.12s;
+  font-family: inherit;
+  margin-right: 6px;
+}
+.preview-toggle-btn:hover { color: #fff; border-color: #3b82f6; }
+.preview-toggle-btn.on { color: #3b82f6; border-color: #3b82f6; border-style: solid; background: #1a2a3a; }
+
 /* Filter button group (Summary + Heatmap) */
 .filter-btn {
   font-size: 0.78rem;

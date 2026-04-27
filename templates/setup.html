@@ -11,6 +11,8 @@
   <script src="/static/utils.js"></script>
   <script src="/static/sync_toast.js" defer></script>
   <link rel="stylesheet" href="/static/base.css">
+  <link rel="stylesheet" href="/static/preview.css">
+  <script src="/static/preview-toggle.js" defer></script>
   <style>
     body { height: 100vh; display: flex; flex-direction: column; }
 
@@ -112,6 +114,8 @@
     <a href="/comparison">Compare Logs</a>
     <a href="/heatmap">Heat Map</a>
     <a href="/setup" class="active">Setup</a>
+    <button id="preview-toggle-btn" class="preview-toggle-btn" onclick="togglePreviewStyles()"
+            title="Toggle style-cleanup preview (sticky across pages)">Preview</button>
   </nav>
 </header>
 

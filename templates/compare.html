@@ -11,6 +11,8 @@
   <script src="/static/utils.js"></script>
   <script src="/static/sync_toast.js" defer></script>
   <link rel="stylesheet" href="/static/base.css">
+  <link rel="stylesheet" href="/static/preview.css">
+  <script src="/static/preview-toggle.js" defer></script>
   <style>
     body { display: flex; flex-direction: column; min-height: 100vh; }
     main { flex: 1; padding: 18px 22px 32px; max-width: 1680px; margin: 0 auto; width: 100%; display: flex; flex-direction: column; gap: 16px; }
@@ -91,6 +93,8 @@
     <a href="/comparison">Compare Logs</a>
     <a href="/heatmap">Heat Map</a>
     <a href="/setup">Setup</a>
+    <button id="preview-toggle-btn" class="preview-toggle-btn" onclick="togglePreviewStyles()"
+            title="Toggle style-cleanup preview (sticky across pages)">Preview</button>
     <button class="nav-sync-btn" onclick="triggerSyncAll()" title="Sync Strava + Garmin now">Sync</button>
   </nav>
 </header>
