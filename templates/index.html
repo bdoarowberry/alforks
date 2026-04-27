@@ -464,6 +464,17 @@
     body[data-layout="v7"] .ah-main .ah-row-2 { flex: 0 0 auto; padding: 0; min-height: 0; }
     body[data-layout="v7"] .ah-main .ah-row-place { flex: 0 0 auto; padding: 0; font-size: 0.72rem; color: #aaa; min-height: 0; }
     body[data-layout="v7"] .ah-main .ah-row-place:not(:empty)::before { content: '·'; color: #555; margin: 0 8px; }
+    /* When the runs drawer is open on v7 it sits inline beside the map
+       (taking real layout space) instead of overlaying. The :has() selector
+       lets the parent react to the drawer's `.open` class without any JS
+       coordinating sibling elements. */
+    body[data-layout="v7"] #runs-tab { display: none !important; }
+    body[data-layout="v7"] #map-wrap:has(#runs-drawer.open) { display: flex; }
+    body[data-layout="v7"] #map-wrap:has(#runs-drawer.open) #map { flex: 1; height: 100%; min-width: 0; }
+    body[data-layout="v7"] #map-wrap:has(#runs-drawer.open) #map-3d { right: 280px; }
+    body[data-layout="v7"] #map-wrap:has(#runs-drawer.open) #view-toggle,
+    body[data-layout="v7"] #map-wrap:has(#runs-drawer.open) #map-controls { right: 290px; }
+    body[data-layout="v7"] #runs-drawer.open { position: relative; transform: none; transition: none; flex: 0 0 280px; width: 280px; height: 100%; box-shadow: none; }
   </style>
 </head>
 <body data-layout="{{ layout_variant or 'default' }}">
@@ -2365,16 +2376,24 @@ function toggleRunsDrawer() {
   const tab    = document.getElementById('runs-tab');
   const open   = drawer.classList.toggle('open');
   tab.classList.toggle('open', open);
+  // v7's inline drawer changes the map's available width — Leaflet won't
+  // notice on its own.
+  if (document.body.dataset.layout === 'v7') setTimeout(() => map.invalidateSize(), 0);
 }
 
 function renderRunStats(meta) {
   const tab    = document.getElementById('runs-tab');
   const drawer = document.getElementById('runs-drawer');
   const isSkiSport = ['ski','snowboard'].includes(meta?.type);
+  // On v7 the drawer takes layout space — closing it expands the map, so
+  // invalidate Leaflet's size in the close path too.
+  const wasOpen = drawer.classList.contains('open');
+  const isV7 = document.body.dataset.layout === 'v7';
   if (!isSkiSport || !trackData || !activeSegments.length) {
     tab.classList.remove('visible');
     drawer.classList.remove('open');
     tab.classList.remove('open');
+    if (isV7 && wasOpen) setTimeout(() => map.invalidateSize(), 0);
     return;
   }
   const runs = computeRuns(activeSegments, trackData.points);
@@ -2382,6 +2401,7 @@ function renderRunStats(meta) {
     tab.classList.remove('visible');
     drawer.classList.remove('open');
     tab.classList.remove('open');
+    if (isV7 && wasOpen) setTimeout(() => map.invalidateSize(), 0);
     return;
   }
 
@@ -2412,9 +2432,15 @@ function renderRunStats(meta) {
     </table>`;
 
   tab.classList.add('visible');
-  // V6 layout: keep the drawer always-open whenever runs are available so
-  // the user doesn't need to flip the tab on every load.
-  if (document.body.dataset.layout === 'v6') drawer.classList.add('open');
+  // V6 / V7 layouts auto-open the drawer when runs are available so the
+  // user doesn't need to flip the tab on every load. v7 makes the drawer
+  // inline (real layout space, not overlay) — invalidate Leaflet's size
+  // afterward so the map repaints at the new narrower width.
+  const layout = document.body.dataset.layout;
+  if (layout === 'v6' || layout === 'v7') {
+    drawer.classList.add('open');
+    if (layout === 'v7') setTimeout(() => map.invalidateSize(), 0);
+  }
 }
 
 let _runHighlight = null;
