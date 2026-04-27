@@ -385,17 +385,27 @@
        the drawer in/out without overlaying the map. */
     #map-wrap.has-runs { display: flex; }
     #map-wrap.has-runs #map { flex: 1; height: 100%; min-width: 0; }
+    /* When the map-wrap is flex (snow activity), promote #map-3d from its
+       default absolute positioning to a flex sibling so it takes the same
+       slot the leaflet #map vacates when 3D is active. Without this, the
+       strip + drawer collapse to the left when #map.display = none. */
+    #map-wrap.has-runs #map-3d { position: relative; inset: auto; flex: 1; min-width: 0; height: 100%; }
     #map-wrap.has-runs #runs-strip { display: flex; }
     #map-wrap.has-runs #runs-drawer { position: relative; transform: none; transition: none; width: 0; box-shadow: none; flex: 0 0 0; height: 100%; overflow-x: hidden; }
     #map-wrap.has-runs #runs-drawer.open { flex: 0 0 280px; width: 280px; }
-    /* Strip-only (drawer closed): shift map controls clear of the 14 px strip. */
-    #map-wrap.has-runs #map-3d      { right: 14px; }
+    /* Strip-only (drawer closed): shift absolute map overlays clear of the
+       14 px strip. Includes both legends (riding/lift and speed) that share
+       the bottom-right slot — without this they get hidden behind the
+       drawer or strip. */
     #map-wrap.has-runs #view-toggle,
-    #map-wrap.has-runs #map-controls { right: 24px; }
+    #map-wrap.has-runs #map-controls,
+    #map-wrap.has-runs #map-legend,
+    #map-wrap.has-runs #speed-legend { right: 24px; }
     /* Drawer open: shift them clear of the 14 px strip + 280 px drawer. */
-    #map-wrap.has-runs:has(#runs-drawer.open) #map-3d { right: 294px; }
     #map-wrap.has-runs:has(#runs-drawer.open) #view-toggle,
-    #map-wrap.has-runs:has(#runs-drawer.open) #map-controls { right: 304px; }
+    #map-wrap.has-runs:has(#runs-drawer.open) #map-controls,
+    #map-wrap.has-runs:has(#runs-drawer.open) #map-legend,
+    #map-wrap.has-runs:has(#runs-drawer.open) #speed-legend { right: 304px; }
   </style>
 </head>
 <body>
