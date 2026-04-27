@@ -787,22 +787,7 @@ if os.environ.get("ALFORKS_PREWARM") == "1":
 def index():
     return render_template("index.html",
         mapbox_token=load_config().get("mapbox_token", ""),
-        types_json=json.dumps(load_types()),
-        layout_variant="default")
-
-
-@app.route("/v<int:n>")
-def index_variant(n: int):
-    """Layout-variant previews for the Ride Logs page. v1..v7 are space-saving
-    experiments the user can flip between to compare. Identical functionality
-    and data, just different chrome layout. /v0 (or any other n) -> 404.
-    """
-    if n < 1 or n > 7:
-        abort(404)
-    return render_template("index.html",
-        mapbox_token=load_config().get("mapbox_token", ""),
-        types_json=json.dumps(load_types()),
-        layout_variant=f"v{n}")
+        types_json=json.dumps(load_types()))
 
 
 @app.route("/summary")

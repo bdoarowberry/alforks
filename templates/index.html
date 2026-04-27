@@ -314,10 +314,6 @@
     .spd-dot { width: 12px; height: 4px; border-radius: 2px; }
 
     /* Run statistics drawer (slides from right edge of map area) */
-    #runs-tab { position: absolute; top: 50%; right: 0; transform: translateY(-50%); z-index: 1001; background: rgba(18,21,26,0.92); border: 1px solid #2a2d35; border-right: none; color: #ccc; font-size: 0.68rem; padding: 10px 4px; cursor: pointer; writing-mode: vertical-rl; text-orientation: mixed; letter-spacing: 0.08em; text-transform: uppercase; border-radius: 4px 0 0 4px; font-family: inherit; display: none; transition: all 0.12s; }
-    #runs-tab.visible { display: block; }
-    #runs-tab:hover { color: #fff; border-color: #3b82f6; }
-    #runs-tab.open { background: #1a2a3a; border-color: #3b82f6; color: #3b82f6; right: 320px; }
     #runs-drawer { position: absolute; top: 0; right: 0; bottom: 0; width: 320px; background: #12151a; border-left: 1px solid #2a2d35; z-index: 1000; transform: translateX(100%); transition: transform 0.2s ease; overflow-y: auto; }
     #runs-drawer.open { transform: translateX(0); }
     #runs-drawer h3 { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.08em; color: #ccc; padding: 10px 14px; border-bottom: 1px solid #2a2d35; }
@@ -341,174 +337,66 @@
     .runs-table tbody tr:hover td { background: #1e2128; cursor: pointer; }
     .runs-table tbody tr.best td { color: #f59e0b; }
 
-    /* ─── V1: One-row header ────────────────────────────────────────────────
-       Collapse the activity-header's three stacked rows (type+title /
-       regions / place) plus the right-column (datetime+actions) into a
-       single horizontal strip. Saves ~50–60px vertical on the Ride Logs
-       page when an activity is loaded. */
-    body[data-layout="v1"] #activity-header { padding: 6px 20px; align-items: center; gap: 12px; flex-wrap: wrap; }
-    body[data-layout="v1"] .ah-main { flex-direction: row; align-items: center; flex-wrap: wrap; gap: 8px; flex: 1; min-width: 0; }
-    body[data-layout="v1"] .ah-main .ah-row-1 { flex: 1 1 auto; min-width: 240px; }
-    body[data-layout="v1"] .ah-main .ah-row-2,
-    body[data-layout="v1"] .ah-main .ah-row-place { display: inline-flex; align-items: center; padding: 0; min-height: 0; font-size: 0.74rem; color: #aaa; }
-    body[data-layout="v1"] .ah-main .ah-row-2:not(:empty)::before { content: '·'; color: #555; margin-right: 8px; }
-    body[data-layout="v1"] .ah-main .ah-row-place:not(:empty)::before { content: '·'; color: #555; margin-right: 8px; }
-    body[data-layout="v1"] #header-issues { margin: 0; padding: 3px 8px; font-size: 0.7rem; flex: 0 0 auto; }
-    body[data-layout="v1"] #header-issues ul { display: none; }      /* tooltip via title attr instead */
-    body[data-layout="v1"] #header-issues button { padding: 2px 6px; font-size: 0.66rem; }
-    body[data-layout="v1"] .ah-context { flex-direction: row; align-items: center; gap: 8px; }
-    body[data-layout="v1"] .ah-context-top { gap: 6px; }
-    body[data-layout="v1"] #header-weather { font-size: 0.7rem; color: #888; }
-    body[data-layout="v1"] #header-title { font-size: 1.05rem; }
+    /* ─── Page layout (promoted from V7 layout-variant trial) ───────────────
+       #content uses a CSS grid:
 
-    /* ─── V2: Two compressed rows ────────────────────────────────────────────
-       Less aggressive than V1. Row 1 keeps type+title+actions; row 2 collapses
-       regions, place, and weather onto a single muted line. Saves ~30 px
-       vertical without giving up the "title gets its own row" readability. */
-    body[data-layout="v2"] #activity-header { padding: 8px 20px; gap: 12px; }
-    body[data-layout="v2"] .ah-main { gap: 2px; flex-wrap: wrap; }
-    body[data-layout="v2"] .ah-main .ah-row-1 { flex: 1 0 100%; }
-    body[data-layout="v2"] .ah-main .ah-row-2 { flex: 0 0 auto; padding: 0; min-height: 0; font-size: 0.72rem; }
-    body[data-layout="v2"] .ah-main .ah-row-place { flex: 0 0 auto; padding: 0; font-size: 0.72rem; color: #aaa; min-height: 0; }
-    body[data-layout="v2"] .ah-main .ah-row-place:not(:empty)::before { content: '·'; color: #555; margin: 0 8px; }
-    body[data-layout="v2"] .ah-context { gap: 2px; }
-    body[data-layout="v2"] #header-title { font-size: 1.1rem; }
+         header   header
+         notes    notes
+         stats    map
+         chart    chart
 
-    /* ─── V3: One-row header with inline stats ───────────────────────────────
-       Builds on V1's single-row header and additionally moves four key stats
-       (distance / climbing / duration / avg speed) inline into the header's
-       right side, then hides the standalone #stats-bar. Maximum vertical
-       savings: ~110–130 px. Detailed stats still live in the chart's hover
-       tooltip and in the now-hidden bar (kept in the DOM for the JS that
-       writes into it). */
-    body[data-layout="v3"] #activity-header { padding: 6px 20px; align-items: center; gap: 12px; flex-wrap: wrap; }
-    body[data-layout="v3"] .ah-main { flex-direction: row; align-items: center; flex-wrap: wrap; gap: 8px; flex: 1; min-width: 0; }
-    body[data-layout="v3"] .ah-main .ah-row-1 { flex: 1 1 auto; min-width: 240px; }
-    body[data-layout="v3"] .ah-main .ah-row-2,
-    body[data-layout="v3"] .ah-main .ah-row-place { display: inline-flex; align-items: center; padding: 0; min-height: 0; font-size: 0.74rem; color: #aaa; }
-    body[data-layout="v3"] .ah-main .ah-row-2:not(:empty)::before,
-    body[data-layout="v3"] .ah-main .ah-row-place:not(:empty)::before { content: '·'; color: #555; margin-right: 8px; }
-    body[data-layout="v3"] #header-issues { margin: 0; padding: 3px 8px; font-size: 0.7rem; flex: 0 0 auto; }
-    body[data-layout="v3"] #header-issues ul { display: none; }
-    body[data-layout="v3"] #header-issues button { padding: 2px 6px; font-size: 0.66rem; }
-    body[data-layout="v3"] .ah-context { flex-direction: row; align-items: center; gap: 8px; }
-    body[data-layout="v3"] #header-title { font-size: 1.05rem; }
-    body[data-layout="v3"] #stats-bar { display: none; }
-    body[data-layout="v3"] .v3-mini-stats { display: inline-flex; align-items: center; gap: 14px; padding: 0 12px; border-left: 1px solid #2a2d35; border-right: 1px solid #2a2d35; }
-    body[data-layout="v3"] .v3-mini-stats .v3-stat { display: flex; flex-direction: column; gap: 1px; align-items: flex-start; line-height: 1.1; min-width: 56px; }
-    body[data-layout="v3"] .v3-mini-stats .v3-stat .v3-val { font-size: 0.95rem; color: #fff; font-weight: 500; }
-    body[data-layout="v3"] .v3-mini-stats .v3-stat .v3-lbl { font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.07em; color: #888; }
-    body:not([data-layout="v3"]) .v3-mini-stats { display: none !important; }
+       The stats bar sits as a narrow vertical column on the LEFT of the
+       map; the elevation chart spans the full width below so its canvas
+       isn't squeezed by the stats column. display:contents on
+       #map-chart-row lets us place its #map-wrap and #chart-panel children
+       directly into the grid areas without restructuring the markup. */
+    #content { display: grid; grid-template-areas: "header header" "notes notes" "stats map" "chart chart"; grid-template-columns: auto 1fr; grid-template-rows: auto auto 1fr auto; }
+    #activity-header { grid-area: header; }
+    #activity-bar    { grid-area: notes; }
+    #stats-bar       { grid-area: stats; }
+    #map-chart-row   { display: contents; }
+    #map-wrap        { grid-area: map; min-height: 0; }
+    #chart-panel     { grid-area: chart; }
 
-    /* ─── V4: Side-by-side map + chart column ────────────────────────────────
-       Restructures the lower half of the page from a vertical stack
-       (map-wrap on top, chart-panel below) into a horizontal split: map
-       takes ~62 % of the width on the left, chart panel becomes a tall
-       narrow column on the right.
+    /* Vertical stats column styling. The horizontal flex layout left over
+       from the legacy stats-bar is overridden here so .stat blocks stack
+       vertically with a divider between rows. */
+    #stats-bar { display: flex; flex-direction: column; flex-shrink: 0; padding: 10px 12px; gap: 1px; border-bottom: none; border-right: 1px solid #2a2d35; min-width: 130px; max-width: 160px; align-self: stretch; }
+    #stats-bar .stat { flex: 0 0 auto; text-align: left; border-right: none; border-bottom: 1px solid #1e2128; padding: 6px 4px; }
+    #stats-bar .stat:last-child { border-bottom: none; }
+    #stats-bar .stat-value { font-size: 1rem; }
+    #stats-bar .stat-label { font-size: 0.6rem; }
 
-       Caveat: Trim / Edit Segments / Smooth GPS modes are designed around
-       a wide chart canvas. They still work but the trim handles are
-       cramped — switch back to default for those interactions if it gets
-       awkward. */
-    body[data-layout="v4"] #map-chart-row { display: flex; flex: 1; min-height: 0; }
-    body[data-layout="v4"] #map-wrap { flex: 0 0 62%; }
-    body[data-layout="v4"] #chart-panel { flex: 1 1 38%; min-width: 0; border-top: none; border-left: 1px solid #2a2d35; padding: 10px 12px; }
-    body[data-layout="v4"] #chart-toolbar { flex-wrap: wrap; gap: 4px; }
-    body[data-layout="v4"] .chart-title { flex: 1 0 100%; margin-bottom: 4px; }
-    body[data-layout="v4"] .chart-btn { font-size: 0.66rem; padding: 2px 7px; }
-    body[data-layout="v4"] #chart-wrapper { flex: 1; min-height: 0; }
+    /* Activity header — title on its own row; regions and place inline on
+       the row below, separated by a muted middot. */
+    .ah-main { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 2px 8px; }
+    .ah-main .ah-row-1 { flex: 1 0 100%; }
+    .ah-main .ah-row-2 { flex: 0 0 auto; padding: 0; min-height: 0; }
+    .ah-main .ah-row-place { flex: 0 0 auto; padding: 0; font-size: 0.72rem; color: #aaa; min-height: 0; }
+    .ah-main .ah-row-place:not(:empty)::before { content: '·'; color: #555; margin-right: 8px; }
 
-    /* ─── V5: Vertical stats column ─────────────────────────────────────────
-       Hides the horizontal #stats-bar above the map and instead mounts a
-       narrow stats column on the right side of the map+chart row. Frees
-       ~50 px of vertical chrome above the map; map gets all of it.
-
-       Stats are still populated by updateStats() — they're just rendered
-       in a different column whose layout we restyle. The column re-uses
-       the same .stat blocks as the horizontal bar (no duplicate markup),
-       so HR / difficulty / zones all stay in sync. */
-    body[data-layout="v5"] #stats-bar { display: flex; flex-direction: column; flex-shrink: 0; padding: 10px 12px; gap: 1px; border-bottom: none; border-left: 1px solid #2a2d35; min-width: 130px; max-width: 160px; align-self: stretch; }
-    body[data-layout="v5"] #stats-bar .stat { flex: 0 0 auto; text-align: left; border-right: none; border-bottom: 1px solid #1e2128; padding: 6px 4px; }
-    body[data-layout="v5"] #stats-bar .stat:last-child { border-bottom: none; }
-    body[data-layout="v5"] #stats-bar .stat-value { font-size: 1rem; }
-    body[data-layout="v5"] #stats-bar .stat-label { font-size: 0.6rem; }
-    /* Pull the stats column out of the #content column-flex and into a row
-       alongside #map-chart-row. Mirrors v4's structural intent without the
-       chart split. */
-    /* display:contents lets us reach #map-wrap and #chart-panel through
-       #map-chart-row and place them in their own grid areas — the stats
-       column sits next to the map only; the chart spans the full width
-       below so its canvas isn't squeezed. */
-    body[data-layout="v5"] #content { display: grid; grid-template-areas: "header header" "notes notes" "map stats" "chart chart"; grid-template-columns: 1fr auto; grid-template-rows: auto auto 1fr auto; }
-    body[data-layout="v5"] #activity-header { grid-area: header; }
-    body[data-layout="v5"] #activity-bar    { grid-area: notes; }
-    body[data-layout="v5"] #map-chart-row   { display: contents; }
-    body[data-layout="v5"] #map-wrap        { grid-area: map; min-height: 0; }
-    body[data-layout="v5"] #chart-panel     { grid-area: chart; }
-    body[data-layout="v5"] #stats-bar       { grid-area: stats; }
-
-    /* ─── V6: Always-on runs drawer (snow types) ─────────────────────────────
-       Default behaviour: the runs drawer slides in only when the user clicks
-       the vertical Runs tab. For ski / snowboard activities the drawer is
-       almost always wanted, so v6 forces it open whenever runs are
-       available (renderRunStats adds .open in v6 — see JS), hides the
-       redundant tab, and tightens the drawer's chrome to take less
-       horizontal space. */
-    body[data-layout="v6"] #runs-tab { display: none !important; }
-    body[data-layout="v6"] #runs-drawer { transition: none; width: 280px; }
-
-    /* ─── V7: Vertical stats column on the LEFT ─────────────────────────────
-       Mirror of V5 but the stats column sits between the activity sidebar
-       and the map. Same grid trick: pulls #stats-bar out of the column
-       stack and places it in a left-aligned column inside #content. */
-    body[data-layout="v7"] #stats-bar { display: flex; flex-direction: column; flex-shrink: 0; padding: 10px 12px; gap: 1px; border-bottom: none; border-right: 1px solid #2a2d35; min-width: 130px; max-width: 160px; align-self: stretch; }
-    body[data-layout="v7"] #stats-bar .stat { flex: 0 0 auto; text-align: left; border-right: none; border-bottom: 1px solid #1e2128; padding: 6px 4px; }
-    body[data-layout="v7"] #stats-bar .stat:last-child { border-bottom: none; }
-    body[data-layout="v7"] #stats-bar .stat-value { font-size: 1rem; }
-    body[data-layout="v7"] #stats-bar .stat-label { font-size: 0.6rem; }
-    /* Same display:contents trick as v5 — chart spans full width under
-       the map+stats row instead of being narrowed by the stats column. */
-    body[data-layout="v7"] #content { display: grid; grid-template-areas: "header header" "notes notes" "stats map" "chart chart"; grid-template-columns: auto 1fr; grid-template-rows: auto auto 1fr auto; }
-    body[data-layout="v7"] #activity-header { grid-area: header; }
-    body[data-layout="v7"] #activity-bar    { grid-area: notes; }
-    body[data-layout="v7"] #stats-bar       { grid-area: stats; }
-    body[data-layout="v7"] #map-chart-row   { display: contents; }
-    body[data-layout="v7"] #map-wrap        { grid-area: map; min-height: 0; }
-    body[data-layout="v7"] #chart-panel     { grid-area: chart; }
-    /* Inline the place (province, country) after the tagged regions on the
-       same row so the header is one row tighter. flex-direction:row +
-       flex-wrap on .ah-main lets the title row span 100 % and the
-       regions/place pieces wrap to a single second line. */
-    body[data-layout="v7"] .ah-main { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 2px 8px; }
-    body[data-layout="v7"] .ah-main .ah-row-1 { flex: 1 0 100%; }
-    body[data-layout="v7"] .ah-main .ah-row-2 { flex: 0 0 auto; padding: 0; min-height: 0; }
-    body[data-layout="v7"] .ah-main .ah-row-place { flex: 0 0 auto; padding: 0; font-size: 0.72rem; color: #aaa; min-height: 0; }
-    body[data-layout="v7"] .ah-main .ah-row-place:not(:empty)::before { content: '·'; color: #555; margin-right: 8px; }
-    /* V7 inline runs panel: when the activity has runs, map-wrap becomes a
-       flex row containing [#map, #runs-strip, #runs-drawer]. The strip is a
-       thin vertical handle (with a triangle at the top, mirroring the
-       sidebar collapse) — always visible alongside the map for v7 runs;
-       click toggles the drawer. The drawer takes real layout width when
-       open and collapses to nothing when closed; the strip stays put.
-       Absolute map overlays (#view-toggle, #map-controls, #map-3d) are
-       shifted left so they don't sit behind the strip / drawer. */
-    body[data-layout="v7"] #runs-tab { display: none !important; }
-    body[data-layout="v7"] #map-wrap.has-runs { display: flex; }
-    body[data-layout="v7"] #map-wrap.has-runs #map { flex: 1; height: 100%; min-width: 0; }
-    body[data-layout="v7"] #map-wrap.has-runs #runs-strip { display: flex; }
-    body[data-layout="v7"] #map-wrap.has-runs #runs-drawer { position: relative; transform: none; transition: none; width: 0; box-shadow: none; flex: 0 0 0; height: 100%; overflow-x: hidden; }
-    body[data-layout="v7"] #map-wrap.has-runs #runs-drawer.open { flex: 0 0 280px; width: 280px; }
+    /* Inline runs panel for snow activities — map-wrap becomes a flex row
+       containing [#map, #runs-strip, #runs-drawer] when .has-runs is on
+       (set by renderRunStats whenever the current activity has detected
+       runs). The thin strip sits between map and drawer with a triangle
+       at the top mirroring the sidebar collapse pattern; click toggles
+       the drawer in/out without overlaying the map. */
+    #map-wrap.has-runs { display: flex; }
+    #map-wrap.has-runs #map { flex: 1; height: 100%; min-width: 0; }
+    #map-wrap.has-runs #runs-strip { display: flex; }
+    #map-wrap.has-runs #runs-drawer { position: relative; transform: none; transition: none; width: 0; box-shadow: none; flex: 0 0 0; height: 100%; overflow-x: hidden; }
+    #map-wrap.has-runs #runs-drawer.open { flex: 0 0 280px; width: 280px; }
     /* Strip-only (drawer closed): shift map controls clear of the 14 px strip. */
-    body[data-layout="v7"] #map-wrap.has-runs #map-3d      { right: 14px; }
-    body[data-layout="v7"] #map-wrap.has-runs #view-toggle,
-    body[data-layout="v7"] #map-wrap.has-runs #map-controls { right: 24px; }
+    #map-wrap.has-runs #map-3d      { right: 14px; }
+    #map-wrap.has-runs #view-toggle,
+    #map-wrap.has-runs #map-controls { right: 24px; }
     /* Drawer open: shift them clear of the 14 px strip + 280 px drawer. */
-    body[data-layout="v7"] #map-wrap.has-runs:has(#runs-drawer.open) #map-3d { right: 294px; }
-    body[data-layout="v7"] #map-wrap.has-runs:has(#runs-drawer.open) #view-toggle,
-    body[data-layout="v7"] #map-wrap.has-runs:has(#runs-drawer.open) #map-controls { right: 304px; }
+    #map-wrap.has-runs:has(#runs-drawer.open) #map-3d { right: 294px; }
+    #map-wrap.has-runs:has(#runs-drawer.open) #view-toggle,
+    #map-wrap.has-runs:has(#runs-drawer.open) #map-controls { right: 304px; }
   </style>
 </head>
-<body data-layout="{{ layout_variant or 'default' }}">
+<body>
 
 <header>
   <h1>AlForks</h1>
@@ -518,18 +406,6 @@
     <a href="/comparison">Compare Logs</a>
     <a href="/heatmap">Heat Map</a>
     <a href="/setup">Setup</a>
-    <select id="layout-switch" onchange="onLayoutSwitch(this.value)"
-            title="Compare layout variants — preserves the current activity / state."
-            style="margin-left:auto;margin-right:8px;background:#1a1d23;border:1px solid #2a2d35;color:#bbb;font-size:0.74rem;padding:3px 6px;border-radius:4px;font-family:inherit;cursor:pointer;">
-      <option value="default" {% if layout_variant in (None, 'default') %}selected{% endif %}>Layout: Default</option>
-      <option value="v1" {% if layout_variant == 'v1' %}selected{% endif %}>V1 — One-row header</option>
-      <option value="v2" {% if layout_variant == 'v2' %}selected{% endif %}>V2 — Two compressed rows</option>
-      <option value="v3" {% if layout_variant == 'v3' %}selected{% endif %}>V3 — Header + inline stats</option>
-      <option value="v4" {% if layout_variant == 'v4' %}selected{% endif %}>V4 — Map + chart column</option>
-      <option value="v5" {% if layout_variant == 'v5' %}selected{% endif %}>V5 — Vertical stats</option>
-      <option value="v6" {% if layout_variant == 'v6' %}selected{% endif %}>V6 — Always-on runs</option>
-      <option value="v7" {% if layout_variant == 'v7' %}selected{% endif %}>V7 — Stats on the left</option>
-    </select>
     <button class="nav-sync-btn" onclick="triggerSyncAll()" title="Sync Strava + Garmin now">Sync</button>
   </nav>
 </header>
@@ -609,15 +485,6 @@
         <div class="ah-row-place"><span id="header-place"></span></div>
         <div id="header-issues" style="display:none;"></div>
       </div>
-      <!-- V3-only: inline mini-stats next to the title row. Hidden via CSS
-           on every other layout. Populated alongside #stats-bar in
-           renderStatsBar() at activity-load time. -->
-      <div class="v3-mini-stats">
-        <div class="v3-stat"><span class="v3-val" id="v3-s-dist">--</span><span class="v3-lbl">Dist</span></div>
-        <div class="v3-stat"><span class="v3-val" id="v3-s-gain">--</span><span class="v3-lbl">Climb</span></div>
-        <div class="v3-stat"><span class="v3-val" id="v3-s-dur">--</span><span class="v3-lbl">Time</span></div>
-        <div class="v3-stat"><span class="v3-val" id="v3-s-avg">--</span><span class="v3-lbl">Avg</span></div>
-      </div>
       <div class="ah-context">
         <div class="ah-context-top">
           <span id="header-datetime"></span>
@@ -694,7 +561,6 @@
           oninput="onExagChange(this.value)">
         <span id="exag-val">1.5×</span>
       </div>
-      <button id="runs-tab" onclick="toggleRunsDrawer()">Runs</button>
       <button id="runs-strip" onclick="toggleRunsDrawer()" title="Toggle runs panel">▶</button>
       <div id="runs-drawer">
         <h3>Run Statistics</h3>
@@ -710,9 +576,12 @@
         <button class="chart-btn" id="btn-speed" onclick="switchChart('speed')">Speed</button>
         <button class="chart-btn" id="btn-hr" onclick="switchChart('hr')" style="display:none">HR</button>
         <button class="chart-btn" id="btn-reset-zoom" onclick="resetChartZoom()" style="display:none">Reset Zoom</button>
-        <!-- Edit modes are rarely used — folded behind a single button so the
-             toolbar stays clean. The original buttons remain in the DOM
-             (existing JS toggles them) but are hidden via .edit-menu styling. -->
+        <!-- Edit modes are rarely used — folded behind a single dropdown so
+             the toolbar stays clean. The hidden id="btn-edit-segs" /
+             "btn-trim" / "btn-smooth" buttons used to live here as the
+             original click targets; they're kept in the DOM because some
+             toggle code addresses them by id, but rendered as zero-size
+             span via CSS so they don't take toolbar space. -->
         <div class="edit-menu-wrap">
           <button class="chart-btn" id="btn-edit-menu" onclick="toggleEditMenu(event)" title="Edit modes">Edit ▾</button>
           <div id="edit-menu" class="edit-menu">
@@ -721,9 +590,9 @@
             <button class="edit-menu-item" onclick="closeEditMenu(); toggleSmoothMode()">Smooth GPS</button>
           </div>
         </div>
-        <button class="chart-btn" id="btn-edit-segs" onclick="toggleEditMode()" style="display:none">Edit Segments</button>
-        <button class="chart-btn" id="btn-trim" onclick="toggleTrimMode()" style="display:none">Trim Ends</button>
-        <button class="chart-btn" id="btn-smooth" onclick="toggleSmoothMode()" style="display:none">Smooth GPS</button>
+        <span id="btn-edit-segs" hidden></span>
+        <span id="btn-trim" hidden></span>
+        <span id="btn-smooth" hidden></span>
         <button class="chart-btn" id="btn-chart-collapse" onclick="toggleChartPanel()" title="Hide/show chart">▼</button>
       </div>
       <div id="chart-wrapper" style="position:relative;">
@@ -2436,34 +2305,27 @@ function computeRuns(segments, points) {
 
 function toggleRunsDrawer() {
   const drawer = document.getElementById('runs-drawer');
-  const tab    = document.getElementById('runs-tab');
   const open   = drawer.classList.toggle('open');
-  tab.classList.toggle('open', open);
-  // Flip the v7 strip's triangle: ▶ when drawer is open (signals close
+  // Flip the strip's triangle: ▶ when drawer is open (signals close
   // direction), ◀ when closed (signals open direction).
   const strip = document.getElementById('runs-strip');
   if (strip) strip.textContent = open ? '▶' : '◀';
-  // v7's inline drawer changes the map's available width — Leaflet won't
+  // The inline drawer changes the map's available width — Leaflet won't
   // notice on its own.
-  if (document.body.dataset.layout === 'v7') setTimeout(() => map.invalidateSize(), 0);
+  setTimeout(() => map.invalidateSize(), 0);
 }
 
 function renderRunStats(meta) {
-  const tab    = document.getElementById('runs-tab');
-  const drawer = document.getElementById('runs-drawer');
+  const drawer  = document.getElementById('runs-drawer');
   const mapWrap = document.getElementById('map-wrap');
   const isSkiSport = ['ski','snowboard'].includes(meta?.type);
-  // On v7 the drawer takes layout space — closing it expands the map, so
-  // invalidate Leaflet's size in the close path too. .has-runs gates
-  // whether the v7 strip is shown alongside the map.
+  // The drawer takes real layout width when open — closing it expands the
+  // map, so we invalidate Leaflet's size in the close path too.
   const wasOpen = drawer.classList.contains('open');
-  const isV7 = document.body.dataset.layout === 'v7';
   const closeAndExit = () => {
-    tab.classList.remove('visible');
     drawer.classList.remove('open');
-    tab.classList.remove('open');
     mapWrap.classList.remove('has-runs');
-    if (isV7 && wasOpen) setTimeout(() => map.invalidateSize(), 0);
+    if (wasOpen) setTimeout(() => map.invalidateSize(), 0);
   };
   if (!isSkiSport || !trackData || !activeSegments.length) {
     closeAndExit();
@@ -2503,17 +2365,13 @@ function renderRunStats(meta) {
       <tbody>${tbody}</tbody>
     </table>`;
 
-  tab.classList.add('visible');
   mapWrap.classList.add('has-runs');
-  // V6 / V7 layouts auto-open the drawer when runs are available so the
-  // user doesn't need to flip the tab on every load. v7 makes the drawer
-  // inline (real layout space, not overlay) — invalidate Leaflet's size
-  // afterward so the map repaints at the new narrower width.
-  const layout = document.body.dataset.layout;
-  if (layout === 'v6' || layout === 'v7') {
-    drawer.classList.add('open');
-    if (layout === 'v7') setTimeout(() => map.invalidateSize(), 0);
-  }
+  // Auto-open the drawer when runs are available so the user doesn't need
+  // to flip the strip on every load. The drawer takes real layout width
+  // (not overlay), so invalidate Leaflet's size afterward to repaint the
+  // map at the narrower width.
+  drawer.classList.add('open');
+  setTimeout(() => map.invalidateSize(), 0);
   // Strip triangle reflects current state: ▶ when drawer open, ◀ when closed.
   const strip = document.getElementById('runs-strip');
   if (strip) strip.textContent = drawer.classList.contains('open') ? '▶' : '◀';
@@ -2545,15 +2403,6 @@ function updateStats(stats) {
   document.getElementById('s-dist').textContent = stats.distance_km  != null ? `${stats.distance_km} km`  : '--';
   document.getElementById('s-dur').textContent  = fmtDuration(stats.duration_sec, { showSeconds: true });
   document.getElementById('s-gain').textContent = stats.elev_gain_m  != null ? `${stats.elev_gain_m.toLocaleString()} m`   : '--';
-  // V3 mini stats — mirror the four headline values into the inline header
-  // strip used by the v3 layout. Hidden via CSS on every other variant.
-  const v3 = id => document.getElementById(id);
-  if (v3('v3-s-dist')) {
-    v3('v3-s-dist').textContent = stats.distance_km != null ? `${stats.distance_km} km` : '--';
-    v3('v3-s-gain').textContent = stats.elev_gain_m != null ? `${stats.elev_gain_m.toLocaleString()} m` : '--';
-    v3('v3-s-dur').textContent  = fmtDuration(stats.duration_sec);
-    v3('v3-s-avg').textContent  = stats.avg_speed_kmh != null ? `${stats.avg_speed_kmh} km/h` : '--';
-  }
   const asst = stats.assisted_gain_m;
   document.getElementById('s-assisted').textContent = asst ? `(+${asst.toLocaleString()} ass.)` : '';
 
@@ -3015,20 +2864,8 @@ function writeUrlState() {
   if (!sortDesc) p.set('dir', 'asc');
   if (currentFilename) p.set('file', currentFilename);
   const qs = p.toString();
-  // Preserve the layout-variant path segment (/, /v1, /v2 ...) so flipping
-  // between variants doesn't reset the user's activity selection.
-  const basePath = location.pathname.match(/^\/v[1-7]$/) ? location.pathname : '/';
-  const url = qs ? `${basePath}?${qs}` : basePath;
+  const url = qs ? `/?${qs}` : '/';
   history.replaceState(null, '', url);
-}
-
-// Layout switcher in the global nav. Navigates to /{value} (or / for default)
-// while preserving the current query string so the same activity / filters
-// stay in view across variants.
-function onLayoutSwitch(value) {
-  const target = value === 'default' ? '/' : `/${value}`;
-  const qs = location.search;  // already includes the leading "?" if any
-  location.href = target + qs;
 }
 
 // Wrap state-mutating handlers so they persist to URL
