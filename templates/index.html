@@ -457,6 +457,13 @@
     body[data-layout="v7"] #map-chart-row   { display: contents; }
     body[data-layout="v7"] #map-wrap        { grid-area: map; min-height: 0; }
     body[data-layout="v7"] #chart-panel     { grid-area: chart; }
+    /* Inline the place (province, country) after the tagged regions on the
+       same row so the header is one row tighter. */
+    body[data-layout="v7"] .ah-main { gap: 2px; flex-wrap: wrap; }
+    body[data-layout="v7"] .ah-main .ah-row-1 { flex: 1 0 100%; }
+    body[data-layout="v7"] .ah-main .ah-row-2 { flex: 0 0 auto; padding: 0; min-height: 0; }
+    body[data-layout="v7"] .ah-main .ah-row-place { flex: 0 0 auto; padding: 0; font-size: 0.72rem; color: #aaa; min-height: 0; }
+    body[data-layout="v7"] .ah-main .ah-row-place:not(:empty)::before { content: '·'; color: #555; margin: 0 8px; }
   </style>
 </head>
 <body data-layout="{{ layout_variant or 'default' }}">
