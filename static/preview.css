@@ -8,7 +8,76 @@
  * the per-template <style> blocks and this file will shrink.
  */
 
-/* ─── Round 1: TBD (grays + accents) ────────────────────────────────────── */
+/* ═══ Round 1: standardize grays + accents ═════════════════════════════════
+   Targets the "Strongly inconsistent" findings:
+   - 3 different grays for "field label" → single value (#bbb)
+   - Heatmap overlay labels at #555 → #aaa (readable)
+   - Section-title letter-spacing 0.07 vs 0.1em → unified at 0.08em
+   - "Best/record" highlights → all amber (#f59e0b)
+   - .mode-btn inactive grey #666 → #ccc (matches .filter-btn) */
+
+/* All "DISTANCE / ACTIVE / FROM:" style uppercase labels — one canonical
+   muted color so the same role looks the same on every page. */
+body.preview #filter-bar label,
+body.preview .filter-label,
+body.preview .sflabel,
+body.preview .ah-label,
+body.preview .stat-label,
+body.preview .section-title,
+body.preview .hero-label,
+body.preview .lifetime-label,
+body.preview .lifetime-stat-label,
+body.preview .pt-record-card .pt-record-type,
+body.preview #runs-drawer h3,
+body.preview .run-sum-lbl,
+body.preview .runs-table th,
+body.preview .picker-label,
+body.preview .chart-head { color: #bbb; }
+
+/* Letter-spacing for uppercase labels — collapse 0.07em / 0.08em / 0.1em
+   into a single value so labels visually align across pages. */
+body.preview .section-title,
+body.preview #filter-bar label,
+body.preview .filter-label,
+body.preview .ah-label,
+body.preview .stat-label,
+body.preview .hero-label,
+body.preview .lifetime-label,
+body.preview .lifetime-stat-label { letter-spacing: 0.08em; }
+
+/* Heatmap overlay was painting labels at #555 — almost unreadable on the
+   88 % alpha card. Brighten to #aaa to match other secondary text. */
+body.preview .ov-label { color: #aaa; }
+body.preview #legend > div:first-child,
+body.preview #heat-legend > div:first-child,
+body.preview #heat-legend .grad-labels { color: #aaa; }
+
+/* "Best / max / record" highlights — three different colors today. Pick one
+   amber (the existing .record-value choice) so the visual semantic is
+   consistent across pages. The is-max cells on Compare Logs override
+   per-metric colors that map to sparkbar tints; unify those too. */
+body.preview .stat-cell.is-max:has(.sb-distance) .v,
+body.preview .stat-cell.is-max:has(.sb-climb) .v,
+body.preview .stat-cell.is-max:has(.sb-descent) .v,
+body.preview .stat-cell.is-max:has(.sb-duration) .v,
+body.preview .stat-cell.is-max:has(.sb-avg) .v,
+body.preview .stat-cell.is-max:has(.sb-max) .v,
+body.preview .stat-cell.is-max:has(.sb-hravg) .v,
+body.preview .stat-cell.is-max:has(.sb-hrmax) .v { color: #f59e0b; }
+body.preview .stat-cell.is-max:has(.sb-distance),
+body.preview .stat-cell.is-max:has(.sb-climb),
+body.preview .stat-cell.is-max:has(.sb-descent),
+body.preview .stat-cell.is-max:has(.sb-duration),
+body.preview .stat-cell.is-max:has(.sb-avg),
+body.preview .stat-cell.is-max:has(.sb-max),
+body.preview .stat-cell.is-max:has(.sb-hravg),
+body.preview .stat-cell.is-max:has(.sb-hrmax) { background: rgba(245,158,11,0.14); }
+
+/* .mode-btn inactive color was #666 (much darker than .filter-btn's #ccc).
+   Match .filter-btn so toggle controls feel uniform. */
+body.preview .mode-btn { color: #ccc; }
+body.preview .mode-btn:disabled { color: #555; }
+
 
 /* ─── Round 2: TBD (button consolidation) ──────────────────────────────── */
 
