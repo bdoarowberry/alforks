@@ -37,10 +37,14 @@
     #delete-activity-btn { color: #ef4444; border-color: #4a2020; }
     #delete-activity-btn:hover { color: #fff; border-color: #ef4444; background: #ef4444; }
 
-    #header-title { flex: 1; min-width: 0; font-size: 1.2rem; color: #fff; font-weight: 500; background: transparent; border: none; border-bottom: 1px solid transparent; text-align: left; padding: 2px 4px; font-family: inherit; letter-spacing: 0.01em; transition: border-color 0.15s; }
+    #header-title { flex: 1; min-width: 0; font-size: 1.2rem; color: #fff; font-weight: 500; background: transparent; border: none; border-bottom: 1px solid transparent; text-align: left; padding: 2px 4px; font-family: inherit; letter-spacing: 0.01em; transition: border-color 0.15s, color 0.15s; }
     #header-title:focus { outline: none; border-bottom-color: #3b82f6; }
     #header-title:hover:not(:focus) { border-bottom-color: #2a2d35; }
     #header-title::placeholder { color: #fff; opacity: 0.85; }
+    /* Suggested-default state — input value is a derived "{type} - {region}"
+       hint, not a saved title. Muted + italic so the user can tell it's
+       editable suggestion vs persisted text. Edit to make it real. */
+    #header-title.is-default { color: #888; font-style: italic; font-weight: 400; }
     .save-confirm { font-size: 0.7rem; color: #22c55e; opacity: 0; transition: opacity 0.2s; padding: 0 6px; flex-shrink: 0; }
     .save-confirm.visible { opacity: 1; }
 
@@ -2070,9 +2074,14 @@ async function deleteCurrent() {
 
 async function saveMeta() {
   if (!currentFilename) return;
+  const titleEl = document.getElementById('header-title');
+  // If the input still shows the suggested-default text (untouched), don't
+  // persist it — the user might be saving notes or a type change without
+  // wanting to promote the suggestion to a real title.
+  const titleVal = titleEl.classList.contains('is-default') ? '' : titleEl.value.trim();
   const payload = {
     type:  document.getElementById('header-type').value,
-    title: document.getElementById('header-title').value.trim(),
+    title: titleVal,
   };
   await fetch(`/api/activity/${encodeURIComponent(currentFilename)}/metadata`, {
     method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
@@ -2122,6 +2131,24 @@ function speedBandColor(kmh) {
   return SPEED_BANDS[SPEED_BANDS.length - 1].color;
 }
 
+// Builds the "{type} - {region}" suggestion shown when the activity has no
+// saved title. Falls back to type-only or region-only when the other piece
+// is missing. Returns '' when nothing useful is available — caller should
+// then leave the input empty.
+function computeDefaultTitle(data) {
+  const meta = data.meta || {};
+  const typeId    = meta.type || data.effective_type || '';
+  const typeLabel = TYPES.find(t => t.id === typeId)?.label || '';
+  const regionName = (data.regions || [])
+    .map(id => _allRegions.find(r => r.id === id)?.name)
+    .find(Boolean) || '';
+  // Fallback to the GPX track name (e.g. "Morning Ride" from Strava) if no
+  // region is matched — better than nothing.
+  const location = regionName || data.name || '';
+  if (typeLabel && location) return `${typeLabel} - ${location}`;
+  return typeLabel || location || '';
+}
+
 // Auto-save: debounce title typing, save type changes immediately
 let _saveTimer = null;
 function scheduleSave(delay = 600) {
@@ -2129,7 +2156,11 @@ function scheduleSave(delay = 600) {
   clearTimeout(_saveTimer);
   _saveTimer = setTimeout(() => { _saveTimer = null; saveMeta(); }, delay);
 }
-document.getElementById('header-title').addEventListener('input', () => scheduleSave());
+document.getElementById('header-title').addEventListener('input', (ev) => {
+  // First user keystroke promotes the suggested default to a real title.
+  ev.target.classList.remove('is-default');
+  scheduleSave();
+});
 document.getElementById('header-title').addEventListener('blur', () => {
   if (_saveTimer) { clearTimeout(_saveTimer); _saveTimer = null; saveMeta(); }
 });
@@ -2294,7 +2325,19 @@ async function loadActivity(filename) {
   activeSegments = applySegmentOverrides(trackData);
 
   const meta = trackData.meta || {};
-  document.getElementById('header-title').value = meta.title || '';
+  // Pre-fill the title input with a suggested "{type} - {region}" string when
+  // the user hasn't set a title yet. Muted + italic until they touch it.
+  // Touching strips the muted class (see the input listener below); no save
+  // fires unless the user actually types, because programmatic .value
+  // assignment doesn't trigger an `input` event.
+  const titleInput = document.getElementById('header-title');
+  if (meta.title) {
+    titleInput.value = meta.title;
+    titleInput.classList.remove('is-default');
+  } else {
+    titleInput.value = computeDefaultTitle(trackData);
+    titleInput.classList.toggle('is-default', !!titleInput.value);
+  }
   const place = trackData.place || {};
   const placeStr = [place.province, place.country].filter(Boolean).join(', ');
   document.getElementById('header-place').textContent = placeStr;
