@@ -350,6 +350,32 @@
     body[data-layout="v2"] .ah-main .ah-row-place:not(:empty)::before { content: '·'; color: #555; margin: 0 8px; }
     body[data-layout="v2"] .ah-context { gap: 2px; }
     body[data-layout="v2"] #header-title { font-size: 1.1rem; }
+
+    /* ─── V3: One-row header with inline stats ───────────────────────────────
+       Builds on V1's single-row header and additionally moves four key stats
+       (distance / climbing / duration / avg speed) inline into the header's
+       right side, then hides the standalone #stats-bar. Maximum vertical
+       savings: ~110–130 px. Detailed stats still live in the chart's hover
+       tooltip and in the now-hidden bar (kept in the DOM for the JS that
+       writes into it). */
+    body[data-layout="v3"] #activity-header { padding: 6px 20px; align-items: center; gap: 12px; flex-wrap: wrap; }
+    body[data-layout="v3"] .ah-main { flex-direction: row; align-items: center; flex-wrap: wrap; gap: 8px; flex: 1; min-width: 0; }
+    body[data-layout="v3"] .ah-main .ah-row-1 { flex: 1 1 auto; min-width: 240px; }
+    body[data-layout="v3"] .ah-main .ah-row-2,
+    body[data-layout="v3"] .ah-main .ah-row-place { display: inline-flex; align-items: center; padding: 0; min-height: 0; font-size: 0.74rem; color: #aaa; }
+    body[data-layout="v3"] .ah-main .ah-row-2:not(:empty)::before,
+    body[data-layout="v3"] .ah-main .ah-row-place:not(:empty)::before { content: '·'; color: #555; margin-right: 8px; }
+    body[data-layout="v3"] #header-issues { margin: 0; padding: 3px 8px; font-size: 0.7rem; flex: 0 0 auto; }
+    body[data-layout="v3"] #header-issues ul { display: none; }
+    body[data-layout="v3"] #header-issues button { padding: 2px 6px; font-size: 0.66rem; }
+    body[data-layout="v3"] .ah-context { flex-direction: row; align-items: center; gap: 8px; }
+    body[data-layout="v3"] #header-title { font-size: 1.05rem; }
+    body[data-layout="v3"] #stats-bar { display: none; }
+    body[data-layout="v3"] .v3-mini-stats { display: inline-flex; align-items: center; gap: 14px; padding: 0 12px; border-left: 1px solid #2a2d35; border-right: 1px solid #2a2d35; }
+    body[data-layout="v3"] .v3-mini-stats .v3-stat { display: flex; flex-direction: column; gap: 1px; align-items: flex-start; line-height: 1.1; min-width: 56px; }
+    body[data-layout="v3"] .v3-mini-stats .v3-stat .v3-val { font-size: 0.95rem; color: #fff; font-weight: 500; }
+    body[data-layout="v3"] .v3-mini-stats .v3-stat .v3-lbl { font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.07em; color: #888; }
+    body:not([data-layout="v3"]) .v3-mini-stats { display: none !important; }
   </style>
 </head>
 <body data-layout="{{ layout_variant or 'default' }}">
@@ -451,6 +477,15 @@
         <div class="ah-row-2"><span id="header-regions"></span></div>
         <div class="ah-row-place"><span id="header-place"></span></div>
         <div id="header-issues" style="display:none;"></div>
+      </div>
+      <!-- V3-only: inline mini-stats next to the title row. Hidden via CSS
+           on every other layout. Populated alongside #stats-bar in
+           renderStatsBar() at activity-load time. -->
+      <div class="v3-mini-stats">
+        <div class="v3-stat"><span class="v3-val" id="v3-s-dist">--</span><span class="v3-lbl">Dist</span></div>
+        <div class="v3-stat"><span class="v3-val" id="v3-s-gain">--</span><span class="v3-lbl">Climb</span></div>
+        <div class="v3-stat"><span class="v3-val" id="v3-s-dur">--</span><span class="v3-lbl">Time</span></div>
+        <div class="v3-stat"><span class="v3-val" id="v3-s-avg">--</span><span class="v3-lbl">Avg</span></div>
       </div>
       <div class="ah-context">
         <div class="ah-context-top">
@@ -2311,6 +2346,15 @@ function updateStats(stats) {
   document.getElementById('s-dist').textContent = stats.distance_km  != null ? `${stats.distance_km} km`  : '--';
   document.getElementById('s-dur').textContent  = fmtDuration(stats.duration_sec, { showSeconds: true });
   document.getElementById('s-gain').textContent = stats.elev_gain_m  != null ? `${stats.elev_gain_m.toLocaleString()} m`   : '--';
+  // V3 mini stats — mirror the four headline values into the inline header
+  // strip used by the v3 layout. Hidden via CSS on every other variant.
+  const v3 = id => document.getElementById(id);
+  if (v3('v3-s-dist')) {
+    v3('v3-s-dist').textContent = stats.distance_km != null ? `${stats.distance_km} km` : '--';
+    v3('v3-s-gain').textContent = stats.elev_gain_m != null ? `${stats.elev_gain_m.toLocaleString()} m` : '--';
+    v3('v3-s-dur').textContent  = fmtDuration(stats.duration_sec);
+    v3('v3-s-avg').textContent  = stats.avg_speed_kmh != null ? `${stats.avg_speed_kmh} km/h` : '--';
+  }
   const asst = stats.assisted_gain_m;
   document.getElementById('s-assisted').textContent = asst ? `(+${asst.toLocaleString()} ass.)` : '';
 
