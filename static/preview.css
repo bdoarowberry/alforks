@@ -79,6 +79,79 @@ body.preview .mode-btn { color: #ccc; }
 body.preview .mode-btn:disabled { color: #555; }
 
 
-/* ─── Round 2: TBD (button consolidation) ──────────────────────────────── */
+/* ═══ Round 2: consolidate toggle / chip buttons ═══════════════════════════
+   Six classes serve overlapping "small toggle button" roles today —
+   .filter-btn, .chip, .mode-btn, .chart-btn, .vtbtn, .layer-toggle-btn.
+   Each ships its own font-size (0.7 / 0.72 / 0.74 / 0.75 / 0.78 rem),
+   radius (3 / 4 / 5 px), and hover convention. Standardize them so the
+   visual rhythm of toggles is the same across every page. */
+
+body.preview .filter-btn,
+body.preview .chip,
+body.preview .mode-btn,
+body.preview .chart-btn,
+body.preview .vtbtn,
+body.preview .layer-toggle-btn,
+body.preview #compare-toggle,
+body.preview .nav-sync-btn {
+  font-size: 0.75rem;
+  border-radius: 4px;
+  font-family: inherit;
+  transition: all 0.12s;
+}
+
+/* Inactive vs hover vs active — match the existing .filter-btn convention
+   since it lives in base.css: muted #ccc text on a #1a1d23 plate, blue
+   border on hover, full-blue on active. Apply consistently to every
+   toggle class so the active/hover affordances feel the same. */
+body.preview .filter-btn,
+body.preview .chip,
+body.preview .mode-btn,
+body.preview .chart-btn,
+body.preview .vtbtn,
+body.preview .layer-toggle-btn,
+body.preview #compare-toggle {
+  color: #ccc;
+  border: 1px solid #2a2d35;
+  background: #1a1d23;
+}
+
+body.preview .filter-btn:hover,
+body.preview .chip:hover,
+body.preview .mode-btn:hover:not(:disabled),
+body.preview .chart-btn:hover,
+body.preview .vtbtn:hover,
+body.preview .layer-toggle-btn:hover,
+body.preview #compare-toggle:hover { color: #fff; border-color: #3b82f6; }
+
+/* Active state — single canonical look. Some classes already match;
+   others (.chart-btn.edit-active is red, deliberately separate) keep
+   their semantic variant. */
+body.preview .filter-btn.active,
+body.preview .chip.active,
+body.preview .mode-btn.active,
+body.preview .chart-btn.active,
+body.preview .vtbtn.active,
+body.preview #compare-toggle.active {
+  background: #1a2a3a;
+  color: #3b82f6;
+  border-color: #3b82f6;
+}
+
+/* The mode-btn group on Heat Map is wrapped in #mode-group with shared
+   borders between buttons. Override the group's segmented look so each
+   button reads as its own pill (matches every other toggle on the page). */
+body.preview #mode-group { border: none; gap: 4px; display: flex; }
+body.preview #mode-group .mode-btn { border: 1px solid #2a2d35; }
+body.preview #mode-group .mode-btn + .mode-btn { border-left: 1px solid #2a2d35; }
+
+/* The .vtbtn group (Map / Satellite / 3D in-map overlay) keeps its
+   segmented joined look — that overlay reads better as a single
+   control. Just make sure the joined-pill border-radius is applied. */
+body.preview #view-toggle .vtbtn:not(:first-child) { border-left: none; }
+body.preview #view-toggle .vtbtn:first-child { border-radius: 4px 0 0 4px; }
+body.preview #view-toggle .vtbtn:last-child  { border-radius: 0 4px 4px 0; }
+body.preview #view-toggle .vtbtn:only-child  { border-radius: 4px; }
+
 
 /* ─── Round 3: TBD (small fixes) ───────────────────────────────────────── */
