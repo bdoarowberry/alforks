@@ -1,197 +1,98 @@
-/* Style-cleanup preview overrides.
+/* Style-cleanup preview overrides — Ride Logs (/) only.
  *
- * Every rule in this file is scoped under `body.preview`. With the toggle
- * on (button in the global nav), these rules apply on top of the existing
- * styles to show the proposed cleanup. Toggle off and the page reverts.
+ * Every rule scoped under `body.preview`. Toggle the Preview button to
+ * compare. Once approved, these graduate into the page's canonical CSS
+ * and the same patterns will be rolled out to the other pages.
  *
- * Once each round is approved, the rules will be promoted into base.css /
- * the per-template <style> blocks and this file will shrink.
+ * Focus: internal consistency of the Ride Logs page. The previous
+ * cross-page round-1/2/3 sweep has been parked — this file now targets
+ * only selectors that ship on /.
  */
 
-/* ═══ Round 1: standardize grays + accents ═════════════════════════════════
-   Targets the "Strongly inconsistent" findings:
-   - 3 different grays for "field label" → single value (#bbb)
-   - Heatmap overlay labels at #555 → #aaa (readable)
-   - Section-title letter-spacing 0.07 vs 0.1em → unified at 0.08em
-   - "Best/record" highlights → all amber (#f59e0b)
-   - .mode-btn inactive grey #666 → #ccc (matches .filter-btn) */
-
-/* All "DISTANCE / ACTIVE / FROM:" style uppercase labels — one canonical
-   muted color so the same role looks the same on every page. */
-body.preview #filter-bar label,
-body.preview .filter-label,
+/* ─── 1. One canonical "small uppercase label" treatment ─────────────────
+   Today the page has at least four label styles for the same job:
+     .sflabel              0.62rem #bbb  letter-spacing 0.06em
+     .stat-label           0.62rem #bbb  letter-spacing 0.07em
+     #sidebar-header       0.7rem  #ccc  letter-spacing 0.08em
+     .chart-title          0.7rem  #ccc  letter-spacing 0.08em
+     .field label          0.68rem #ccc  letter-spacing 0.07em
+     .runs-table th        0.6rem  #bbb  letter-spacing 0.07em
+     .run-sum-lbl          0.6rem  #bbb  letter-spacing 0.07em
+   Collapse to one rule: 0.66rem / #bbb / 0.07em — readable in either
+   sidebar or stat-bar context. */
 body.preview .sflabel,
-body.preview .ah-label,
 body.preview .stat-label,
-body.preview .section-title,
-body.preview .hero-label,
-body.preview .lifetime-label,
-body.preview .lifetime-stat-label,
-body.preview .pt-record-card .pt-record-type,
-body.preview #runs-drawer h3,
-body.preview .run-sum-lbl,
+body.preview #sidebar-header,
+body.preview .chart-title,
+body.preview .field label,
+body.preview #edit-toggle,
 body.preview .runs-table th,
-body.preview .picker-label,
-body.preview .chart-head { color: #bbb; }
+body.preview .run-sum-lbl,
+body.preview #runs-drawer h3 {
+  font-size: 0.66rem;
+  color: #bbb;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  font-weight: 500;
+}
+/* Sidebar header still has its border-bottom + flex layout — preserve. */
+body.preview #sidebar-header { font-weight: 500; }
 
-/* Letter-spacing for uppercase labels — collapse 0.07em / 0.08em / 0.1em
-   into a single value so labels visually align across pages. */
-body.preview .section-title,
-body.preview #filter-bar label,
-body.preview .filter-label,
-body.preview .ah-label,
-body.preview .stat-label,
-body.preview .hero-label,
-body.preview .lifetime-label,
-body.preview .lifetime-stat-label { letter-spacing: 0.08em; }
-
-/* Heatmap overlay was painting labels at #555 — almost unreadable on the
-   88 % alpha card. Brighten to #aaa to match other secondary text. */
-body.preview .ov-label { color: #aaa; }
-body.preview #legend > div:first-child,
-body.preview #heat-legend > div:first-child,
-body.preview #heat-legend .grad-labels { color: #aaa; }
-
-/* "Best / max / record" highlights — three different colors today. Pick one
-   amber (the existing .record-value choice) so the visual semantic is
-   consistent across pages. The is-max cells on Compare Logs override
-   per-metric colors that map to sparkbar tints; unify those too. */
-body.preview .stat-cell.is-max:has(.sb-distance) .v,
-body.preview .stat-cell.is-max:has(.sb-climb) .v,
-body.preview .stat-cell.is-max:has(.sb-descent) .v,
-body.preview .stat-cell.is-max:has(.sb-duration) .v,
-body.preview .stat-cell.is-max:has(.sb-avg) .v,
-body.preview .stat-cell.is-max:has(.sb-max) .v,
-body.preview .stat-cell.is-max:has(.sb-hravg) .v,
-body.preview .stat-cell.is-max:has(.sb-hrmax) .v { color: #f59e0b; }
-body.preview .stat-cell.is-max:has(.sb-distance),
-body.preview .stat-cell.is-max:has(.sb-climb),
-body.preview .stat-cell.is-max:has(.sb-descent),
-body.preview .stat-cell.is-max:has(.sb-duration),
-body.preview .stat-cell.is-max:has(.sb-avg),
-body.preview .stat-cell.is-max:has(.sb-max),
-body.preview .stat-cell.is-max:has(.sb-hravg),
-body.preview .stat-cell.is-max:has(.sb-hrmax) { background: rgba(245,158,11,0.14); }
-
-/* .mode-btn inactive color was #666 (much darker than .filter-btn's #ccc).
-   Match .filter-btn so toggle controls feel uniform. */
-body.preview .mode-btn { color: #ccc; }
-body.preview .mode-btn:disabled { color: #555; }
-
-
-/* ═══ Round 2: consolidate toggle / chip buttons ═══════════════════════════
-   Six classes serve overlapping "small toggle button" roles today —
-   .filter-btn, .chip, .mode-btn, .chart-btn, .vtbtn, .layer-toggle-btn.
-   Each ships its own font-size (0.7 / 0.72 / 0.74 / 0.75 / 0.78 rem),
-   radius (3 / 4 / 5 px), and hover convention. Standardize them so the
-   visual rhythm of toggles is the same across every page. */
-
-body.preview .filter-btn,
-body.preview .chip,
-body.preview .mode-btn,
-body.preview .chart-btn,
+/* ─── 2. Small toggle / chip / action buttons — single shape ─────────────
+   #bulk-toggle-btn, #sort-dir-btn, .vtbtn, .chart-btn, .layer-toggle-btn
+   all share the "tiny pill button" role with diverging font-size
+   (0.68 / 0.7 / 0.72) and border-radius (3 / 4). Standardize. */
+body.preview #bulk-toggle-btn,
+body.preview #sort-dir-btn,
 body.preview .vtbtn,
-body.preview .layer-toggle-btn,
-body.preview #compare-toggle,
-body.preview .nav-sync-btn {
-  font-size: 0.75rem;
+body.preview .chart-btn {
+  font-size: 0.72rem;
   border-radius: 4px;
-  font-family: inherit;
-  transition: all 0.12s;
 }
+/* Chart-btn hover used #aaa border (out of step). Match the others — blue. */
+body.preview .chart-btn:hover { border-color: #3b82f6; color: #fff; }
 
-/* Inactive vs hover vs active — match the existing .filter-btn convention
-   since it lives in base.css: muted #ccc text on a #1a1d23 plate, blue
-   border on hover, full-blue on active. Apply consistently to every
-   toggle class so the active/hover affordances feel the same. */
-body.preview .filter-btn,
-body.preview .chip,
-body.preview .mode-btn,
-body.preview .chart-btn,
-body.preview .vtbtn,
-body.preview .layer-toggle-btn,
-body.preview #compare-toggle {
-  color: #ccc;
-  border: 1px solid #2a2d35;
-  background: #1a1d23;
-}
+/* Sidebar form controls (search + sort selects) shared 3 px radius;
+   bring them in line with the rest of the small UI at 4 px. */
+body.preview #search-input,
+body.preview .sfselect,
+body.preview .skeleton-bar,
+body.preview .type-badge { border-radius: 4px; }
 
-body.preview .filter-btn:hover,
-body.preview .chip:hover,
-body.preview .mode-btn:hover:not(:disabled),
-body.preview .chart-btn:hover,
-body.preview .vtbtn:hover,
-body.preview .layer-toggle-btn:hover,
-body.preview #compare-toggle:hover { color: #fff; border-color: #3b82f6; }
+/* ─── 3. Action buttons in the activity header ──────────────────────────
+   .ah-action-btn used #3a3d45 — the only place in the codebase that
+   border tone is used. Pull it back to the standard #2a2d35 so its
+   default look matches every other bordered button. The hover/active
+   colour overrides on Exclude / Delete stay (semantic accent). */
+body.preview .ah-action-btn { border-color: #2a2d35; color: #ccc; }
 
-/* Active state — single canonical look. Some classes already match;
-   others (.chart-btn.edit-active is red, deliberately separate) keep
-   their semantic variant. */
-body.preview .filter-btn.active,
-body.preview .chip.active,
-body.preview .mode-btn.active,
-body.preview .chart-btn.active,
-body.preview .vtbtn.active,
-body.preview #compare-toggle.active {
-  background: #1a2a3a;
-  color: #3b82f6;
-  border-color: #3b82f6;
-}
+/* ─── 4. Map / chart overlay panels — same radius hierarchy ─────────────
+   #map-legend and #exag-ctrl use 6 px radius; every other small panel on
+   the page uses 4 px. Unify so map overlays don't look like a different
+   visual family. */
+body.preview #map-legend,
+body.preview #exag-ctrl,
+body.preview #speed-legend { border-radius: 4px; }
 
-/* The mode-btn group on Heat Map is wrapped in #mode-group with shared
-   borders between buttons. Override the group's segmented look so each
-   button reads as its own pill (matches every other toggle on the page). */
-body.preview #mode-group { border: none; gap: 4px; display: flex; }
-body.preview #mode-group .mode-btn { border: 1px solid #2a2d35; }
-body.preview #mode-group .mode-btn + .mode-btn { border-left: 1px solid #2a2d35; }
+/* ─── 5. The exag-ctrl text gets brighter ───────────────────────────────
+   Was #888 — same role as other muted labels which we just promoted to
+   #bbb. Match. */
+body.preview #exag-ctrl { color: #bbb; }
+body.preview #exag-val { color: #ccc; }
 
-/* The .vtbtn group (Map / Satellite / 3D in-map overlay) keeps its
-   segmented joined look — that overlay reads better as a single
-   control. Just make sure the joined-pill border-radius is applied. */
-body.preview #view-toggle .vtbtn:not(:first-child) { border-left: none; }
-body.preview #view-toggle .vtbtn:first-child { border-radius: 4px 0 0 4px; }
-body.preview #view-toggle .vtbtn:last-child  { border-radius: 0 4px 4px 0; }
-body.preview #view-toggle .vtbtn:only-child  { border-radius: 4px; }
+/* ─── 6. Activity-list item meta colour ─────────────────────────────────
+   .activity-item .date and .activity-item .meta both use #bbb (correct).
+   #activity-count was #aaa — out of step. Match. */
+body.preview #activity-count { color: #bbb; }
 
+/* ─── 7. Stat-value / stat-label consistency ────────────────────────────
+   .stat-value uses font-weight 600; .run-sum-val uses 600. The headline
+   numbers are aligned. Just tighten the .stat-label spacing to match the
+   universal 0.07em. (Already done above.) */
 
-/* ═══ Round 3: small fixes ═════════════════════════════════════════════════ */
-
-/* The 5 px radius on #seg-instructions was the only one in the codebase. */
-body.preview #seg-instructions { border-radius: 4px; }
-
-/* Type-badge: index uses 1px 6px / 0.6rem; summary uses 1px 5px / 0.58rem;
-   compare's inline injection used yet another shape. Unify dimensions
-   wherever the badge ships in the visible flow. */
-body.preview .type-badge { padding: 1px 6px; font-size: 0.6rem; }
-
-/* hero-sub vs record-sub: both are "small descriptor under a number" but
-   one was 0.72rem and the other 0.7rem. Match them. */
-body.preview .hero-sub,
-body.preview .record-sub { font-size: 0.72rem; color: #999; }
-
-/* hero-label vs section-title: bring their type-stack closer so two
-   adjacent uppercase labels on the same page stop looking like different
-   hierarchies. (Round 1 already aligned colour and letter-spacing.) */
-body.preview .hero-label { font-size: 0.7rem; }
-body.preview .section-title { font-size: 0.7rem; }
-
-/* "Save confirm" font-size was 0.68 / 0.7 / 0.72 rem in three places. */
-body.preview .save-confirm,
-body.preview #title-save-confirm,
-body.preview #ab-save-confirm,
-body.preview #seg-save-confirm,
-body.preview .sync-confirm { font-size: 0.7rem; }
-
-/* #activity-count vs comparison's #count-label — both are "N items shown"
-   meta text. Same colour. */
-body.preview #activity-count,
-body.preview #count-label { color: #999; }
-
-/* Hover-lift on .comp-row was the only translateY hover in the codebase.
-   Drop it to match the convention (border-only highlight). */
-body.preview .comp-row:hover { transform: none; }
-
-/* Border-radius hierarchy: cards 8 px, buttons 4 px, sub-elements 4 px.
-   Collapse the orphan 6 px values used in a few inline styles to fit. */
-body.preview .ah-action-btn { border-color: #2a2d35; }
-
+/* ─── 8. Empty-state link colour ────────────────────────────────────────
+   .activity-empty .empty-clear used #60a5fa — a lighter accent variant
+   than the page's primary #3b82f6. Use the page primary so accents are
+   one colour. */
+body.preview .activity-empty .empty-clear { color: #3b82f6; }
+body.preview .activity-empty .empty-clear:hover { color: #60a5fa; }
