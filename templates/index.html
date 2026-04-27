@@ -317,6 +317,26 @@
     .runs-table td:first-child { color: #fff; text-align: left; }
     .runs-table tbody tr:hover td { background: #1e2128; cursor: pointer; }
     .runs-table tbody tr.best td { color: #f59e0b; }
+
+    /* ─── V1: One-row header ────────────────────────────────────────────────
+       Collapse the activity-header's three stacked rows (type+title /
+       regions / place) plus the right-column (datetime+actions) into a
+       single horizontal strip. Saves ~50–60px vertical on the Ride Logs
+       page when an activity is loaded. */
+    body[data-layout="v1"] #activity-header { padding: 6px 20px; align-items: center; gap: 12px; flex-wrap: wrap; }
+    body[data-layout="v1"] .ah-main { flex-direction: row; align-items: center; flex-wrap: wrap; gap: 8px; flex: 1; min-width: 0; }
+    body[data-layout="v1"] .ah-main .ah-row-1 { flex: 1 1 auto; min-width: 240px; }
+    body[data-layout="v1"] .ah-main .ah-row-2,
+    body[data-layout="v1"] .ah-main .ah-row-place { display: inline-flex; align-items: center; padding: 0; min-height: 0; font-size: 0.74rem; color: #aaa; }
+    body[data-layout="v1"] .ah-main .ah-row-2:not(:empty)::before { content: '·'; color: #555; margin-right: 8px; }
+    body[data-layout="v1"] .ah-main .ah-row-place:not(:empty)::before { content: '·'; color: #555; margin-right: 8px; }
+    body[data-layout="v1"] #header-issues { margin: 0; padding: 3px 8px; font-size: 0.7rem; flex: 0 0 auto; }
+    body[data-layout="v1"] #header-issues ul { display: none; }      /* tooltip via title attr instead */
+    body[data-layout="v1"] #header-issues button { padding: 2px 6px; font-size: 0.66rem; }
+    body[data-layout="v1"] .ah-context { flex-direction: row; align-items: center; gap: 8px; }
+    body[data-layout="v1"] .ah-context-top { gap: 6px; }
+    body[data-layout="v1"] #header-weather { font-size: 0.7rem; color: #888; }
+    body[data-layout="v1"] #header-title { font-size: 1.05rem; }
   </style>
 </head>
 <body data-layout="{{ layout_variant or 'default' }}">
