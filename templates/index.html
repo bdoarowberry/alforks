@@ -566,7 +566,7 @@
         <div class="spd-row"><div class="spd-dot" style="background:#1e40af"></div>&lt; 5 km/h</div>
         <div class="spd-row"><div class="spd-dot" style="background:#3b82f6"></div>5 – 15</div>
         <div class="spd-row"><div class="spd-dot" style="background:#10b981"></div>15 – 30</div>
-        <div class="spd-row"><div class="spd-dot" style="background:#f59e0b"></div>30 – 50</div>
+        <div class="spd-row"><div class="spd-dot" style="background:#facc15"></div>30 – 50</div>
         <div class="spd-row"><div class="spd-dot" style="background:#ef4444"></div>50 – 80</div>
         <div class="spd-row"><div class="spd-dot" style="background:#7c3aed"></div>80+ km/h</div>
       </div>
@@ -2275,11 +2275,14 @@ function toggleKmMarks() {
   if (trackData) renderTrackLayers(activeSegments);
   if (currentView === '3d') apply3DTrack();
 }
+// Speed bands. The 30–50 km/h band used to be #f59e0b (amber), which
+// collides with the universal lift / assisted accent — yellow #facc15
+// keeps the cool→hot gradient legible without overlapping the lift colour.
 const SPEED_BANDS = [
   { max: 5,        color: '#1e40af' },
   { max: 15,       color: '#3b82f6' },
   { max: 30,       color: '#10b981' },
-  { max: 50,       color: '#f59e0b' },
+  { max: 50,       color: '#facc15' },
   { max: 80,       color: '#ef4444' },
   { max: Infinity, color: '#7c3aed' },
 ];
