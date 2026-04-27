@@ -13,14 +13,149 @@
   <script src="/static/sync_toast.js" defer></script>
   <script src="/static/preview-toggle.js" defer></script>
   <style>
-    /* See design/summary-v2/README.md for the full design tokens. */
+    /* ─────────────────────────────────────────────────────────────────────
+       Summary V2 — design tokens transcribed from design/summary-v2/README.
+       Keep the type stack tight; numeric values use JetBrains Mono with
+       tabular-nums everywhere.
+       ───────────────────────────────────────────────────────────────────── */
     :root {
       --sans: 'Inter', system-ui, -apple-system, sans-serif;
       --mono: 'JetBrains Mono', ui-monospace, 'SF Mono', monospace;
+      --bg-page: #0a0c0c;
+      --bg-card: #0f1313;
+      --border-hair: rgba(255,255,255,0.06);
+      --border-row:  rgba(255,255,255,0.08);
+      --border-dotted: rgba(255,255,255,0.05);
+      --border-divider: rgba(255,255,255,0.04);
+      --text-primary: #fff;
+      --text-secondary: rgba(255,255,255,0.7);
+      --text-tertiary: rgba(255,255,255,0.4);
+      --text-muted: rgba(255,255,255,0.3);
+      --text-faint: rgba(255,255,255,0.04);
+      --pos: oklch(0.78 0.15 145);
+      --neg: oklch(0.74 0.14 55);
     }
-    body { background: #0a0c0c; color: #fff; font-family: var(--sans); -webkit-font-smoothing: antialiased; }
-    main { max-width: 1320px; margin: 0 auto; padding: 32px 36px; display: flex; flex-direction: column; gap: 22px; }
-    .summary-loading { padding: 40px; text-align: center; color: rgba(255,255,255,0.4); font-family: var(--mono); font-size: 12px; }
+
+    body { background: var(--bg-page); color: var(--text-primary); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+    body, * { box-sizing: border-box; }
+
+    /* The standard AlForks <header> + <nav> sits above this; the dashboard
+       is a centered max-width inner stage. */
+    main.s2-stage { max-width: 1320px; margin: 0 auto; padding: 32px 36px; display: flex; flex-direction: column; gap: 22px; }
+
+    /* All numeric cells should align column-to-column. */
+    .s2-stage .num,
+    .s2-stage .num * { font-variant-numeric: tabular-nums; }
+
+    /* Eyebrow / uppercase labels */
+    .s2-eyebrow      { font-size: 10px; color: var(--text-tertiary); letter-spacing: 0.14em; text-transform: uppercase; }
+    .s2-eyebrow-hero { font-size: 11px; color: var(--text-tertiary); letter-spacing: 0.18em; text-transform: uppercase; }
+    .s2-eyebrow-section { font-size: 10px; color: var(--text-tertiary); letter-spacing: 0.18em; text-transform: uppercase; margin-top: 4px; }
+
+    /* ── Page header ─────────────────────────────────────────────────── */
+    .s2-head { display: flex; align-items: flex-end; justify-content: space-between; }
+    .s2-head h1 { font-size: 32px; font-weight: 500; margin: 8px 0 0 0; letter-spacing: -0.02em; }
+    .s2-head h1 .suffix { color: rgba(255,255,255,0.45); font-weight: 300; }
+    .s2-head .right { text-align: right; }
+    .s2-head .right .last-date { font-size: 16px; font-family: var(--mono); margin-top: 6px; }
+    .s2-head .right .ago { margin-left: 10px; font-size: 13px; }
+    .s2-head .right .ago.fresh { color: var(--pos); }
+    .s2-head .right .ago.warm  { color: var(--neg); }
+    .s2-head .right .ago.neutral { color: #fff; }
+
+    /* ── KPI strip ──────────────────────────────────────────────────── */
+    .s2-kpi { display: grid; grid-template-columns: repeat(5, 1fr); gap: 1px;
+              background: var(--border-hair); border: 1px solid var(--border-hair);
+              border-radius: 4px; overflow: hidden; }
+    .s2-kpi .cell { background: var(--bg-card); padding: 20px 22px; }
+    .s2-kpi .cell .label { font-size: 10px; color: var(--text-tertiary); letter-spacing: 0.14em; text-transform: uppercase; margin-bottom: 10px; }
+    .s2-kpi .cell .value { font-size: 30px; color: #fff; font-weight: 500; font-family: var(--mono); letter-spacing: -0.02em; line-height: 1; }
+    .s2-kpi .cell .value .suffix { font-size: 13px; color: var(--text-tertiary); margin-left: 4px; font-weight: 400; }
+
+    @media (max-width: 720px) {
+      .s2-kpi { grid-template-columns: repeat(2, 1fr); }
+    }
+
+    /* ── Ribbon ─────────────────────────────────────────────────────── */
+    .s2-ribbon { background: var(--bg-card); border: 1px solid var(--border-hair); border-radius: 4px; padding: 20px 22px; }
+    .s2-ribbon .top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
+    .s2-ribbon .legend { display: flex; gap: 14px; }
+    .s2-ribbon .legend-item { display: flex; align-items: center; gap: 6px; font-size: 10px; font-family: var(--mono); }
+    .s2-ribbon .legend-dot { width: 10px; height: 10px; border-radius: 2px; }
+    .s2-ribbon .legend-label { color: var(--text-secondary); }
+    .s2-ribbon .cells { display: flex; gap: 1px; height: 36px; align-items: stretch; }
+    .s2-ribbon .cell { flex: 1; border-radius: 1px; }
+    .s2-ribbon .cell.on { cursor: pointer; }
+    .s2-ribbon .cell:not(.on) { background: var(--text-faint); }
+    .s2-ribbon .cell.hover { outline: 1px solid #fff; }
+    .s2-ribbon .caption { margin-top: 8px; display: flex; justify-content: space-between; font-size: 10px; color: var(--text-tertiary); font-family: var(--mono); min-height: 14px; }
+
+    /* ── Activity stack ─────────────────────────────────────────────── */
+    .s2-activities { background: var(--bg-page); border: 1px solid var(--border-hair); border-top: none; border-radius: 4px; }
+    .s2-row { border-top: 1px solid var(--border-row); border-left: 2px solid #3b82f6; background: var(--bg-page); }
+    .s2-row > .head { all: unset; cursor: pointer; display: flex; align-items: center; gap: 18px; padding: 14px 18px; width: 100%; }
+    .s2-row .glyph { width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; border-radius: 4px; font-family: var(--mono); font-weight: 700; font-size: 13px; flex-shrink: 0; }
+    .s2-row .name  { font-size: 14px; color: #fff; font-weight: 500; }
+    .s2-row .spacer { flex: 1; }
+    .s2-row .stat-inline { font-size: 11px; color: var(--text-secondary); font-family: var(--mono); min-width: 80px; text-align: right; flex-shrink: 0; }
+    .s2-row .stat-inline .v { color: #fff; }
+    .s2-row .stat-inline .u { color: var(--text-tertiary); }
+    .s2-row .stat-inline .l { color: var(--text-muted); margin-left: 6px; font-size: 9px; letter-spacing: 0.1em; text-transform: uppercase; }
+    .s2-row .ago { font-size: 10px; color: rgba(255,255,255,0.45); font-family: var(--mono); min-width: 60px; text-align: right; flex-shrink: 0; }
+    .s2-row .chev { color: var(--text-tertiary); font-size: 16px; font-family: var(--mono); width: 16px; text-align: center; transition: transform 120ms; }
+    .s2-row.open > .head .chev { transform: rotate(90deg); }
+    .s2-row > .body { padding: 4px 18px 22px; display: none; }
+    .s2-row.open > .body { display: block; }
+
+    /* Toolbar */
+    .s2-toolbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; gap: 12px; flex-wrap: wrap; }
+    .s2-toolbar .sub { font-size: 10px; color: var(--text-tertiary); letter-spacing: 0.14em; text-transform: uppercase; }
+    .s2-toolbar .yoy { margin-left: 12px; font-family: var(--mono); letter-spacing: 0; }
+    .s2-toolbar .yoy.pos { color: var(--pos); }
+    .s2-toolbar .yoy.neg { color: var(--neg); }
+    .s2-toolbar .right { display: flex; gap: 10px; align-items: center; }
+
+    .s2-segctrl { display: inline-flex; background: var(--text-faint); border: 1px solid var(--border-hair); border-radius: 4px; overflow: hidden; }
+    .s2-segctrl button { all: unset; cursor: pointer; padding: 5px 12px; font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; font-family: var(--mono); color: rgba(255,255,255,0.55); border-left: 1px solid var(--border-hair); }
+    .s2-segctrl button:first-child { border-left: none; }
+    .s2-segctrl button.on { color: #0b0d0c; font-weight: 600; }
+    .s2-segctrl.mode button { padding: 5px 10px; font-size: 11px; }
+    .s2-segctrl.mode button.on { background: rgba(255,255,255,0.1); color: #fff; }
+
+    /* Chart */
+    .s2-chart { position: relative; }
+    .s2-chart .grouped { display: grid; grid-template-columns: repeat(12, 1fr); gap: 3px; height: 140px; align-items: flex-end; }
+    .s2-chart .group { display: flex; gap: 1px; height: 100%; align-items: flex-end; }
+    .s2-chart .bar { flex: 1; border-radius: 1px; min-height: 1px; transition: opacity 80ms; }
+    .s2-chart .bar.empty { background: var(--text-faint); height: 1px; }
+    .s2-chart .bar.has-data { cursor: crosshair; }
+    .s2-chart .tooltip { position: absolute; top: -28px; background: #15191a; border: 1px solid rgba(255,255,255,0.1); color: #fff; font-size: 10px; padding: 4px 8px; border-radius: 3px; font-family: var(--mono); white-space: nowrap; pointer-events: none; transform: translateX(-50%); }
+    .s2-chart .tooltip .month { color: rgba(255,255,255,0.5); }
+    .s2-chart svg.overlay { display: block; width: 100%; height: 140px; }
+    .s2-chart .month-axis { display: grid; grid-template-columns: repeat(12, 1fr); gap: 3px; margin-top: 6px; font-size: 9px; color: var(--text-muted); font-family: var(--mono); text-align: center; }
+    .s2-chart .year-legend { display: flex; gap: 12px; margin-top: 8px; justify-content: flex-end; font-size: 9px; font-family: var(--mono); }
+    .s2-chart .year-legend .swatch { width: 10px; height: 2px; border-radius: 1px; display: inline-block; margin-right: 5px; vertical-align: middle; }
+
+    /* Body grid (Performance / Recent / Records) */
+    .s2-body-grid { display: grid; grid-template-columns: 1fr 1.4fr 1fr; gap: 28px; margin-top: 24px; }
+    @media (max-width: 960px) { .s2-body-grid { grid-template-columns: 1fr; } }
+    .s2-perf .row, .s2-prs .row { display: flex; justify-content: space-between; padding: 6px 0; font-size: 12px; border-bottom: 1px solid var(--border-divider); }
+    .s2-perf .row:last-child, .s2-prs .row:last-child { border-bottom: none; }
+    .s2-perf .label { color: rgba(255,255,255,0.55); }
+    .s2-perf .value { color: #fff; font-family: var(--mono); }
+    .s2-recent .head-row { display: grid; gap: 8px; font-size: 9px; color: var(--text-muted); letter-spacing: 0.08em; text-transform: uppercase; padding-bottom: 6px; border-bottom: 1px solid var(--border-hair); font-family: var(--mono); }
+    .s2-recent .row { display: grid; gap: 8px; padding: 6px 0; font-size: 11px; font-family: var(--mono); border-bottom: 1px dotted var(--border-dotted); cursor: pointer; }
+    .s2-recent .row:last-child { border-bottom: none; }
+    .s2-recent .row .name { font-family: var(--sans); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .s2-recent .row .right { text-align: right; color: rgba(255,255,255,0.65); }
+    .s2-recent .row .date { color: rgba(255,255,255,0.5); }
+    .s2-prs .row { display: grid; grid-template-columns: 14px 1fr auto; gap: 10px; padding: 8px 0; font-size: 12px; align-items: center; }
+    .s2-prs .star { font-size: 14px; line-height: 1; }
+    .s2-prs .lbl { color: rgba(255,255,255,0.7); font-size: 11px; }
+    .s2-prs .sub { color: rgba(255,255,255,0.35); font-size: 9px; font-family: var(--mono); margin-top: 2px; }
+    .s2-prs .val { color: #fff; font-family: var(--mono); }
+
+    .s2-loading { padding: 40px; text-align: center; color: var(--text-tertiary); font-family: var(--mono); font-size: 12px; }
   </style>
 </head>
 <body>
@@ -40,27 +175,535 @@
   </nav>
 </header>
 
-<main id="root">
-  <div class="summary-loading">Loading summary…</div>
+<main class="s2-stage" id="root">
+  <div class="s2-loading">Loading summary…</div>
 </main>
 
 <script>
 const TYPES = {{ types_json | safe }};
 
+// ── Format helpers ─────────────────────────────────────────────────────────
+function fmtDist(km) { return km < 100 ? km.toFixed(1) : Math.round(km).toLocaleString(); }
+function fmtElev(m) { return Math.round(m).toLocaleString(); }
+function fmtSpeed(kmh) { return kmh.toFixed(1); }
+function fmtH(h) { const hr = Math.floor(h); const mn = Math.round((h - hr) * 60); return `${hr}h ${String(mn).padStart(2, '0')}m`; }
+function fmtSec(s) { const h = Math.floor(s/3600), m = Math.floor((s%3600)/60); return h > 0 ? `${h}h ${String(m).padStart(2,'0')}m` : `${m}m`; }
+function fmtDateShort(iso) { if (!iso) return ''; const d = new Date(iso + 'T00:00:00'); return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }); }
+function fmtMetricVal(value, key) {
+  if (value == null) return '—';
+  switch (key) {
+    case 'count':    return Math.round(value).toString();
+    case 'distance': return `${fmtDist(value)} km`;
+    case 'duration': return `${value.toFixed(1)} h`;
+    case 'ascent':
+    case 'descent':  return `${fmtElev(value)} m`;
+    default:         return String(value);
+  }
+}
+
+const MONTH_LETTERS = ['J','F','M','A','M','J','J','A','S','O','N','D'];
+const MONTH_LABELS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+// ── Render ─────────────────────────────────────────────────────────────────
+let DATA = null;
+const rowState = {};   // activityId → { metric, mode, open }
+
 async function init() {
   const r = await fetch('/api/summary/v2?days=365&units=metric');
   if (!r.ok) {
-    document.getElementById('root').innerHTML = '<div class="summary-loading">Failed to load summary.</div>';
+    document.getElementById('root').innerHTML =
+      '<div class="s2-loading">Failed to load summary.</div>';
     return;
   }
-  const data = await r.json();
-  // Page chrome / activity rows go in subsequent commits — for now, dump
-  // the data shape so we can verify the backend.
-  document.getElementById('root').innerHTML =
-    '<pre style="font-family:var(--mono);font-size:11px;color:rgba(255,255,255,0.6);' +
-    'overflow:auto;max-height:80vh;background:#0f1313;padding:16px;border:1px solid rgba(255,255,255,0.06);' +
-    'border-radius:4px;">' + JSON.stringify(data, null, 2) + '</pre>';
+  DATA = await r.json();
+  // initial per-row state: open by default; metric default 'descent' for snow else 'count'
+  DATA.activities.forEach(a => {
+    rowState[a.id] = {
+      open:   true,
+      metric: a.isSnow ? 'descent' : 'count',
+      mode:   'grouped',
+    };
+  });
+  render();
 }
+
+function rangeLabel(d) {
+  if (d === 365) return 'Rolling 365 days';
+  if (d === 90)  return 'Last 90 days';
+  if (d === 30)  return 'Last 30 days';
+  return `${d}d`;
+}
+
+function render() {
+  const root = document.getElementById('root');
+  root.innerHTML = '';
+  root.appendChild(renderHead());
+  root.appendChild(renderKpi());
+  root.appendChild(renderRibbon());
+  const eyebrow = document.createElement('div');
+  eyebrow.className = 's2-eyebrow-section';
+  eyebrow.textContent = 'By activity · all-time';
+  root.appendChild(eyebrow);
+  root.appendChild(renderActivities());
+}
+
+function renderHead() {
+  const wrap = document.createElement('div');
+  wrap.className = 's2-head num';
+  const t = DATA.totals;
+  const ds = t.days_since;
+  let agoCls = 'neutral';
+  if (ds != null) agoCls = ds <= 1 ? 'fresh' : ds <= 7 ? 'neutral' : 'warm';
+  wrap.innerHTML = `
+    <div>
+      <div class="s2-eyebrow-hero">${rangeLabel(DATA.daysBack)}</div>
+      <h1>${t.days} <span class="suffix">days outside</span></h1>
+    </div>
+    <div class="right">
+      <div class="s2-eyebrow">Last activity</div>
+      <div class="last-date">
+        ${t.last_date ? fmtDateShort(t.last_date) : '—'}
+        ${ds != null ? `<span class="ago ${agoCls}">· ${ds}d ago</span>` : ''}
+      </div>
+    </div>`;
+  return wrap;
+}
+
+function renderKpi() {
+  const t = DATA.totals;
+  const wrap = document.createElement('div');
+  wrap.className = 's2-kpi num';
+  const cells = [
+    ['Total days',     t.days,                                   null],
+    ['Current streak', `${t.current_streak}d`,                   `max ${t.longest_streak}d`],
+    ['Total ascent',   fmtElev(t.elev_gain_m),                   'm'],
+    ['Total descent',  fmtElev(t.elev_loss_m),                   'm'],
+    ['Moving time',    fmtH(t.moving_h),                         null],
+  ];
+  wrap.innerHTML = cells.map(([l, v, suf]) => `
+    <div class="cell">
+      <div class="label">${l}</div>
+      <div class="value">${v}${suf ? `<span class="suffix">${suf}</span>` : ''}</div>
+    </div>`).join('');
+  return wrap;
+}
+
+function renderRibbon() {
+  const wrap = document.createElement('div');
+  wrap.className = 's2-ribbon num';
+
+  const top = document.createElement('div');
+  top.className = 'top';
+  top.innerHTML = `
+    <div class="s2-eyebrow">Active days · ${rangeLabel(DATA.daysBack).toLowerCase()}</div>
+    <div class="legend">
+      ${DATA.activities.map(a => `
+        <span class="legend-item">
+          <span class="legend-dot" style="background:${a.accent}"></span>
+          <span class="legend-label">${a.short}</span>
+        </span>`).join('')}
+    </div>`;
+  wrap.appendChild(top);
+
+  const cells = document.createElement('div');
+  cells.className = 'cells';
+  const accents = Object.fromEntries(DATA.activities.map(a => [a.id, a.accent]));
+  const labels  = Object.fromEntries(DATA.activities.map(a => [a.id, a.label]));
+  const today = new Date(DATA.today + 'T00:00:00');
+  const cellEls = [];
+  for (let i = DATA.daysBack - 1; i >= 0; i--) {
+    const d = new Date(today);
+    d.setDate(d.getDate() - i);
+    const iso = d.toISOString().slice(0, 10);
+    const dom = DATA.dominantByDate[iso];
+    const cell = document.createElement('div');
+    cell.className = 'cell' + (dom ? ' on' : '');
+    cell.style.background = dom ? accents[dom] : '';
+    cell.dataset.iso = iso;
+    if (dom) cell.dataset.type = dom;
+    cells.appendChild(cell);
+    cellEls.push(cell);
+  }
+  wrap.appendChild(cells);
+
+  const caption = document.createElement('div');
+  caption.className = 'caption';
+  caption.innerHTML = `<span>${DATA.daysBack} days back</span><span>today →</span>`;
+  wrap.appendChild(caption);
+
+  cellEls.forEach(c => {
+    if (!c.classList.contains('on')) return;
+    c.addEventListener('mouseenter', () => {
+      cellEls.forEach(x => x.classList.remove('hover'));
+      c.classList.add('hover');
+      const tid = c.dataset.type;
+      caption.innerHTML = `<span>${c.dataset.iso}</span>
+        <span style="color:${accents[tid]}">${labels[tid]}</span>`;
+    });
+    c.addEventListener('mouseleave', () => {
+      c.classList.remove('hover');
+      caption.innerHTML = `<span>${DATA.daysBack} days back</span><span>today →</span>`;
+    });
+  });
+
+  return wrap;
+}
+
+function renderActivities() {
+  const wrap = document.createElement('div');
+  wrap.className = 's2-activities';
+  DATA.activities.forEach(a => wrap.appendChild(renderActivityRow(a)));
+  return wrap;
+}
+
+function renderActivityRow(a) {
+  const r = DATA.rollups[a.id] || {};
+  const state = rowState[a.id];
+  const row = document.createElement('div');
+  row.className = 's2-row' + (state.open ? ' open' : '');
+  row.style.borderLeftColor = a.accent;
+
+  // Header
+  const head = document.createElement('button');
+  head.className = 'head num';
+  head.type = 'button';
+
+  // Headline stats per the activity's metrics array
+  const headlineMap = {
+    days:     { label: 'days',     v: r.days, u: null },
+    distance: { label: 'distance', v: fmtDist(r.distance_km || 0), u: 'km' },
+    ascent:   { label: 'ascent',   v: fmtElev(r.elev_gain_m || 0), u: 'm' },
+    descent:  { label: 'descent',  v: fmtElev(r.elev_loss_m || 0), u: 'm' },
+    moving:   { label: 'moving',   v: fmtH(r.moving_h || 0), u: null },
+  };
+  const headlineHtml = a.metrics.map(m => {
+    const s = headlineMap[m];
+    if (!s) return '';
+    return `<span class="stat-inline">
+        <span class="v">${s.v}</span>${s.u ? `<span class="u"> ${s.u}</span>` : ''}<span class="l">${s.label}</span>
+      </span>`;
+  }).join('');
+
+  let ago = '';
+  if (r.last_date) {
+    const dt = new Date(r.last_date + 'T00:00:00');
+    const today = new Date(DATA.today + 'T00:00:00');
+    const diff = Math.round((today - dt) / 86400000);
+    ago = `<span class="ago">${diff}d ago</span>`;
+  }
+
+  head.innerHTML = `
+    <span class="glyph" style="background:${a.accentSoft};color:${a.accent}">${a.glyph}</span>
+    <span class="name">${a.label}</span>
+    <span class="spacer"></span>
+    ${headlineHtml}
+    ${ago}
+    <span class="chev">›</span>`;
+  head.addEventListener('click', () => {
+    state.open = !state.open;
+    row.classList.toggle('open', state.open);
+  });
+  row.appendChild(head);
+
+  // Body — built lazily on first open / re-rendered on metric/mode change
+  const body = document.createElement('div');
+  body.className = 'body';
+  buildRowBody(body, a);
+  row.appendChild(body);
+
+  return row;
+}
+
+function buildRowBody(body, a) {
+  const state = rowState[a.id];
+  body.innerHTML = '';
+
+  // Toolbar
+  const tb = document.createElement('div');
+  tb.className = 's2-toolbar num';
+  const metricLabel = a.chartMetrics.find(m => m.key === state.metric)?.label || state.metric;
+  // YoY %: this year vs last year, same months elapsed
+  const h = DATA.history[a.id] || {};
+  const years = Object.keys(h).map(Number).sort();
+  const yThis = years[years.length - 1];
+  const yPrev = years[years.length - 2];
+  let yoyHtml = '';
+  if (yThis && yPrev && h[yThis] && h[yPrev]) {
+    const thisArr = h[yThis][state.metric] || [];
+    const lastArr = h[yPrev][state.metric] || [];
+    const elapsed = thisArr.filter(v => v != null).length;
+    const sumThis = thisArr.slice(0, elapsed).reduce((s,v) => s + (v || 0), 0);
+    const sumLast = lastArr.slice(0, elapsed).reduce((s,v) => s + (v || 0), 0);
+    if (sumLast > 0) {
+      const pct = ((sumThis - sumLast) / sumLast) * 100;
+      const cls = pct >= 0 ? 'pos' : 'neg';
+      const arr = pct >= 0 ? '↑' : '↓';
+      yoyHtml = `<span class="yoy ${cls}">${arr} ${Math.abs(pct).toFixed(0)}% vs '${String(yPrev).slice(2)} (${elapsed}mo)</span>`;
+    }
+  }
+  tb.innerHTML = `
+    <div class="sub">
+      ${metricLabel} · year over year ${yoyHtml}
+    </div>
+    <div class="right">
+      <div class="s2-segctrl metric"></div>
+      <div class="s2-segctrl mode"></div>
+    </div>`;
+  body.appendChild(tb);
+
+  // Metric toggle buttons
+  const metricCtl = tb.querySelector('.s2-segctrl.metric');
+  a.chartMetrics.forEach(m => {
+    const b = document.createElement('button');
+    b.textContent = m.label;
+    b.style.background = state.metric === m.key ? a.accent : 'transparent';
+    if (state.metric === m.key) b.classList.add('on');
+    b.addEventListener('click', () => {
+      state.metric = m.key;
+      buildRowBody(body, a);
+    });
+    metricCtl.appendChild(b);
+  });
+
+  // Mode toggle buttons (▮▮ / ⌇)
+  const modeCtl = tb.querySelector('.s2-segctrl.mode');
+  [{k:'grouped', l:'▮▮'}, {k:'overlay', l:'⌇'}].forEach(m => {
+    const b = document.createElement('button');
+    b.textContent = m.l;
+    b.title = m.k;
+    if (state.mode === m.k) b.classList.add('on');
+    b.addEventListener('click', () => {
+      state.mode = m.k;
+      buildRowBody(body, a);
+    });
+    modeCtl.appendChild(b);
+  });
+
+  // Chart
+  body.appendChild(renderYoYChart(a, state.metric, state.mode));
+
+  // Body trio (Performance / Recent / Records)
+  body.appendChild(renderBodyGrid(a));
+}
+
+function renderYoYChart(a, metric, mode) {
+  const wrap = document.createElement('div');
+  wrap.className = 's2-chart num';
+
+  const h = DATA.history[a.id] || {};
+  const allYears = Object.keys(h).map(Number).sort();
+  const years = allYears.slice(-4);   // yearsToShow = 4
+  const series = years.map(y => ({ year: y, data: (h[y] && h[y][metric]) || Array(12).fill(null) }));
+  const max = Math.max(1, ...series.flatMap(s => s.data.map(v => v == null ? 0 : v)));
+
+  const yearOpacity = (yi) => {
+    const t = yi / Math.max(1, years.length - 1);
+    return 0.32 + t * 0.68;
+  };
+
+  const chartArea = document.createElement('div');
+  chartArea.style.position = 'relative';
+
+  if (mode === 'overlay') {
+    const W = 100, H = 140, pad = 2;
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('class', 'overlay');
+    svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+    svg.setAttribute('preserveAspectRatio', 'none');
+    series.forEach((s, yi) => {
+      const op = yearOpacity(yi);
+      const isLatest = yi === series.length - 1;
+      const pts = [];
+      s.data.forEach((v, mi) => {
+        if (v == null) return;
+        const x = pad + (mi / 11) * (W - pad * 2);
+        const y = H - 4 - (v / max) * (H - 8);
+        pts.push([x, y]);
+      });
+      if (!pts.length) return;
+      const path = pts.map((p, i) => (i === 0 ? `M${p[0]},${p[1]}` : `L${p[0]},${p[1]}`)).join(' ');
+      const line = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      line.setAttribute('d', path);
+      line.setAttribute('fill', 'none');
+      line.setAttribute('stroke', a.accent);
+      line.setAttribute('stroke-opacity', op);
+      line.setAttribute('stroke-width', isLatest ? 2 : 1.2);
+      line.setAttribute('vector-effect', 'non-scaling-stroke');
+      svg.appendChild(line);
+      if (isLatest) {
+        pts.forEach(p => {
+          const c = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+          c.setAttribute('cx', p[0]);
+          c.setAttribute('cy', p[1]);
+          c.setAttribute('r', 1.6);
+          c.setAttribute('fill', a.accent);
+          c.setAttribute('vector-effect', 'non-scaling-stroke');
+          svg.appendChild(c);
+        });
+      }
+    });
+    chartArea.appendChild(svg);
+  } else {
+    // Grouped bars
+    const grid = document.createElement('div');
+    grid.className = 'grouped';
+    for (let mi = 0; mi < 12; mi++) {
+      const group = document.createElement('div');
+      group.className = 'group';
+      series.forEach((s, yi) => {
+        const v = s.data[mi];
+        const isLatest = yi === series.length - 1;
+        const op = yearOpacity(yi);
+        const bar = document.createElement('div');
+        bar.className = 'bar' + (v == null ? ' empty' : ' has-data');
+        if (v != null) {
+          const h = Math.max(1, (v / max) * 140);
+          bar.style.height = h + 'px';
+          bar.style.background = a.accent;
+          bar.style.opacity = op;
+          if (isLatest) bar.style.borderTop = `1px solid ${a.accent}`;
+          bar.dataset.year = s.year;
+          bar.dataset.month = mi;
+          bar.dataset.value = v;
+          bar.addEventListener('mouseenter', () => {
+            bar.style.opacity = 1;
+            const tt = chartArea.querySelector('.tooltip') || document.createElement('div');
+            tt.className = 'tooltip';
+            tt.style.left = `${(mi + 0.5) / 12 * 100}%`;
+            tt.innerHTML = `<span class="month">${MONTH_LABELS[mi]} ${s.year}</span> · ${fmtMetricVal(v, metric)}`;
+            if (!tt.parentElement) chartArea.appendChild(tt);
+          });
+          bar.addEventListener('mouseleave', () => {
+            bar.style.opacity = op;
+            const tt = chartArea.querySelector('.tooltip');
+            if (tt) tt.remove();
+          });
+        }
+        group.appendChild(bar);
+      });
+      grid.appendChild(group);
+    }
+    chartArea.appendChild(grid);
+  }
+  wrap.appendChild(chartArea);
+
+  // Month axis
+  const axis = document.createElement('div');
+  axis.className = 'month-axis';
+  axis.innerHTML = MONTH_LETTERS.map(l => `<div>${l}</div>`).join('');
+  wrap.appendChild(axis);
+
+  // Year legend
+  const legend = document.createElement('div');
+  legend.className = 'year-legend';
+  legend.innerHTML = years.map((y, i) => {
+    const op = yearOpacity(i);
+    const isLatest = i === years.length - 1;
+    return `<span style="display:flex;align-items:center;gap:5px">
+      <span class="swatch" style="background:${a.accent};opacity:${op}"></span>
+      <span style="color:${isLatest ? '#fff' : 'rgba(255,255,255,0.5)'}">${y}</span>
+    </span>`;
+  }).join('');
+  wrap.appendChild(legend);
+
+  return wrap;
+}
+
+function renderBodyGrid(a) {
+  const wrap = document.createElement('div');
+  wrap.className = 's2-body-grid';
+  wrap.appendChild(renderPerformance(a));
+  wrap.appendChild(renderRecent(a));
+  wrap.appendChild(renderRecords(a));
+  return wrap;
+}
+
+function renderPerformance(a) {
+  const r = DATA.rollups[a.id] || {};
+  const isSnow = a.isSnow;
+  const rows = [
+    ['avg speed',  r.avg_speed_kmh != null ? `${fmtSpeed(r.avg_speed_kmh)} km/h` : '—'],
+    ['top speed',  r.max_speed_kmh != null ? `${fmtSpeed(r.max_speed_kmh)} km/h` : '—'],
+    ['avg HR',     r.avg_hr != null ? `${r.avg_hr} bpm` : '—'],
+    ['max HR',     r.max_hr != null ? `${r.max_hr} bpm` : '—'],
+    ['streak',     `${r.current_streak || 0}d / ${r.longest_streak || 0}d`],
+  ];
+  const wrap = document.createElement('div');
+  wrap.className = 's2-perf num';
+  wrap.innerHTML = `<div class="s2-eyebrow" style="margin-bottom:12px">performance</div>
+    ${rows.map(([l, v]) => `<div class="row"><span class="label">${l}</span><span class="value">${v}</span></div>`).join('')}`;
+  return wrap;
+}
+
+function renderRecent(a) {
+  const recent = (DATA.recent || []).filter(x => x.type === a.id).slice(0, 5);
+  const showAscent = !a.isSnow;
+  const cols = showAscent ? '60px 1fr 60px 50px 50px' : '60px 1fr 60px 60px 50px';
+  const wrap = document.createElement('div');
+  wrap.className = 's2-recent num';
+  wrap.innerHTML = `
+    <div class="s2-eyebrow" style="display:flex;justify-content:space-between;margin-bottom:12px">
+      <span>recent</span>
+      <span style="color:rgba(255,255,255,0.3);font-family:var(--mono)">${recent.length}</span>
+    </div>
+    <div class="head-row" style="grid-template-columns:${cols}">
+      <span>date</span><span>name</span>
+      <span style="text-align:right">dist</span>
+      <span style="text-align:right">${showAscent ? '↑' : '↓'}</span>
+      <span style="text-align:right">dur</span>
+    </div>
+    ${recent.length === 0
+      ? '<div class="row" style="border:none;color:rgba(255,255,255,0.3);font-style:italic;cursor:default;display:block;padding-top:12px">— no activity in window —</div>'
+      : recent.map(x => `
+      <div class="row" style="grid-template-columns:${cols}" data-fn="${x.id}">
+        <span class="date">${fmtDateShort(x.date)}</span>
+        <span class="name">${escapeHtml(x.name)}</span>
+        <span class="right" style="color:#fff">${fmtDist(x.dist)}</span>
+        <span class="right">${fmtElev(x.elev)}</span>
+        <span class="right">${x.dur}</span>
+      </div>`).join('')}`;
+  // Make rows navigate to Ride Logs
+  wrap.querySelectorAll('.row[data-fn]').forEach(r => {
+    r.addEventListener('click', () => {
+      window.location.href = `/?file=${encodeURIComponent(r.dataset.fn)}`;
+    });
+  });
+  return wrap;
+}
+
+function renderRecords(a) {
+  const r = DATA.rollups[a.id] || {};
+  const prs = (r.prs || []).slice(0, 5);
+  const wrap = document.createElement('div');
+  wrap.className = 's2-prs num';
+
+  function prValue(pr) {
+    if (pr.value_km  != null) return `${fmtDist(pr.value_km)} km`;
+    if (pr.value_m   != null) return `${fmtElev(pr.value_m)} m`;
+    if (pr.value_kmh != null) return `${fmtSpeed(pr.value_kmh)} km/h`;
+    if (pr.value_sec != null) return fmtSec(pr.value_sec);
+    return '—';
+  }
+
+  wrap.innerHTML = `<div class="s2-eyebrow" style="margin-bottom:12px">records</div>
+    ${prs.length === 0
+      ? '<div class="row" style="border:none;color:rgba(255,255,255,0.3);font-style:italic;display:block;padding-top:8px">— no records yet —</div>'
+      : prs.map(pr => `
+      <div class="row">
+        <span class="star" style="color:${a.accent}">★</span>
+        <div>
+          <div class="lbl">${pr.label}</div>
+          <div class="sub">${pr.date || ''}${pr.name ? ' · ' + escapeHtml(pr.name) : ''}</div>
+        </div>
+        <span class="val">${prValue(pr)}</span>
+      </div>`).join('')}`;
+  return wrap;
+}
+
+function escapeHtml(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]);
+}
+
 init();
 </script>
 </body>
