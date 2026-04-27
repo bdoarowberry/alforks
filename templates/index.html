@@ -319,7 +319,7 @@
     .runs-table tbody tr.best td { color: #f59e0b; }
   </style>
 </head>
-<body>
+<body data-layout="{{ layout_variant or 'default' }}">
 
 <header>
   <h1>AlForks</h1>
@@ -329,6 +329,17 @@
     <a href="/comparison">Compare Logs</a>
     <a href="/heatmap">Heat Map</a>
     <a href="/setup">Setup</a>
+    <select id="layout-switch" onchange="onLayoutSwitch(this.value)"
+            title="Compare layout variants — preserves the current activity / state."
+            style="margin-left:auto;margin-right:8px;background:#1a1d23;border:1px solid #2a2d35;color:#bbb;font-size:0.74rem;padding:3px 6px;border-radius:4px;font-family:inherit;cursor:pointer;">
+      <option value="default" {% if layout_variant in (None, 'default') %}selected{% endif %}>Layout: Default</option>
+      <option value="v1" {% if layout_variant == 'v1' %}selected{% endif %}>V1 — One-row header</option>
+      <option value="v2" {% if layout_variant == 'v2' %}selected{% endif %}>V2 — Two compressed rows</option>
+      <option value="v3" {% if layout_variant == 'v3' %}selected{% endif %}>V3 — Header + inline stats</option>
+      <option value="v4" {% if layout_variant == 'v4' %}selected{% endif %}>V4 — Map + chart column</option>
+      <option value="v5" {% if layout_variant == 'v5' %}selected{% endif %}>V5 — Vertical stats</option>
+      <option value="v6" {% if layout_variant == 'v6' %}selected{% endif %}>V6 — Always-on runs</option>
+    </select>
     <button class="nav-sync-btn" onclick="triggerSyncAll()" title="Sync Strava + Garmin now">Sync</button>
   </nav>
 </header>
@@ -2711,8 +2722,20 @@ function writeUrlState() {
   if (!sortDesc) p.set('dir', 'asc');
   if (currentFilename) p.set('file', currentFilename);
   const qs = p.toString();
-  const url = qs ? `/?${qs}` : '/';
+  // Preserve the layout-variant path segment (/, /v1, /v2 ...) so flipping
+  // between variants doesn't reset the user's activity selection.
+  const basePath = location.pathname.match(/^\/v[1-6]$/) ? location.pathname : '/';
+  const url = qs ? `${basePath}?${qs}` : basePath;
   history.replaceState(null, '', url);
+}
+
+// Layout switcher in the global nav. Navigates to /{value} (or / for default)
+// while preserving the current query string so the same activity / filters
+// stay in view across variants.
+function onLayoutSwitch(value) {
+  const target = value === 'default' ? '/' : `/${value}`;
+  const qs = location.search;  // already includes the leading "?" if any
+  location.href = target + qs;
 }
 
 // Wrap state-mutating handlers so they persist to URL
