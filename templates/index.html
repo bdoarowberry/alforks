@@ -158,6 +158,11 @@
     .hrz-bar span[data-z="5"] { background: #ef4444; }
 
     /* Map */
+    /* Wraps map-wrap + chart-panel. Defaults to a column flex so the map
+       takes whatever vertical space remains and the chart docks below.
+       v4 flips this to a horizontal split (see variant rules at end of
+       the style block). */
+    #map-chart-row { flex: 1; display: flex; flex-direction: column; min-height: 0; }
     #map-wrap { flex: 1; position: relative; min-height: 0; }
     #map { width: 100%; height: 100%; }
     #map-legend { position: absolute; bottom: 24px; right: 10px; z-index: 1000; background: rgba(18,21,26,0.9); border: 1px solid #2a2d35; border-radius: 6px; padding: 8px 12px; font-size: 0.72rem; color: #aaa; display: none; }
@@ -376,6 +381,24 @@
     body[data-layout="v3"] .v3-mini-stats .v3-stat .v3-val { font-size: 0.95rem; color: #fff; font-weight: 500; }
     body[data-layout="v3"] .v3-mini-stats .v3-stat .v3-lbl { font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.07em; color: #888; }
     body:not([data-layout="v3"]) .v3-mini-stats { display: none !important; }
+
+    /* ─── V4: Side-by-side map + chart column ────────────────────────────────
+       Restructures the lower half of the page from a vertical stack
+       (map-wrap on top, chart-panel below) into a horizontal split: map
+       takes ~62 % of the width on the left, chart panel becomes a tall
+       narrow column on the right.
+
+       Caveat: Trim / Edit Segments / Smooth GPS modes are designed around
+       a wide chart canvas. They still work but the trim handles are
+       cramped — switch back to default for those interactions if it gets
+       awkward. */
+    body[data-layout="v4"] #map-chart-row { display: flex; flex: 1; min-height: 0; }
+    body[data-layout="v4"] #map-wrap { flex: 0 0 62%; }
+    body[data-layout="v4"] #chart-panel { flex: 1 1 38%; min-width: 0; border-top: none; border-left: 1px solid #2a2d35; padding: 10px 12px; }
+    body[data-layout="v4"] #chart-toolbar { flex-wrap: wrap; gap: 4px; }
+    body[data-layout="v4"] .chart-title { flex: 1 0 100%; margin-bottom: 4px; }
+    body[data-layout="v4"] .chart-btn { font-size: 0.66rem; padding: 2px 7px; }
+    body[data-layout="v4"] #chart-wrapper { flex: 1; min-height: 0; }
   </style>
 </head>
 <body data-layout="{{ layout_variant or 'default' }}">
@@ -524,6 +547,10 @@
       </div>
     </div>
 
+    <!-- map + chart wrapper. Default and most variants: column-flex stack,
+         map on top of chart. v4 flips this to a flex row so the chart sits
+         in a column on the right of the map. -->
+    <div id="map-chart-row">
     <div id="map-wrap">
       <div id="map"></div>
       <div id="map-3d"></div>
@@ -632,6 +659,7 @@
         </div>
       </div>
     </div>
+    </div><!-- /#map-chart-row -->
   </div>
 </div>
 
