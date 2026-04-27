@@ -432,6 +432,21 @@
        horizontal space. */
     body[data-layout="v6"] #runs-tab { display: none !important; }
     body[data-layout="v6"] #runs-drawer { transition: none; width: 280px; }
+
+    /* ─── V7: Vertical stats column on the LEFT ─────────────────────────────
+       Mirror of V5 but the stats column sits between the activity sidebar
+       and the map. Same grid trick: pulls #stats-bar out of the column
+       stack and places it in a left-aligned column inside #content. */
+    body[data-layout="v7"] #stats-bar { display: flex; flex-direction: column; flex-shrink: 0; padding: 10px 12px; gap: 1px; border-bottom: none; border-right: 1px solid #2a2d35; min-width: 130px; max-width: 160px; align-self: stretch; }
+    body[data-layout="v7"] #stats-bar .stat { flex: 0 0 auto; text-align: left; border-right: none; border-bottom: 1px solid #1e2128; padding: 6px 4px; }
+    body[data-layout="v7"] #stats-bar .stat:last-child { border-bottom: none; }
+    body[data-layout="v7"] #stats-bar .stat-value { font-size: 1rem; }
+    body[data-layout="v7"] #stats-bar .stat-label { font-size: 0.6rem; }
+    body[data-layout="v7"] #content { display: grid; grid-template-areas: "header header" "notes notes" "stats main"; grid-template-columns: auto 1fr; grid-template-rows: auto auto 1fr; }
+    body[data-layout="v7"] #activity-header { grid-area: header; }
+    body[data-layout="v7"] #activity-bar    { grid-area: notes; }
+    body[data-layout="v7"] #stats-bar       { grid-area: stats; }
+    body[data-layout="v7"] #map-chart-row   { grid-area: main; min-height: 0; }
   </style>
 </head>
 <body data-layout="{{ layout_variant or 'default' }}">
@@ -454,6 +469,7 @@
       <option value="v4" {% if layout_variant == 'v4' %}selected{% endif %}>V4 — Map + chart column</option>
       <option value="v5" {% if layout_variant == 'v5' %}selected{% endif %}>V5 — Vertical stats</option>
       <option value="v6" {% if layout_variant == 'v6' %}selected{% endif %}>V6 — Always-on runs</option>
+      <option value="v7" {% if layout_variant == 'v7' %}selected{% endif %}>V7 — Stats on the left</option>
     </select>
     <button class="nav-sync-btn" onclick="triggerSyncAll()" title="Sync Strava + Garmin now">Sync</button>
   </nav>
@@ -2865,7 +2881,7 @@ function writeUrlState() {
   const qs = p.toString();
   // Preserve the layout-variant path segment (/, /v1, /v2 ...) so flipping
   // between variants doesn't reset the user's activity selection.
-  const basePath = location.pathname.match(/^\/v[1-6]$/) ? location.pathname : '/';
+  const basePath = location.pathname.match(/^\/v[1-7]$/) ? location.pathname : '/';
   const url = qs ? `${basePath}?${qs}` : basePath;
   history.replaceState(null, '', url);
 }

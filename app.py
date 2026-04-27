@@ -793,11 +793,11 @@ def index():
 
 @app.route("/v<int:n>")
 def index_variant(n: int):
-    """Layout-variant previews for the Ride Logs page. v1..v6 are space-saving
+    """Layout-variant previews for the Ride Logs page. v1..v7 are space-saving
     experiments the user can flip between to compare. Identical functionality
     and data, just different chrome layout. /v0 (or any other n) -> 404.
     """
-    if n < 1 or n > 6:
+    if n < 1 or n > 7:
         abort(404)
     return render_template("index.html",
         mapbox_token=load_config().get("mapbox_token", ""),
