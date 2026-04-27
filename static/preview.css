@@ -154,4 +154,44 @@ body.preview #view-toggle .vtbtn:last-child  { border-radius: 0 4px 4px 0; }
 body.preview #view-toggle .vtbtn:only-child  { border-radius: 4px; }
 
 
-/* ─── Round 3: TBD (small fixes) ───────────────────────────────────────── */
+/* ═══ Round 3: small fixes ═════════════════════════════════════════════════ */
+
+/* The 5 px radius on #seg-instructions was the only one in the codebase. */
+body.preview #seg-instructions { border-radius: 4px; }
+
+/* Type-badge: index uses 1px 6px / 0.6rem; summary uses 1px 5px / 0.58rem;
+   compare's inline injection used yet another shape. Unify dimensions
+   wherever the badge ships in the visible flow. */
+body.preview .type-badge { padding: 1px 6px; font-size: 0.6rem; }
+
+/* hero-sub vs record-sub: both are "small descriptor under a number" but
+   one was 0.72rem and the other 0.7rem. Match them. */
+body.preview .hero-sub,
+body.preview .record-sub { font-size: 0.72rem; color: #999; }
+
+/* hero-label vs section-title: bring their type-stack closer so two
+   adjacent uppercase labels on the same page stop looking like different
+   hierarchies. (Round 1 already aligned colour and letter-spacing.) */
+body.preview .hero-label { font-size: 0.7rem; }
+body.preview .section-title { font-size: 0.7rem; }
+
+/* "Save confirm" font-size was 0.68 / 0.7 / 0.72 rem in three places. */
+body.preview .save-confirm,
+body.preview #title-save-confirm,
+body.preview #ab-save-confirm,
+body.preview #seg-save-confirm,
+body.preview .sync-confirm { font-size: 0.7rem; }
+
+/* #activity-count vs comparison's #count-label — both are "N items shown"
+   meta text. Same colour. */
+body.preview #activity-count,
+body.preview #count-label { color: #999; }
+
+/* Hover-lift on .comp-row was the only translateY hover in the codebase.
+   Drop it to match the convention (border-only highlight). */
+body.preview .comp-row:hover { transform: none; }
+
+/* Border-radius hierarchy: cards 8 px, buttons 4 px, sub-elements 4 px.
+   Collapse the orphan 6 px values used in a few inline styles to fit. */
+body.preview .ah-action-btn { border-color: #2a2d35; }
+
