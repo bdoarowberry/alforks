@@ -320,12 +320,15 @@
     #runs-tab.open { background: #1a2a3a; border-color: #3b82f6; color: #3b82f6; right: 320px; }
     #runs-drawer { position: absolute; top: 0; right: 0; bottom: 0; width: 320px; background: #12151a; border-left: 1px solid #2a2d35; z-index: 1000; transform: translateX(100%); transition: transform 0.2s ease; overflow-y: auto; }
     #runs-drawer.open { transform: translateX(0); }
-    .runs-drawer-head { display: flex; align-items: center; border-bottom: 1px solid #2a2d35; }
-    #runs-drawer h3 { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.08em; color: #ccc; padding: 10px 14px; flex: 1; border-bottom: none; }
-    /* Generic close-X for side panels (runs drawer, sidebar) — small,
-       muted, hover lights it up. */
-    .panel-close-btn { background: transparent; border: none; color: #666; font-size: 1.1rem; line-height: 1; cursor: pointer; padding: 8px 12px; font-family: inherit; transition: color 0.12s; }
-    .panel-close-btn:hover { color: #fff; }
+    #runs-drawer h3 { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.08em; color: #ccc; padding: 10px 14px; border-bottom: 1px solid #2a2d35; }
+
+    /* Thin vertical strip with a triangle at the top — mirrors the sidebar
+       collapse pattern. Hidden by default; v7 shows it when runs are
+       available, sitting between the map and the (optional) drawer.
+       Triangle: ▶ when drawer is open (close direction), ◀ when closed
+       (open direction). */
+    #runs-strip { display: none; width: 14px; flex-shrink: 0; background: #12151a; border: none; border-left: 1px solid #2a2d35; border-right: 1px solid #2a2d35; color: #555; cursor: pointer; font-size: 9px; padding: 14px 0 0; align-items: flex-start; justify-content: center; transition: background 0.12s, color 0.12s; font-family: inherit; }
+    #runs-strip:hover { background: #1e2128; color: #aaa; }
     #runs-summary { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; padding: 12px 14px; border-bottom: 1px solid #2a2d35; }
     .run-sum-stat { font-size: 0.72rem; }
     .run-sum-val { font-size: 1rem; font-weight: 600; color: #fff; }
@@ -481,17 +484,28 @@
     body[data-layout="v7"] .ah-main .ah-row-2 { flex: 0 0 auto; padding: 0; min-height: 0; }
     body[data-layout="v7"] .ah-main .ah-row-place { flex: 0 0 auto; padding: 0; font-size: 0.72rem; color: #aaa; min-height: 0; }
     body[data-layout="v7"] .ah-main .ah-row-place:not(:empty)::before { content: '·'; color: #555; margin-right: 8px; }
-    /* When the runs drawer is open on v7 it sits inline beside the map
-       (taking real layout space) instead of overlaying. The :has() selector
-       lets the parent react to the drawer's `.open` class without any JS
-       coordinating sibling elements. */
+    /* V7 inline runs panel: when the activity has runs, map-wrap becomes a
+       flex row containing [#map, #runs-strip, #runs-drawer]. The strip is a
+       thin vertical handle (with a triangle at the top, mirroring the
+       sidebar collapse) — always visible alongside the map for v7 runs;
+       click toggles the drawer. The drawer takes real layout width when
+       open and collapses to nothing when closed; the strip stays put.
+       Absolute map overlays (#view-toggle, #map-controls, #map-3d) are
+       shifted left so they don't sit behind the strip / drawer. */
     body[data-layout="v7"] #runs-tab { display: none !important; }
-    body[data-layout="v7"] #map-wrap:has(#runs-drawer.open) { display: flex; }
-    body[data-layout="v7"] #map-wrap:has(#runs-drawer.open) #map { flex: 1; height: 100%; min-width: 0; }
-    body[data-layout="v7"] #map-wrap:has(#runs-drawer.open) #map-3d { right: 280px; }
-    body[data-layout="v7"] #map-wrap:has(#runs-drawer.open) #view-toggle,
-    body[data-layout="v7"] #map-wrap:has(#runs-drawer.open) #map-controls { right: 290px; }
-    body[data-layout="v7"] #runs-drawer.open { position: relative; transform: none; transition: none; flex: 0 0 280px; width: 280px; height: 100%; box-shadow: none; }
+    body[data-layout="v7"] #map-wrap.has-runs { display: flex; }
+    body[data-layout="v7"] #map-wrap.has-runs #map { flex: 1; height: 100%; min-width: 0; }
+    body[data-layout="v7"] #map-wrap.has-runs #runs-strip { display: flex; }
+    body[data-layout="v7"] #map-wrap.has-runs #runs-drawer { position: relative; transform: none; transition: none; width: 0; box-shadow: none; flex: 0 0 0; height: 100%; overflow-x: hidden; }
+    body[data-layout="v7"] #map-wrap.has-runs #runs-drawer.open { flex: 0 0 280px; width: 280px; }
+    /* Strip-only (drawer closed): shift map controls clear of the 14 px strip. */
+    body[data-layout="v7"] #map-wrap.has-runs #map-3d      { right: 14px; }
+    body[data-layout="v7"] #map-wrap.has-runs #view-toggle,
+    body[data-layout="v7"] #map-wrap.has-runs #map-controls { right: 24px; }
+    /* Drawer open: shift them clear of the 14 px strip + 280 px drawer. */
+    body[data-layout="v7"] #map-wrap.has-runs:has(#runs-drawer.open) #map-3d { right: 294px; }
+    body[data-layout="v7"] #map-wrap.has-runs:has(#runs-drawer.open) #view-toggle,
+    body[data-layout="v7"] #map-wrap.has-runs:has(#runs-drawer.open) #map-controls { right: 304px; }
   </style>
 </head>
 <body data-layout="{{ layout_variant or 'default' }}">
@@ -681,11 +695,9 @@
         <span id="exag-val">1.5×</span>
       </div>
       <button id="runs-tab" onclick="toggleRunsDrawer()">Runs</button>
+      <button id="runs-strip" onclick="toggleRunsDrawer()" title="Toggle runs panel">▶</button>
       <div id="runs-drawer">
-        <div class="runs-drawer-head">
-          <h3>Run Statistics</h3>
-          <button class="panel-close-btn" onclick="toggleRunsDrawer()" title="Close runs panel">×</button>
-        </div>
+        <h3>Run Statistics</h3>
         <div id="runs-summary"></div>
         <div id="runs-table-wrap"></div>
       </div>
@@ -2422,6 +2434,10 @@ function toggleRunsDrawer() {
   const tab    = document.getElementById('runs-tab');
   const open   = drawer.classList.toggle('open');
   tab.classList.toggle('open', open);
+  // Flip the v7 strip's triangle: ▶ when drawer is open (signals close
+  // direction), ◀ when closed (signals open direction).
+  const strip = document.getElementById('runs-strip');
+  if (strip) strip.textContent = open ? '▶' : '◀';
   // v7's inline drawer changes the map's available width — Leaflet won't
   // notice on its own.
   if (document.body.dataset.layout === 'v7') setTimeout(() => map.invalidateSize(), 0);
@@ -2430,24 +2446,27 @@ function toggleRunsDrawer() {
 function renderRunStats(meta) {
   const tab    = document.getElementById('runs-tab');
   const drawer = document.getElementById('runs-drawer');
+  const mapWrap = document.getElementById('map-wrap');
   const isSkiSport = ['ski','snowboard'].includes(meta?.type);
   // On v7 the drawer takes layout space — closing it expands the map, so
-  // invalidate Leaflet's size in the close path too.
+  // invalidate Leaflet's size in the close path too. .has-runs gates
+  // whether the v7 strip is shown alongside the map.
   const wasOpen = drawer.classList.contains('open');
   const isV7 = document.body.dataset.layout === 'v7';
-  if (!isSkiSport || !trackData || !activeSegments.length) {
+  const closeAndExit = () => {
     tab.classList.remove('visible');
     drawer.classList.remove('open');
     tab.classList.remove('open');
+    mapWrap.classList.remove('has-runs');
     if (isV7 && wasOpen) setTimeout(() => map.invalidateSize(), 0);
+  };
+  if (!isSkiSport || !trackData || !activeSegments.length) {
+    closeAndExit();
     return;
   }
   const runs = computeRuns(activeSegments, trackData.points);
   if (!runs.length) {
-    tab.classList.remove('visible');
-    drawer.classList.remove('open');
-    tab.classList.remove('open');
-    if (isV7 && wasOpen) setTimeout(() => map.invalidateSize(), 0);
+    closeAndExit();
     return;
   }
 
@@ -2478,6 +2497,7 @@ function renderRunStats(meta) {
     </table>`;
 
   tab.classList.add('visible');
+  mapWrap.classList.add('has-runs');
   // V6 / V7 layouts auto-open the drawer when runs are available so the
   // user doesn't need to flip the tab on every load. v7 makes the drawer
   // inline (real layout space, not overlay) — invalidate Leaflet's size
@@ -2487,6 +2507,9 @@ function renderRunStats(meta) {
     drawer.classList.add('open');
     if (layout === 'v7') setTimeout(() => map.invalidateSize(), 0);
   }
+  // Strip triangle reflects current state: ▶ when drawer open, ◀ when closed.
+  const strip = document.getElementById('runs-strip');
+  if (strip) strip.textContent = drawer.classList.contains('open') ? '▶' : '◀';
 }
 
 let _runHighlight = null;
