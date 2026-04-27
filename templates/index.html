@@ -2411,7 +2411,12 @@ document.getElementById('header-type').addEventListener('change', () => schedule
 // ─── Run statistics (ski / snowboard) ────────────────────────────────────────
 function computeRuns(segments, points) {
   const runs = [];
-  segments.filter(s => s.type === 'riding').forEach((seg, idx) => {
+  // Counter only increments when a run actually qualifies (has elevation
+  // data, isn't a transition / flat segment). _build_segments always starts
+  // its list with a degenerate riding(0..0) — using forEach's idx caused
+  // the first real run to be labelled #2 because that degenerate segment
+  // burned through index 0 before being filtered out.
+  segments.filter(s => s.type === 'riding').forEach((seg) => {
     const pts = points.slice(seg.start, seg.end + 1);
     if (pts.length < 2) return;
     const eles   = pts.map(p => p.ele).filter(e => e != null);
@@ -2424,7 +2429,7 @@ function computeRuns(segments, points) {
     if (pts[0].time && pts[pts.length-1].time)
       dur = (new Date(pts[pts.length-1].time) - new Date(pts[0].time)) / 1000;
     if (drop < 15 && dist < 0.05) return; // filter transitions / flat segments
-    runs.push({ idx: idx + 1, drop, dist, maxSpd, dur, start: seg.start, end: seg.end });
+    runs.push({ idx: runs.length + 1, drop, dist, maxSpd, dur, start: seg.start, end: seg.end });
   });
   return runs;
 }
