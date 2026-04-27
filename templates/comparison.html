@@ -106,6 +106,35 @@
     .stat-cell.is-max:has(.sb-intensity)  { background: rgba(239,68,68,0.14); }
 
     #empty-msg { padding: 40px; text-align: center; color: #666; font-size: 0.85rem; }
+
+    /* Pair-compare select mode — rows highlight per slot, sticky action bar
+       at the top tracks the picks. */
+    #compare-toggle { font-size: 0.75rem; padding: 4px 12px; border-radius: 4px; border: 1px solid #2a2d35; background: #1a1d23; color: #ccc; cursor: pointer; font-family: inherit; transition: all 0.12s; }
+    #compare-toggle:hover { border-color: #3b82f6; color: #fff; }
+    #compare-toggle.active { background: #1a2a3a; border-color: #3b82f6; color: #3b82f6; }
+    #compare-actionbar { position: sticky; top: 0; z-index: 50; background: #14171c; border: 1px solid #2a2d35; border-radius: 8px; padding: 10px 14px; margin-bottom: 12px; display: none; align-items: center; gap: 14px; flex-wrap: wrap; }
+    #compare-actionbar.visible { display: flex; }
+    #compare-actionbar .ab-label { font-size: 0.62rem; text-transform: uppercase; letter-spacing: 0.1em; color: #888; font-weight: 600; }
+    #compare-actionbar .ab-slot { display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1; }
+    #compare-actionbar .ab-slot .slot-tag { font-size: 0.62rem; text-transform: uppercase; letter-spacing: 0.1em; font-weight: 600; flex-shrink: 0; }
+    #compare-actionbar .ab-slot .slot-tag.a { color: #3b82f6; }
+    #compare-actionbar .ab-slot .slot-tag.b { color: #f59e0b; }
+    #compare-actionbar .ab-slot .slot-name { font-size: 0.78rem; color: #e0e0e0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+    #compare-actionbar .ab-slot .slot-name.empty { color: #555; font-style: italic; }
+    #compare-actionbar .ab-slot .slot-clear { font-size: 0.62rem; color: #777; background: transparent; border: none; cursor: pointer; padding: 2px 6px; font-family: inherit; }
+    #compare-actionbar .ab-slot .slot-clear:hover { color: #f87171; }
+    #compare-actionbar .ab-go { background: #3b82f6; color: #fff; border: none; padding: 6px 14px; border-radius: 4px; cursor: pointer; font-family: inherit; font-size: 0.78rem; font-weight: 500; }
+    #compare-actionbar .ab-go:hover { background: #2563eb; }
+    #compare-actionbar .ab-go:disabled { opacity: 0.4; cursor: not-allowed; background: #2a2d35; }
+    #compare-actionbar .ab-cancel { background: transparent; color: #888; border: 1px solid #2a2d35; padding: 5px 10px; border-radius: 4px; cursor: pointer; font-family: inherit; font-size: 0.74rem; }
+    #compare-actionbar .ab-cancel:hover { color: #fff; border-color: #888; }
+    .comp-row.cmp-a { border-left: 3px solid #3b82f6; padding-left: 9px; }
+    .comp-row.cmp-b { border-left: 3px solid #f59e0b; padding-left: 9px; }
+    /* When in compare-select mode, hover hint switches to the action verb. */
+    body.cmp-mode .comp-row { cursor: pointer; }
+    body.cmp-mode .comp-row:hover { border-color: #3b82f6; }
+    body.cmp-mode .comp-row.cmp-a:hover,
+    body.cmp-mode .comp-row.cmp-b:hover { border-color: #f59e0b; }
   </style>
 </head>
 <body>
@@ -138,7 +167,24 @@
       <input type="checkbox" id="issues-only" onchange="load()" style="margin:0;">
       <span>Show only flagged ⚠</span>
     </label>
+    <button id="compare-toggle" onclick="toggleCompareMode()" title="Pick two activities to overlay them on the Pair Compare page">Pair Compare</button>
     <span id="count-label"></span>
+  </div>
+
+  <div id="compare-actionbar">
+    <span class="ab-label">Pair Compare</span>
+    <div class="ab-slot">
+      <span class="slot-tag a">A</span>
+      <span class="slot-name empty" id="cmp-name-a">— click a row to pick —</span>
+      <button class="slot-clear" id="cmp-clear-a" onclick="clearSlot('a')" style="display:none">clear</button>
+    </div>
+    <div class="ab-slot">
+      <span class="slot-tag b">B</span>
+      <span class="slot-name empty" id="cmp-name-b">— click another row —</span>
+      <button class="slot-clear" id="cmp-clear-b" onclick="clearSlot('b')" style="display:none">clear</button>
+    </div>
+    <button class="ab-go" id="cmp-go" onclick="openCompare()" disabled>Open compare →</button>
+    <button class="ab-cancel" onclick="toggleCompareMode()">Cancel</button>
   </div>
 
   <div id="rows"></div>
@@ -263,7 +309,11 @@ function renderRow(item) {
   // without re-parsing item.type at draw time.
   const _t = TYPE_LOOKUP[item.type];
   row.dataset.typeColor = _t ? _t.color : '#3b82f6';
-  row.onclick = () => { window.location.href = `/?file=${encodeURIComponent(item.filename)}`; };
+  row.dataset.title = item.title || item.filename;
+  row.onclick = () => {
+    if (compareMode) { onCompareClick(item.filename, row.dataset.title); return; }
+    window.location.href = `/?file=${encodeURIComponent(item.filename)}`;
+  };
 
   const t = TYPE_LOOKUP[item.type];
   const KNOWN_ICONS = new Set(['mtb', 'fat_biking', 'snowboard', 'ski', 'hike', 'other']);
@@ -444,6 +494,77 @@ async function load() {
 
   // Update type chips' active style after potential changes
   renderTypeChips();
+
+  // Re-apply pair-compare highlight classes to surviving rows so the user's
+  // current A/B selection persists across filter changes.
+  if (typeof refreshCompareUI === 'function') refreshCompareUI();
+}
+
+// ─── Pair-compare select mode ───────────────────────────────────────────
+// Lets the user pick two rides from this list and jump to the /compare
+// overlay page. Toggle with the Pair Compare button in the filter bar.
+let compareMode = false;
+let compareA = null, compareB = null;  // {filename, title}
+
+function toggleCompareMode() {
+  compareMode = !compareMode;
+  document.body.classList.toggle('cmp-mode', compareMode);
+  document.getElementById('compare-toggle').classList.toggle('active', compareMode);
+  document.getElementById('compare-actionbar').classList.toggle('visible', compareMode);
+  if (!compareMode) { compareA = compareB = null; refreshCompareUI(); }
+  else refreshCompareUI();
+}
+
+function onCompareClick(filename, title) {
+  // Click toggles selection. If neither slot has this row → fill the first
+  // empty slot (A first, then B). If A or B holds it → clear that slot.
+  // If both filled and a new row is clicked → replace A (FIFO; A becomes the
+  // older pick, fresh selection becomes the new B).
+  const sel = { filename, title };
+  if (compareA && compareA.filename === filename) { compareA = null; }
+  else if (compareB && compareB.filename === filename) { compareB = null; }
+  else if (!compareA) { compareA = sel; }
+  else if (!compareB) { compareB = sel; }
+  else { compareA = compareB; compareB = sel; }
+  refreshCompareUI();
+}
+
+function refreshCompareUI() {
+  // Highlight rows according to current A/B picks.
+  document.querySelectorAll('.comp-row').forEach(r => {
+    r.classList.toggle('cmp-a', !!compareA && r.dataset.filename === compareA.filename);
+    r.classList.toggle('cmp-b', !!compareB && r.dataset.filename === compareB.filename);
+  });
+  function fillSlot(slot, sel) {
+    const nameEl  = document.getElementById(`cmp-name-${slot}`);
+    const clearEl = document.getElementById(`cmp-clear-${slot}`);
+    if (sel) {
+      nameEl.textContent = sel.title;
+      nameEl.classList.remove('empty');
+      clearEl.style.display = '';
+    } else {
+      nameEl.textContent = slot === 'a' ? '— click a row to pick —' : '— click another row —';
+      nameEl.classList.add('empty');
+      clearEl.style.display = 'none';
+    }
+  }
+  fillSlot('a', compareA);
+  fillSlot('b', compareB);
+  document.getElementById('cmp-go').disabled = !(compareA && compareB);
+}
+
+function clearSlot(slot) {
+  if (slot === 'a') compareA = null;
+  else              compareB = null;
+  refreshCompareUI();
+}
+
+function openCompare() {
+  if (!(compareA && compareB)) return;
+  const u = new URL('/compare', location.origin);
+  u.searchParams.set('a', compareA.filename);
+  u.searchParams.set('b', compareB.filename);
+  location.href = u.toString();
 }
 
 init();
