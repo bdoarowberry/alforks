@@ -641,7 +641,7 @@
       <div class="stat"><div class="stat-value" id="s-dist">--</div><div class="stat-label">Distance</div></div>
       <div class="stat"><div class="stat-value" id="s-dur">--</div><div class="stat-label">Duration</div></div>
       <div class="stat"><div class="stat-value"><span id="s-gain">--</span><span class="assisted-inline" id="s-assisted"></span></div><div class="stat-label">Climbing</div></div>
-      <div class="stat"><div class="stat-value" id="s-loss">--</div><div class="stat-label">Descent</div></div>
+      <div class="stat"><div class="stat-value" id="s-loss">--</div><div class="stat-label" id="s-loss-label">Descent</div></div>
       <div class="stat"><div class="stat-value" id="s-avg">--</div><div class="stat-label">Avg Speed</div></div>
       <div class="stat"><div class="stat-value" id="s-max">--</div><div class="stat-label">Max Speed</div></div>
       <div class="stat" id="stat-difficulty"><div class="stat-value" id="s-difficulty">--</div><div class="stat-label">Difficulty</div></div>
@@ -2475,11 +2475,13 @@ function renderRunStats(meta) {
   const maxSpd    = Math.max(...runs.map(r => r.maxSpd ?? 0));
   const bestDrop  = runs.find(r => r.drop === maxDrop);
 
+  // Run summary: drop the Total Vertical card (now folded into the Vert
+   // stat card in the main stats bar — see updateStats) and the Top Speed
+   // card (already shown as Max Speed in the main stats bar) so the panel
+   // doesn't duplicate headline numbers.
   document.getElementById('runs-summary').innerHTML = `
     <div class="run-sum-stat"><div class="run-sum-val">${runs.length}</div><div class="run-sum-lbl">Runs</div></div>
-    <div class="run-sum-stat"><div class="run-sum-val">${Math.round(totalDrop).toLocaleString()} m</div><div class="run-sum-lbl">Total Vertical</div></div>
-    <div class="run-sum-stat"><div class="run-sum-val">${Math.round(maxDrop)} m</div><div class="run-sum-lbl">Best Drop</div></div>
-    <div class="run-sum-stat"><div class="run-sum-val">${maxSpd ? Math.round(maxSpd)+' km/h' : '--'}</div><div class="run-sum-lbl">Top Speed</div></div>
+    <div class="run-sum-stat"><div class="run-sum-val">${Math.round(maxDrop)} m</div><div class="run-sum-lbl">Best Run</div></div>
   `;
 
   const tbody = runs.map(r => `
@@ -2492,7 +2494,7 @@ function renderRunStats(meta) {
 
   document.getElementById('runs-table-wrap').innerHTML = `
     <table class="runs-table">
-      <thead><tr><th>Run</th><th>Drop</th><th>Max km/h</th><th>Dur</th></tr></thead>
+      <thead><tr><th>Run</th><th>Vert</th><th>Max km/h</th><th>Dur</th></tr></thead>
       <tbody>${tbody}</tbody>
     </table>`;
 
@@ -2579,7 +2581,24 @@ function updateStats(stats) {
     // Activity has no HR but we were viewing HR — switch back to Elevation
     switchChart('elevation');
   }
-  document.getElementById('s-loss').textContent = stats.elev_loss_m  != null ? `${stats.elev_loss_m} m`   : '--';
+  // For ski / snowboard, swap the Descent stat for "Vert" — sum of net
+  // drops per run, the convention used everywhere in skiing. The per-run
+  // table values literally add up to this number, so the headline and the
+  // table are consistent. For other activity types keep the original
+  // Descent (sum of point-to-point negative deltas).
+  const meta = trackData?.meta || {};
+  const effType = meta.type || trackData?.effective_type || '';
+  const isSnow = effType === 'ski' || effType === 'snowboard';
+  const lossLabel = document.getElementById('s-loss-label');
+  if (isSnow && trackData?.points && activeSegments?.length) {
+    const runs = computeRuns(activeSegments, trackData.points);
+    const totalDrop = runs.reduce((s, r) => s + r.drop, 0);
+    document.getElementById('s-loss').textContent = totalDrop > 0 ? `${Math.round(totalDrop).toLocaleString()} m` : '--';
+    lossLabel.textContent = 'Vert';
+  } else {
+    document.getElementById('s-loss').textContent = stats.elev_loss_m != null ? `${stats.elev_loss_m} m` : '--';
+    lossLabel.textContent = 'Descent';
+  }
   document.getElementById('s-avg').textContent  = stats.avg_speed_kmh != null ? `${stats.avg_speed_kmh} km/h` : '--';
   document.getElementById('s-max').textContent  = stats.max_speed_kmh != null ? `${stats.max_speed_kmh} km/h` : '--';
 }
