@@ -58,7 +58,10 @@
     /* Sidebar */
     #sidebar { width: 270px; background: #12151a; border-right: 1px solid #2a2d35; display: flex; flex-direction: column; flex-shrink: 0; overflow: hidden; transition: width 0.18s ease; }
     #sidebar.collapsed { width: 0; border-right: none; }
-    #sidebar-toggle { width: 14px; flex-shrink: 0; background: #12151a; border: none; border-right: 1px solid #2a2d35; color: #555; cursor: pointer; font-size: 9px; padding: 0; display: flex; align-items: center; justify-content: center; transition: background 0.12s, color 0.12s; }
+    /* Triangle toggle for the activities sidebar — full-height vertical
+       strip, icon docked at the TOP of the strip so it lines up with the
+       sidebar header instead of floating mid-page. */
+    #sidebar-toggle { width: 14px; flex-shrink: 0; background: #12151a; border: none; border-right: 1px solid #2a2d35; color: #555; cursor: pointer; font-size: 9px; padding: 14px 0 0; display: flex; align-items: flex-start; justify-content: center; transition: background 0.12s, color 0.12s; }
     #sidebar-toggle:hover { background: #1e2128; color: #aaa; }
     #sidebar-header { padding: 8px 16px; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em; color: #ccc; border-bottom: 1px solid #2a2d35; flex-shrink: 0; display: flex; align-items: center; justify-content: space-between; }
     #bulk-toggle-btn { font-size: 0.68rem; padding: 2px 8px; border-radius: 3px; border: 1px solid #2a2d35; background: #1a1d23; color: #ccc; cursor: pointer; transition: all 0.12s; }
@@ -523,8 +526,6 @@
     <div id="sidebar-header">
       <span>Activities</span>
       <button id="bulk-toggle-btn" onclick="toggleBulk()">Select</button>
-      <button class="panel-close-btn" onclick="toggleSidebar()"
-              title="Hide activities panel" style="margin-left:4px">×</button>
     </div>
     <div id="sort-filter-bar">
       <div class="sfrow">
