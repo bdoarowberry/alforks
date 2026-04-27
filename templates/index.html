@@ -422,6 +422,16 @@
     body[data-layout="v5"] #activity-bar    { grid-area: notes; }
     body[data-layout="v5"] #map-chart-row   { grid-area: main; min-height: 0; }
     body[data-layout="v5"] #stats-bar       { grid-area: stats; }
+
+    /* ─── V6: Always-on runs drawer (snow types) ─────────────────────────────
+       Default behaviour: the runs drawer slides in only when the user clicks
+       the vertical Runs tab. For ski / snowboard activities the drawer is
+       almost always wanted, so v6 forces it open whenever runs are
+       available (renderRunStats adds .open in v6 — see JS), hides the
+       redundant tab, and tightens the drawer's chrome to take less
+       horizontal space. */
+    body[data-layout="v6"] #runs-tab { display: none !important; }
+    body[data-layout="v6"] #runs-drawer { transition: none; width: 280px; }
   </style>
 </head>
 <body data-layout="{{ layout_variant or 'default' }}">
@@ -2369,6 +2379,9 @@ function renderRunStats(meta) {
     </table>`;
 
   tab.classList.add('visible');
+  // V6 layout: keep the drawer always-open whenever runs are available so
+  // the user doesn't need to flip the tab on every load.
+  if (document.body.dataset.layout === 'v6') drawer.classList.add('open');
 }
 
 let _runHighlight = null;
