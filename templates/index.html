@@ -1006,16 +1006,30 @@ function renderTrackLayers(segments) {
   kmMarkLayers.forEach(l => l.remove()); kmMarkLayers = [];
   clearRunHighlight();
   if (!trackData) return;
-  if (colorMode !== 'default') {
-    renderColoredLayers(trackData.points, colorMode);
-  } else {
+  // In speed mode, leave assisted (lift / shuttle) segments as their
+  // standard orange dashed line — chairlift speed is uniform cable speed,
+  // not useful information. Riding segments still get the speed gradient.
+  // Default mode: per-segment SEGMENT_STYLES as before.
+  // Gradient / progression: colour the whole track since slope and
+  // chronological position are still meaningful on a lift.
+  if (colorMode === 'default' || colorMode === 'speed') {
     segments.forEach(seg => {
-      const pts = trackData.points.slice(seg.start, seg.end + 1).map(p => [p.lat, p.lon]);
-      if (pts.length < 2) return;
-      const layer = L.polyline(pts, SEGMENT_STYLES[seg.type] || SEGMENT_STYLES.riding).addTo(map);
-      if (seg.type === 'riding') layer.on('click', e => setActiveIndex(nearestIndex(e.latlng)));
-      trackLayers.push(layer);
+      const segPts = trackData.points.slice(seg.start, seg.end + 1);
+      const latlngs = segPts.map(p => [p.lat, p.lon]);
+      if (latlngs.length < 2) return;
+      if (seg.type === 'assisted') {
+        trackLayers.push(L.polyline(latlngs, SEGMENT_STYLES.assisted).addTo(map));
+      } else if (colorMode === 'default') {
+        const layer = L.polyline(latlngs, SEGMENT_STYLES.riding).addTo(map);
+        layer.on('click', e => setActiveIndex(nearestIndex(e.latlng)));
+        trackLayers.push(layer);
+      } else {
+        // riding segment, speed mode — colour-band only this slice
+        renderColoredLayers(segPts, 'speed');
+      }
     });
+  } else {
+    renderColoredLayers(trackData.points, colorMode);
   }
   if (kmMarksOn) renderKmMarks(trackData.points);
 }
