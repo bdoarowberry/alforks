@@ -795,6 +795,426 @@ def summary():
     return render_template("summary.html", types_json=json.dumps(load_types()))
 
 
+@app.route("/summary/v2")
+def summary_v2():
+    """Engineering-log style summary dashboard (per design/summary-v2). Data
+    is fetched separately from /api/summary/v2 to keep the template thin."""
+    return render_template("summary_v2.html", types_json=json.dumps(load_types()))
+
+
+def _hex_to_rgba(hex_color: str, alpha: float) -> str:
+    """#3b82f6 → 'rgba(59, 130, 246, 0.18)'. Falls back to the input on
+    parse failure so the page still renders."""
+    h = (hex_color or "").lstrip("#")
+    if len(h) == 3:
+        h = "".join(c * 2 for c in h)
+    if len(h) != 6:
+        return hex_color
+    try:
+        r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+    except ValueError:
+        return hex_color
+    return f"rgba({r}, {g}, {b}, {alpha})"
+
+
+def _three_letter_short(label: str) -> str:
+    """'Mountain Bike' → 'MTB', 'Snowboard' → 'SNB', 'Ski' → 'SKI'."""
+    parts = [p for p in label.split() if p]
+    if len(parts) >= 2:
+        return "".join(p[0] for p in parts[:3]).upper()
+    return parts[0][:3].upper() if parts else "???"
+
+
+_SUMMARY_V2_TYPE_ORDER = ("mtb", "snowboard", "ski", "hike", "other")
+
+
+def _summary_v2_data(days_back: int, units: str) -> dict:
+    """Build the data contract documented in design/summary-v2/README.md from
+    the user's real activities. Window is rolling-`days_back`-days back from
+    today, inclusive of today.
+    """
+    today_dt = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    today_iso = today_dt.strftime("%Y-%m-%d")
+    earliest_dt = today_dt - timedelta(days=days_back - 1)
+
+    acts = [a for a in all_activities() if not a.get("excluded")]
+    types = load_types()
+    type_lookup = {t["id"]: t for t in types}
+
+    # Group by effective type. Activities without a type fall under "other".
+    by_type: dict[str, list[dict]] = {}
+    for a in acts:
+        tid = (a.get("meta") or {}).get("type") or a.get("effective_type") or "other"
+        by_type.setdefault(tid, []).append(a)
+
+    # Canonical order, but only emit activities the user actually has data
+    # for. If they have a non-standard type, append it after the canonical
+    # ones in the order it first appears.
+    ordered_ids: list[str] = []
+    for tid in _SUMMARY_V2_TYPE_ORDER:
+        if by_type.get(tid):
+            ordered_ids.append(tid)
+    for tid in by_type:
+        if tid not in ordered_ids:
+            ordered_ids.append(tid)
+
+    activities_def = []
+    for tid in ordered_ids:
+        td = type_lookup.get(tid, {})
+        is_snow = tid in ("snowboard", "ski")
+        label = td.get("label") or tid.title()
+        accent = td.get("color") or "#3b82f6"
+        activities_def.append({
+            "id":         tid,
+            "label":      label,
+            "short":      _three_letter_short(label),
+            "glyph":      label[:1].upper() or "?",
+            "accent":     accent,
+            "accentSoft": _hex_to_rgba(accent, 0.18),
+            "metrics":    (["days", "descent", "distance", "moving"] if is_snow
+                           else ["days", "distance", "ascent", "moving"]),
+            "chartMetrics": ([
+                {"key": "count",    "label": "Activities"},
+                {"key": "descent",  "label": "Vertical"},
+                {"key": "duration", "label": "Duration"},
+                {"key": "distance", "label": "Distance"},
+            ] if is_snow else [
+                {"key": "count",    "label": "Activities"},
+                {"key": "distance", "label": "Distance"},
+                {"key": "duration", "label": "Duration"},
+                {"key": "ascent",   "label": "Ascent"},
+            ]),
+            "isSnow": is_snow,
+        })
+
+    # Discover years that have any activity, capped at the last 8 (mirrors
+    # the design — yearsToShow = 4 by default).
+    years_set: set[int] = set()
+    for a in acts:
+        d = (a.get("date") or "")[:10]
+        if len(d) == 10:
+            try:
+                years_set.add(int(d[:4]))
+            except ValueError:
+                pass
+    years_sorted = sorted(years_set)
+
+    rollups: dict = {}
+    history: dict = {}
+    recent_combined: list = []
+    active_dates_dominant: dict[str, str] = {}
+    active_dates_set: set[str] = set()
+
+    for tid in ordered_ids:
+        type_acts = by_type[tid]
+        # Rolling-window subset
+        in_window = []
+        for a in type_acts:
+            d = (a.get("date") or "")[:10]
+            if not d:
+                continue
+            try:
+                dt = datetime.strptime(d, "%Y-%m-%d")
+            except ValueError:
+                continue
+            if earliest_dt <= dt <= today_dt:
+                in_window.append(a)
+
+        # Days set + dominant type for the ribbon
+        for a in in_window:
+            iso = (a.get("date") or "")[:10]
+            if not iso:
+                continue
+            active_dates_set.add(iso)
+            # First-write wins per date, mirroring the README's "RECENT
+            # overrides HISTORY" rule (we go newest-first below).
+            active_dates_dominant.setdefault(iso, tid)
+
+        unique_dates = {(a.get("date") or "")[:10] for a in in_window if a.get("date")}
+        # Streaks (current + longest) from unique active dates within window
+        sorted_dates = sorted(d for d in unique_dates if d)
+        longest_streak = current_streak = 0
+        if sorted_dates:
+            run = 1
+            longest_streak = 1
+            for i in range(1, len(sorted_dates)):
+                prev = datetime.strptime(sorted_dates[i - 1], "%Y-%m-%d")
+                cur  = datetime.strptime(sorted_dates[i],     "%Y-%m-%d")
+                if (cur - prev).days == 1:
+                    run += 1
+                    longest_streak = max(longest_streak, run)
+                else:
+                    run = 1
+            # Current streak is consecutive days ending at today (or yesterday)
+            last_dt = datetime.strptime(sorted_dates[-1], "%Y-%m-%d")
+            if (today_dt - last_dt).days <= 1:
+                run = 1
+                for i in range(len(sorted_dates) - 1, 0, -1):
+                    a_dt = datetime.strptime(sorted_dates[i], "%Y-%m-%d")
+                    p_dt = datetime.strptime(sorted_dates[i - 1], "%Y-%m-%d")
+                    if (a_dt - p_dt).days == 1:
+                        run += 1
+                    else:
+                        break
+                current_streak = run
+
+        def _stat_sum(key):
+            return sum((a.get("stats") or {}).get(key) or 0 for a in in_window)
+        def _stat_max(key):
+            vals = [(a.get("stats") or {}).get(key) for a in in_window]
+            vals = [v for v in vals if v is not None]
+            return max(vals) if vals else 0
+
+        # avg_hr / max_hr — only across activities that recorded HR
+        hr_acts = [a for a in in_window if (a.get("stats") or {}).get("hr_avg")]
+        avg_hr = round(sum((a["stats"]["hr_avg"]) for a in hr_acts) / len(hr_acts)) if hr_acts else None
+        max_hr_val = max((a["stats"]["hr_max"] for a in hr_acts if a["stats"].get("hr_max")), default=None)
+
+        last_date_iso = max(unique_dates) if unique_dates else None
+
+        # Records — best-of across the user's full history (not just window).
+        # Top distance, top climbing, top descent, top max-speed, top duration.
+        def _rank(key, top=1):
+            ranked = sorted(
+                (a for a in type_acts if (a.get("stats") or {}).get(key) is not None),
+                key=lambda a: a["stats"][key], reverse=True,
+            )
+            return ranked[:top]
+
+        prs = []
+        # Snow types lead with descent ("vertical"), others with distance.
+        if tid in ("snowboard", "ski"):
+            for top in _rank("elev_loss_m"):
+                prs.append({"label": "Vertical",   "value_m": top["stats"]["elev_loss_m"], "kind": "elev",
+                            "name": (top.get("meta") or {}).get("title") or top.get("name") or top["filename"],
+                            "date": (top.get("date") or "")[:10]})
+            for top in _rank("distance_km"):
+                prs.append({"label": "Longest",    "value_km": top["stats"]["distance_km"], "kind": "dist",
+                            "name": (top.get("meta") or {}).get("title") or top.get("name") or top["filename"],
+                            "date": (top.get("date") or "")[:10]})
+            for top in _rank("max_speed_kmh"):
+                prs.append({"label": "Top speed",  "value_kmh": top["stats"]["max_speed_kmh"], "kind": "speed",
+                            "name": (top.get("meta") or {}).get("title") or top.get("name") or top["filename"],
+                            "date": (top.get("date") or "")[:10]})
+            for top in _rank("duration_sec"):
+                prs.append({"label": "Duration",   "value_sec": top["stats"]["duration_sec"], "kind": "dur",
+                            "name": (top.get("meta") or {}).get("title") or top.get("name") or top["filename"],
+                            "date": (top.get("date") or "")[:10]})
+        else:
+            for top in _rank("distance_km"):
+                prs.append({"label": "Longest",    "value_km": top["stats"]["distance_km"], "kind": "dist",
+                            "name": (top.get("meta") or {}).get("title") or top.get("name") or top["filename"],
+                            "date": (top.get("date") or "")[:10]})
+            for top in _rank("elev_gain_m"):
+                prs.append({"label": "Climbing",   "value_m": top["stats"]["elev_gain_m"], "kind": "elev",
+                            "name": (top.get("meta") or {}).get("title") or top.get("name") or top["filename"],
+                            "date": (top.get("date") or "")[:10]})
+            for top in _rank("elev_loss_m"):
+                prs.append({"label": "Descent",    "value_m": top["stats"]["elev_loss_m"], "kind": "elev",
+                            "name": (top.get("meta") or {}).get("title") or top.get("name") or top["filename"],
+                            "date": (top.get("date") or "")[:10]})
+            for top in _rank("max_speed_kmh"):
+                prs.append({"label": "Top speed",  "value_kmh": top["stats"]["max_speed_kmh"], "kind": "speed",
+                            "name": (top.get("meta") or {}).get("title") or top.get("name") or top["filename"],
+                            "date": (top.get("date") or "")[:10]})
+            for top in _rank("duration_sec"):
+                prs.append({"label": "Duration",   "value_sec": top["stats"]["duration_sec"], "kind": "dur",
+                            "name": (top.get("meta") or {}).get("title") or top.get("name") or top["filename"],
+                            "date": (top.get("date") or "")[:10]})
+
+        rollups[tid] = {
+            "days":            len(unique_dates),
+            "activity_count":  len(in_window),
+            "distance_km":     round(_stat_sum("distance_km"), 1),
+            "elev_gain_m":     round(_stat_sum("elev_gain_m")),
+            "elev_loss_m":     round(_stat_sum("elev_loss_m")),
+            "moving_h":        round(_stat_sum("duration_sec") / 3600.0, 2),
+            "avg_speed_kmh":   None,  # computed below from total dist / total moving
+            "max_speed_kmh":   round(_stat_max("max_speed_kmh"), 1) or None,
+            "avg_hr":          avg_hr,
+            "max_hr":          max_hr_val,
+            "longest_streak":  longest_streak,
+            "current_streak":  current_streak,
+            "last_date":       last_date_iso,
+            "prs":             prs,
+        }
+        # avg_speed: total distance / total riding time
+        total_dist = rollups[tid]["distance_km"]
+        total_h = rollups[tid]["moving_h"]
+        rollups[tid]["avg_speed_kmh"] = round(total_dist / total_h, 1) if total_h > 0 else None
+
+        # ── HISTORY: per-year monthly buckets, all years (not just window) ──
+        h: dict = {}
+        for year in years_sorted:
+            h[str(year)] = {
+                "count":    [None] * 12,
+                "distance": [None] * 12,
+                "duration": [None] * 12,
+                "ascent":   [None] * 12,
+                "descent":  [None] * 12,
+            }
+        # Aggregate
+        for a in type_acts:
+            d = (a.get("date") or "")[:10]
+            if len(d) != 10:
+                continue
+            try:
+                dt = datetime.strptime(d, "%Y-%m-%d")
+            except ValueError:
+                continue
+            yr_str = str(dt.year)
+            mi = dt.month - 1
+            if yr_str not in h:
+                continue
+            s = a.get("stats") or {}
+            for key, val_key, unit_factor in (
+                ("count",    None,            1),  # +1 per activity
+                ("distance", "distance_km",   1),
+                ("duration", "duration_sec",  1.0 / 3600.0),
+                ("ascent",   "elev_gain_m",   1),
+                ("descent",  "elev_loss_m",   1),
+            ):
+                if key == "count":
+                    h[yr_str][key][mi] = (h[yr_str][key][mi] or 0) + 1
+                else:
+                    v = s.get(val_key)
+                    if v is None:
+                        continue
+                    h[yr_str][key][mi] = round((h[yr_str][key][mi] or 0) + v * unit_factor, 1)
+
+        # Determine the first (year, month) this activity ever appeared so
+        # we can zero "active but empty" months while leaving truly
+        # out-of-range months as null (the design renders 0 vs null
+        # differently — solid empty-bar vs faint stub).
+        first_year = first_month = None
+        for a in type_acts:
+            d = (a.get("date") or "")[:10]
+            if len(d) != 10:
+                continue
+            try:
+                dt = datetime.strptime(d, "%Y-%m-%d")
+            except ValueError:
+                continue
+            ym = (dt.year, dt.month)
+            if first_year is None or ym < (first_year, first_month):
+                first_year, first_month = ym
+        cur_year = today_dt.year
+        cur_month_idx = today_dt.month - 1
+        for yr_str, monthly in h.items():
+            yr = int(yr_str)
+            for mi in range(12):
+                in_future = (yr > cur_year) or (yr == cur_year and mi > cur_month_idx)
+                pre_first = (first_year is not None and (
+                    yr < first_year or (yr == first_year and mi < first_month - 1)))
+                if in_future or pre_first:
+                    for key in ("count", "distance", "duration", "ascent", "descent"):
+                        monthly[key][mi] = None
+                else:
+                    for key in ("count", "distance", "duration", "ascent", "descent"):
+                        if monthly[key][mi] is None:
+                            monthly[key][mi] = 0
+
+        history[tid] = h
+
+        # Recent log — last 5 in window for this type, newest first
+        recent_for_type = sorted(
+            (a for a in in_window if a.get("date")),
+            key=lambda a: a["date"], reverse=True,
+        )[:5]
+        for a in recent_for_type:
+            s = a.get("stats") or {}
+            dur_sec = s.get("duration_sec") or 0
+            dur_h = int(dur_sec // 3600)
+            dur_m = int((dur_sec % 3600) // 60)
+            recent_combined.append({
+                "id":   a["filename"],
+                "type": tid,
+                "date": (a.get("date") or "")[:10],
+                "name": (a.get("meta") or {}).get("title") or a.get("name") or a["filename"],
+                "dist": round(s.get("distance_km") or 0, 1),
+                "elev": round((s.get("elev_loss_m") if tid in ("snowboard", "ski") else s.get("elev_gain_m")) or 0),
+                "dur":  f"{dur_h}:{str(dur_m).zfill(2)}",
+                "max":  round(s.get("max_speed_kmh") or 0, 1) if s.get("max_speed_kmh") else None,
+                "hr":   s.get("hr_avg"),
+            })
+
+    # ─── Cross-activity totals ──────────────────────────────────────────────
+    all_in_window = [a for tid in ordered_ids for a in by_type[tid]
+                     if (a.get("date") or "")[:10]
+                     and earliest_dt <= datetime.strptime(a["date"][:10], "%Y-%m-%d") <= today_dt]
+    unique_active = {a["date"][:10] for a in all_in_window if a.get("date")}
+    sorted_dates_all = sorted(unique_active)
+    longest_streak_all = 0
+    current_streak_all = 0
+    if sorted_dates_all:
+        run = 1
+        longest_streak_all = 1
+        for i in range(1, len(sorted_dates_all)):
+            prev = datetime.strptime(sorted_dates_all[i - 1], "%Y-%m-%d")
+            cur  = datetime.strptime(sorted_dates_all[i],     "%Y-%m-%d")
+            if (cur - prev).days == 1:
+                run += 1
+                longest_streak_all = max(longest_streak_all, run)
+            else:
+                run = 1
+        last_dt = datetime.strptime(sorted_dates_all[-1], "%Y-%m-%d")
+        if (today_dt - last_dt).days <= 1:
+            run = 1
+            for i in range(len(sorted_dates_all) - 1, 0, -1):
+                a_dt = datetime.strptime(sorted_dates_all[i], "%Y-%m-%d")
+                p_dt = datetime.strptime(sorted_dates_all[i - 1], "%Y-%m-%d")
+                if (a_dt - p_dt).days == 1:
+                    run += 1
+                else:
+                    break
+            current_streak_all = run
+
+    last_date_all = max(unique_active) if unique_active else None
+    days_since = None
+    if last_date_all:
+        days_since = (today_dt - datetime.strptime(last_date_all, "%Y-%m-%d")).days
+
+    totals = {
+        "days":            len(unique_active),
+        "elev_gain_m":     sum((a.get("stats") or {}).get("elev_gain_m") or 0 for a in all_in_window),
+        "elev_loss_m":     sum((a.get("stats") or {}).get("elev_loss_m") or 0 for a in all_in_window),
+        "moving_h":        round(sum((a.get("stats") or {}).get("duration_sec") or 0 for a in all_in_window) / 3600.0, 2),
+        "longest_streak":  longest_streak_all,
+        "current_streak":  current_streak_all,
+        "last_date":       last_date_all,
+        "days_since":      days_since,
+    }
+
+    # Sort the combined recent log newest-first (across all activities)
+    recent_combined.sort(key=lambda r: r["date"], reverse=True)
+
+    return {
+        "today":      today_iso,
+        "daysBack":   days_back,
+        "units":      units,
+        "years":      years_sorted,
+        "activities": activities_def,
+        "rollups":    rollups,
+        "history":    history,
+        "recent":     recent_combined[:25],   # cap; per-activity slicing happens client-side
+        "activeDates": sorted(active_dates_set),
+        "dominantByDate": active_dates_dominant,
+        "totals":     totals,
+    }
+
+
+@app.route("/api/summary/v2")
+def api_summary_v2():
+    try:
+        days_back = max(1, min(3650, int(request.args.get("days", 365))))
+    except (TypeError, ValueError):
+        days_back = 365
+    units = request.args.get("units", "metric")
+    if units not in ("metric", "imperial"):
+        units = "metric"
+    return jsonify(_summary_v2_data(days_back, units))
+
+
 def _make_etag(*parts) -> str:
     return hashlib.md5(repr(parts).encode()).hexdigest()
 

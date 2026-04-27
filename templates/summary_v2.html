@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AlForks – Summary V2</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/base.css">
+  <link rel="stylesheet" href="/static/preview.css">
+  <script src="/static/utils.js"></script>
+  <script src="/static/sync_toast.js" defer></script>
+  <script src="/static/preview-toggle.js" defer></script>
+  <style>
+    /* See design/summary-v2/README.md for the full design tokens. */
+    :root {
+      --sans: 'Inter', system-ui, -apple-system, sans-serif;
+      --mono: 'JetBrains Mono', ui-monospace, 'SF Mono', monospace;
+    }
+    body { background: #0a0c0c; color: #fff; font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+    main { max-width: 1320px; margin: 0 auto; padding: 32px 36px; display: flex; flex-direction: column; gap: 22px; }
+    .summary-loading { padding: 40px; text-align: center; color: rgba(255,255,255,0.4); font-family: var(--mono); font-size: 12px; }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>AlForks</h1>
+  <nav>
+    <a href="/summary">Summary</a>
+    <a href="/summary/v2" class="active">Summary V2</a>
+    <a href="/">Ride Logs</a>
+    <a href="/comparison">Compare Logs</a>
+    <a href="/heatmap">Heat Map</a>
+    <a href="/setup">Setup</a>
+    <button id="preview-toggle-btn" class="preview-toggle-btn" onclick="togglePreviewStyles()"
+            title="Toggle style-cleanup preview (sticky across pages)">Preview</button>
+    <button class="nav-sync-btn" onclick="triggerSyncAll()" title="Sync Strava + Garmin now">Sync</button>
+  </nav>
+</header>
+
+<main id="root">
+  <div class="summary-loading">Loading summary…</div>
+</main>
+
+<script>
+const TYPES = {{ types_json | safe }};
+
+async function init() {
+  const r = await fetch('/api/summary/v2?days=365&units=metric');
+  if (!r.ok) {
+    document.getElementById('root').innerHTML = '<div class="summary-loading">Failed to load summary.</div>';
+    return;
+  }
+  const data = await r.json();
+  // Page chrome / activity rows go in subsequent commits — for now, dump
+  // the data shape so we can verify the backend.
+  document.getElementById('root').innerHTML =
+    '<pre style="font-family:var(--mono);font-size:11px;color:rgba(255,255,255,0.6);' +
+    'overflow:auto;max-height:80vh;background:#0f1313;padding:16px;border:1px solid rgba(255,255,255,0.06);' +
+    'border-radius:4px;">' + JSON.stringify(data, null, 2) + '</pre>';
+}
+init();
+</script>
+</body>
+</html>
