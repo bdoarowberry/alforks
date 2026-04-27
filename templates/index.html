@@ -865,34 +865,54 @@ function add3DLayers() {
 
 function apply3DTrack() {
   if (!mapbox3D || !mapbox3DReady || !trackData) return;
-  let features;
-  if (colorMode !== 'default') {
-    const pts = trackData.points;
-    features = [];
-    if (pts.length >= 2) {
-      let curColor = colorForPoint(0, pts, colorMode);
-      let coords = [[pts[0].lon, pts[0].lat]];
-      for (let i = 1; i < pts.length; i++) {
-        const c = colorForPoint(i, pts, colorMode);
-        coords.push([pts[i].lon, pts[i].lat]);
-        if (c !== curColor || i === pts.length - 1) {
-          if (coords.length >= 2) {
-            features.push({ type: 'Feature',
-              properties: { segtype: 'speed', speedColor: curColor },
-              geometry: { type: 'LineString', coordinates: coords } });
-          }
-          coords = [[pts[i].lon, pts[i].lat]];
-          curColor = c;
+  // Build a colour-banded LineString chain over the given points using
+  // colorForPoint(i, pts, mode). Pushes Features onto `out` with segtype
+  // 'speed' (the layer that colours by feature.properties.speedColor).
+  function pushColoredBands(out, pts, mode) {
+    if (pts.length < 2) return;
+    let curColor = colorForPoint(0, pts, mode);
+    let coords = [[pts[0].lon, pts[0].lat]];
+    for (let i = 1; i < pts.length; i++) {
+      const c = colorForPoint(i, pts, mode);
+      coords.push([pts[i].lon, pts[i].lat]);
+      if (c !== curColor || i === pts.length - 1) {
+        if (coords.length >= 2) {
+          out.push({ type: 'Feature',
+            properties: { segtype: 'speed', speedColor: curColor },
+            geometry: { type: 'LineString', coordinates: coords } });
         }
+        coords = [[pts[i].lon, pts[i].lat]];
+        curColor = c;
       }
     }
-  } else {
+  }
+
+  let features = [];
+  if (colorMode === 'default') {
     features = activeSegments.map(seg => ({
       type: 'Feature', properties: { segtype: seg.type },
       geometry: { type: 'LineString',
         coordinates: trackData.points.slice(seg.start, seg.end + 1).map(p => [p.lon, p.lat]),
       },
     }));
+  } else if (colorMode === 'speed') {
+    // Mirror the 2D rule: chairlift speed is uniform cable speed and
+    // uninformative, so leave assisted segments as the dashed orange line
+    // and only colour-band the riding segments.
+    activeSegments.forEach(seg => {
+      const segPts = trackData.points.slice(seg.start, seg.end + 1);
+      if (segPts.length < 2) return;
+      if (seg.type === 'assisted') {
+        features.push({ type: 'Feature', properties: { segtype: 'assisted' },
+          geometry: { type: 'LineString',
+            coordinates: segPts.map(p => [p.lon, p.lat]) } });
+      } else {
+        pushColoredBands(features, segPts, 'speed');
+      }
+    });
+  } else {
+    // gradient or progression — colour the whole track regardless of segment.
+    pushColoredBands(features, trackData.points, colorMode);
   }
   // KM marker features (rendered as a separate symbol layer)
   if (kmMarksOn && trackData.points?.length) {
