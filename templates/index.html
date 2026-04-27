@@ -399,6 +399,29 @@
     body[data-layout="v4"] .chart-title { flex: 1 0 100%; margin-bottom: 4px; }
     body[data-layout="v4"] .chart-btn { font-size: 0.66rem; padding: 2px 7px; }
     body[data-layout="v4"] #chart-wrapper { flex: 1; min-height: 0; }
+
+    /* ─── V5: Vertical stats column ─────────────────────────────────────────
+       Hides the horizontal #stats-bar above the map and instead mounts a
+       narrow stats column on the right side of the map+chart row. Frees
+       ~50 px of vertical chrome above the map; map gets all of it.
+
+       Stats are still populated by updateStats() — they're just rendered
+       in a different column whose layout we restyle. The column re-uses
+       the same .stat blocks as the horizontal bar (no duplicate markup),
+       so HR / difficulty / zones all stay in sync. */
+    body[data-layout="v5"] #stats-bar { display: flex; flex-direction: column; flex-shrink: 0; padding: 10px 12px; gap: 1px; border-bottom: none; border-left: 1px solid #2a2d35; min-width: 130px; max-width: 160px; align-self: stretch; }
+    body[data-layout="v5"] #stats-bar .stat { flex: 0 0 auto; text-align: left; border-right: none; border-bottom: 1px solid #1e2128; padding: 6px 4px; }
+    body[data-layout="v5"] #stats-bar .stat:last-child { border-bottom: none; }
+    body[data-layout="v5"] #stats-bar .stat-value { font-size: 1rem; }
+    body[data-layout="v5"] #stats-bar .stat-label { font-size: 0.6rem; }
+    /* Pull the stats column out of the #content column-flex and into a row
+       alongside #map-chart-row. Mirrors v4's structural intent without the
+       chart split. */
+    body[data-layout="v5"] #content { display: grid; grid-template-areas: "header header" "notes notes" "main stats"; grid-template-columns: 1fr auto; grid-template-rows: auto auto 1fr; }
+    body[data-layout="v5"] #activity-header { grid-area: header; }
+    body[data-layout="v5"] #activity-bar    { grid-area: notes; }
+    body[data-layout="v5"] #map-chart-row   { grid-area: main; min-height: 0; }
+    body[data-layout="v5"] #stats-bar       { grid-area: stats; }
   </style>
 </head>
 <body data-layout="{{ layout_variant or 'default' }}">
