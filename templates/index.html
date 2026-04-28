@@ -458,6 +458,14 @@
           <option value="__untagged__">Untagged</option>
         </select>
       </div>
+      <div class="sfrow">
+        <span class="sflabel">Region</span>
+        <select id="filter-region" class="sfselect" onchange="renderActivityList()"
+                title="Filter by region match">
+          <option value="all">All</option>
+          <option value="__untagged__">Untagged (no match)</option>
+        </select>
+      </div>
     </div>
     <div id="activity-list">
       <div class="skeleton-row"><div class="skeleton-bar short"></div><div class="skeleton-bar long"></div><div class="skeleton-bar medium"></div></div>
@@ -2686,6 +2694,8 @@ function clearAllFilters() {
   document.getElementById('search-input').value = '';
   document.getElementById('filter-year').value = 'all';
   document.getElementById('filter-type').value = 'all';
+  const rg = document.getElementById('filter-region');
+  if (rg) rg.value = 'all';
   renderActivityList();
 }
 
@@ -2707,6 +2717,7 @@ function populateYearFilter() {
 function renderActivityList(reSelectFilename) {
   const year   = document.getElementById('filter-year').value;
   const type   = document.getElementById('filter-type').value;
+  const region = document.getElementById('filter-region')?.value || 'all';
   const search = (document.getElementById('search-input')?.value || '').toLowerCase().trim();
   sortField   = document.getElementById('sort-field').value;
 
@@ -2718,6 +2729,13 @@ function renderActivityList(reSelectFilename) {
       // type nor a region default.
       const t = act.effective_type || act.meta?.type || '';
       if (type === '__untagged__' ? t !== '' : t !== type) return false;
+    }
+    if (region === '__untagged__') {
+      // No geometric match AND no manual pin → untagged. Pinned activities
+      // already have explicit user attention.
+      const matched = (act.regions || []).length > 0;
+      const pinned  = (act.meta?.regions_pinned || []).length > 0;
+      if (matched || pinned) return false;
     }
     if (search) {
       const hay = [
@@ -2892,10 +2910,11 @@ function toggleSidebar() {
 
 function applyUrlState() {
   const p = new URLSearchParams(window.location.search);
-  if (p.has('q'))    document.getElementById('search-input').value  = p.get('q');
-  if (p.has('year')) document.getElementById('filter-year').value   = p.get('year');
-  if (p.has('type')) document.getElementById('filter-type').value   = p.get('type');
-  if (p.has('sort')) document.getElementById('sort-field').value    = p.get('sort');
+  if (p.has('q'))      document.getElementById('search-input').value  = p.get('q');
+  if (p.has('year'))   document.getElementById('filter-year').value   = p.get('year');
+  if (p.has('type'))   document.getElementById('filter-type').value   = p.get('type');
+  if (p.has('region')) document.getElementById('filter-region').value = p.get('region');
+  if (p.has('sort'))   document.getElementById('sort-field').value    = p.get('sort');
   if (p.has('dir')) {
     sortDesc = p.get('dir') !== 'asc';
     document.getElementById('sort-dir-btn').textContent = sortDesc ? '▼' : '▲';
@@ -2907,10 +2926,12 @@ function writeUrlState() {
   const q    = document.getElementById('search-input').value.trim();
   const yr   = document.getElementById('filter-year').value;
   const tp   = document.getElementById('filter-type').value;
+  const rg   = document.getElementById('filter-region')?.value || 'all';
   const sf   = document.getElementById('sort-field').value;
   if (q)    p.set('q', q);
   if (yr && yr !== 'all')  p.set('year', yr);
   if (tp && tp !== 'all')  p.set('type', tp);
+  if (rg && rg !== 'all')  p.set('region', rg);
   if (sf && sf !== 'date') p.set('sort', sf);
   if (!sortDesc) p.set('dir', 'asc');
   if (currentFilename) p.set('file', currentFilename);
@@ -2920,7 +2941,7 @@ function writeUrlState() {
 }
 
 // Wrap state-mutating handlers so they persist to URL
-['search-input', 'filter-year', 'filter-type', 'sort-field'].forEach(id => {
+['search-input', 'filter-year', 'filter-type', 'filter-region', 'sort-field'].forEach(id => {
   const el = document.getElementById(id);
   if (el) el.addEventListener(el.tagName === 'SELECT' ? 'change' : 'input', writeUrlState);
 });
