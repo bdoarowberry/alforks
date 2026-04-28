@@ -384,7 +384,12 @@ def _activities_cache_key() -> tuple:
         hr_count = sum(1 for _ in hr_dir.glob("*.json"))
     except OSError:
         hr_count = 0
-    return (_m(GPX_DIR), _m(METADATA_FILE), _m(REGIONS_FILE), _m(TYPES_FILE), hr_count)
+    # _REGION_MATCH_VERSION is included so a bump to the region-matching
+    # algorithm forces every cached sidebar row to recompute its `regions`
+    # field on the next load — without it the cache would happily serve
+    # the old centroid-matched answers until the user touched a file.
+    return (_m(GPX_DIR), _m(METADATA_FILE), _m(REGIONS_FILE), _m(TYPES_FILE),
+            hr_count, _REGION_MATCH_VERSION)
 
 
 def _build_activity_entry(filename: str, meta: dict, regions: list[dict]) -> tuple[dict, dict] | None:
@@ -2890,33 +2895,71 @@ def _regions_geom_hash(regions: list[dict]) -> str:
     return h
 
 
+# Fraction of a track's points that must fall inside a region's polygon for
+# the region to auto-tag. The previous implementation only matched on the
+# centroid (one point) — that miscounted multi-region rides and missed
+# tracks whose centroid landed in a polygon's hole or on a shared road.
+_REGION_MATCH_THRESHOLD = 0.15
+# Bumped whenever the matching algorithm changes so old cache entries
+# (computed under different rules) are invalidated automatically.
+_REGION_MATCH_VERSION = 2
+
+
 def regions_for_track(data: dict, regions: list[dict]) -> list[str]:
-    """Return ids of regions whose polygon contains the track centroid.
-    Memoized per (filename, gpx_mtime, regions_geom_hash)."""
+    """Return ids of regions whose polygon contains ≥ _REGION_MATCH_THRESHOLD
+    of the track's GPS points. Each region is evaluated independently, so
+    a track that genuinely crosses multiple regions tags all of them.
+    Per-region bbox prefilter rejects far-away points before the trig of
+    the ray-cast. Memoized per (filename, gpx_mtime, regions_geom_hash,
+    match_version)."""
     pts = data.get("points", [])
     if not pts:
         return []
-    # Fast path: per-filename cache keyed on geometry hash
+    # Fast path: per-filename cache keyed on geometry hash + algo version
     filename = data.get("filename")
     cache_key = None
     if filename:
         try:
             mtime = (GPX_DIR / filename).stat().st_mtime
-            cache_key = (filename, mtime, _regions_geom_hash(regions))
+            cache_key = (filename, mtime, _regions_geom_hash(regions),
+                         _REGION_MATCH_VERSION)
             with _regions_match_cache_lock:
                 cached = _regions_match_cache.get(cache_key)
                 if cached is not None:
                     return cached
         except OSError:
             cache_key = None
-    clat = sum(p["lat"] for p in pts) / len(pts)
-    clon = sum(p["lon"] for p in pts) / len(pts)
-    matched = []
+    matched: list[str] = []
+    n_pts = len(pts)
+    min_inside = max(1, int(n_pts * _REGION_MATCH_THRESHOLD))
     for r in regions:
         # GeoJSON polygon ring coordinates are [lon, lat]
         coords = r.get("geometry", {}).get("coordinates", [[]])[0]
-        ring   = [[c[1], c[0]] for c in coords]  # convert to [lat, lon]
-        if ring and _point_in_polygon(clat, clon, ring):
+        ring = [[c[1], c[0]] for c in coords]  # convert to [lat, lon]
+        if not ring:
+            continue
+        # Bbox prefilter — points outside the polygon's bounding rectangle
+        # can't be inside the polygon, and the four-comparison check is much
+        # cheaper than the ray-cast.
+        ring_lats = [p[0] for p in ring]
+        ring_lons = [p[1] for p in ring]
+        min_lat, max_lat = min(ring_lats), max(ring_lats)
+        min_lon, max_lon = min(ring_lons), max(ring_lons)
+        inside = 0
+        # Early-out: as soon as we know inside count can't reach the
+        # threshold, skip the rest of the points for this region.
+        for i, p in enumerate(pts):
+            lat = p["lat"]; lon = p["lon"]
+            if min_lat <= lat <= max_lat and min_lon <= lon <= max_lon:
+                if _point_in_polygon(lat, lon, ring):
+                    inside += 1
+                    if inside >= min_inside:
+                        break
+            # Optimistic upper bound: even if every remaining point is inside
+            remaining = n_pts - 1 - i
+            if inside + remaining < min_inside:
+                break
+        if inside >= min_inside:
             matched.append(r["id"])
     if cache_key is not None:
         with _regions_match_cache_lock:
