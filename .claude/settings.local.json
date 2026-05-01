@@ -18,7 +18,31 @@
       "Bash(grep -n \"nav a \\\\|body { font-family\\\\|header h1\\\\|filter-btn\\\\|\\\\\\\\.sep \" \"/c/Users/arowberry/OneDrive - BDO Canada LLP/Documents/Personal/Claude Code Projects/GPX Files/templates/heatmap.html\")",
       "Bash(grep *)",
       "Bash(gh --version)",
-      "Bash(gh auth *)"
+      "Bash(gh auth *)",
+      "Bash(gh repo *)",
+      "Bash(gh api *)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git push *)",
+      "Bash(sort -k5 -n -r)",
+      "Bash(git worktree *)",
+      "Bash(cmd //c \"mklink /J tracks \\\\\"..\\\\\\\\GPX Files\\\\\\\\tracks\\\\\"\")",
+      "Bash(cmd //c \"rmdir tracks\")",
+      "Bash(cmd //c \"mklink /J tracks \\\\\"C:\\\\\\\\Users\\\\\\\\arowberry\\\\\\\\OneDrive - BDO Canada LLP\\\\\\\\Documents\\\\\\\\Personal\\\\\\\\Claude Code Projects\\\\\\\\GPX Files\\\\\\\\tracks\\\\\"\")",
+      "Bash(cmd *)",
+      "Bash(git -C \"C:\\\\Users\\\\arowberry\\\\OneDrive - BDO Canada LLP\\\\Documents\\\\Personal\\\\Claude Code Projects\\\\GPX Files\" log --oneline)",
+      "Bash(tasklist)",
+      "PowerShell(Get-CimInstance *)",
+      "Bash(where node *)",
+      "Bash(where.exe node *)",
+      "Bash(sort -k6,7)",
+      "Read(//tmp/**)",
+      "Read(//c/Users/AROWBE~1/AppData/Local/Temp/claude/**)",
+      "Bash(python _test_fix.py)",
+      "Bash(rm _test_fix.py _test_out.txt)",
+      "Bash(cat)",
+      "Bash(chmod +x /tmp/stage_tz.sh)",
+      "Bash(/tmp/stage_tz.sh)"
     ]
   }
 }
