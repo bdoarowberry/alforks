@@ -52,6 +52,16 @@
     .s2-eyebrow-hero { font-size: 11px; color: var(--text-tertiary); letter-spacing: 0.18em; text-transform: uppercase; }
     .s2-eyebrow-section { font-size: 10px; color: var(--text-tertiary); letter-spacing: 0.18em; text-transform: uppercase; margin-top: 4px; }
 
+    /* "By activity" header row — eyebrow on the left, year chips on the right. */
+    .s2-activities-header { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-top: 4px; flex-wrap: wrap; }
+    .s2-year-chips { display: inline-flex; gap: 4px; flex-wrap: wrap; }
+    .s2-year-chips button { all: unset; cursor: pointer; padding: 4px 10px; font-size: 10px;
+                            font-family: var(--mono); letter-spacing: 0.04em;
+                            color: var(--text-tertiary); background: var(--text-faint);
+                            border: 1px solid var(--border-hair); border-radius: 3px; }
+    .s2-year-chips button.on { color: #fff; background: rgba(255,255,255,0.10); border-color: rgba(255,255,255,0.18); }
+    .s2-year-chips button:hover:not(.on) { color: var(--text-secondary); }
+
     /* ── Page header ─────────────────────────────────────────────────── */
     .s2-head { display: flex; align-items: flex-end; justify-content: space-between; }
     .s2-head h1 { font-size: 32px; font-weight: 500; margin: 8px 0 0 0; letter-spacing: -0.02em; }
@@ -202,12 +212,13 @@ function fmtMetricVal(value, key) {
   }
 }
 
-const MONTH_LETTERS = ['J','F','M','A','M','J','J','A','S','O','N','D'];
+const MONTH_LETTERS = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
 const MONTH_LABELS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
 // ── Render ─────────────────────────────────────────────────────────────────
 let DATA = null;
 const rowState = {};   // activityId → { metric, mode, open }
+let SELECTED_YEARS = new Set();  // which years to include in the per-activity charts
 
 async function init() {
   const r = await fetch('/api/summary/v2?days=365&units=metric');
@@ -225,6 +236,9 @@ async function init() {
       mode:   'grouped',
     };
   });
+  // Default selected years: the most recent 3 years that have data.
+  const allYears = (DATA.years || []).slice().sort();
+  SELECTED_YEARS = new Set(allYears.slice(-3));
   render();
 }
 
@@ -241,11 +255,52 @@ function render() {
   root.appendChild(renderHead());
   root.appendChild(renderKpi());
   root.appendChild(renderRibbon());
-  const eyebrow = document.createElement('div');
-  eyebrow.className = 's2-eyebrow-section';
-  eyebrow.textContent = 'By activity · all-time';
-  root.appendChild(eyebrow);
+  root.appendChild(renderActivitiesHeader());
   root.appendChild(renderActivities());
+}
+
+function renderActivitiesHeader() {
+  // Eyebrow on the left, year-toggle chips on the right. Toggling a chip
+  // re-renders the activities below — the chip set drives the YoY chart's
+  // year selection.
+  const wrap = document.createElement('div');
+  wrap.className = 's2-activities-header';
+  const eb = document.createElement('div');
+  eb.className = 's2-eyebrow-section';
+  eb.textContent = 'By activity';
+  wrap.appendChild(eb);
+
+  const chips = document.createElement('div');
+  chips.className = 's2-year-chips';
+  const allYears = (DATA.years || []).slice().sort();
+  allYears.forEach(y => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.textContent = y;
+    if (SELECTED_YEARS.has(y)) btn.classList.add('on');
+    btn.addEventListener('click', () => {
+      if (SELECTED_YEARS.has(y)) {
+        // Don't allow deselecting the last selected year — the chart needs
+        // at least one series.
+        if (SELECTED_YEARS.size <= 1) return;
+        SELECTED_YEARS.delete(y);
+      } else {
+        SELECTED_YEARS.add(y);
+      }
+      // Re-render activities only — KPI / ribbon / header don't depend on
+      // year selection.
+      const oldActs = document.querySelector('.s2-activities');
+      const newActs = renderActivities();
+      if (oldActs) oldActs.replaceWith(newActs);
+      // Re-render the chip row to update on/off styling.
+      const oldHeader = document.querySelector('.s2-activities-header');
+      const newHeader = renderActivitiesHeader();
+      if (oldHeader) oldHeader.replaceWith(newHeader);
+    });
+    chips.appendChild(btn);
+  });
+  wrap.appendChild(chips);
+  return wrap;
 }
 
 function renderHead() {
@@ -276,8 +331,8 @@ function renderKpi() {
   wrap.className = 's2-kpi num';
   const cells = [
     ['Total days',     t.days,                                   null],
-    ['Current streak', `${t.current_streak}d`,                   `max ${t.longest_streak}d`],
-    ['Total ascent',   fmtElev(t.elev_gain_m),                   'm'],
+    ['Last 2 weeks',   `${t.last_14d_active_days ?? 0} of 14`,   'd'],
+    ['Total climbing', fmtElev(t.elev_gain_m),                   'm'],
     ['Total descent',  fmtElev(t.elev_loss_m),                   'm'],
     ['Moving time',    fmtH(t.moving_h),                         null],
   ];
@@ -466,9 +521,9 @@ function buildRowBody(body, a) {
     metricCtl.appendChild(b);
   });
 
-  // Mode toggle buttons (▮▮ / ⌇)
+  // Mode toggle buttons — text labels render more reliably than glyphs.
   const modeCtl = tb.querySelector('.s2-segctrl.mode');
-  [{k:'grouped', l:'▮▮'}, {k:'overlay', l:'⌇'}].forEach(m => {
+  [{k:'grouped', l:'Bars'}, {k:'overlay', l:'Lines'}].forEach(m => {
     const b = document.createElement('button');
     b.textContent = m.l;
     b.title = m.k;
@@ -493,7 +548,10 @@ function renderYoYChart(a, metric, mode) {
 
   const h = DATA.history[a.id] || {};
   const allYears = Object.keys(h).map(Number).sort();
-  const years = allYears.slice(-4);   // yearsToShow = 4
+  // Honor the user's chip selection; fall back to most-recent-4 if (somehow)
+  // none of the selected years have history for this activity.
+  let years = allYears.filter(y => SELECTED_YEARS.has(y));
+  if (years.length === 0) years = allYears.slice(-4);
   const series = years.map(y => ({ year: y, data: (h[y] && h[y][metric]) || Array(12).fill(null) }));
   const max = Math.max(1, ...series.flatMap(s => s.data.map(v => v == null ? 0 : v)));
 
@@ -627,7 +685,6 @@ function renderPerformance(a) {
     ['top speed',  r.max_speed_kmh != null ? `${fmtSpeed(r.max_speed_kmh)} km/h` : '—'],
     ['avg HR',     r.avg_hr != null ? `${r.avg_hr} bpm` : '—'],
     ['max HR',     r.max_hr != null ? `${r.max_hr} bpm` : '—'],
-    ['streak',     `${r.current_streak || 0}d / ${r.longest_streak || 0}d`],
   ];
   const wrap = document.createElement('div');
   wrap.className = 's2-perf num';
@@ -639,7 +696,8 @@ function renderPerformance(a) {
 function renderRecent(a) {
   const recent = (DATA.recent || []).filter(x => x.type === a.id).slice(0, 5);
   const showAscent = !a.isSnow;
-  const cols = showAscent ? '60px 1fr 60px 50px 50px' : '60px 1fr 60px 60px 50px';
+  // Columns: date · name · dist · ↑/↓ · dur · HR
+  const cols = '58px 1fr 56px 56px 50px 48px';
   const wrap = document.createElement('div');
   wrap.className = 's2-recent num';
   wrap.innerHTML = `
@@ -652,6 +710,7 @@ function renderRecent(a) {
       <span style="text-align:right">dist</span>
       <span style="text-align:right">${showAscent ? '↑' : '↓'}</span>
       <span style="text-align:right">dur</span>
+      <span style="text-align:right">HR</span>
     </div>
     ${recent.length === 0
       ? '<div class="row" style="border:none;color:rgba(255,255,255,0.3);font-style:italic;cursor:default;display:block;padding-top:12px">— no activity in window —</div>'
@@ -662,11 +721,12 @@ function renderRecent(a) {
         <span class="right" style="color:#fff">${fmtDist(x.dist)}</span>
         <span class="right">${fmtElev(x.elev)}</span>
         <span class="right">${x.dur}</span>
+        <span class="right">${x.hr != null ? x.hr : '—'}</span>
       </div>`).join('')}`;
-  // Make rows navigate to Ride Logs
+  // Open in a new tab so the user keeps their place on the summary view.
   wrap.querySelectorAll('.row[data-fn]').forEach(r => {
     r.addEventListener('click', () => {
-      window.location.href = `/?file=${encodeURIComponent(r.dataset.fn)}`;
+      window.open(`/?file=${encodeURIComponent(r.dataset.fn)}`, '_blank', 'noopener');
     });
   });
   return wrap;

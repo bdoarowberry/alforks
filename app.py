@@ -505,6 +505,20 @@ def _build_activity_entry(filename: str, meta: dict, regions: list[dict]) -> tup
         except (KeyError, TypeError, ValueError):
             has_hr = False
     matched_regions = _effective_regions(eff, file_meta, regions)
+    # Bake hr_avg / hr_max into the sidebar entry's stats once at build time
+    # so the Summary V2 / Training Load aggregations don't have to re-merge
+    # HR per request. The cache invalidates correctly already — `has_hr`
+    # tracks the HR cache's mtime via the activities-cache key.
+    stats = dict(eff["stats"])
+    if has_hr:
+        try:
+            merged_stats = (_merge_hr_into_data(eff).get("stats") or {})
+            if merged_stats.get("hr_avg") is not None:
+                stats["hr_avg"] = int(merged_stats["hr_avg"])
+            if merged_stats.get("hr_max") is not None:
+                stats["hr_max"] = int(merged_stats["hr_max"])
+        except Exception:
+            pass
     entry = {
         "filename": eff["filename"],
         "name":     eff["name"],
@@ -513,7 +527,7 @@ def _build_activity_entry(filename: str, meta: dict, regions: list[dict]) -> tup
         "end_time":   (pts[-1].get("time") if pts else None),
         "tz_name":  eff.get("tz_name"),
         "start_latlon": list(start_latlon) if start_latlon else None,
-        "stats":    eff["stats"],
+        "stats":    stats,
         "meta":     file_meta,
         "spark":    spark,
         "regions":  matched_regions,
@@ -949,9 +963,15 @@ def _hex_to_rgba(hex_color: str, alpha: float) -> str:
     return f"rgba({r}, {g}, {b}, {alpha})"
 
 
-def _three_letter_short(label: str) -> str:
-    """'Mountain Bike' → 'MTB', 'Snowboard' → 'SNB', 'Ski' → 'SKI'."""
-    parts = [p for p in label.split() if p]
+def _three_letter_short(type_id: str, label: str) -> str:
+    """Prefer the type id for short labels: 'mtb' → 'MTB', 'fat_biking' →
+    'FAT', 'snowboard' → 'SNO'. Falls back to first-letters-of-words on the
+    label if the id is unusable."""
+    if type_id:
+        clean = "".join(c for c in type_id if c.isalpha())
+        if clean:
+            return clean[:3].upper()
+    parts = [p for p in (label or "").split() if p]
     if len(parts) >= 2:
         return "".join(p[0] for p in parts[:3]).upper()
     return parts[0][:3].upper() if parts else "???"
@@ -979,16 +999,17 @@ def _summary_v2_data(days_back: int, units: str) -> dict:
         tid = (a.get("meta") or {}).get("type") or a.get("effective_type") or "other"
         by_type.setdefault(tid, []).append(a)
 
-    # Canonical order, but only emit activities the user actually has data
-    # for. If they have a non-standard type, append it after the canonical
-    # ones in the order it first appears.
-    ordered_ids: list[str] = []
-    for tid in _SUMMARY_V2_TYPE_ORDER:
-        if by_type.get(tid):
-            ordered_ids.append(tid)
-    for tid in by_type:
-        if tid not in ordered_ids:
-            ordered_ids.append(tid)
+    # Sort by which activity type was active most recently — the type whose
+    # newest activity is closest to today comes first. Stable on type id to
+    # break ties deterministically.
+    def _last_date_for_type(tid: str) -> str:
+        dates = [(a.get("date") or "")[:10] for a in by_type.get(tid, []) if a.get("date")]
+        return max(dates) if dates else ""
+    ordered_ids: list[str] = sorted(
+        by_type.keys(),
+        key=lambda tid: (_last_date_for_type(tid), tid),
+        reverse=True,
+    )
 
     activities_def = []
     for tid in ordered_ids:
@@ -999,7 +1020,7 @@ def _summary_v2_data(days_back: int, units: str) -> dict:
         activities_def.append({
             "id":         tid,
             "label":      label,
-            "short":      _three_letter_short(label),
+            "short":      _three_letter_short(tid, label),
             "glyph":      label[:1].upper() or "?",
             "accent":     accent,
             "accentSoft": _hex_to_rgba(accent, 0.18),
@@ -1014,7 +1035,7 @@ def _summary_v2_data(days_back: int, units: str) -> dict:
                 {"key": "count",    "label": "Activities"},
                 {"key": "distance", "label": "Distance"},
                 {"key": "duration", "label": "Duration"},
-                {"key": "ascent",   "label": "Ascent"},
+                {"key": "ascent",   "label": "Climbing"},
             ]),
             "isSnow": is_snow,
         })
@@ -1097,9 +1118,10 @@ def _summary_v2_data(days_back: int, units: str) -> dict:
             vals = [v for v in vals if v is not None]
             return max(vals) if vals else 0
 
-        # avg_hr / max_hr — only across activities that recorded HR
-        hr_acts = [a for a in in_window if (a.get("stats") or {}).get("hr_avg")]
-        avg_hr = round(sum((a["stats"]["hr_avg"]) for a in hr_acts) / len(hr_acts)) if hr_acts else None
+        # avg_hr / max_hr — `_activity_payload` bakes these into entry.stats
+        # at sidebar-build time so we can aggregate cheaply here.
+        hr_acts = [a for a in in_window if (a.get("stats") or {}).get("hr_avg") is not None]
+        avg_hr = round(sum(a["stats"]["hr_avg"] for a in hr_acts) / len(hr_acts)) if hr_acts else None
         max_hr_val = max((a["stats"]["hr_max"] for a in hr_acts if a["stats"].get("hr_max")), default=None)
 
         last_date_iso = max(unique_dates) if unique_dates else None
@@ -1306,6 +1328,10 @@ def _summary_v2_data(days_back: int, units: str) -> dict:
     if last_date_all:
         days_since = (today_dt - datetime.strptime(last_date_all, "%Y-%m-%d")).days
 
+    # Active days in the last 14 days (rolling fortnight ending today).
+    fortnight_start = (today_dt - timedelta(days=13)).strftime("%Y-%m-%d")
+    last_14d_active_days = sum(1 for d in unique_active if d >= fortnight_start)
+
     totals = {
         "days":            len(unique_active),
         "elev_gain_m":     sum((a.get("stats") or {}).get("elev_gain_m") or 0 for a in all_in_window),
@@ -1313,6 +1339,7 @@ def _summary_v2_data(days_back: int, units: str) -> dict:
         "moving_h":        round(sum((a.get("stats") or {}).get("duration_sec") or 0 for a in all_in_window) / 3600.0, 2),
         "longest_streak":  longest_streak_all,
         "current_streak":  current_streak_all,
+        "last_14d_active_days": last_14d_active_days,
         "last_date":       last_date_all,
         "days_since":      days_since,
     }
