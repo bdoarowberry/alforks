@@ -48,8 +48,14 @@
     .comp-side { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
     .comp-top { display: flex; align-items: baseline; gap: 12px; }
     .comp-top-left { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; flex-wrap: wrap; }
-    .comp-top-right { display: flex; align-items: center; gap: 8px; flex-shrink: 0; font-size: 0.72rem; color: var(--text-secondary); font-family: var(--font-mono); }
+    .comp-top-right { display: flex; align-items: center; gap: 10px; flex-shrink: 0; font-size: 0.74rem; color: var(--text-secondary); font-family: var(--font-mono); }
     .comp-top-right .sep { color: var(--text-faint); }
+    /* Lazy-loaded weather summary per row — icon + temp range. Empty when
+       the activity has no weather data (offline parse, future date, etc.). */
+    .row-weather { white-space: nowrap; color: var(--text-secondary); font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-size: 0.74rem; }
+    .row-weather:empty { display: none; }
+    .row-weather .wx-icon { margin-right: 4px; font-family: var(--font-sans); }
+    .row-weather .wx-extra { color: var(--text-tertiary); margin-left: 6px; }
     /* Activity-page-style title bar: [icon] {type} - {title} · {date} · {time range}.
        Each segment dim or accented appropriately to read as a single line. */
     .row-title { display: inline-flex; align-items: baseline; gap: 8px; font-size: 0.92rem;
@@ -312,10 +318,53 @@ function initMap(rowEl) {
 
 const observer = new IntersectionObserver(entries => {
   for (const e of entries) {
-    if (e.isIntersecting) initMap(e.target);
-    else evictIfOver();
+    if (e.isIntersecting) {
+      initMap(e.target);
+      loadRowWeather(e.target);
+    } else {
+      evictIfOver();
+    }
   }
 }, { rootMargin: '300px' });
+
+// ─── Lazy weather per row ─────────────────────────────────────────────
+// One-shot fetch of /api/activity/<filename>/weather when the row enters
+// the viewport. Backend caches per (lat-rounded, lon-rounded, date) so
+// repeat visits are cheap. Failures (no data, offline) leave the cell
+// empty (`.row-weather:empty { display: none }`).
+function weatherIcon(code) {
+  if (code == null) return '';
+  if (code === 0) return '☀';
+  if (code <= 3)  return '⛅';
+  if (code <= 48) return '🌫';
+  if (code <= 67) return '🌧';
+  if (code <= 77) return '❄';
+  if (code <= 82) return '🌧';
+  if (code <= 86) return '❄';
+  return '⛈';
+}
+
+async function loadRowWeather(row) {
+  const span = row.querySelector('.row-weather');
+  if (!span || span.dataset.loaded) return;
+  span.dataset.loaded = '1';   // mark immediately so we don't re-fetch on re-enter
+  const fn = span.dataset.fn;
+  try {
+    const r = await fetch(`/api/activity/${encodeURIComponent(fn)}/weather`);
+    if (!r.ok) return;
+    const w = await r.json();
+    if (w.tmin == null && w.tmax == null) return;
+    const icon = weatherIcon(w.code);
+    const temp = (w.tmin != null && w.tmax != null)
+      ? `${Math.round(w.tmin)}° / ${Math.round(w.tmax)}°`
+      : `${Math.round(w.tmax ?? w.tmin)}°`;
+    const extras = [];
+    if (w.snow && w.snow > 0)          extras.push(`❄ ${w.snow.toFixed(1)}cm`);
+    else if (w.precip && w.precip > 0) extras.push(`💧 ${w.precip.toFixed(1)}mm`);
+    if (w.wind && w.wind > 0)          extras.push(`💨 ${Math.round(w.wind)}`);
+    span.innerHTML = `<span class="wx-icon">${icon}</span>${temp}${extras.length ? `<span class="wx-extra">· ${extras.join(' · ')}</span>` : ''}`;
+  } catch (e) { /* leave empty */ }
+}
 
 // ─── Render ─────────────────────────────────────────────────────────────────
 function fmt(n, dp = 0) { return n == null ? '—' : Number(n).toFixed(dp); }
@@ -423,6 +472,7 @@ function renderRow(item) {
           </span>
         </div>
         <div class="comp-top-right">
+          <span class="row-weather" data-fn="${item.filename}"></span>
           <button class="exclude-btn ${item.excluded ? 'active' : ''}"
                   data-fn="${item.filename}"
                   title="${item.excluded ? 'Re-include in statistics' : 'Exclude from statistics'}">⊘</button>

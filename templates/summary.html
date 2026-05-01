@@ -270,7 +270,7 @@ function renderLifetime() {
   const sinceLbl = earliest ? `since ${earliest.slice(0, 10)}` : 'lifetime';
 
   const stats = [
-    ['Activities',  fmtNum(acts.length)],
+    ['Logs',  fmtNum(acts.length)],
     ['Distance',    `${fmtNum(dist, 0)} km`],
     ['Climbing',    `${fmtNum(gain)} m`],
     ['Descent',     `${fmtNum(loss)} m`],
@@ -304,7 +304,7 @@ function renderHero() {
   const streaks = computeStreaks(acts);
 
   const cards = [
-    ['Activities',       fmtNum(acts.length), `${activeDays} active days`],
+    ['Logs',       fmtNum(acts.length), `${activeDays} active days`],
     ['Distance',         `${fmtNum(dist, 1)} km`, 'self-powered, excl. lifts'],
     ['Climbing',         `${fmtNum(gain)} m`, assisted > 0 ? `excl. lifts · +${fmtNum(assisted)} m assisted` : 'excl. lifts'],
     ['Descent',          `${fmtNum(loss)} m`, 'excl. lifts'],
