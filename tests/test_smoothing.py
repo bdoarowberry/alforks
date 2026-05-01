@@ -527,10 +527,13 @@ class TestSafeGpxPath(unittest.TestCase):
             except FileNotFoundError: pass
 
     def test_relative_traversal_rejected(self):
-        # `..` segments must not escape GPX_DIR even with a .gpx extension
+        # `..` segments must not escape GPX_DIR even with a .gpx extension.
+        # Forward slashes only — pathlib treats backslash as a separator on
+        # Windows but a literal character on POSIX, so a `..\\file.gpx`
+        # assertion is platform-dependent and not a useful security check.
         self.assertIsNone(app._safe_gpx_path("../metadata.json"))
         self.assertIsNone(app._safe_gpx_path("../../etc/passwd"))
-        self.assertIsNone(app._safe_gpx_path("..\\windows.gpx"))
+        self.assertIsNone(app._safe_gpx_path("../malicious.gpx"))
 
     def test_absolute_path_rejected(self):
         self.assertIsNone(app._safe_gpx_path("/etc/passwd"))
