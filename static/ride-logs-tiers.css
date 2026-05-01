@@ -176,7 +176,9 @@ body[data-tier="3"] #header-datetime {
 
 body[data-tier="3"] #stats-bar {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  /* 10 stats × ~120px = 1200px in a single row on typical desktop widths.
+     `auto-fit` lets it wrap to two rows when narrower. */
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
   gap: 1px;
   background: rgba(255, 255, 255, 0.06);
   border: 1px solid rgba(255, 255, 255, 0.06);
@@ -184,27 +186,62 @@ body[data-tier="3"] #stats-bar {
   margin: 10px 20px 0;
   overflow: hidden;
   padding: 0;
+  /* Reset the original flex container */
+  border-bottom: none;
 }
 
 body[data-tier="3"] #stats-bar .stat {
   background: #0f1313;
-  padding: 14px 16px;
+  padding: 10px 12px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 5px;
   align-items: flex-start;
+  border-right: none !important;
+  /* `min-width: 0` lets long values truncate inside the grid track instead
+     of pushing it wider and clipping neighbours. */
+  min-width: 0;
+  text-align: left;
+  overflow: hidden;
 }
 
 body[data-tier="3"] #stats-bar .stat-value {
-  font-size: 1.35rem;
+  font-size: 1.05rem;
   font-weight: 500;
-  letter-spacing: -0.02em;
+  letter-spacing: -0.01em;
   color: #fff;
-  line-height: 1;
+  line-height: 1.15;
+  width: 100%;
+  /* Inline assisted (`+1,234 ass.`) wraps below the main value so the
+     cell stays the same width as its neighbours. */
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px;
+}
+
+body[data-tier="3"] #stats-bar .stat-value .assisted-inline {
+  font-size: 0.65rem;
+  font-weight: 400;
+  margin-left: 0;
+  white-space: nowrap;
 }
 
 body[data-tier="3"] #stats-bar .stat-label {
   margin-top: 0;
+  white-space: nowrap;
+}
+
+/* HR Zones cell: the inner zones bar is 110px wide which would normally
+   force its grid track to ≥110px even when others are narrower. Let the
+   bar shrink and re-anchor it to the cell's left edge so it sits like the
+   other cells' values. */
+body[data-tier="3"] #stat-hrzones .stat-value {
+  align-items: stretch;
+}
+body[data-tier="3"] #stat-hrzones .hrz-bar {
+  width: 100%;
+  max-width: 110px;
 }
 
 body[data-tier="3"] .activity-item {
