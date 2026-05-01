@@ -418,8 +418,13 @@ def _activities_cache_key() -> tuple:
 # present.
 _HR_COVERAGE_TOL_MS = 5 * 60 * 1000
 
-# date_str -> (file mtime, (first_ms, last_ms, count) | None)
+# date_str -> (file mtime, (first_ms, last_ms, count) | None).
+# Mutated from `_hr_sample_range`, which is now called from worker threads
+# inside `all_activities`'s parallel build loop. Single-key dict mutation
+# is GIL-safe but the read-then-write pattern below is not, so we guard
+# all touches with `_hr_range_cache_lock`.
 _hr_range_cache: dict[str, tuple[float, tuple[int, int, int] | None]] = {}
+_hr_range_cache_lock = threading.Lock()
 
 
 def _hr_sample_range(date_str: str) -> tuple[int, int, int] | None:
@@ -431,19 +436,23 @@ def _hr_sample_range(date_str: str) -> tuple[int, int, int] | None:
     try:
         mtime = p.stat().st_mtime
     except OSError:
-        _hr_range_cache.pop(date_str, None)
+        with _hr_range_cache_lock:
+            _hr_range_cache.pop(date_str, None)
         return None
-    cached = _hr_range_cache.get(date_str)
+    with _hr_range_cache_lock:
+        cached = _hr_range_cache.get(date_str)
     if cached is not None and cached[0] == mtime:
         return cached[1]
     try:
         payload = json.loads(p.read_text(encoding="utf-8"))
         samples = payload.get("samples") or []
     except (OSError, ValueError):
-        _hr_range_cache[date_str] = (mtime, None)
+        with _hr_range_cache_lock:
+            _hr_range_cache[date_str] = (mtime, None)
         return None
     rng = (samples[0][0], samples[-1][0], len(samples)) if samples else None
-    _hr_range_cache[date_str] = (mtime, rng)
+    with _hr_range_cache_lock:
+        _hr_range_cache[date_str] = (mtime, rng)
     return rng
 
 
@@ -556,16 +565,35 @@ def all_activities() -> list[dict]:
 
         meta    = load_metadata()
         regions = load_regions()
+        # Build all sidebar entries in parallel — the per-activity work is
+        # mostly I/O (HR cache reads, weather TZ lookups) so threading
+        # overlaps cleanly even under the GIL. Sort filenames first so the
+        # output ordering is stable, then submit, then collect via the
+        # original order so result list matches the pre-parallel layout.
+        gpx_files = sorted(GPX_DIR.glob("*.gpx"))
         result  = []
         start_coords = []
-        for gpx_file in sorted(GPX_DIR.glob("*.gpx")):
-            built = _build_activity_entry(gpx_file.name, meta, regions)
-            if built is None:
-                continue
-            entry, aux = built
-            result.append(entry)
-            if aux.get("_start_latlon"):
-                start_coords.append(aux)
+
+        def _safe_build(f):
+            # Wrap so an unexpected error in any single file doesn't blow
+            # up the whole sidebar build — match the existing
+            # _build_activity_entry contract: return None on failure.
+            try:
+                return _build_activity_entry(f.name, meta, regions)
+            except Exception:
+                logger.exception("sidebar build failed for %s", f.name)
+                return None
+
+        if gpx_files:
+            with ThreadPoolExecutor(max_workers=6) as pool:
+                builds = list(pool.map(_safe_build, gpx_files))
+            for built in builds:
+                if built is None:
+                    continue
+                entry, aux = built
+                result.append(entry)
+                if aux.get("_start_latlon"):
+                    start_coords.append(aux)
 
         _activities_cache            = result
         _activities_cache_dir_mtime  = key
@@ -1828,7 +1856,8 @@ def api_refresh_hr(filename):
 
     # Drop the per-date HR-range cache so the next has_hr check re-stats the
     # cache file and picks up the new sample range.
-    _hr_range_cache.pop(date_str, None)
+    with _hr_range_cache_lock:
+        _hr_range_cache.pop(date_str, None)
     # Refresh just this activity's sidebar entry so has_hr flips when the
     # fetch returned samples covering the activity window.
     _update_activity_entry(filename)
