@@ -324,10 +324,7 @@ function fmtSignedHours(h) {
   return h >= 0 ? '+' + v : v;
 }
 
-function fmtElev(m) {
-  if (m == null) return '—';
-  return Math.round(m).toLocaleString();
-}
+// `fmtElev` is shared via /static/utils.js.
 
 function fmtKm(km) {
   if (km == null) return '—';

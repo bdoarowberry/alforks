@@ -550,12 +550,7 @@ function renderDuplicates(payload) {
   groups.forEach(g => list.appendChild(_renderDupGroup(g)));
 }
 
-function _fmtDuration(secs) {
-  if (secs == null) return '—';
-  const h = Math.floor(secs / 3600);
-  const m = Math.floor((secs % 3600) / 60);
-  return h ? `${h}h ${m}m` : `${m}m`;
-}
+// Duration formatting is shared via /static/utils.js (`fmtDuration`).
 
 // "2026-04-28T18:09:02+00:00" → "12:09" in browser local time. Returns null
 // when the input can't be parsed so the caller can skip rendering.
@@ -602,7 +597,7 @@ function _buildDupMetrics(t, isElevOutlier) {
   const items = [
     ['Time',     (startTime && endTime) ? `${startTime}–${endTime}` : '—', false],
     ['Distance', t.distance_km != null ? `${t.distance_km.toFixed(2)} km` : '—', false],
-    ['Duration', _fmtDuration(t.duration_sec), false],
+    ['Duration', fmtDuration(t.duration_sec), false],
     ['Climbing', t.elev_gain_m != null ? `↑${Math.round(t.elev_gain_m)} m` : '—', !!isElevOutlier],
     ['Type',     t.type || '—', false],
   ];
@@ -714,7 +709,7 @@ function _renderDupRow(t, color, isElevOutlier) {
   row.dataset.filename = t.filename;
   row.dataset.color = color;
   const distance = t.distance_km != null ? `${t.distance_km.toFixed(2)} km` : '—';
-  const duration = _fmtDuration(t.duration_sec);
+  const duration = fmtDuration(t.duration_sec);
   const elev     = t.elev_gain_m != null
     ? `${isElevOutlier ? '⚠ ' : ''}↑${Math.round(t.elev_gain_m)} m`
     : '';
@@ -1706,7 +1701,7 @@ function _renderOddRow(a) {
   row.className = 'odd-row';
   const time = _fmtTime(a.start_time) || '—';
   const dist = a.distance_km != null ? `${a.distance_km.toFixed(1)} km` : '—';
-  const dur  = _fmtDuration(a.duration_sec);
+  const dur  = fmtDuration(a.duration_sec);
   const tz   = a.tz_offset != null ? `UTC${a.tz_offset >= 0 ? '+' : ''}${a.tz_offset}` : 'no offset';
   const regions = (a.regions || []).join(', ');
 

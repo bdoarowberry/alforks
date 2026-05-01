@@ -331,18 +331,8 @@ const observer = new IntersectionObserver(entries => {
 // One-shot fetch of /api/activity/<filename>/weather when the row enters
 // the viewport. Backend caches per (lat-rounded, lon-rounded, date) so
 // repeat visits are cheap. Failures (no data, offline) leave the cell
-// empty (`.row-weather:empty { display: none }`).
-function weatherIcon(code) {
-  if (code == null) return '';
-  if (code === 0) return '☀';
-  if (code <= 3)  return '⛅';
-  if (code <= 48) return '🌫';
-  if (code <= 67) return '🌧';
-  if (code <= 77) return '❄';
-  if (code <= 82) return '🌧';
-  if (code <= 86) return '❄';
-  return '⛈';
-}
+// empty (`.row-weather:empty { display: none }`). `weatherIcon` is
+// imported from utils.js along with `escapeHtml`.
 
 async function loadRowWeather(row) {
   const span = row.querySelector('.row-weather');
@@ -407,7 +397,7 @@ function renderRow(item) {
   const iconId = KNOWN_ICONS.has(item.type) ? item.type : 'unknown';
   const iconHtml = `<span class="type-icon" title="${t ? t.label : 'Unknown type'}" style="--icon-url:url('/static/icons/${iconId}.svg');background:${t ? t.bg : '#1a1d23'};color:${t ? t.color : '#888'};border-color:${t ? t.color : '#2a2d35'}"></span>`;
   const regionChips = item.regions.length
-    ? item.regions.map(r => `<span class="region-chip">${r.name}</span>`).join('')
+    ? item.regions.map(r => `<span class="region-chip">${escapeHtml(r.name)}</span>`).join('')
     : '';
 
   // Compact date "Apr 30, 2026" and time range "16:55 – 18:01" matched
@@ -447,7 +437,7 @@ function renderRow(item) {
          <div class="issues-row">
            <div style="flex:1;">
              <div class="issues-head">⚠ ${item.issues.length} possible issue${item.issues.length===1?'':'s'}</div>
-             <ul class="issues-list">${item.issues.map(i => `<li>${i.msg}</li>`).join('')}</ul>
+             <ul class="issues-list">${item.issues.map(i => `<li>${escapeHtml(i.msg)}</li>`).join('')}</ul>
            </div>
            <button class="issues-approve" data-fn="${item.filename}">Approve</button>
          </div>
@@ -496,10 +486,6 @@ function renderRow(item) {
   // Set name via textContent so user-provided strings can't inject markup.
   row.querySelector('.rt-name').textContent = placeName;
   return row;
-}
-
-function escapeHtml(s) {
-  return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]);
 }
 
 function fmtClock(iso) {

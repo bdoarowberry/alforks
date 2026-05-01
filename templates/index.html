@@ -1763,17 +1763,8 @@ function fmtDateTimeRange(iso, durationSec) {
 }
 
 // ─── Weather ──────────────────────────────────────────────────────────────────
-function weatherIcon(code) {
-  if (code == null) return '';
-  if (code === 0) return '☀';
-  if (code <= 3)  return '⛅';
-  if (code <= 48) return '🌫';
-  if (code <= 67) return '🌧';
-  if (code <= 77) return '❄';
-  if (code <= 82) return '🌧';
-  if (code <= 86) return '❄';
-  return '⛈';
-}
+// `weatherIcon` lives in /static/utils.js so /logs and the activity
+// header share one mapping. `loadWeather` below uses it.
 
 async function loadWeather(filename) {
   const el = document.getElementById('header-weather');

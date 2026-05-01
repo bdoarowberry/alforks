@@ -507,5 +507,46 @@ class TestGzipMiddleware(unittest.TestCase):
         self.assertEqual(len(_json.loads(decoded)["values"]), 2000)
 
 
+class TestSafeGpxPath(unittest.TestCase):
+    """`_safe_gpx_path` is the path-traversal guard between user-supplied
+    filenames (in API routes) and the real filesystem. These tests assert
+    that escapes outside `tracks/` and non-`.gpx` extensions are rejected
+    so the various `/api/activity/<filename>/...` endpoints can't be
+    coerced into reading or modifying arbitrary files."""
+
+    def test_simple_filename_inside_tracks_is_accepted(self):
+        # Make a real file so the resolved-path check can succeed
+        f = app.GPX_DIR / "_test_safe_path.gpx"
+        try:
+            f.write_text("<gpx></gpx>", encoding="utf-8")
+            result = app._safe_gpx_path("_test_safe_path.gpx")
+            self.assertIsNotNone(result)
+            self.assertEqual(result.name, "_test_safe_path.gpx")
+        finally:
+            try: f.unlink()
+            except FileNotFoundError: pass
+
+    def test_relative_traversal_rejected(self):
+        # `..` segments must not escape GPX_DIR even with a .gpx extension
+        self.assertIsNone(app._safe_gpx_path("../metadata.json"))
+        self.assertIsNone(app._safe_gpx_path("../../etc/passwd"))
+        self.assertIsNone(app._safe_gpx_path("..\\windows.gpx"))
+
+    def test_absolute_path_rejected(self):
+        self.assertIsNone(app._safe_gpx_path("/etc/passwd"))
+        self.assertIsNone(app._safe_gpx_path("C:\\Windows\\System32\\config\\SAM"))
+
+    def test_non_gpx_extension_rejected(self):
+        self.assertIsNone(app._safe_gpx_path("metadata.json"))
+        self.assertIsNone(app._safe_gpx_path("config.json"))
+        self.assertIsNone(app._safe_gpx_path("activity.txt"))
+        self.assertIsNone(app._safe_gpx_path("activity"))  # no extension
+
+    def test_garbage_input_rejected(self):
+        # Empty filename resolves to GPX_DIR itself, which has no .gpx
+        # suffix and so falls out of the gate.
+        self.assertIsNone(app._safe_gpx_path(""))
+
+
 if __name__ == "__main__":
     unittest.main()

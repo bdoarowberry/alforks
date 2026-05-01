@@ -197,7 +197,7 @@ const TYPES = {{ types_json | safe }};
 
 // ── Format helpers ─────────────────────────────────────────────────────────
 function fmtDist(km) { return km < 100 ? km.toFixed(1) : Math.round(km).toLocaleString(); }
-function fmtElev(m) { return Math.round(m).toLocaleString(); }
+// `fmtElev` is shared via /static/utils.js (null-safe; rounds + locales).
 function fmtSpeed(kmh) { return kmh.toFixed(1); }
 function fmtH(h) { const hr = Math.floor(h); const mn = Math.round((h - hr) * 60); return `${hr}h ${String(mn).padStart(2, '0')}m`; }
 function fmtSec(s) { const h = Math.floor(s/3600), m = Math.floor((s%3600)/60); return h > 0 ? `${h}h ${String(m).padStart(2,'0')}m` : `${m}m`; }
@@ -762,9 +762,7 @@ function renderRecords(a) {
   return wrap;
 }
 
-function escapeHtml(s) {
-  return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]);
-}
+// `escapeHtml` is shared via /static/utils.js.
 
 init();
 </script>

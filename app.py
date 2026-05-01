@@ -299,7 +299,10 @@ def _fetch_osm_lifts(bbox) -> list[dict]:
 # ─── Metadata ─────────────────────────────────────────────────────────────────
 
 _metadata_cache: dict | None = None
-_metadata_lock  = threading.Lock()
+# Reentrant so route handlers can hold the lock across a read-mutate-
+# write block while `save_metadata()` (which itself acquires the lock)
+# runs inside the same thread.
+_metadata_lock  = threading.RLock()
 # Set when metadata.json failed to parse on load. Reads fall back to {} so
 # the sidebar doesn't 500, but writes are refused — otherwise the first PATCH
 # would silently overwrite the corrupt file with an empty dict and destroy
@@ -1806,13 +1809,17 @@ def _archive_activity(filename: str) -> bool:
         src.rename(dest)
     except OSError:
         return False
-    meta = load_metadata()
-    if filename in meta:
-        del meta[filename]
-        save_metadata(meta, changed_filenames=[filename])
-    else:
-        # Metadata untouched — still drop the sidebar entry for the archived file
-        _update_activity_entry(filename)
+    # Hold the metadata lock across the read-mutate-write so a concurrent
+    # PATCH on a different filename doesn't lose its update by racing
+    # with our `del`. Same pattern in the other three callers below.
+    with _metadata_lock:
+        meta = load_metadata()
+        if filename in meta:
+            del meta[filename]
+            save_metadata(meta, changed_filenames=[filename])
+        else:
+            # Metadata untouched — still drop the sidebar entry for the archived file
+            _update_activity_entry(filename)
     return True
 
 
@@ -1882,19 +1889,20 @@ def api_bulk_metadata():
     update    = {k: v for k, v in body.items() if k in allowed}
     if not update or not filenames:
         abort(400)
-    meta    = load_metadata()
-    count   = 0
-    touched = []
-    for fn in filenames:
-        if _safe_gpx_path(fn) is None or not (GPX_DIR / fn).exists():
-            continue
-        meta.setdefault(fn, {}).update(update)
-        meta[fn] = {k: v for k, v in meta[fn].items() if v != ""}
-        if not meta[fn]:
-            del meta[fn]
-        touched.append(fn)
-        count += 1
-    save_metadata(meta, changed_filenames=touched)
+    with _metadata_lock:
+        meta    = load_metadata()
+        count   = 0
+        touched = []
+        for fn in filenames:
+            if _safe_gpx_path(fn) is None or not (GPX_DIR / fn).exists():
+                continue
+            meta.setdefault(fn, {}).update(update)
+            meta[fn] = {k: v for k, v in meta[fn].items() if v != ""}
+            if not meta[fn]:
+                del meta[fn]
+            touched.append(fn)
+            count += 1
+        save_metadata(meta, changed_filenames=touched)
     return jsonify({"ok": True, "updated": count})
 
 
@@ -1923,15 +1931,16 @@ def api_save_metadata(filename):
                 cleaned.append(rid)
                 seen.add(rid)
         update["regions_pinned"] = cleaned
-    meta    = load_metadata()
-    meta.setdefault(filename, {}).update(update)
-    # Strip empty/cleared values, but keep trim={} as a clear signal of "no trim"
-    meta[filename] = {k: v for k, v in meta[filename].items()
-                      if v != "" and v is not None and not (k == "trim" and not v)
-                      and not (k == "regions_pinned" and not v)}
-    if not meta[filename]:
-        del meta[filename]
-    save_metadata(meta, changed_filenames=[filename])
+    with _metadata_lock:
+        meta    = load_metadata()
+        meta.setdefault(filename, {}).update(update)
+        # Strip empty/cleared values, but keep trim={} as a clear signal of "no trim"
+        meta[filename] = {k: v for k, v in meta[filename].items()
+                          if v != "" and v is not None and not (k == "trim" and not v)
+                          and not (k == "regions_pinned" and not v)}
+        if not meta[filename]:
+            del meta[filename]
+        save_metadata(meta, changed_filenames=[filename])
     return jsonify({"ok": True})
 
 
@@ -1946,17 +1955,18 @@ def heatmap():
 def api_save_segments(filename):
     if _safe_gpx_path(filename) is None or not (GPX_DIR / filename).exists():
         abort(404)
-    meta = load_metadata()
-    if request.method == "DELETE":
-        if filename in meta:
-            meta[filename].pop("segment_overrides", None)
-            if not meta[filename]:
-                del meta[filename]
-    else:
-        overrides = (request.get_json(force=True) or {}).get("segment_overrides")
-        if overrides is not None:
-            meta.setdefault(filename, {})["segment_overrides"] = _validate_segment_overrides(overrides)
-    save_metadata(meta, changed_filenames=[filename])
+    with _metadata_lock:
+        meta = load_metadata()
+        if request.method == "DELETE":
+            if filename in meta:
+                meta[filename].pop("segment_overrides", None)
+                if not meta[filename]:
+                    del meta[filename]
+        else:
+            overrides = (request.get_json(force=True) or {}).get("segment_overrides")
+            if overrides is not None:
+                meta.setdefault(filename, {})["segment_overrides"] = _validate_segment_overrides(overrides)
+        save_metadata(meta, changed_filenames=[filename])
     return jsonify({"ok": True})
 
 
