@@ -14,6 +14,8 @@
   <script src="/static/sync_toast.js" defer></script>
   <link rel="stylesheet" href="/static/base.css">
   <link rel="stylesheet" href="/static/preview.css">
+  <link rel="stylesheet" href="/static/ride-logs-tiers.css">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <script src="/static/preview-toggle.js" defer></script>
 
   <link href="https://api.mapbox.com/mapbox-gl-js/v3.3.0/mapbox-gl.css" rel="stylesheet">
@@ -409,6 +411,37 @@
   </style>
 </head>
 <body>
+
+<!-- Style-tier picker — temporary; lets the user evaluate three palette /
+     typography / component variants of Ride Logs before we commit to one.
+     Removed once a tier is chosen. -->
+<div id="style-tier-picker">
+  <span class="label">Style</span>
+  <button data-tier="off" class="on">Off</button>
+  <button data-tier="1">T1</button>
+  <button data-tier="2">T2</button>
+  <button data-tier="3">T3</button>
+</div>
+<script>
+  (function() {
+    const KEY = 'ridelogs.styleTier';
+    const initial = localStorage.getItem(KEY) || 'off';
+    document.body.dataset.tier = initial === 'off' ? '' : initial;
+    document.addEventListener('DOMContentLoaded', () => {
+      const picker = document.getElementById('style-tier-picker');
+      if (!picker) return;
+      picker.querySelectorAll('button').forEach(b => {
+        b.classList.toggle('on', b.dataset.tier === initial);
+        b.addEventListener('click', () => {
+          const t = b.dataset.tier;
+          localStorage.setItem(KEY, t);
+          document.body.dataset.tier = t === 'off' ? '' : t;
+          picker.querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b));
+        });
+      });
+    });
+  })();
+</script>
 
 <header>
   <h1>AlForks</h1>

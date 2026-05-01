@@ -1,0 +1,291 @@
+/* Ride Logs visual-alignment tiers. Activated by setting
+   `data-tier="1|2|3"` on <body>. Each tier is additive: tier 2 picks up
+   tier 1's palette, tier 3 picks up both. Default (no attribute) leaves
+   the page exactly as it was.
+
+   Temporary file — once the user picks a tier, fold it into base.css
+   plus the index.html inline <style>, then delete this file. */
+
+
+/* ─── TIER 1 — palette swap ────────────────────────────────────────────
+   Body bg, panel bg, hairline borders, opacity-tier text. No layout or
+   font changes. Just makes Ride Logs read in the same color language as
+   Summary. */
+
+body[data-tier="1"], body[data-tier="2"], body[data-tier="3"] {
+  background: #0a0c0c;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+body[data-tier="1"] #activity-header,
+body[data-tier="2"] #activity-header,
+body[data-tier="3"] #activity-header,
+body[data-tier="1"] #sidebar,
+body[data-tier="2"] #sidebar,
+body[data-tier="3"] #sidebar,
+body[data-tier="1"] #sidebar-toggle,
+body[data-tier="2"] #sidebar-toggle,
+body[data-tier="3"] #sidebar-toggle,
+body[data-tier="1"] #sort-filter-bar,
+body[data-tier="2"] #sort-filter-bar,
+body[data-tier="3"] #sort-filter-bar,
+body[data-tier="1"] #sidebar-bulk-bar,
+body[data-tier="2"] #sidebar-bulk-bar,
+body[data-tier="3"] #sidebar-bulk-bar,
+body[data-tier="1"] #edit-panel,
+body[data-tier="2"] #edit-panel,
+body[data-tier="3"] #edit-panel,
+body[data-tier="1"] #stats-bar,
+body[data-tier="2"] #stats-bar,
+body[data-tier="3"] #stats-bar {
+  background: #0f1313;
+}
+
+/* All solid-grey borders → hairline rgba */
+body[data-tier="1"] #activity-header,
+body[data-tier="2"] #activity-header,
+body[data-tier="3"] #activity-header,
+body[data-tier="1"] #sidebar,
+body[data-tier="2"] #sidebar,
+body[data-tier="3"] #sidebar,
+body[data-tier="1"] #sidebar-toggle,
+body[data-tier="2"] #sidebar-toggle,
+body[data-tier="3"] #sidebar-toggle,
+body[data-tier="1"] #sidebar-header,
+body[data-tier="2"] #sidebar-header,
+body[data-tier="3"] #sidebar-header,
+body[data-tier="1"] #sort-filter-bar,
+body[data-tier="2"] #sort-filter-bar,
+body[data-tier="3"] #sort-filter-bar,
+body[data-tier="1"] #sidebar-bulk-bar,
+body[data-tier="2"] #sidebar-bulk-bar,
+body[data-tier="3"] #sidebar-bulk-bar,
+body[data-tier="1"] #edit-panel,
+body[data-tier="2"] #edit-panel,
+body[data-tier="3"] #edit-panel {
+  border-color: rgba(255, 255, 255, 0.06) !important;
+}
+
+body[data-tier="1"] .activity-item,
+body[data-tier="2"] .activity-item,
+body[data-tier="3"] .activity-item,
+body[data-tier="1"] .skeleton-row,
+body[data-tier="2"] .skeleton-row,
+body[data-tier="3"] .skeleton-row {
+  border-bottom-color: rgba(255, 255, 255, 0.06);
+}
+
+body[data-tier="1"] .activity-item:hover,
+body[data-tier="2"] .activity-item:hover,
+body[data-tier="3"] .activity-item:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+body[data-tier="1"] .activity-item.active,
+body[data-tier="2"] .activity-item.active,
+body[data-tier="3"] .activity-item.active {
+  background: rgba(59, 130, 246, 0.10);
+}
+
+body[data-tier="1"] .activity-item .name,
+body[data-tier="2"] .activity-item .name,
+body[data-tier="3"] .activity-item .name {
+  color: rgba(255, 255, 255, 0.85);
+}
+
+body[data-tier="1"] .activity-item.active .name,
+body[data-tier="2"] .activity-item.active .name,
+body[data-tier="3"] .activity-item.active .name {
+  color: #fff;
+}
+
+body[data-tier="1"] .activity-item .date,
+body[data-tier="2"] .activity-item .date,
+body[data-tier="3"] .activity-item .date,
+body[data-tier="1"] .activity-item .meta,
+body[data-tier="2"] .activity-item .meta,
+body[data-tier="3"] .activity-item .meta {
+  color: rgba(255, 255, 255, 0.5);
+}
+
+body[data-tier="1"] #sidebar-header,
+body[data-tier="2"] #sidebar-header,
+body[data-tier="3"] #sidebar-header {
+  color: rgba(255, 255, 255, 0.5);
+}
+
+body[data-tier="1"] #search-input,
+body[data-tier="2"] #search-input,
+body[data-tier="3"] #search-input,
+body[data-tier="1"] .sfselect,
+body[data-tier="2"] .sfselect,
+body[data-tier="3"] .sfselect,
+body[data-tier="1"] #sort-dir-btn,
+body[data-tier="2"] #sort-dir-btn,
+body[data-tier="3"] #sort-dir-btn {
+  background: #0a0c0c;
+  border-color: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.85);
+}
+
+body[data-tier="1"] .sflabel,
+body[data-tier="2"] .sflabel,
+body[data-tier="3"] .sflabel {
+  color: rgba(255, 255, 255, 0.5);
+}
+
+
+/* ─── TIER 2 — typography ──────────────────────────────────────────────
+   Inter sans by default; JetBrains Mono with tabular-nums on stat
+   numbers and the run table. Eyebrow-style stat labels. */
+
+body[data-tier="2"], body[data-tier="3"] {
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+}
+
+body[data-tier="2"] .stat-value,
+body[data-tier="3"] .stat-value,
+body[data-tier="2"] #header-datetime,
+body[data-tier="3"] #header-datetime,
+body[data-tier="2"] #runs-table,
+body[data-tier="3"] #runs-table {
+  font-family: 'JetBrains Mono', ui-monospace, 'SF Mono', monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+body[data-tier="2"] .stat-label,
+body[data-tier="3"] .stat-label {
+  font-size: 0.6rem !important;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: rgba(255, 255, 255, 0.4) !important;
+}
+
+body[data-tier="2"] #header-datetime,
+body[data-tier="3"] #header-datetime {
+  font-weight: 400;
+  font-size: 0.92rem;
+}
+
+
+/* ─── TIER 3 — component refactor ──────────────────────────────────────
+   Stats bar redesigned as a 6-cell KPI strip with 1px hairline gutters
+   between cells. Sidebar item active state replaced with a left-edge
+   accent and subtle bg shift. Form controls go transparent + hairline.
+   The activity header tightens up. */
+
+body[data-tier="3"] #stats-bar {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: 1px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 4px;
+  margin: 10px 20px 0;
+  overflow: hidden;
+  padding: 0;
+}
+
+body[data-tier="3"] #stats-bar .stat {
+  background: #0f1313;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+body[data-tier="3"] #stats-bar .stat-value {
+  font-size: 1.35rem;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  color: #fff;
+  line-height: 1;
+}
+
+body[data-tier="3"] #stats-bar .stat-label {
+  margin-top: 0;
+}
+
+body[data-tier="3"] .activity-item {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  padding: 12px 16px;
+  position: relative;
+}
+
+body[data-tier="3"] .activity-item.active {
+  background: rgba(59, 130, 246, 0.08);
+  border-left: 2px solid #3b82f6;
+  padding-left: 14px;
+}
+
+body[data-tier="3"] .activity-item .date {
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 0.62rem;
+  color: rgba(255, 255, 255, 0.4);
+}
+
+body[data-tier="3"] #search-input,
+body[data-tier="3"] .sfselect,
+body[data-tier="3"] #sort-dir-btn {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 3px;
+}
+
+body[data-tier="3"] #search-input:focus,
+body[data-tier="3"] .sfselect:focus {
+  border-color: #3b82f6;
+  background: rgba(59, 130, 246, 0.05);
+}
+
+body[data-tier="3"] #activity-header {
+  padding: 8px 20px;
+  gap: 14px;
+}
+
+body[data-tier="3"] #header-title {
+  font-size: 1.05rem;
+}
+
+
+/* ─── Tier picker control ─────────────────────────────────────────────
+   Always visible; fixed top-right beneath the header banner so it
+   doesn't disturb existing layout. Lets you flip through the tiers
+   without leaving the page. Removed once a tier is chosen. */
+
+#style-tier-picker {
+  position: fixed;
+  top: 60px;
+  right: 14px;
+  z-index: 5000;
+  display: inline-flex;
+  gap: 1px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 4px;
+  padding: 1px;
+  font-size: 0.7rem;
+  font-family: ui-monospace, 'SF Mono', monospace;
+}
+#style-tier-picker .label {
+  background: rgba(0, 0, 0, 0.5);
+  color: rgba(255, 255, 255, 0.5);
+  padding: 4px 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.6rem;
+  display: flex;
+  align-items: center;
+}
+#style-tier-picker button {
+  all: unset;
+  cursor: pointer;
+  padding: 4px 10px;
+  background: rgba(0, 0, 0, 0.5);
+  color: rgba(255, 255, 255, 0.5);
+  letter-spacing: 0.04em;
+}
+#style-tier-picker button:hover { color: #fff; background: rgba(255, 255, 255, 0.05); }
+#style-tier-picker button.on   { color: #fff; background: rgba(59, 130, 246, 0.20); }
