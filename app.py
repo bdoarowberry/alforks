@@ -1141,40 +1141,49 @@ def _summary_v2_data(days_back: int, units: str) -> dict:
             for top in _rank("elev_loss_m"):
                 prs.append({"label": "Vertical",   "value_m": top["stats"]["elev_loss_m"], "kind": "elev",
                             "name": (top.get("meta") or {}).get("title") or top.get("name") or top["filename"],
-                            "date": (top.get("date") or "")[:10]})
+                            "date": (top.get("date") or "")[:10],
+                            "filename": top["filename"]})
             for top in _rank("distance_km"):
                 prs.append({"label": "Longest",    "value_km": top["stats"]["distance_km"], "kind": "dist",
                             "name": (top.get("meta") or {}).get("title") or top.get("name") or top["filename"],
-                            "date": (top.get("date") or "")[:10]})
+                            "date": (top.get("date") or "")[:10],
+                            "filename": top["filename"]})
             for top in _rank("max_speed_kmh"):
                 prs.append({"label": "Top speed",  "value_kmh": top["stats"]["max_speed_kmh"], "kind": "speed",
                             "name": (top.get("meta") or {}).get("title") or top.get("name") or top["filename"],
-                            "date": (top.get("date") or "")[:10]})
+                            "date": (top.get("date") or "")[:10],
+                            "filename": top["filename"]})
             for top in _rank("duration_sec"):
                 prs.append({"label": "Duration",   "value_sec": top["stats"]["duration_sec"], "kind": "dur",
                             "name": (top.get("meta") or {}).get("title") or top.get("name") or top["filename"],
-                            "date": (top.get("date") or "")[:10]})
+                            "date": (top.get("date") or "")[:10],
+                            "filename": top["filename"]})
         else:
             for top in _rank("distance_km"):
                 prs.append({"label": "Longest",    "value_km": top["stats"]["distance_km"], "kind": "dist",
                             "name": (top.get("meta") or {}).get("title") or top.get("name") or top["filename"],
-                            "date": (top.get("date") or "")[:10]})
+                            "date": (top.get("date") or "")[:10],
+                            "filename": top["filename"]})
             for top in _rank("elev_gain_m"):
                 prs.append({"label": "Climbing",   "value_m": top["stats"]["elev_gain_m"], "kind": "elev",
                             "name": (top.get("meta") or {}).get("title") or top.get("name") or top["filename"],
-                            "date": (top.get("date") or "")[:10]})
+                            "date": (top.get("date") or "")[:10],
+                            "filename": top["filename"]})
             for top in _rank("elev_loss_m"):
                 prs.append({"label": "Descent",    "value_m": top["stats"]["elev_loss_m"], "kind": "elev",
                             "name": (top.get("meta") or {}).get("title") or top.get("name") or top["filename"],
-                            "date": (top.get("date") or "")[:10]})
+                            "date": (top.get("date") or "")[:10],
+                            "filename": top["filename"]})
             for top in _rank("max_speed_kmh"):
                 prs.append({"label": "Top speed",  "value_kmh": top["stats"]["max_speed_kmh"], "kind": "speed",
                             "name": (top.get("meta") or {}).get("title") or top.get("name") or top["filename"],
-                            "date": (top.get("date") or "")[:10]})
+                            "date": (top.get("date") or "")[:10],
+                            "filename": top["filename"]})
             for top in _rank("duration_sec"):
                 prs.append({"label": "Duration",   "value_sec": top["stats"]["duration_sec"], "kind": "dur",
                             "name": (top.get("meta") or {}).get("title") or top.get("name") or top["filename"],
-                            "date": (top.get("date") or "")[:10]})
+                            "date": (top.get("date") or "")[:10],
+                            "filename": top["filename"]})
 
         rollups[tid] = {
             "days":            len(unique_dates),

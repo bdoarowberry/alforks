@@ -164,6 +164,11 @@
     .s2-prs .lbl { color: rgba(255,255,255,0.7); font-size: 11px; }
     .s2-prs .sub { color: rgba(255,255,255,0.35); font-size: 9px; font-family: var(--mono); margin-top: 2px; }
     .s2-prs .val { color: #fff; font-family: var(--mono); }
+    /* Recent + Records rows render as anchors when they link to a ride log
+       — strip the default anchor styling so they look identical to the
+       non-link rows. Hover lights up the row subtly to confirm clickability. */
+    .s2-recent a.row, .s2-prs a.row { color: inherit; text-decoration: none; }
+    .s2-recent a.row:hover, .s2-prs a.row:hover { background: rgba(255,255,255,0.03); }
 
     .s2-loading { padding: 40px; text-align: center; color: var(--text-tertiary); font-family: var(--mono); font-size: 12px; }
   </style>
@@ -715,20 +720,14 @@ function renderRecent(a) {
     ${recent.length === 0
       ? '<div class="row" style="border:none;color:rgba(255,255,255,0.3);font-style:italic;cursor:default;display:block;padding-top:12px">— no activity in window —</div>'
       : recent.map(x => `
-      <div class="row" style="grid-template-columns:${cols}" data-fn="${x.id}">
+      <a class="row" href="/?file=${encodeURIComponent(x.id)}" style="grid-template-columns:${cols}">
         <span class="date">${fmtDateShort(x.date)}</span>
         <span class="name">${escapeHtml(x.name)}</span>
         <span class="right" style="color:#fff">${fmtDist(x.dist)}</span>
         <span class="right">${fmtElev(x.elev)}</span>
         <span class="right">${x.dur}</span>
         <span class="right">${x.hr != null ? x.hr : '—'}</span>
-      </div>`).join('')}`;
-  // Open in a new tab so the user keeps their place on the summary view.
-  wrap.querySelectorAll('.row[data-fn]').forEach(r => {
-    r.addEventListener('click', () => {
-      window.open(`/?file=${encodeURIComponent(r.dataset.fn)}`, '_blank', 'noopener');
-    });
-  });
+      </a>`).join('')}`;
   return wrap;
 }
 
@@ -749,15 +748,20 @@ function renderRecords(a) {
   wrap.innerHTML = `<div class="s2-eyebrow" style="margin-bottom:12px">records</div>
     ${prs.length === 0
       ? '<div class="row" style="border:none;color:rgba(255,255,255,0.3);font-style:italic;display:block;padding-top:8px">— no records yet —</div>'
-      : prs.map(pr => `
-      <div class="row">
+      : prs.map(pr => {
+        const inner = `
         <span class="star" style="color:${a.accent}">★</span>
         <div>
           <div class="lbl">${pr.label}</div>
           <div class="sub">${pr.date || ''}${pr.name ? ' · ' + escapeHtml(pr.name) : ''}</div>
         </div>
-        <span class="val">${prValue(pr)}</span>
-      </div>`).join('')}`;
+        <span class="val">${prValue(pr)}</span>`;
+        // Wrap in an anchor when we have a filename so a single click opens
+        // the ride log and right-click / middle-click work as expected.
+        return pr.filename
+          ? `<a class="row" href="/?file=${encodeURIComponent(pr.filename)}">${inner}</a>`
+          : `<div class="row">${inner}</div>`;
+      }).join('')}`;
   return wrap;
 }
 

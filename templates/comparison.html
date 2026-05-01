@@ -34,7 +34,7 @@
     .day-gap.collapsed { height: 28px !important; background: #12151a; }
     .day-gap.collapsed .day-gap-label { opacity: 1; color: #aaa; }
 
-    .comp-row { background: #12151a; border: 1px solid #2a2d35; border-radius: 8px; padding: 12px; display: grid; grid-template-columns: 128px 1fr; gap: 14px; cursor: pointer; transition: border-color 0.15s, transform 0.15s; }
+    .comp-row { background: #12151a; border: 1px solid #2a2d35; border-radius: 8px; padding: 12px; display: grid; grid-template-columns: 128px 1fr; gap: 14px; cursor: pointer; transition: border-color 0.15s, transform 0.15s; color: inherit; text-decoration: none; }
     .comp-row:hover { border-color: #3b82f6; transform: translateY(-1px); }
     .comp-map { width: 128px; height: 96px; border-radius: 4px; background: #0a0c10; overflow: hidden; }
     .comp-map .leaflet-container { background: #0a0c10; }
@@ -307,8 +307,12 @@ function statCell(label, valueText, isMuted, sbClass, sbValue) {
 }
 
 function renderRow(item) {
-  const row = document.createElement('div');
+  // Anchor element so single-click navigates, right-click / middle-click
+  // get the browser's natural new-tab options. Compare mode hijacks the
+  // click to swap A/B selection instead.
+  const row = document.createElement('a');
   row.className = 'comp-row' + (item.excluded ? ' excluded' : '');
+  row.href = `/?file=${encodeURIComponent(item.filename)}`;
   row.dataset.filename = item.filename;
   row.dataset.polyline = JSON.stringify(item.polyline);
   // Stash the type colour on the row so the lazy initMap() below can use it
@@ -316,9 +320,8 @@ function renderRow(item) {
   const _t = TYPE_LOOKUP[item.type];
   row.dataset.typeColor = _t ? _t.color : '#3b82f6';
   row.dataset.title = item.title || item.filename;
-  row.onclick = () => {
-    if (compareMode) { onCompareClick(item.filename, row.dataset.title); return; }
-    window.location.href = `/?file=${encodeURIComponent(item.filename)}`;
+  row.onclick = (e) => {
+    if (compareMode) { e.preventDefault(); onCompareClick(item.filename, row.dataset.title); }
   };
 
   const t = TYPE_LOOKUP[item.type];
