@@ -2113,13 +2113,17 @@ def _merge_hr_into_data(data: dict) -> dict:
     # Treat the GPX wall-clock time as LOCAL — TrailForks (and many other GPX
     # exporters) tag timestamps with `+00:00` even though the displayed HH:MM
     # is the rider's local time. We strip any stated tzinfo and re-anchor with
-    # the location's IANA timezone (via Open-Meteo). zoneinfo computes the
-    # historically-correct DST-aware offset for the activity's actual datetime,
-    # which matters for winter activities (Open-Meteo's `utc_offset_seconds`
-    # always reports the *current* offset, not the date's).
-    clat = sum(p["lat"] for p in pts) / len(pts)
-    clon = sum(p["lon"] for p in pts) / len(pts)
-    tz_name = _weather_timezone_name(clat, clon, date_str)
+    # the location's IANA timezone. `parse_gpx` already resolved the zone from
+    # the start point and stashed it in `data["tz_name"]`; prefer that to
+    # avoid a second `_weather_timezone_name` call (which uses a different
+    # cache key and can fire a duplicate Open-Meteo fetch for the same ride).
+    # Centroid-based lookup remains as the fallback for legacy cache entries
+    # that don't carry `tz_name`.
+    tz_name = data.get("tz_name")
+    if not tz_name:
+        clat = sum(p["lat"] for p in pts) / len(pts)
+        clon = sum(p["lon"] for p in pts) / len(pts)
+        tz_name = _weather_timezone_name(clat, clon, date_str)
     if not tz_name:
         return data
     try:
@@ -2616,20 +2620,54 @@ def api_max_hr():
     })
 
 
+# In-process dedup for TZ resolution. Keyed on the same 2-decimal rounding
+# that `_weather_cache_path` uses, so two activities at the "same" location
+# share a single lookup regardless of date.
+#
+# Successful resolutions are cached indefinitely. Failures are cached with a
+# short TTL via `_TZ_LRU_FAIL` so that a transient Open-Meteo outage during
+# `_prewarm` doesn't poison the entire process — once the TTL expires, a
+# fresh call retries. This balances cold-start dedup (the whole point) with
+# self-healing after temporary network blips.
+_TZ_LRU: dict[tuple[float, float], str] = {}
+_TZ_LRU_FAIL: dict[tuple[float, float], float] = {}
+_TZ_LRU_FAIL_TTL_SEC = 60.0
+
+
 def _weather_timezone_name(lat: float, lon: float, date_str: str) -> str | None:
     """Return the IANA timezone name (e.g. 'America/Edmonton') for a location.
 
-    Fetched via Open-Meteo (timezone=auto). Cached per location. Returning the
-    name (rather than a single offset) lets us compute the historically-correct
-    DST-aware offset for any datetime via zoneinfo, which matters for activities
-    spanning the DST transition or recorded in winter (where Open-Meteo's
-    `utc_offset_seconds` always reflects the *current* offset, not the date's).
+    Fetched via Open-Meteo (timezone=auto). Cached on disk per (lat, lon,
+    date) and in-process per (round(lat,2), round(lon,2)). The latter is
+    what keeps `_prewarm` fast: 6 threads parsing ~669 GPX files without
+    the in-memory cache fire ~108 separate Open-Meteo calls; with it, the
+    same coord cluster shares a single resolution.
+
+    Note: `date_str` only affects which on-disk cache file is checked; the
+    in-process dedup key is coordinates-only, since Open-Meteo's TZ result
+    is location-only.
+
+    Returning the name (rather than a single offset) lets us compute the
+    historically-correct DST-aware offset for any datetime via zoneinfo,
+    which matters for activities spanning the DST transition or recorded
+    in winter (where Open-Meteo's `utc_offset_seconds` always reflects the
+    *current* offset, not the date's).
     """
+    key = (round(lat, 2), round(lon, 2))
+    cached = _TZ_LRU.get(key)
+    if cached:
+        return cached
+    fail_ts = _TZ_LRU_FAIL.get(key)
+    if fail_ts is not None and time.time() - fail_ts < _TZ_LRU_FAIL_TTL_SEC:
+        return None
+
     cp = _weather_cache_path(lat, lon, date_str)
     if cp.exists():
         try:
             entry = json.loads(cp.read_text(encoding="utf-8"))
             if entry.get("timezone_name"):
+                _TZ_LRU[key] = entry["timezone_name"]
+                _TZ_LRU_FAIL.pop(key, None)
                 return entry["timezone_name"]
         except Exception:
             pass
@@ -2643,10 +2681,14 @@ def _weather_timezone_name(lat: float, lon: float, date_str: str) -> str | None:
     )
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "AlanForks-GPX-Viewer/1.0"})
-        with urllib.request.urlopen(req, timeout=8) as resp:
+        # Tight timeout: Open-Meteo serves these in <500 ms when healthy;
+        # longer waits are signalling either congestion or an outage, and
+        # the 8 s default was the source of multi-minute prewarm stalls.
+        with urllib.request.urlopen(req, timeout=2) as resp:
             data = json.loads(resp.read().decode("utf-8"))
         tz_name = data.get("timezone")
         if not tz_name:
+            _TZ_LRU_FAIL[key] = time.time()
             return None
         entry = {}
         if cp.exists():
@@ -2659,8 +2701,11 @@ def _weather_timezone_name(lat: float, lon: float, date_str: str) -> str | None:
             entry["utc_offset_sec"] = int(data["utc_offset_seconds"])
         entry.setdefault("fetched", int(time.time()))
         _atomic_write(cp, json.dumps(entry, ensure_ascii=False))
+        _TZ_LRU[key] = tz_name
+        _TZ_LRU_FAIL.pop(key, None)
         return tz_name
     except Exception:
+        _TZ_LRU_FAIL[key] = time.time()
         return None
 
 
@@ -3812,7 +3857,7 @@ def api_duplicates():
 _ODD_TIME_NIGHT_HOURS = {21, 22, 23, 0, 1, 2, 3, 4, 5, 6}
 
 # Cap on lazy `_weather_timezone_name` lookups per request so a fresh install
-# (every activity missing tz_name) doesn't fan out to ~669 sequential 8 s
+# (every activity missing tz_name) doesn't fan out to ~669 sequential 2 s
 # Open-Meteo calls. Subsequent tab opens make incremental progress as the
 # weather cache fills in.
 _ODD_TIMES_LAZY_LOOKUP_BUDGET = 20
@@ -3847,10 +3892,9 @@ def api_odd_times():
             # entry sits alongside any weather we'd fetch later anyway.
             date_str = (a.get("date") or "")[:10] or "2024-01-01"
             lazy_budget -= 1
-            try:
-                tz_name = _weather_timezone_name(lat, lon, date_str)
-            except Exception:
-                tz_name = None
+            # `_weather_timezone_name` swallows its own exceptions and
+            # returns None — no outer try/except needed here.
+            tz_name = _weather_timezone_name(lat, lon, date_str)
 
         if tz_name:
             try:
