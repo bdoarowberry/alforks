@@ -927,6 +927,13 @@ def summary_v2():
     return render_template("summary_v2.html", types_json=json.dumps(load_types()))
 
 
+@app.route("/training-load")
+def training_load():
+    """Coach-view fitness page (per design/training-load). Data fetched from
+    /api/training-load; template stays thin."""
+    return render_template("training_load.html", types_json=json.dumps(load_types()))
+
+
 def _hex_to_rgba(hex_color: str, alpha: float) -> str:
     """#3b82f6 → 'rgba(59, 130, 246, 0.18)'. Falls back to the input on
     parse failure so the page still renders."""
@@ -2292,21 +2299,13 @@ def api_comparison():
     return jsonify({"items": items, "max_hr": max_hr})
 
 
-@app.route("/api/fitness/weekly")
-def api_fitness_weekly():
-    """Aggregate fitness training metrics by ISO week.
-    Query params:
-      weeks: number of trailing weeks to return (default 12)
-    Returns per-week: hours, gain_m, zones_sec[5], rides_count, plus a
-    rolling 28-day average HR for endurance-effort (mostly-Z2) rides.
-    """
-    n_weeks = max(1, min(52, int(request.args.get("weeks", 12))))
+def _compute_fitness_weeks(n_weeks: int, type_filter: set | None = None) -> list[dict]:
+    """Return `n_weeks` of trailing weekly fitness rollups (Monday-anchored).
+    Each week dict carries: start, hours, gain_m, zones_sec[5], rides,
+    z2_hr_28d. Used by `/api/fitness/weekly` and the Training Load page."""
+    type_filter = type_filter or set()
     cutoff = datetime.now().date() - timedelta(weeks=n_weeks)
-    # Optional type filter — comma-separated ids, or 'all' / empty for no filter
-    type_arg = (request.args.get("type") or "").strip()
-    type_filter = {t for t in type_arg.split(",") if t and t != "all"}
 
-    # Aggregate per-day, then bucket by Monday-anchored week
     per_day: dict[str, dict] = {}
     rolling_z2_input: list[tuple[str, int, int]] = []  # (date, avg_hr, z2_seconds)
 
@@ -2330,7 +2329,6 @@ def api_fitness_weekly():
         bucket["gain"] += int(s.get("elev_gain_m")  or 0)
         bucket["n"]    += 1
 
-        # Pull zones from the per-activity merge — only when HR exists
         if act.get("has_hr"):
             data = get_activity(act["filename"])
             if data:
@@ -2343,7 +2341,6 @@ def api_fitness_weekly():
                 if ms.get("hr_avg") is not None and z[1] > 0:
                     rolling_z2_input.append((date, int(ms["hr_avg"]), int(z[1])))
 
-    # Bucket per-day into weeks (Monday start)
     weeks: dict[str, dict] = {}
     for date_str, b in per_day.items():
         d = datetime.fromisoformat(date_str).date()
@@ -2355,7 +2352,6 @@ def api_fitness_weekly():
         for i in range(5):
             w["zones_sec"][i] += b["zones"][i]
 
-    # Fill missing weeks for a continuous timeline
     today_monday = datetime.now().date()
     today_monday = today_monday - timedelta(days=today_monday.weekday())
     output = []
@@ -2370,8 +2366,6 @@ def api_fitness_weekly():
             "rides":     int(bucket["rides"]),
         })
 
-    # 28-day rolling Z2-weighted average HR per week-end
-    rolling = []
     for week in output:
         wk_end = datetime.fromisoformat(week["start"]).date() + timedelta(days=6)
         wk_28_start = wk_end - timedelta(days=28)
@@ -2381,11 +2375,145 @@ def api_fitness_weekly():
             if wk_28_start <= d <= wk_end:
                 num += avg_hr * z2_sec
                 den += z2_sec
-        rolling.append(round(num / den) if den > 0 else None)
-    for i, v in enumerate(rolling):
-        output[i]["z2_hr_28d"] = v
+        week["z2_hr_28d"] = round(num / den) if den > 0 else None
 
-    return jsonify({"weeks": output, "max_hr": _effective_max_hr()})
+    return output
+
+
+@app.route("/api/fitness/weekly")
+def api_fitness_weekly():
+    """Aggregate fitness training metrics by ISO week.
+    Query params:
+      weeks: number of trailing weeks to return (default 12)
+      type:  optional comma-separated activity-type filter
+    """
+    n_weeks = max(1, min(52, int(request.args.get("weeks", 12))))
+    type_arg = (request.args.get("type") or "").strip()
+    type_filter = {t for t in type_arg.split(",") if t and t != "all"}
+    weeks = _compute_fitness_weeks(n_weeks, type_filter)
+    return jsonify({"weeks": weeks, "max_hr": _effective_max_hr()})
+
+
+_ALLOWED_TRAINING_LOAD_WEEKS = (4, 8, 12, 26)
+
+
+def _fmt_hours_h_mm(hours: float) -> str:
+    """Format a fractional-hours value as 'H:MM' (matches the design's `dur` field)."""
+    if hours is None or hours <= 0:
+        return "0:00"
+    total_min = int(round(hours * 60))
+    return f"{total_min // 60}:{total_min % 60:02d}"
+
+
+def _compute_training_load(n_weeks: int) -> dict:
+    """Build the Training Load page payload: 12 weeks of fitness rollups, the
+    in-window activities for window-scoped PRs, and per-type totals rolled up
+    over the same window. Returns a dict matching the design contract."""
+    weeks = _compute_fitness_weeks(n_weeks)
+    types_list = load_types()
+    types_by_id = {t["id"]: t for t in types_list}
+
+    # Window bounds — first week's Monday through last week's Sunday
+    if weeks:
+        win_start = datetime.fromisoformat(weeks[0]["start"]).date()
+        win_end   = datetime.fromisoformat(weeks[-1]["start"]).date() + timedelta(days=6)
+    else:
+        today = datetime.now().date()
+        win_start = today - timedelta(weeks=n_weeks)
+        win_end   = today
+
+    # In-window activities — used by both records and per-type totals.
+    in_window: list[dict] = []
+    for a in all_activities():
+        date = (a.get("date") or "")[:10]
+        if not date or a.get("excluded"):
+            continue
+        try:
+            d = datetime.fromisoformat(date).date()
+        except ValueError:
+            continue
+        if d < win_start or d > win_end:
+            continue
+        in_window.append(a)
+
+    # Recent activities — flat list with the design's RecentActivity shape.
+    recent: list[dict] = []
+    for a in in_window:
+        s = a.get("stats") or {}
+        recent.append({
+            "filename": a["filename"],
+            "type":     (a.get("meta") or {}).get("type", "") or a.get("effective_type") or "",
+            "date":     (a.get("date") or "")[:10],
+            "name":     a.get("name") or a["filename"],
+            "dist":     round(s.get("distance_km") or 0, 2),
+            "elev":     int(s.get("elev_gain_m") or 0),
+            "elev_loss": int(s.get("elev_loss_m") or 0),
+            "dur":      _fmt_hours_h_mm((s.get("duration_sec") or 0) / 3600),
+            "duration_sec": int(s.get("duration_sec") or 0),
+            "max":      round(s.get("max_speed_kmh") or 0, 1),
+            "hr":       int(s.get("hr_avg")) if s.get("hr_avg") is not None else None,
+        })
+    recent.sort(key=lambda r: r["date"], reverse=True)
+
+    # Per-type rollups across the same window.
+    totals_by_type: dict[str, dict] = {}
+    for a in in_window:
+        meta_type = (a.get("meta") or {}).get("type") or a.get("effective_type") or ""
+        if not meta_type:
+            continue
+        s = a.get("stats") or {}
+        b = totals_by_type.setdefault(meta_type, {
+            "type": meta_type,
+            "days": set(),
+            "moving_h": 0.0,
+            "elev_gain_m": 0,
+            "elev_loss_m": 0,
+            "count": 0,
+        })
+        b["days"].add((a.get("date") or "")[:10])
+        b["moving_h"]    += (s.get("duration_sec") or 0) / 3600
+        b["elev_gain_m"] += int(s.get("elev_gain_m") or 0)
+        b["elev_loss_m"] += int(s.get("elev_loss_m") or 0)
+        b["count"]       += 1
+    totals = []
+    for tid, b in totals_by_type.items():
+        td = types_by_id.get(tid, {})
+        totals.append({
+            "type":        tid,
+            "label":       td.get("label", tid),
+            "color":       td.get("color", "#9ca3af"),
+            "color_bg":    td.get("bg", "#2a2a2a"),
+            "glyph":       (td.get("label", tid)[:1] or "?").upper(),
+            "days":        len(b["days"]),
+            "moving_h":    round(b["moving_h"], 1),
+            "elev_gain_m": b["elev_gain_m"],
+            "elev_loss_m": b["elev_loss_m"],
+            "count":       b["count"],
+        })
+    totals.sort(key=lambda t: t["moving_h"], reverse=True)
+
+    return {
+        "weeks":        weeks,
+        "recent":       recent,
+        "totals":       totals,
+        "max_hr":       _effective_max_hr(),
+        "today":        datetime.now().date().isoformat(),
+        "window_start": win_start.isoformat(),
+        "window_end":   win_end.isoformat(),
+        "n_weeks":      n_weeks,
+    }
+
+
+@app.route("/api/training-load")
+def api_training_load():
+    """JSON payload for the Training Load page. `weeks` query param accepts
+    4, 8, 12, or 26 — anything else falls back to 12 (the design default)."""
+    try:
+        requested = int(request.args.get("weeks", 12))
+    except ValueError:
+        requested = 12
+    n_weeks = requested if requested in _ALLOWED_TRAINING_LOAD_WEEKS else 12
+    return jsonify(_compute_training_load(n_weeks))
 
 
 @app.route("/api/fitness/max-hr", methods=["GET", "POST"])

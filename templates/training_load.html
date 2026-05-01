@@ -1,0 +1,770 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AlForks – Training Load</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/base.css">
+  <link rel="stylesheet" href="/static/preview.css">
+  <script src="/static/utils.js"></script>
+  <script src="/static/sync_toast.js" defer></script>
+  <script src="/static/preview-toggle.js" defer></script>
+  <style>
+    /* Design tokens transcribed from design/training-load/README.md.
+       Coach view — technical, dense, monospace-heavy. */
+    :root {
+      --tl-sans:  'Inter', system-ui, -apple-system, sans-serif;
+      --tl-mono:  'JetBrains Mono', ui-monospace, 'SF Mono', monospace;
+      --tl-bg:        #080a0c;
+      --tl-panel:     #0d1115;
+      --tl-line:      rgba(255, 255, 255, 0.07);
+      --tl-dim:       rgba(255, 255, 255, 0.5);
+      --tl-dimmer:    rgba(255, 255, 255, 0.32);
+      --tl-ink:       oklch(0.96 0 0);
+      --tl-green:     oklch(0.78 0.15 145);
+      --tl-red:       oklch(0.7  0.20  25);
+      --tl-blue:      oklch(0.78 0.13 230);
+      --tl-amber:     oklch(0.78 0.16  60);
+      --tl-purple:    oklch(0.72 0.13 305);
+      --tl-z1:        oklch(0.6  0.02 240);
+      --tl-z2:        oklch(0.78 0.13 230);
+      --tl-z3:        oklch(0.78 0.15 145);
+      --tl-z4:        oklch(0.78 0.16  60);
+      --tl-z5:        oklch(0.7  0.20  25);
+    }
+
+    body { background: var(--tl-bg); color: #fff; font-family: var(--tl-sans); -webkit-font-smoothing: antialiased; }
+    body, .tl-stage * { box-sizing: border-box; }
+    .tl-stage .num,
+    .tl-stage .num * { font-variant-numeric: tabular-nums; }
+
+    main.tl-stage { max-width: 1320px; margin: 0 auto; padding: 20px;
+                    display: flex; flex-direction: column; gap: 12px; }
+
+    /* Header */
+    .tl-head { display: flex; align-items: baseline; justify-content: space-between;
+               padding: 4px 4px 8px; gap: 12px; flex-wrap: wrap; }
+    .tl-eyebrow-coach { font-size: 9px; color: var(--tl-red); letter-spacing: 0.3em;
+                        text-transform: uppercase; font-weight: 700; }
+    .tl-title { font-size: 22px; font-weight: 500; color: #fff; letter-spacing: -0.02em;
+                margin: 4px 0 0; }
+    .tl-meta  { font-size: 11px; color: var(--tl-dimmer); font-family: var(--tl-mono); text-align: right; }
+
+    /* Window length toggle (segmented control) */
+    .tl-window-ctrl { display: inline-flex; gap: 1px; background: var(--tl-line);
+                      border: 1px solid var(--tl-line); border-radius: 4px;
+                      overflow: hidden; margin-right: 14px; }
+    .tl-window-ctrl button { all: unset; cursor: pointer; padding: 5px 10px;
+                             font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase;
+                             font-family: var(--tl-mono); color: var(--tl-dim);
+                             background: var(--tl-panel); }
+    .tl-window-ctrl button.on { color: #fff; background: rgba(255,255,255,0.10); }
+    .tl-window-ctrl button:hover:not(.on) { color: rgba(255,255,255,0.78); }
+
+    /* Generic panel */
+    .tl-panel { background: var(--tl-panel); border: 1px solid var(--tl-line);
+                border-radius: 4px; padding: 20px 22px; }
+    .tl-panel-hero { padding: 22px 28px; border-left: 3px solid var(--tl-red); }
+
+    .tl-eyebrow { font-size: 9px; color: var(--tl-dimmer); letter-spacing: 0.22em;
+                  text-transform: uppercase; font-weight: 600; }
+    .tl-eyebrow.tight { letter-spacing: 0.18em; }
+
+    /* ─── Z2 hero ──────────────────────────────────────────────────── */
+    .tl-hero-row { display: flex; align-items: flex-start; justify-content: space-between;
+                   gap: 18px; margin-bottom: 18px; flex-wrap: wrap; }
+    .tl-hero-title { font-size: 22px; font-weight: 500; color: #fff;
+                     letter-spacing: -0.02em; margin: 6px 0 0; }
+    .tl-hero-title .suffix { color: var(--tl-dimmer); font-size: 13px; font-weight: 400; margin-left: 6px; }
+    .tl-hero-right { text-align: right; }
+    .tl-hero-latest { font-size: 36px; color: var(--tl-ink); font-family: var(--tl-mono);
+                      letter-spacing: -0.02em; line-height: 1; margin-top: 4px; }
+    .tl-hero-latest .unit { color: var(--tl-dimmer); font-size: 16px; margin-left: 3px; }
+    .tl-hero-delta { font-size: 11px; font-family: var(--tl-mono); margin-top: 6px; }
+    .tl-hero-delta.good { color: var(--tl-green); }
+    .tl-hero-delta.bad  { color: var(--tl-red); }
+    .tl-hero-svg { display: block; width: 100%; height: 220px; }
+
+    /* ─── Load cards ──────────────────────────────────────────────── */
+    .tl-load-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
+    .tl-load-card { background: var(--tl-panel); border: 1px solid var(--tl-line);
+                    border-radius: 4px; padding: 16px 18px; }
+    .tl-load-card .lbl { font-size: 9px; color: var(--tl-dimmer); letter-spacing: 0.18em;
+                         text-transform: uppercase; font-weight: 600; margin-bottom: 10px; }
+    .tl-load-card .val { font-size: 24px; font-family: var(--tl-mono);
+                         letter-spacing: -0.01em; line-height: 1; }
+    .tl-load-card .val .unit { color: var(--tl-dimmer); font-size: 12px; margin-left: 3px; }
+    .tl-load-card .sub { font-size: 10px; color: var(--tl-dimmer); margin-top: 8px;
+                         font-family: var(--tl-mono); }
+
+    /* ─── HR-zone stack ───────────────────────────────────────────── */
+    .tl-hrstack-head { display: flex; justify-content: space-between; align-items: baseline;
+                       margin-bottom: 16px; gap: 18px; flex-wrap: wrap; }
+    .tl-hrstack-subtitle { font-size: 14px; color: #fff; margin-top: 4px; }
+    .tl-hrstack-legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 10px;
+                         font-family: var(--tl-mono); color: var(--tl-dim);
+                         justify-content: flex-end; max-width: 380px; }
+    .tl-hrstack-legend .item { display: flex; align-items: center; gap: 5px; }
+    .tl-hrstack-legend .swatch { width: 9px; height: 9px; border-radius: 1px; }
+    .tl-hrstack-area { position: relative; height: 200px; display: flex; align-items: flex-end;
+                       gap: 6px; padding-left: 36px; padding-bottom: 22px; }
+    .tl-hrstack-yaxis { position: absolute; left: 0; top: 0; bottom: 22px;
+                        display: flex; flex-direction: column; justify-content: space-between;
+                        font-size: 10px; color: var(--tl-dimmer); font-family: var(--tl-mono); }
+    .tl-hrstack-bar { flex: 1; height: 100%; display: flex; flex-direction: column-reverse;
+                      gap: 1px; }
+    .tl-hrstack-seg { width: 100%; opacity: 0.95; }
+    .tl-hrstack-xaxis { position: absolute; left: 36px; right: 0; bottom: 0;
+                        display: flex; justify-content: space-between;
+                        font-size: 10px; color: var(--tl-dimmer); font-family: var(--tl-mono); }
+
+    /* ─── Volume / Climbing / Donut row ───────────────────────────── */
+    .tl-vcd-row { display: grid; grid-template-columns: 1.6fr 1fr; gap: 8px; }
+    .tl-vc-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .tl-vc-area { position: relative; height: 140px; display: flex; align-items: flex-end;
+                  gap: 6px; padding-left: 36px; padding-bottom: 20px; margin-top: 14px; }
+    .tl-vc-yaxis { position: absolute; left: 0; top: 0; bottom: 20px;
+                   display: flex; flex-direction: column; justify-content: space-between;
+                   font-size: 9px; color: var(--tl-dimmer); font-family: var(--tl-mono); }
+    .tl-vc-bar-wrap { flex: 1; height: 100%; display: flex; align-items: flex-end; }
+    .tl-vc-bar { width: 100%; opacity: 0.9; min-height: 1px; }
+    .tl-vc-bar.volume   { background: var(--tl-purple); }
+    .tl-vc-bar.climbing { background: var(--tl-amber); }
+    .tl-vc-xaxis { position: absolute; left: 36px; right: 0; bottom: 0;
+                   display: flex; justify-content: space-between;
+                   font-size: 9px; color: var(--tl-dimmer); font-family: var(--tl-mono); }
+
+    /* ─── Zone donut ──────────────────────────────────────────────── */
+    .tl-donut-bar { display: flex; height: 16px; border-radius: 2px; overflow: hidden;
+                    gap: 1px; margin: 14px 0; background: var(--tl-line); }
+    .tl-donut-seg { height: 100%; }
+    .tl-donut-legend { display: grid; grid-template-columns: 1fr 1fr; gap: 6px;
+                       font-size: 11px; font-family: var(--tl-mono); }
+    .tl-donut-legend .row { display: flex; align-items: center; gap: 6px; }
+    .tl-donut-legend .swatch { width: 10px; height: 10px; border-radius: 1px; flex-shrink: 0; }
+    .tl-donut-legend .name   { color: var(--tl-dim); }
+    .tl-donut-legend .pct    { color: #fff; margin-left: auto; }
+    .tl-donut-footer { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--tl-line);
+                       font-size: 11px; color: var(--tl-dim); line-height: 1.5; }
+    .tl-donut-footer .v { color: #fff; font-family: var(--tl-mono); }
+
+    /* ─── Records + totals ────────────────────────────────────────── */
+    .tl-rt-row { display: grid; grid-template-columns: 1.4fr 1fr; gap: 8px; }
+    .tl-records-head { display: flex; justify-content: space-between; align-items: baseline;
+                       margin-bottom: 14px; gap: 12px; flex-wrap: wrap; }
+    .tl-records-range { font-size: 9px; color: var(--tl-dimmer); font-family: var(--tl-mono); }
+    .tl-record-row { display: grid; grid-template-columns: 1fr auto; align-items: baseline;
+                     gap: 16px; padding: 10px 0; border-bottom: 1px solid var(--tl-line); }
+    .tl-record-row:last-child { border-bottom: none; }
+    .tl-record-row .label { font-size: 12px; color: #fff; }
+    .tl-record-row .sub   { font-size: 10px; color: var(--tl-dimmer); margin-top: 3px;
+                            font-family: var(--tl-mono); display: flex; align-items: center; gap: 6px; }
+    .tl-record-row .dot   { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+    .tl-record-row .value { font-size: 18px; color: var(--tl-amber); font-family: var(--tl-mono);
+                            letter-spacing: -0.01em; }
+
+    .tl-totals-row { display: grid; grid-template-columns: auto 1fr auto auto auto;
+                     gap: 18px; align-items: baseline; padding: 6px 0;
+                     border-bottom: 1px solid var(--tl-line); }
+    .tl-totals-row .glyph { width: 22px; height: 22px; border-radius: 3px;
+                            display: inline-flex; align-items: center; justify-content: center;
+                            font-size: 11px; font-family: var(--tl-mono); font-weight: 700; }
+    .tl-totals-row .name  { font-size: 13px; color: #fff; }
+    .tl-totals-row .col   { font-size: 13px; font-family: var(--tl-mono); text-align: right; }
+    .tl-totals-row .col.days { color: var(--tl-dim); min-width: 70px; }
+    .tl-totals-row .col.time { color: #fff; min-width: 90px; }
+    .tl-totals-row .col.elev { color: var(--tl-amber); min-width: 90px; }
+
+    /* Empty state */
+    .tl-empty { padding: 48px 22px; text-align: center; color: var(--tl-dimmer);
+                font-size: 13px; font-family: var(--tl-mono); }
+
+    /* ─── Responsive ─────────────────────────────────────────────── */
+    @media (max-width: 1000px) {
+      .tl-load-grid { grid-template-columns: repeat(2, 1fr); }
+      .tl-vcd-row   { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 900px) {
+      .tl-rt-row    { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 600px) {
+      .tl-load-grid { grid-template-columns: 1fr; }
+      .tl-vc-grid   { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>AlForks</h1>
+  <nav>
+    <a href="/summary">Summary</a>
+    <a href="/summary/v2">Summary V2</a>
+    <a href="/">Ride Logs</a>
+    <a href="/comparison">Compare Logs</a>
+    <a href="/heatmap">Heat Map</a>
+    <a href="/training-load" class="active">Training Load</a>
+    <a href="/setup">Setup</a>
+    <button id="preview-toggle-btn" class="preview-toggle-btn" onclick="togglePreviewStyles()"
+            title="Toggle style-cleanup preview (sticky across pages)">Preview</button>
+    <button class="nav-sync-btn" onclick="triggerSyncAll()" title="Sync Strava + Garmin now">Sync</button>
+  </nav>
+</header>
+
+<main class="tl-stage num">
+  <!-- Header -->
+  <div class="tl-head">
+    <div>
+      <div class="tl-eyebrow-coach">Coach view</div>
+      <h1 class="tl-title">Training load <span style="color:var(--tl-dimmer);font-weight:400;font-size:14px;letter-spacing:0;" id="tl-today-label"></span></h1>
+    </div>
+    <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;justify-content:flex-end;">
+      <div class="tl-window-ctrl" id="tl-window-ctrl">
+        <button data-weeks="4">4w</button>
+        <button data-weeks="8">8w</button>
+        <button data-weeks="12" class="on">12w</button>
+        <button data-weeks="26">26w</button>
+      </div>
+      <div class="tl-meta" id="tl-meta">— weeks of data</div>
+    </div>
+  </div>
+
+  <!-- Z2 hero -->
+  <div class="tl-panel tl-panel-hero" id="tl-hero">
+    <div class="tl-hero-row">
+      <div>
+        <div class="tl-eyebrow">Aerobic fitness</div>
+        <h2 class="tl-hero-title">28-day Z2 heart-rate average <span class="suffix">lower = fitter</span></h2>
+      </div>
+      <div class="tl-hero-right">
+        <div class="tl-eyebrow tight">Latest</div>
+        <div class="tl-hero-latest" id="tl-hero-latest">—<span class="unit">bpm</span></div>
+        <div class="tl-hero-delta" id="tl-hero-delta">&nbsp;</div>
+      </div>
+    </div>
+    <div id="tl-hero-chart"></div>
+  </div>
+
+  <!-- Load cards -->
+  <div class="tl-load-grid" id="tl-load-cards"></div>
+
+  <!-- HR zone stack -->
+  <div class="tl-panel" id="tl-hrstack-panel">
+    <div class="tl-hrstack-head">
+      <div>
+        <div class="tl-eyebrow">Weekly HR-zone time</div>
+        <div class="tl-hrstack-subtitle">Where you spend your minutes</div>
+      </div>
+      <div class="tl-hrstack-legend" id="tl-hrstack-legend"></div>
+    </div>
+    <div id="tl-hrstack-area"></div>
+  </div>
+
+  <!-- Volume / Climbing / Donut -->
+  <div class="tl-vcd-row">
+    <div class="tl-vc-grid">
+      <div class="tl-panel">
+        <div class="tl-eyebrow">Weekly volume</div>
+        <div id="tl-volume-chart"></div>
+      </div>
+      <div class="tl-panel">
+        <div class="tl-eyebrow">Weekly climbing</div>
+        <div id="tl-climbing-chart"></div>
+      </div>
+    </div>
+    <div class="tl-panel" id="tl-donut">
+      <div class="tl-eyebrow" id="tl-donut-eyebrow">Last 4 weeks · zone composition</div>
+      <div class="tl-donut-bar"  id="tl-donut-bar"></div>
+      <div class="tl-donut-legend" id="tl-donut-legend"></div>
+      <div class="tl-donut-footer" id="tl-donut-footer">
+        Z2 share is <span class="v" id="tl-donut-z2">—%</span> — aim for 60–80% in base season.
+      </div>
+    </div>
+  </div>
+
+  <!-- Records + Activity totals -->
+  <div class="tl-rt-row">
+    <div class="tl-panel" id="tl-records">
+      <div class="tl-records-head">
+        <div class="tl-eyebrow">Personal records · this window</div>
+        <div class="tl-records-range" id="tl-records-range">—</div>
+      </div>
+      <div id="tl-records-body"></div>
+    </div>
+    <div class="tl-panel" id="tl-totals">
+      <div class="tl-eyebrow" id="tl-totals-eyebrow">Activity totals · this window</div>
+      <div id="tl-totals-body" style="margin-top:14px;"></div>
+    </div>
+  </div>
+</main>
+
+<script>
+const TYPES_RAW = {{ types_json | safe }};
+const TYPES_BY_ID = Object.fromEntries(TYPES_RAW.map(t => [t.id, t]));
+
+const HR_ZONE_COLORS = ['var(--tl-z1)','var(--tl-z2)','var(--tl-z3)','var(--tl-z4)','var(--tl-z5)'];
+const HR_ZONE_LABELS = ['Z1 Recovery','Z2 Endurance','Z3 Tempo','Z4 Threshold','Z5 VO2max'];
+const SVG_NS = 'http://www.w3.org/2000/svg';
+
+let CURRENT = null;        // last fetched payload
+let CURRENT_WEEKS = 12;    // active window length
+
+function fmtMonthDay(iso) {
+  // 'YYYY-MM-DD' → 'MM-DD' (matches the design's wk labels).
+  return iso ? iso.slice(5) : '';
+}
+
+function fmtTodayLabel(iso) {
+  if (!iso) return '';
+  const d = new Date(iso + 'T00:00:00');
+  return '· ' + d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+function fmtSignedHours(h) {
+  // Sign-prefixed hours, 1 dp.
+  if (h == null) return '—';
+  const v = h.toFixed(1);
+  return h >= 0 ? '+' + v : v;
+}
+
+function fmtElev(m) {
+  if (m == null) return '—';
+  return Math.round(m).toLocaleString();
+}
+
+function fmtKm(km) {
+  if (km == null) return '—';
+  return km < 100 ? km.toFixed(1) : Math.round(km).toLocaleString();
+}
+
+// ─── Z2 hero ──────────────────────────────────────────────────────────────
+function renderHero(weeks) {
+  const z2 = weeks.map(w => w.z2_hr_28d).filter(v => v != null);
+  const latestEl = document.getElementById('tl-hero-latest');
+  const deltaEl  = document.getElementById('tl-hero-delta');
+  const chartEl  = document.getElementById('tl-hero-chart');
+  chartEl.innerHTML = '';
+
+  if (z2.length < 2) {
+    latestEl.innerHTML = '— <span class="unit">bpm</span>';
+    deltaEl.textContent = 'Not enough HR data in this window';
+    deltaEl.className = 'tl-hero-delta';
+    return;
+  }
+
+  // Use the most recent and earliest non-null Z2 values — the chronologically
+  // last week may itself have null z2_hr_28d (no Z2 activities in its 28-day
+  // trailing window) even when prior weeks have data.
+  const last  = z2[z2.length - 1];
+  const first = z2[0];
+  const delta = last - first;
+  const deltaPct = (delta / first) * 100;
+  const goodTrend = delta < 0;
+
+  latestEl.innerHTML = `${last}<span class="unit">bpm</span>`;
+  deltaEl.textContent = `${goodTrend ? '↓' : '↑'} ${Math.abs(delta)}bpm vs ${weeks.length}wk ago (${deltaPct.toFixed(1)}%)`;
+  deltaEl.className = 'tl-hero-delta ' + (goodTrend ? 'good' : 'bad');
+
+  const minZ = Math.min(...z2), maxZ = Math.max(...z2);
+  const range = maxZ - minZ || 1;
+  const lo = minZ - range * 0.1;
+  const hi = maxZ + range * 0.1;
+  const span = hi - lo;
+  const W = 720, H = 220, padL = 44, padR = 16, padT = 16, padB = 28;
+
+  // Map weeks → x positions (only those with z2_hr_28d != null get a point).
+  const points = [];
+  weeks.forEach((w, i) => {
+    if (w.z2_hr_28d == null) return;
+    const x = padL + (i / (weeks.length - 1)) * (W - padL - padR);
+    const y = H - padB - ((w.z2_hr_28d - lo) / span) * (H - padT - padB);
+    points.push([x, y, w.z2_hr_28d]);
+  });
+
+  const svg = document.createElementNS(SVG_NS, 'svg');
+  svg.setAttribute('class', 'tl-hero-svg');
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  svg.setAttribute('preserveAspectRatio', 'none');
+
+  const defs = document.createElementNS(SVG_NS, 'defs');
+  const grad = document.createElementNS(SVG_NS, 'linearGradient');
+  grad.setAttribute('id', 'tl-z2grad'); grad.setAttribute('x1', '0'); grad.setAttribute('y1', '0');
+  grad.setAttribute('x2', '0'); grad.setAttribute('y2', '1');
+  const s1 = document.createElementNS(SVG_NS, 'stop');
+  s1.setAttribute('offset', '0%'); s1.setAttribute('stop-color', 'oklch(0.7 0.2 25)'); s1.setAttribute('stop-opacity', '0.28');
+  const s2 = document.createElementNS(SVG_NS, 'stop');
+  s2.setAttribute('offset', '100%'); s2.setAttribute('stop-color', 'oklch(0.7 0.2 25)'); s2.setAttribute('stop-opacity', '0');
+  grad.appendChild(s1); grad.appendChild(s2); defs.appendChild(grad); svg.appendChild(defs);
+
+  // Y-axis dashed lines at min, mid, max.
+  const ticks = [minZ, Math.round((minZ + maxZ) / 2), maxZ];
+  ticks.forEach(v => {
+    const y = H - padB - ((v - lo) / span) * (H - padT - padB);
+    const line = document.createElementNS(SVG_NS, 'line');
+    line.setAttribute('x1', padL); line.setAttribute('x2', W - padR);
+    line.setAttribute('y1', y); line.setAttribute('y2', y);
+    line.setAttribute('stroke', 'rgba(255,255,255,0.05)');
+    line.setAttribute('stroke-dasharray', '2,4');
+    svg.appendChild(line);
+    const t = document.createElementNS(SVG_NS, 'text');
+    t.setAttribute('x', padL - 8); t.setAttribute('y', y + 3);
+    t.setAttribute('fill', 'rgba(255,255,255,0.32)');
+    t.setAttribute('font-size', '10'); t.setAttribute('font-family', 'JetBrains Mono');
+    t.setAttribute('text-anchor', 'end'); t.textContent = v;
+    svg.appendChild(t);
+  });
+
+  // X-axis labels — every other week to avoid crowding.
+  weeks.forEach((w, i) => {
+    if (i % 2 !== 0) return;
+    const x = padL + (i / (weeks.length - 1)) * (W - padL - padR);
+    const t = document.createElementNS(SVG_NS, 'text');
+    t.setAttribute('x', x); t.setAttribute('y', H - 8);
+    t.setAttribute('fill', 'rgba(255,255,255,0.32)');
+    t.setAttribute('font-size', '10'); t.setAttribute('font-family', 'JetBrains Mono');
+    t.setAttribute('text-anchor', 'middle');
+    t.textContent = fmtMonthDay(w.start);
+    svg.appendChild(t);
+  });
+
+  if (points.length >= 2) {
+    const path = points.map((p, i) => (i === 0 ? `M${p[0]},${p[1]}` : `L${p[0]},${p[1]}`)).join(' ');
+    const last = points[points.length - 1], first0 = points[0];
+    const area = `${path} L${last[0]},${H - padB} L${first0[0]},${H - padB} Z`;
+
+    const areaEl = document.createElementNS(SVG_NS, 'path');
+    areaEl.setAttribute('d', area); areaEl.setAttribute('fill', 'url(#tl-z2grad)');
+    svg.appendChild(areaEl);
+    const lineEl = document.createElementNS(SVG_NS, 'path');
+    lineEl.setAttribute('d', path); lineEl.setAttribute('fill', 'none');
+    lineEl.setAttribute('stroke', 'oklch(0.7 0.2 25)'); lineEl.setAttribute('stroke-width', '2');
+    lineEl.setAttribute('vector-effect', 'non-scaling-stroke');
+    svg.appendChild(lineEl);
+
+    points.forEach(p => {
+      const c = document.createElementNS(SVG_NS, 'circle');
+      c.setAttribute('cx', p[0]); c.setAttribute('cy', p[1]); c.setAttribute('r', '3');
+      c.setAttribute('fill', 'oklch(0.7 0.2 25)');
+      c.setAttribute('stroke', '#0d1115'); c.setAttribute('stroke-width', '2');
+      svg.appendChild(c);
+    });
+  }
+
+  chartEl.appendChild(svg);
+}
+
+// ─── Load cards ───────────────────────────────────────────────────────────
+function renderLoadCards(weeks) {
+  const volumes = weeks.map(w => w.hours);
+  const last4 = volumes.slice(-4);
+  const last8 = volumes.slice(-8);
+  const atl = last4.reduce((s, v) => s + v, 0) / Math.max(1, last4.length);
+  const ctl = last8.reduce((s, v) => s + v, 0) / Math.max(1, last8.length);
+  const tsb = ctl - atl;
+  const totalH = volumes.reduce((s, v) => s + v, 0);
+  const totalClimb = weeks.reduce((s, w) => s + w.gain_m, 0);
+
+  const tsbState = tsb > 1
+    ? { label: 'Fresh', color: 'var(--tl-green)' }
+    : tsb < -1
+      ? { label: 'Fatigued', color: 'var(--tl-red)' }
+      : { label: 'Steady', color: 'var(--tl-blue)' };
+
+  const cards = [
+    { lbl: 'Acute load',   val: atl.toFixed(1), unit: 'h/wk', sub: 'last 4 weeks',  color: 'var(--tl-amber)'  },
+    { lbl: 'Chronic load', val: ctl.toFixed(1), unit: 'h/wk', sub: 'last 8 weeks',  color: 'var(--tl-purple)' },
+    { lbl: 'Form',         val: fmtSignedHours(tsb), unit: 'h', sub: tsbState.label, color: tsbState.color    },
+    { lbl: 'Volume',       val: totalH.toFixed(0), unit: 'h', sub: `${weeks.length} weeks total`,    color: 'var(--tl-blue)'   },
+    { lbl: 'Climbing',     val: Math.round(totalClimb).toLocaleString(), unit: 'm', sub: `${weeks.length} weeks total`, color: 'var(--tl-amber)' },
+  ];
+
+  const grid = document.getElementById('tl-load-cards');
+  grid.innerHTML = '';
+  cards.forEach(c => {
+    const card = document.createElement('div');
+    card.className = 'tl-load-card';
+    card.innerHTML = `
+      <div class="lbl">${c.lbl}</div>
+      <div class="val" style="color:${c.color};">${c.val}<span class="unit">${c.unit}</span></div>
+      <div class="sub">${c.sub}</div>
+    `;
+    grid.appendChild(card);
+  });
+}
+
+// ─── HR-zone stack ────────────────────────────────────────────────────────
+function renderHRStack(weeks) {
+  const legendEl = document.getElementById('tl-hrstack-legend');
+  legendEl.innerHTML = '';
+  HR_ZONE_LABELS.forEach((l, i) => {
+    const item = document.createElement('span');
+    item.className = 'item';
+    item.innerHTML = `<span class="swatch" style="background:${HR_ZONE_COLORS[i]};"></span><span>${l}</span>`;
+    legendEl.appendChild(item);
+  });
+
+  const totals = weeks.map(w => w.zones_sec.reduce((s, x) => s + x, 0) / 3600);
+  const max = Math.max(...totals, 0.1);
+
+  const area = document.createElement('div');
+  area.className = 'tl-hrstack-area';
+
+  const yAxis = document.createElement('div');
+  yAxis.className = 'tl-hrstack-yaxis';
+  [max, max * 0.66, max * 0.33, 0].forEach(v => {
+    const s = document.createElement('span');
+    s.textContent = `${v.toFixed(1)}h`;
+    yAxis.appendChild(s);
+  });
+  area.appendChild(yAxis);
+
+  weeks.forEach(w => {
+    const bar = document.createElement('div');
+    bar.className = 'tl-hrstack-bar';
+    w.zones_sec.forEach((sec, zi) => {
+      const seg = document.createElement('div');
+      seg.className = 'tl-hrstack-seg';
+      const h = sec / 3600;
+      seg.style.background = HR_ZONE_COLORS[zi];
+      seg.style.height = max > 0 ? `${(h / max) * 100}%` : '0';
+      seg.title = `${fmtMonthDay(w.start)} · ${HR_ZONE_LABELS[zi]}: ${h.toFixed(1)}h`;
+      bar.appendChild(seg);
+    });
+    area.appendChild(bar);
+  });
+
+  const xAxis = document.createElement('div');
+  xAxis.className = 'tl-hrstack-xaxis';
+  weeks.forEach((w, i) => {
+    const s = document.createElement('span');
+    s.textContent = i % 2 === 0 ? fmtMonthDay(w.start) : '';
+    xAxis.appendChild(s);
+  });
+  area.appendChild(xAxis);
+
+  const container = document.getElementById('tl-hrstack-area');
+  container.innerHTML = '';
+  container.appendChild(area);
+}
+
+// ─── Volume + Climbing bars ───────────────────────────────────────────────
+function renderBarChart(rootId, weeks, valueKey, unit, color) {
+  const root = document.getElementById(rootId);
+  root.innerHTML = '';
+  const vals = weeks.map(w => w[valueKey]);
+  const max = Math.max(...vals, 1);
+
+  const area = document.createElement('div');
+  area.className = 'tl-vc-area';
+
+  const yAxis = document.createElement('div');
+  yAxis.className = 'tl-vc-yaxis';
+  [max, max * 0.66, max * 0.33, 0].forEach(v => {
+    const s = document.createElement('span');
+    s.textContent = unit === 'h'
+      ? `${v.toFixed(0)}h`
+      : `${Math.round(v).toLocaleString()}m`;
+    yAxis.appendChild(s);
+  });
+  area.appendChild(yAxis);
+
+  weeks.forEach(w => {
+    const wrap = document.createElement('div');
+    wrap.className = 'tl-vc-bar-wrap';
+    const bar = document.createElement('div');
+    bar.className = 'tl-vc-bar ' + (color === 'volume' ? 'volume' : 'climbing');
+    const v = w[valueKey];
+    bar.style.height = `${(v / max) * 100}%`;
+    bar.title = unit === 'h'
+      ? `${fmtMonthDay(w.start)}: ${v.toFixed(1)}h`
+      : `${fmtMonthDay(w.start)}: ${Math.round(v).toLocaleString()}m`;
+    wrap.appendChild(bar);
+    area.appendChild(wrap);
+  });
+
+  const xAxis = document.createElement('div');
+  xAxis.className = 'tl-vc-xaxis';
+  weeks.forEach((w, i) => {
+    const s = document.createElement('span');
+    s.textContent = i % 2 === 0 ? fmtMonthDay(w.start) : '';
+    xAxis.appendChild(s);
+  });
+  area.appendChild(xAxis);
+
+  root.appendChild(area);
+}
+
+// ─── Zone composition donut ───────────────────────────────────────────────
+function renderDonut(weeks) {
+  // The "donut" is a horizontal stacked bar of last-4-weeks zone share.
+  const last4 = weeks.slice(-4);
+  const totals = [0, 0, 0, 0, 0];
+  last4.forEach(w => w.zones_sec.forEach((s, i) => totals[i] += s));
+  const sum = totals.reduce((s, v) => s + v, 0);
+  const share = sum > 0 ? totals.map(v => v / sum) : totals.map(() => 0);
+
+  // Eyebrow follows window length: last 4 weeks of the window.
+  const eyebrow = document.getElementById('tl-donut-eyebrow');
+  eyebrow.textContent = 'Last 4 weeks · zone composition';
+
+  const bar = document.getElementById('tl-donut-bar');
+  bar.innerHTML = '';
+  share.forEach((sh, i) => {
+    if (sh <= 0) return;
+    const seg = document.createElement('div');
+    seg.className = 'tl-donut-seg';
+    seg.style.background = HR_ZONE_COLORS[i];
+    seg.style.width = `${sh * 100}%`;
+    seg.title = `${HR_ZONE_LABELS[i]}: ${(sh * 100).toFixed(0)}%`;
+    bar.appendChild(seg);
+  });
+
+  const legend = document.getElementById('tl-donut-legend');
+  legend.innerHTML = '';
+  share.forEach((sh, i) => {
+    const row = document.createElement('div');
+    row.className = 'row';
+    row.innerHTML = `
+      <span class="swatch" style="background:${HR_ZONE_COLORS[i]};"></span>
+      <span class="name">${HR_ZONE_LABELS[i].split(' ')[0]}</span>
+      <span class="pct">${(sh * 100).toFixed(0)}%</span>
+    `;
+    legend.appendChild(row);
+  });
+
+  document.getElementById('tl-donut-z2').textContent = `${(share[1] * 100).toFixed(0)}%`;
+}
+
+// ─── Records (window-scoped) ──────────────────────────────────────────────
+function durToHours(s) {
+  if (!s) return 0;
+  const [h, m] = s.split(':').map(Number);
+  return (h || 0) + (m || 0) / 60;
+}
+
+function activityColor(typeId) {
+  const t = TYPES_BY_ID[typeId];
+  return t ? t.color : 'var(--tl-amber)';
+}
+
+function renderRecords(payload) {
+  document.getElementById('tl-records-range').textContent =
+    `${fmtMonthDay(payload.window_start)} → ${fmtMonthDay(payload.window_end)}`;
+
+  const body = document.getElementById('tl-records-body');
+  body.innerHTML = '';
+  const inWin = payload.recent;
+  if (!inWin || inWin.length === 0) {
+    body.innerHTML = '<div class="tl-empty">No activities in this window yet.</div>';
+    return;
+  }
+
+  const reduceBy = (arr, key, valueFn) => arr.reduce((b, r) => (valueFn(r) > valueFn(b) ? r : b), arr[0]);
+  const withDist  = inWin.filter(r => r.dist > 0);
+  const withElev  = inWin.filter(r => r.elev > 0);
+  const withDur   = inWin.filter(r => durToHours(r.dur) > 0);
+  const withMax   = inWin.filter(r => r.max);
+  const withHr    = inWin.filter(r => r.hr);
+  const longest    = withDist.length ? reduceBy(withDist, 'dist', r => r.dist) : null;
+  const mostClimb  = withElev.length ? reduceBy(withElev, 'elev', r => r.elev) : null;
+  const longestDur = withDur.length  ? reduceBy(withDur,  'dur',  r => durToHours(r.dur)) : null;
+  const fastest    = withMax.length  ? reduceBy(withMax,  'max',  r => r.max) : null;
+  const highestHR  = withHr.length   ? reduceBy(withHr,   'hr',   r => r.hr)  : null;
+
+  const rows = [
+    longest    && { label: 'Longest ride',     value: `${fmtKm(longest.dist)} km`,      pr: longest    },
+    mostClimb  && { label: 'Most climbing',    value: `${fmtElev(mostClimb.elev)} m`,   pr: mostClimb  },
+    longestDur && { label: 'Longest duration', value: longestDur.dur,                   pr: longestDur },
+    fastest    && { label: 'Top speed',        value: `${fastest.max.toFixed(1)} km/h`, pr: fastest    },
+    highestHR  && { label: 'Highest avg HR',   value: `${highestHR.hr} bpm`,            pr: highestHR  },
+  ].filter(Boolean);
+
+  rows.forEach(row => {
+    const el = document.createElement('div');
+    el.className = 'tl-record-row';
+    const dotColor = activityColor(row.pr.type);
+    el.innerHTML = `
+      <div>
+        <div class="label">${row.label}</div>
+        <div class="sub"><span class="dot" style="background:${dotColor};"></span>${row.pr.name} · ${row.pr.date}</div>
+      </div>
+      <div class="value">${row.value}</div>
+    `;
+    body.appendChild(el);
+  });
+}
+
+// ─── Activity totals ──────────────────────────────────────────────────────
+function fmtMovingTime(hours) {
+  const h = Math.floor(hours);
+  const m = Math.round((hours - h) * 60);
+  return `${h}h ${String(m).padStart(2, '0')}m`;
+}
+
+function renderTotals(payload) {
+  const body = document.getElementById('tl-totals-body');
+  body.innerHTML = '';
+  const totals = payload.totals || [];
+  if (totals.length === 0) {
+    body.innerHTML = '<div class="tl-empty">No activity types in this window.</div>';
+    return;
+  }
+
+  totals.forEach(t => {
+    const isSnowboard = t.type === 'snowboard' || t.type === 'ski';
+    const elev = isSnowboard ? t.elev_loss_m : t.elev_gain_m;
+    const row = document.createElement('div');
+    row.className = 'tl-totals-row';
+    row.innerHTML = `
+      <span class="glyph" style="background:${t.color_bg};color:${t.color};">${t.glyph}</span>
+      <span class="name">${t.label}</span>
+      <span class="col days">${t.days}d</span>
+      <span class="col time">${fmtMovingTime(t.moving_h)}</span>
+      <span class="col elev">${fmtElev(elev)}m</span>
+    `;
+    body.appendChild(row);
+  });
+}
+
+// ─── Page render orchestration ────────────────────────────────────────────
+function render(payload) {
+  CURRENT = payload;
+  document.getElementById('tl-today-label').textContent = fmtTodayLabel(payload.today);
+  document.getElementById('tl-meta').textContent = `${payload.n_weeks} weeks of data`;
+  renderHero(payload.weeks);
+  renderLoadCards(payload.weeks);
+  renderHRStack(payload.weeks);
+  renderBarChart('tl-volume-chart',   payload.weeks, 'hours',  'h', 'volume');
+  renderBarChart('tl-climbing-chart', payload.weeks, 'gain_m', 'm', 'climbing');
+  renderDonut(payload.weeks);
+  renderRecords(payload);
+  renderTotals(payload);
+}
+
+async function loadData(weeks) {
+  CURRENT_WEEKS = weeks;
+  document.querySelectorAll('#tl-window-ctrl button').forEach(b => {
+    b.classList.toggle('on', Number(b.dataset.weeks) === weeks);
+  });
+  try {
+    const res = await fetch(`/api/training-load?weeks=${weeks}`, { cache: 'no-store' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    render(data);
+  } catch (e) {
+    document.getElementById('tl-meta').textContent = `Failed to load: ${e.message}`;
+  }
+}
+
+document.querySelectorAll('#tl-window-ctrl button').forEach(b => {
+  b.addEventListener('click', () => loadData(Number(b.dataset.weeks)));
+});
+
+loadData(12);
+</script>
+
+</body>
+</html>
