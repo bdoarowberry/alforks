@@ -59,23 +59,53 @@
 
     /* ===== Regions panel ===== */
     #regions-panel { }
-    #regions-sidebar { width: 280px; background: #12151a; border-right: 1px solid #2a2d35; display: flex; flex-direction: column; flex-shrink: 0; overflow: hidden; }
-    #regions-sidebar-header { padding: 12px 16px; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em; color: #ccc; border-bottom: 1px solid #2a2d35; display: flex; align-items: center; justify-content: space-between; }
-    #draw-btn { padding: 4px 12px; border-radius: 4px; border: 1px solid #3b82f6; background: #1a2a3a; color: #3b82f6; font-size: 0.72rem; cursor: pointer; transition: all 0.12s; }
-    #draw-btn:hover, #draw-btn.active { background: #3b82f6; color: #fff; }
-    #draw-instructions { padding: 10px 16px; font-size: 0.75rem; color: #bbb; border-bottom: 1px solid #2a2d35; line-height: 1.5; display: none; }
+    #regions-sidebar { width: 280px; background: #12151a; border-right: 1px solid #2a2d35; display: flex; flex-direction: column; flex-shrink: 0; overflow: hidden; position: relative; }
+
+    /* Generic section wrapper used by Current Regions / Add Region / Regionless Tracks */
+    .rs-section { display: flex; flex-direction: column; min-height: 0; flex: 1 1 0; }
+    .rs-section.collapsed { flex: 0 0 auto; }
+    .rs-section.collapsed .rs-section-body { display: none; }
+    .rs-section-header { padding: 10px 16px; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em; color: #ccc; border-bottom: 1px solid #2a2d35; background: #0e1117; display: flex; align-items: center; gap: 8px; flex-shrink: 0; cursor: pointer; user-select: none; }
+    .rs-section-header:hover { color: #fff; }
+    .rs-section-title { flex: 1; }
+    .rs-count { color: #888; font-family: ui-monospace, monospace; font-size: 0.7rem; }
+    .rs-section-toggle { color: #888; font-size: 0.7rem; transition: transform 0.15s; display: inline-block; }
+    .rs-section.collapsed .rs-section-toggle { transform: rotate(-90deg); }
+    /* Draggable divider between sections — transfers space between the two adjacent sections */
+    .rs-divider { height: 6px; flex-shrink: 0; cursor: ns-resize; background: transparent; border-top: 1px solid #2a2d35; transition: background 0.12s; }
+    .rs-divider:hover, .rs-divider.dragging { background: #3b82f6; }
+    .rs-section-body { display: flex; flex-direction: column; min-height: 0; flex: 1; overflow: hidden; }
+    #add-region-section .rs-section-body { overflow-y: auto; }
+    .rs-padded { padding: 8px 12px; border-bottom: 1px solid #1e2128; }
+    .rs-padded > input[type=text] { width: 100%; background: #1a1d23; border: 1px solid #2a2d35; border-radius: 4px; color: #e0e0e0; font-size: 0.78rem; padding: 5px 8px; font-family: inherit; box-sizing: border-box; }
+    .rs-padded > input[type=text]:focus { outline: none; border-color: #3b82f6; }
+    .rs-or { font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.07em; color: #666; text-align: center; margin: 10px 0 8px; }
+
+    .rs-primary-btn { width: 100%; padding: 7px; border-radius: 4px; border: 1px solid #3b82f6; background: #1a2a3a; color: #3b82f6; font-size: 0.78rem; cursor: pointer; transition: all 0.12s; font-family: inherit; }
+    .rs-primary-btn:hover, .rs-primary-btn.active { background: #3b82f6; color: #fff; }
+
+    /* During add/edit, the edit card takes over the full sidebar */
+    #regions-sidebar.editing-active > .rs-section { display: none; }
+    #regions-sidebar.editing-active > #edit-region-card { display: flex; flex-direction: column; flex: 1; max-height: none; border-top: none; }
+
+    #draw-instructions { margin-top: 8px; padding: 10px 12px; font-size: 0.75rem; color: #bbb; line-height: 1.5; display: none; background: #0a0d12; border: 1px solid #2a2d35; border-radius: 4px; }
     #draw-instructions.visible { display: block; }
-    #region-list { flex: 1; overflow-y: auto; }
+    #region-list { flex: 1; overflow-y: auto; min-height: 0; }
     .region-item { padding: 10px 16px; border-bottom: 1px solid #1e2128; cursor: pointer; transition: background 0.1s; }
     .region-item:hover { background: #1e2128; }
     .region-color { width: 12px; height: 12px; border-radius: 50%; display: inline-block; margin-right: 8px; flex-shrink: 0; }
     .region-name-row { display: flex; align-items: center; margin-bottom: 4px; }
     .region-name { font-size: 0.85rem; color: #e0e0e0; font-weight: 500; flex: 1; }
     .region-source-badge { font-size: 0.55rem; font-weight: 700; letter-spacing: 0.04em; color: #60a5fa; background: #1a2a3a; border: 1px solid #2a3a55; border-radius: 3px; padding: 1px 5px; margin-left: 6px; flex-shrink: 0; }
-    #osm-filters { border-top: 1px solid #2a2d35; background: #0a0d12; flex-shrink: 0; }
-    #osm-filters-header { padding: 8px 12px; font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.07em; color: #888; cursor: pointer; display: flex; align-items: center; user-select: none; }
-    #osm-filters-header:hover { color: #ccc; }
-    #osm-filters-body { padding: 8px 12px 12px; }
+    /* OSM search row: input + 3 compact icon buttons */
+    .osm-search-row { display: flex; gap: 4px; align-items: center; }
+    .osm-search-row input { flex: 1; min-width: 0; background: #1a1d23; border: 1px solid #2a2d35; border-radius: 4px; color: #e0e0e0; font-size: 0.78rem; padding: 5px 8px; font-family: inherit; }
+    .osm-search-row input:focus { outline: none; border-color: #3b82f6; }
+    .osm-search-row button { width: 26px; height: 26px; padding: 0; border-radius: 4px; border: 1px solid #2a2d35; background: #1a1d23; color: #888; font-size: 0.82rem; line-height: 1; cursor: pointer; font-family: inherit; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
+    #region-search-btn { border-color: #3b82f6; background: #1a2a3a; color: #3b82f6; }
+    #region-search-btn:hover { background: #3b82f6; color: #fff; }
+    #region-search-clear:hover { color: #ef4444; border-color: #ef4444; }
+    #osm-filters-toggle:hover { color: #ccc; border-color: #3b82f6; }
     .osm-deny-chip { font-size: 0.7rem; padding: 2px 4px 2px 8px; border-radius: 3px; background: #1a1d23; border: 1px solid #2a2d35; color: #ccc; display: inline-flex; align-items: center; gap: 4px; }
     .osm-deny-chip button { background: transparent; border: none; color: #666; cursor: pointer; padding: 0 4px; font-size: 0.85rem; line-height: 1; }
     .osm-deny-chip button:hover { color: #ef4444; }
@@ -102,6 +132,68 @@
     #region-save-confirm { font-size: 0.7rem; color: #22c55e; text-align: center; margin-top: 6px; height: 14px; }
     #no-regions { padding: 20px 16px; color: #666; font-size: 0.82rem; text-align: center; line-height: 1.6; }
     #map { flex: 1; }
+
+    /* Regionless Tracks block */
+    #untagged-block { background: #0f1216; }
+    #untagged-controls { padding: 8px 12px; border-bottom: 1px solid #1e2128; display: flex; align-items: center; gap: 10px; font-size: 0.74rem; color: #ccc; flex-shrink: 0; }
+    #untagged-controls label { display: flex; align-items: center; gap: 5px; cursor: pointer; flex: 1; }
+    #untagged-list { flex: 1; min-height: 0; overflow-y: auto; }
+    .rs-spinner { display: inline-block; animation: rs-spin 0.9s linear infinite; }
+    @keyframes rs-spin { to { transform: rotate(360deg); } }
+
+    /* ===== Duplicates panel ===== */
+    .dup-group { background: #12151a; border: 1px solid #2a2d35; border-radius: 8px; margin-bottom: 12px; max-width: 980px; overflow: hidden; }
+    .dup-group-header { padding: 8px 14px; background: #0e1117; border-bottom: 1px solid #2a2d35; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.07em; color: #ccc; display: flex; align-items: baseline; gap: 10px; }
+    .dup-group-header .dup-date { font-family: ui-monospace, monospace; color: #fff; }
+    .dup-group-header .dup-count { color: #888; }
+    .dup-row { padding: 10px 14px; border-top: 1px solid #1e2128; display: grid; grid-template-columns: 1fr auto auto auto auto; gap: 12px; align-items: center; }
+    .dup-row:first-child { border-top: none; }
+    .dup-row.excluded { opacity: 0.55; }
+    .dup-row .dup-name { font-size: 0.86rem; color: #e0e0e0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .dup-row .dup-meta { font-size: 0.7rem; color: #888; font-family: ui-monospace, monospace; white-space: nowrap; }
+    .dup-row .dup-filename { font-size: 0.66rem; color: #666; font-family: ui-monospace, monospace; margin-top: 2px; }
+    .dup-row .dup-actions { display: flex; gap: 6px; }
+    .dup-row .r-btn.active { border-color: #facc15; color: #facc15; }
+    .dup-empty { color: #666; font-size: 0.85rem; text-align: center; padding: 32px; }
+
+    /* ===== Odd Times panel ===== */
+    .odd-row { background: #12151a; border: 1px solid #2a2d35; border-radius: 6px; margin-bottom: 6px; max-width: 980px;
+               padding: 10px 14px; display: grid; grid-template-columns: 100px 90px 1fr auto auto; gap: 14px; align-items: center; }
+    .odd-row .odd-date { font-family: ui-monospace, monospace; font-size: 0.76rem; color: #ccc; }
+    .odd-row .odd-time { font-family: ui-monospace, monospace; font-size: 0.86rem; color: #facc15; font-weight: 500; }
+    .odd-row .odd-name { font-size: 0.82rem; color: #e0e0e0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .odd-row .odd-meta { font-size: 0.7rem; color: #888; font-family: ui-monospace, monospace; white-space: nowrap; }
+    .odd-row .odd-tz   { font-size: 0.66rem; color: #666; font-family: ui-monospace, monospace; white-space: nowrap; }
+    .dup-color-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 8px; vertical-align: middle; flex-shrink: 0; }
+    .dup-map-toggle { background: none; border: 1px solid #2a2d35; color: #ccc; font-size: 0.7rem; padding: 3px 8px; border-radius: 3px; cursor: pointer; font-family: inherit; margin-left: auto; }
+    .dup-map-toggle:hover { border-color: #3b82f6; color: #3b82f6; }
+
+    /* Per-track metric block — duplicated above each mini-map */
+    .dup-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(70px, 1fr)); gap: 4px 12px; padding: 6px 10px; background: #0e1117; border-bottom: 1px solid #1e2128; }
+    .dup-metrics .m { display: flex; flex-direction: column; min-width: 0; }
+    .dup-metrics .m .lbl { font-size: 0.58rem; text-transform: uppercase; letter-spacing: 0.06em; color: #777; }
+    .dup-metrics .m .val { font-size: 0.78rem; color: #e0e0e0; font-family: ui-monospace, monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .dup-metrics .m.outlier .val { color: #f59e0b; }
+
+    /* Side-by-side mini-maps (one per track in the group) */
+    .dup-minimaps { display: none; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 1px; background: #2a2d35; border-top: 1px solid #2a2d35; }
+    .dup-group.map-open .dup-minimaps { display: grid; }
+    .dup-minimap-cell { background: #12151a; display: flex; flex-direction: column; min-width: 0; }
+    .dup-minimap-head { padding: 8px 10px; display: flex; align-items: center; gap: 8px; min-width: 0; border-bottom: 1px solid #1e2128; }
+    .dup-minimap-head .name { font-size: 0.78rem; color: #e0e0e0; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .dup-minimap-map { height: 200px; width: 100%; background: #1a1d23; }
+    .untagged-item { padding: 6px 12px; border-bottom: 1px solid #1e2128; cursor: pointer; display: flex; align-items: center; gap: 8px; }
+    .untagged-item:hover, .untagged-item.active { background: #1e2128; }
+    .untagged-item .ut-date { font-family: ui-monospace, monospace; font-size: 0.66rem; color: #888; min-width: 64px; flex-shrink: 0; }
+    .untagged-item .ut-name { font-size: 0.78rem; color: #ddd; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .untagged-item.active .ut-name { color: #fff; }
+
+    /* Delete button row in edit card */
+    .region-edit-actions { display: flex; gap: 8px; }
+    #save-region-btn { flex: 1; }
+    #delete-region-btn { padding: 6px 10px; border-radius: 4px; border: 1px solid #ef4444; background: transparent; color: #ef4444; font-size: 0.72rem; cursor: pointer; transition: all 0.12s; font-family: inherit; }
+    #delete-region-btn:hover { background: #ef4444; color: #fff; }
+    #region-edit-hint { font-size: 0.68rem; color: #888; margin-top: 4px; line-height: 1.4; }
   </style>
 </head>
 <body>
@@ -123,6 +215,8 @@
 <div id="tab-bar">
   <button class="tab-btn active" onclick="showTab('regions')">Regions</button>
   <button class="tab-btn" onclick="showTab('types')">Activity Types</button>
+  <button class="tab-btn" onclick="showTab('duplicates')">Duplicates</button>
+  <button class="tab-btn" onclick="showTab('odd-times')">Odd Times</button>
   <button class="tab-btn" onclick="showTab('fitness')">Fitness</button>
   <button class="tab-btn" onclick="showTab('sync')">Sync</button>
 </div>
@@ -142,29 +236,79 @@
   <!-- Regions panel -->
   <div id="regions-panel" class="tab-panel active">
     <div id="regions-sidebar">
-      <div id="regions-sidebar-header">
-        <span>Regions</span>
-        <button id="draw-btn" onclick="startDraw()">+ Draw</button>
-      </div>
-      <div id="draw-instructions">
-        Click on the map to add polygon vertices. Right-click to remove the last point. Double-click to finish.
-      </div>
-      <div id="region-search" style="padding: 8px 12px; border-bottom: 1px solid #2a2d35;">
-        <div style="display: flex; gap: 6px;">
-          <input id="region-search-input" type="text" placeholder="Search OSM for a park / area…"
-                 style="flex:1; background:#1a1d23; border:1px solid #2a2d35; border-radius:4px; color:#e0e0e0; font-size:0.78rem; padding:5px 8px; font-family:inherit;"
-                 onkeydown="if(event.key==='Enter')searchOsmRegions()">
-          <button onclick="searchOsmRegions()" id="region-search-btn"
-                  style="padding:5px 10px; border-radius:4px; border:1px solid #3b82f6; background:#1a2a3a; color:#3b82f6; font-size:0.72rem; cursor:pointer; font-family:inherit;">Search</button>
+
+      <!-- ─── Section 1: Current Regions ─── -->
+      <section id="current-regions-section" class="rs-section">
+        <div class="rs-section-header" onclick="toggleSection('current-regions-section')">
+          <span class="rs-section-title">Current Regions</span>
+          <span id="region-count" class="rs-count">—</span>
+          <span class="rs-section-toggle">▾</span>
         </div>
-        <div id="region-search-results" style="margin-top:6px; max-height:200px; overflow-y:auto;"></div>
-      </div>
-      <div style="padding: 8px 12px; border-bottom: 1px solid #2a2d35;">
-        <input id="region-list-filter" type="text" placeholder="Filter regions…"
-               oninput="renderRegionList()"
-               style="width:100%; background:#1a1d23; border:1px solid #2a2d35; border-radius:4px; color:#e0e0e0; font-size:0.78rem; padding:5px 8px; font-family:inherit;">
-      </div>
-      <div id="region-list"></div>
+        <div class="rs-section-body">
+          <div class="rs-padded">
+            <input id="region-list-filter" type="text" placeholder="Filter regions…"
+                   oninput="renderRegionList()">
+          </div>
+          <div id="region-list"></div>
+        </div>
+      </section>
+
+      <div class="rs-divider" data-above="current-regions-section" data-below="add-region-section" title="Drag to resize"></div>
+
+      <!-- ─── Section 2: Add Region ─── -->
+      <section id="add-region-section" class="rs-section">
+        <div class="rs-section-header" onclick="toggleSection('add-region-section')">
+          <span class="rs-section-title">Add Region</span>
+          <span class="rs-section-toggle">▾</span>
+        </div>
+        <div class="rs-section-body rs-padded">
+          <button id="draw-btn" class="rs-primary-btn" onclick="startDraw()">+ Draw new polygon</button>
+          <div id="draw-instructions">
+            Click the map to add vertices. Right-click removes the last. Double-click to finish.
+            <div style="margin-top:6px;text-align:right;"><button class="r-btn" onclick="cancelDraw()">Cancel</button></div>
+          </div>
+          <div class="rs-or">or search OpenStreetMap</div>
+          <div class="osm-search-row">
+            <input id="region-search-input" type="text" placeholder="Park / area name…"
+                   onkeydown="if(event.key==='Enter')searchOsmRegions()">
+            <button onclick="searchOsmRegions()" id="region-search-btn" title="Search OSM" aria-label="Search OSM">🔍</button>
+            <button id="region-search-clear" onclick="clearOsmSearch()" title="Clear search" aria-label="Clear search"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21"/><path d="M22 21H7"/><path d="m5 11 9 9"/></svg></button>
+            <button id="osm-filters-toggle" onclick="toggleOsmFilters()" title="OSM search exclusions" aria-label="OSM search exclusions">⚙</button>
+          </div>
+          <div id="osm-filters-body" style="display:none; margin-top:8px; padding:8px 10px; background:#0a0d12; border:1px solid #2a2d35; border-radius:4px;">
+            <div style="font-size:0.68rem;color:#888;margin-bottom:6px;text-transform:uppercase;letter-spacing:0.06em;">
+              Exclusions — OSM <code>class</code> values to drop from results
+            </div>
+            <div id="osm-deny-chips" style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:8px;"></div>
+            <div style="display:flex;gap:4px;">
+              <input id="osm-deny-input" type="text" placeholder="add class…"
+                     onkeydown="if(event.key==='Enter')addOsmDenyClass()"
+                     style="flex:1;background:#1a1d23;border:1px solid #2a2d35;border-radius:3px;color:#e0e0e0;font-size:0.74rem;padding:4px 6px;font-family:inherit;">
+              <button onclick="addOsmDenyClass()" class="r-btn">Add</button>
+              <button onclick="resetOsmDenyClasses()" class="r-btn" title="Restore defaults">Reset</button>
+            </div>
+          </div>
+          <div id="region-search-results" style="margin-top:6px; max-height:200px; overflow-y:auto;"></div>
+        </div>
+      </section>
+
+      <div class="rs-divider" data-above="add-region-section" data-below="untagged-block" title="Drag to resize"></div>
+
+      <!-- ─── Section 3: Regionless Tracks ─── -->
+      <section id="untagged-block" class="rs-section">
+        <div id="untagged-header" class="rs-section-header" onclick="toggleSection('untagged-block')">
+          <span class="rs-section-title">Regionless Tracks</span>
+          <span id="untagged-count" class="rs-count">—</span>
+          <span class="rs-section-toggle">▾</span>
+        </div>
+        <div id="untagged-body" class="rs-section-body">
+          <div id="untagged-controls">
+            <label><input type="checkbox" id="untagged-show" onchange="toggleUntaggedShow()"> Show on map</label>
+            <button id="untagged-refresh-btn" class="r-btn" onclick="loadUntagged()" title="Refresh — re-evaluate region matches">↻ Refresh</button>
+          </div>
+          <div id="untagged-list"></div>
+        </div>
+      </section>
       <div id="edit-region-card">
         <button id="region-edit-close" onclick="closeRegionEditPanel()" title="Close"
                 style="position:absolute; top:8px; right:10px; background:transparent; border:none; color:#888; font-size:1rem; cursor:pointer; padding:2px 6px; line-height:1;">×</button>
@@ -199,30 +343,49 @@
             <span style="color:#777;">(11–4 = Nov–Apr)</span>
           </div>
         </div>
-        <button id="save-region-btn" onclick="saveRegion()">Save Region</button>
+        <div class="region-edit-actions">
+          <button id="save-region-btn" onclick="saveRegion()">Save Region</button>
+          <button id="delete-region-btn" onclick="deleteCurrentRegion()" style="display:none;">Delete</button>
+        </div>
+        <div id="region-edit-hint" style="display:none;">Drag the polygon's vertices to reshape, or click an edge midpoint to add a vertex.</div>
         <div id="region-save-confirm"></div>
-      </div>
-      <div id="osm-filters">
-        <div id="osm-filters-header" onclick="toggleOsmFilters()">
-          <span style="flex:1;">OSM search exclusions</span>
-          <span id="osm-filters-arrow">▸</span>
-        </div>
-        <div id="osm-filters-body" style="display:none;">
-          <div style="font-size:0.7rem;color:#888;margin-bottom:6px;">
-            OSM <code>class</code> values to drop from search results.
-          </div>
-          <div id="osm-deny-chips" style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:8px;"></div>
-          <div style="display:flex;gap:4px;">
-            <input id="osm-deny-input" type="text" placeholder="add class…"
-                   onkeydown="if(event.key==='Enter')addOsmDenyClass()"
-                   style="flex:1;background:#1a1d23;border:1px solid #2a2d35;border-radius:3px;color:#e0e0e0;font-size:0.74rem;padding:4px 6px;font-family:inherit;">
-            <button onclick="addOsmDenyClass()" class="r-btn">Add</button>
-            <button onclick="resetOsmDenyClasses()" class="r-btn" title="Restore defaults">Reset</button>
-          </div>
-        </div>
       </div>
     </div>
     <div id="map"></div>
+  </div>
+
+  <!-- Duplicates panel -->
+  <div id="duplicates-panel" class="tab-panel" style="flex-direction: column; padding: 24px; overflow-y: auto;">
+    <div style="display:flex;align-items:baseline;gap:14px;margin-bottom:6px;">
+      <h2 style="font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.08em; color: #bbb; font-weight: 500;">
+        Likely Duplicates
+      </h2>
+      <span id="dup-summary" style="font-size:0.75rem;color:#888;">—</span>
+      <button id="dup-refresh-btn" class="r-btn" onclick="loadDuplicates()" style="margin-left:auto;">↻ Refresh</button>
+    </div>
+    <div style="font-size:0.78rem;color:#888;line-height:1.5;margin-bottom:16px;max-width:780px;">
+      Activities sharing a date with another activity whose distance and duration both fall within ±5%.
+      Same-source re-syncs (Strava re-export of a Garmin ride) usually match exactly. Use Exclude to keep a
+      duplicate file but stop it counting in stats; Delete archives the GPX to your backups folder.
+    </div>
+    <div id="dup-list"></div>
+  </div>
+
+  <!-- Odd Times panel -->
+  <div id="odd-times-panel" class="tab-panel" style="flex-direction: column; padding: 24px; overflow-y: auto;">
+    <div style="display:flex;align-items:baseline;gap:14px;margin-bottom:6px;">
+      <h2 style="font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.08em; color: #bbb; font-weight: 500;">
+        Odd Times
+      </h2>
+      <span id="odd-summary" style="font-size:0.75rem;color:#888;">—</span>
+      <button id="odd-refresh-btn" class="r-btn" onclick="loadOddTimes()" style="margin-left:auto;">↻ Refresh</button>
+    </div>
+    <div style="font-size:0.78rem;color:#888;line-height:1.5;margin-bottom:16px;max-width:780px;">
+      Activities whose start time (in the ride's local timezone) falls between 21:00 and 07:00.
+      A diagnostic for the timezone-normalization fix — anything that lights up here either is a
+      genuine night ride or has a timestamp that didn't get correctly localized at parse time.
+    </div>
+    <div id="odd-list"></div>
   </div>
 
   <!-- Sync panel -->
@@ -332,6 +495,341 @@ function showTab(name) {
   document.querySelector(`.tab-btn[onclick*="'${name}'"]`).classList.add('active');
   document.getElementById(`${name}-panel`).classList.add('active');
   if (name === 'regions') setTimeout(() => map && map.invalidateSize(), 50);
+  if (name === 'duplicates' && !_dupLoaded) loadDuplicates();
+  if (name === 'odd-times' && !_oddLoaded) loadOddTimes();
+}
+
+// ─── Duplicates management ───────────────────────────────────────────────────
+let _dupLoaded = false;
+
+async function loadDuplicates() {
+  const btn = document.getElementById('dup-refresh-btn');
+  const summary = document.getElementById('dup-summary');
+  const list = document.getElementById('dup-list');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="rs-spinner">↻</span> Refreshing…'; }
+  summary.textContent = 'Scanning…';
+  list.innerHTML = '';
+  try {
+    const r = await fetch('/api/duplicates?t=' + Date.now(), { cache: 'no-store' });
+    const d = await r.json();
+    _dupLoaded = true;
+    renderDuplicates(d);
+  } catch (e) {
+    summary.textContent = 'Failed to load.';
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = '↻ Refresh'; }
+  }
+}
+
+function renderDuplicates(payload) {
+  const summary = document.getElementById('dup-summary');
+  const list = document.getElementById('dup-list');
+  const groups = payload.groups || [];
+  if (!groups.length) {
+    summary.textContent = '';
+    list.innerHTML = '<div class="dup-empty">No duplicates found.</div>';
+    return;
+  }
+  const totalTracks = groups.reduce((n, g) => n + g.tracks.length, 0);
+  summary.textContent = `${groups.length} group${groups.length===1?'':'s'} · ${totalTracks} tracks`;
+  list.innerHTML = '';
+  groups.forEach(g => list.appendChild(_renderDupGroup(g)));
+}
+
+function _fmtDuration(secs) {
+  if (secs == null) return '—';
+  const h = Math.floor(secs / 3600);
+  const m = Math.floor((secs % 3600) / 60);
+  return h ? `${h}h ${m}m` : `${m}m`;
+}
+
+// "2026-04-28T18:09:02+00:00" → "12:09" in browser local time. Returns null
+// when the input can't be parsed so the caller can skip rendering.
+function _fmtTime(iso) {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return null;
+  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+}
+
+// Distinct colors for tracks within a group. Saturated and well-separated
+// so a 2-track comparison is unambiguous against any OSM background. Each
+// polyline also gets a white "casing" stroke beneath it so the line stays
+// visible on dark forest tiles, light field tiles, and water alike.
+const _DUP_PALETTE = ['#1e40af', '#dc2626', '#a855f7', '#0f766e', '#ea580c', '#be185d'];
+
+// Returns the set of filenames whose elevation gain is a wild outlier vs.
+// the rest of the group — useful for spotting tracks where one source had
+// noisy GPS-derived elevation while the other had clean barometric data
+// (e.g. 2025-09-03 with +124 m vs +3948 m).
+function _dupElevOutliers(tracks) {
+  const vals = tracks.map(t => t.elev_gain_m).filter(v => v != null);
+  if (vals.length < 2) return new Set();
+  const sorted = [...vals].sort((a, b) => a - b);
+  const median = sorted[Math.floor(sorted.length / 2)];
+  // Flag if elev gain is >2x or <0.5x the median, AND differs by ≥50 m.
+  const out = new Set();
+  tracks.forEach(t => {
+    if (t.elev_gain_m == null) return;
+    const ratio = median > 0 ? t.elev_gain_m / median : (t.elev_gain_m === 0 ? 1 : Infinity);
+    if ((ratio > 2 || ratio < 0.5) && Math.abs(t.elev_gain_m - median) >= 50) out.add(t.filename);
+  });
+  return out;
+}
+
+// Per-track metric block — duplicated above each mini-map / inside each card
+// so the user can read time / distance / climbing / type without leaving the
+// map row. The same block is used by both layouts.
+function _buildDupMetrics(t, isElevOutlier) {
+  const wrap = document.createElement('div');
+  wrap.className = 'dup-metrics';
+  const startTime = _fmtTime(t.start_time);
+  const endTime   = _fmtTime(t.end_time);
+  const items = [
+    ['Time',     (startTime && endTime) ? `${startTime}–${endTime}` : '—', false],
+    ['Distance', t.distance_km != null ? `${t.distance_km.toFixed(2)} km` : '—', false],
+    ['Duration', _fmtDuration(t.duration_sec), false],
+    ['Climbing', t.elev_gain_m != null ? `↑${Math.round(t.elev_gain_m)} m` : '—', !!isElevOutlier],
+    ['Type',     t.type || '—', false],
+  ];
+  items.forEach(([lbl, val, outlier]) => {
+    const m = document.createElement('div');
+    m.className = 'm' + (outlier ? ' outlier' : '');
+    m.innerHTML = `<span class="lbl"></span><span class="val"></span>`;
+    m.querySelector('.lbl').textContent = lbl;
+    m.querySelector('.val').textContent = (outlier ? '⚠ ' : '') + val;
+    wrap.appendChild(m);
+  });
+  return wrap;
+}
+
+function _buildDupActions(t, container) {
+  const actions = document.createElement('div');
+  actions.className = 'dup-actions';
+  // Real anchor → middle-click opens in a new tab natively.
+  const viewBtn = document.createElement('a');
+  viewBtn.className = 'r-btn';
+  viewBtn.textContent = 'Open';
+  viewBtn.title = 'Open this activity in Ride Logs (middle-click for new tab)';
+  viewBtn.href = `/?file=${encodeURIComponent(t.filename)}`;
+  viewBtn.style.textDecoration = 'none';
+  const excludeBtn = document.createElement('button');
+  excludeBtn.className = 'r-btn' + (t.excluded ? ' active' : '');
+  excludeBtn.textContent = t.excluded ? 'Excluded' : 'Exclude';
+  excludeBtn.title = t.excluded
+    ? 'Currently excluded — click to re-include'
+    : 'Exclude this activity from stats';
+  excludeBtn.onclick = () => toggleDupExclude(t.filename, !t.excluded, container, excludeBtn);
+  const deleteBtn = document.createElement('button');
+  deleteBtn.className = 'r-btn danger';
+  deleteBtn.textContent = 'Delete';
+  deleteBtn.title = 'Archive the GPX (recoverable from backups)';
+  deleteBtn.onclick = () => deleteDupTrack(t.filename, container);
+  actions.appendChild(viewBtn);
+  actions.appendChild(excludeBtn);
+  actions.appendChild(deleteBtn);
+  return actions;
+}
+
+function _buildDupGroupHeader(g, elevOutliers) {
+  const header = document.createElement('div');
+  header.className = 'dup-group-header';
+  header.innerHTML = `<span class="dup-date"></span>
+                     <span class="dup-count"></span>
+                     <button class="dup-map-toggle" type="button">Show map</button>`;
+  header.querySelector('.dup-date').textContent = g.date;
+  const countLabel = elevOutliers.size
+    ? `${g.tracks.length} tracks  ·  elev diverges`
+    : `${g.tracks.length} tracks`;
+  header.querySelector('.dup-count').textContent = countLabel;
+  if (elevOutliers.size) header.querySelector('.dup-count').style.color = '#f59e0b';
+  return header;
+}
+
+// Render a duplicate group: compact row list on top, then side-by-side
+// mini-maps with the metrics duplicated above each map. The maps are lazy-
+// initialised when the user clicks "Show maps" on the group header.
+function _renderDupGroup(g) {
+  const wrap = document.createElement('div');
+  wrap.className = 'dup-group';
+  wrap.dataset.date = g.date;
+  const elevOutliers = _dupElevOutliers(g.tracks);
+  const header = _buildDupGroupHeader(g, elevOutliers);
+  const toggle = header.querySelector('.dup-map-toggle');
+  toggle.textContent = 'Show maps';
+  toggle.onclick = () => toggleDupGroupMaps(wrap, g, toggle);
+  wrap.appendChild(header);
+  // Compact row list
+  g.tracks.forEach((t, i) => {
+    wrap.appendChild(_renderDupRow(t, _DUP_PALETTE[i % _DUP_PALETTE.length],
+                                   elevOutliers.has(t.filename)));
+  });
+  // Side-by-side mini-maps grid (shown when group is .map-open)
+  const minimaps = document.createElement('div');
+  minimaps.className = 'dup-minimaps';
+  g.tracks.forEach((t, i) => {
+    const color = _DUP_PALETTE[i % _DUP_PALETTE.length];
+    const cell = document.createElement('div');
+    cell.className = 'dup-minimap-cell';
+    const mhead = document.createElement('div');
+    mhead.className = 'dup-minimap-head';
+    const dot = document.createElement('span');
+    dot.className = 'dup-color-dot';
+    dot.style.background = color;
+    const name = document.createElement('div');
+    name.className = 'name';
+    name.textContent = t.name;
+    mhead.appendChild(dot);
+    mhead.appendChild(name);
+    cell.appendChild(mhead);
+    cell.appendChild(_buildDupMetrics(t, elevOutliers.has(t.filename)));
+    const mapDiv = document.createElement('div');
+    mapDiv.className = 'dup-minimap-map';
+    mapDiv.dataset.filename = t.filename;
+    mapDiv.dataset.color = color;
+    cell.appendChild(mapDiv);
+    minimaps.appendChild(cell);
+  });
+  wrap.appendChild(minimaps);
+  return wrap;
+}
+
+function _renderDupRow(t, color, isElevOutlier) {
+  const row = document.createElement('div');
+  row.className = 'dup-row' + (t.excluded ? ' excluded' : '');
+  row.dataset.filename = t.filename;
+  row.dataset.color = color;
+  const distance = t.distance_km != null ? `${t.distance_km.toFixed(2)} km` : '—';
+  const duration = _fmtDuration(t.duration_sec);
+  const elev     = t.elev_gain_m != null
+    ? `${isElevOutlier ? '⚠ ' : ''}↑${Math.round(t.elev_gain_m)} m`
+    : '';
+  const startTime = _fmtTime(t.start_time);
+  const endTime   = _fmtTime(t.end_time);
+  const timeRange = (startTime && endTime) ? `${startTime}–${endTime}` : '';
+  const regionLabel = (t.regions || []).slice(0, 2).join(', ');
+  const left = document.createElement('div');
+  left.style.minWidth = '0';
+  left.style.display = 'flex';
+  left.style.alignItems = 'center';
+  const dot = document.createElement('span');
+  dot.className = 'dup-color-dot';
+  dot.style.background = color;
+  const textWrap = document.createElement('div');
+  textWrap.style.minWidth = '0';
+  textWrap.style.flex = '1';
+  textWrap.innerHTML = `<div class="dup-name"></div>
+                        <div class="dup-filename"></div>`;
+  textWrap.querySelector('.dup-name').textContent = t.name + (regionLabel ? `  ·  ${regionLabel}` : '');
+  textWrap.querySelector('.dup-filename').textContent = t.filename;
+  left.appendChild(dot);
+  left.appendChild(textWrap);
+  const meta = document.createElement('div');
+  meta.className = 'dup-meta';
+  const parts = [distance, duration];
+  if (timeRange) parts.push(timeRange);
+  if (elev)      parts.push(elev);
+  meta.textContent = parts.join(' · ');
+  const typeChip = document.createElement('div');
+  typeChip.className = 'dup-meta';
+  typeChip.textContent = t.type || '—';
+  row.appendChild(left);
+  row.appendChild(meta);
+  row.appendChild(typeChip);
+  row.appendChild(_buildDupActions(t, row));
+  return row;
+}
+
+// Lazy-init: on first "Show maps" click, fetch each track's decimated coords
+// in parallel and render one polyline per mini-map with a white casing for
+// tile-agnostic visibility.
+async function toggleDupGroupMaps(groupEl, group, btn) {
+  const open = !groupEl.classList.contains('map-open');
+  groupEl.classList.toggle('map-open', open);
+  btn.textContent = open ? 'Hide maps' : 'Show maps';
+  if (!open) return;
+  if (groupEl._mapsInitialised) {
+    setTimeout(() => {
+      groupEl.querySelectorAll('.dup-minimap-map').forEach(d => {
+        if (d._leafletMap) d._leafletMap.invalidateSize();
+      });
+    }, 50);
+    return;
+  }
+  btn.disabled = true;
+  try {
+    const mapDivs = [...groupEl.querySelectorAll('.dup-minimap-map')];
+    await Promise.all(mapDivs.map(async div => {
+      const filename = div.dataset.filename;
+      const color    = div.dataset.color;
+      try {
+        const r = await fetch('/api/track-coords/' + encodeURIComponent(filename));
+        if (!r.ok) return;
+        const d = await r.json();
+        if (!d.coords || d.coords.length < 2) return;
+        const m = L.map(div, { zoomControl: true, attributionControl: false });
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(m);
+        L.polyline(d.coords, { color: '#ffffff', weight: 6, opacity: 0.7 }).addTo(m);
+        const line = L.polyline(d.coords, { color, weight: 3, opacity: 0.95 }).addTo(m);
+        m.fitBounds(line.getBounds(), { padding: [10, 10] });
+        div._leafletMap = m;
+      } catch (e) {}
+    }));
+    groupEl._mapsInitialised = true;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function toggleDupExclude(filename, excluded, row, btn) {
+  btn.disabled = true;
+  try {
+    const r = await fetch(`/api/activity/${encodeURIComponent(filename)}/metadata`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ excluded_from_stats: excluded }),
+    });
+    if (!r.ok) throw new Error('save failed');
+    row.classList.toggle('excluded', excluded);
+    btn.classList.toggle('active', excluded);
+    btn.textContent = excluded ? 'Excluded' : 'Exclude';
+    btn.title = excluded
+      ? 'Currently excluded from stats — click to re-include'
+      : 'Exclude this activity from totals/PRs without deleting the GPX';
+  } catch (e) {
+    alert('Failed to update: ' + e.message);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function deleteDupTrack(filename, row) {
+  if (!confirm(`Archive ${filename}?\n\nThe GPX file will be moved to your backups folder.`)) return;
+  try {
+    const r = await fetch(`/api/activity/${encodeURIComponent(filename)}`, { method: 'DELETE' });
+    if (!r.ok) throw new Error('delete failed');
+    const group = row.closest('.dup-group');
+    row.remove();
+    // Drop the matching mini-map cell too
+    if (group) {
+      const safeFn = filename.replace(/"/g, '\\"');
+      const stray = group.querySelector(`.dup-minimap-map[data-filename="${safeFn}"]`);
+      if (stray) {
+        const cell = stray.closest('.dup-minimap-cell');
+        if (cell) cell.remove();
+      }
+      // If the group now has <2 visible rows, drop it entirely
+      if (group.querySelectorAll('.dup-row').length < 2) group.remove();
+    }
+    const remainingGroups = document.querySelectorAll('#dup-list .dup-group').length;
+    const remainingTracks = document.querySelectorAll('#dup-list .dup-row').length;
+    document.getElementById('dup-summary').textContent =
+      remainingGroups ? `${remainingGroups} group${remainingGroups===1?'':'s'} · ${remainingTracks} tracks` : '';
+    if (!remainingGroups) {
+      document.getElementById('dup-list').innerHTML = '<div class="dup-empty">No duplicates remaining.</div>';
+    }
+  } catch (e) {
+    alert('Failed to delete: ' + e.message);
+  }
 }
 
 // ─── Types management ────────────────────────────────────────────────────────
@@ -514,10 +1012,13 @@ let _osmDenyClasses = [];
 
 function toggleOsmFilters() {
   const body = document.getElementById('osm-filters-body');
-  const arrow = document.getElementById('osm-filters-arrow');
+  const btn  = document.getElementById('osm-filters-toggle');
   const open = body.style.display === 'none';
   body.style.display = open ? 'block' : 'none';
-  arrow.textContent = open ? '▾' : '▸';
+  if (btn) {
+    btn.style.borderColor = open ? '#3b82f6' : '#2a2d35';
+    btn.style.color       = open ? '#3b82f6' : '#888';
+  }
   if (open && !_osmDenyClasses.length) loadOsmDenyClasses();
 }
 
@@ -617,6 +1118,14 @@ function _clearOsmPreview() {
   if (_osmPreviewLayer) { map.removeLayer(_osmPreviewLayer); _osmPreviewLayer = null; }
 }
 
+function clearOsmSearch() {
+  document.getElementById('region-search-input').value = '';
+  document.getElementById('region-search-results').innerHTML = '';
+  _osmResultsCache = [];
+  _clearOsmPreview();
+  document.getElementById('region-search-input').focus();
+}
+
 function previewOsmResult(i) {
   const res = _osmResultsCache[i];
   if (!res) return;
@@ -653,6 +1162,7 @@ function useOsmResult(i) {
 let _pendingSource = '';
 
 function startDraw() {
+  _disableRegionEditing();
   editingId = null;
   pendingLayer = null;
   document.getElementById('draw-btn').classList.add('active');
@@ -661,6 +1171,15 @@ function startDraw() {
   map.addControl(drawControl);
   _activeDrawHandler = new L.Draw.Polygon(map, drawControl.options.draw.polygon);
   _activeDrawHandler.enable();
+}
+
+function cancelDraw() {
+  if (_activeDrawHandler) { try { _activeDrawHandler.disable(); } catch(e) {} _activeDrawHandler = null; }
+  if (pendingLayer) { try { drawnItems.removeLayer(pendingLayer); } catch (e) {} pendingLayer = null; }
+  try { map.removeControl(drawControl); } catch (e) {}
+  document.getElementById('draw-btn').classList.remove('active');
+  document.getElementById('draw-instructions').classList.remove('visible');
+  document.getElementById('regions-sidebar').classList.remove('editing-active');
 }
 
 // Right-click while drawing removes the most recently added vertex.
@@ -682,18 +1201,33 @@ function closeRegionEditPanel() {
   }
   _pendingSource = '';
   try { map.removeControl(drawControl); } catch (e) {}
+  // If we were editing an existing region, revert any unsaved geometry drag
+  // by re-rendering layers from the saved regions list.
+  const wasEditingExisting = editingId && _editingLayer;
+  _disableRegionEditing();
   document.getElementById('edit-region-card').classList.remove('visible');
   document.getElementById('draw-btn').classList.remove('active');
   document.getElementById('draw-instructions').classList.remove('visible');
+  document.getElementById('delete-region-btn').style.display = 'none';
+  document.getElementById('regions-sidebar').classList.remove('editing-active');
   editingId = null;
+  if (wasEditingExisting) renderRegionLayers();
 }
 
 function showRegionEditPanel(id) {
+  // Switching to a different region (or to "new") cancels any in-flight edit drag.
+  if (_editingLayer && (!id || regionLayers[id] !== _editingLayer)) {
+    const wasEditing = editingId;
+    _disableRegionEditing();
+    if (wasEditing && wasEditing !== id) renderRegionLayers();
+  }
   editingId = id;
   const panel = document.getElementById('edit-region-card');
   panel.classList.add('visible');
+  document.getElementById('regions-sidebar').classList.add('editing-active');
   document.getElementById('edit-title-label').textContent = id ? 'Edit Region' : 'New Region';
   document.getElementById('region-save-confirm').textContent = '';
+  document.getElementById('delete-region-btn').style.display = id ? 'inline-block' : 'none';
   if (id) {
     const r = regions.find(r => r.id === id);
     document.getElementById('r-name').value = r?.name || '';
@@ -703,6 +1237,8 @@ function showRegionEditPanel(id) {
     document.getElementById('r-winter-start').value = wm[0] || 11;
     document.getElementById('r-winter-end').value   = wm[wm.length - 1] || 4;
     selectedColor = r?.color || PALETTE[0];
+    _enableRegionEditing(id);
+    zoomToRegion(id);
   } else {
     document.getElementById('r-name').value = '';
     document.getElementById('r-default-type').value = '';
@@ -754,9 +1290,14 @@ async function saveRegion() {
     document.getElementById('r-winter-end').value,
   );
   if (editingId) {
+    const body = { name, color: selectedColor, default_type, winter_default_type, winter_months };
+    // If the polygon was reshaped, persist the new geometry too.
+    const geom = _editedGeometry(editingId);
+    if (geom) body.geometry = geom;
+    _disableRegionEditing();
     await fetch(`/api/regions/${editingId}`, {
       method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, color: selectedColor, default_type, winter_default_type, winter_months }),
+      body: JSON.stringify(body),
     });
   } else {
     if (!pendingLayer) return;
@@ -773,7 +1314,22 @@ async function saveRegion() {
   document.getElementById('region-save-confirm').textContent = 'Saved';
   setTimeout(() => document.getElementById('region-save-confirm').textContent = '', 2000);
   document.getElementById('edit-region-card').classList.remove('visible');
+  document.getElementById('delete-region-btn').style.display = 'none';
+  document.getElementById('regions-sidebar').classList.remove('editing-active');
+  editingId = null;
   await loadRegions();
+  // Note: we deliberately do NOT auto-refresh the Regionless Tracks list
+  // here. Re-evaluating region matches across every activity is heavy, and
+  // when adding several regions in a row that recompute would fire on each
+  // save. Hit the Refresh button on Regionless Tracks (or navigate to
+  // another page) to trigger the recompute on demand.
+}
+
+async function deleteCurrentRegion() {
+  if (!editingId) return;
+  const id = editingId;
+  await deleteRegion(id);
+  if (!regions.find(r => r.id === id)) closeRegionEditPanel();
 }
 
 async function deleteRegion(id) {
@@ -805,21 +1361,63 @@ async function loadRegions() {
 }
 
 function renderRegionLayers() {
+  _disableRegionEditing();
   Object.values(regionLayers).forEach(l => map.removeLayer(l));
   Object.keys(regionLayers).forEach(k => delete regionLayers[k]);
   regions.forEach(r => {
     const layer = L.geoJSON(r.geometry, {
       style: { color: r.color, weight: 2, fillColor: r.color, fillOpacity: 0.12 },
     }).addTo(map);
-    layer.on('click', () => { zoomToRegion(r.id); showRegionEditPanel(r.id); });
+    // Click anywhere on a region polygon → open its edit panel.
+    // Bubbling click handler covers vertex / edge area too.
+    layer.on('click', () => { showRegionEditPanel(r.id); });
     regionLayers[r.id] = layer;
   });
 }
 
+let _editingLayer = null;
+
+function _enableRegionEditing(id) {
+  _disableRegionEditing();
+  const layer = regionLayers[id];
+  if (!layer) return;
+  layer.eachLayer(sub => {
+    if (sub.editing && sub.editing.enable) {
+      try { sub.editing.enable(); } catch (e) {}
+    }
+  });
+  _editingLayer = layer;
+  document.getElementById('region-edit-hint').style.display = 'block';
+}
+
+function _disableRegionEditing() {
+  if (!_editingLayer) return;
+  _editingLayer.eachLayer(sub => {
+    if (sub.editing && sub.editing.disable) {
+      try { sub.editing.disable(); } catch (e) {}
+    }
+  });
+  _editingLayer = null;
+  const hint = document.getElementById('region-edit-hint');
+  if (hint) hint.style.display = 'none';
+}
+
+function _editedGeometry(id) {
+  const layer = regionLayers[id];
+  if (!layer) return null;
+  const fc = layer.toGeoJSON();
+  if (fc?.type === 'FeatureCollection' && fc.features.length) return fc.features[0].geometry;
+  if (fc?.type === 'Feature') return fc.geometry;
+  if (fc?.type && fc?.coordinates) return fc;
+  return null;
+}
+
 function renderRegionList() {
   const list = document.getElementById('region-list');
+  const countEl = document.getElementById('region-count');
+  if (countEl) countEl.textContent = String(regions.length);
   if (!regions.length) {
-    list.innerHTML = '<div id="no-regions">No regions yet.<br>Click <strong>+ Draw</strong> to create one.</div>';
+    list.innerHTML = '<div id="no-regions">No regions yet.<br>Use <strong>Add Region</strong> below.</div>';
     return;
   }
   // Sort alphabetically (case-insensitive); apply text filter from the input
@@ -871,6 +1469,172 @@ function renderRegionList() {
 
 loadRegions();
 
+// ─── Untagged tracks (coverage-gap finder) ───────────────────────────────────
+let untaggedTracks = [];
+let untaggedLayers = {};
+let untaggedShown = false;
+let highlightedUntaggedFn = null;
+const _untaggedGroup = L.layerGroup().addTo(map);
+const _UT_BASE_STYLE = { color: '#facc15', weight: 1.5, opacity: 0.55 };
+const _UT_HIGHLIGHT_STYLE = { color: '#f97316', weight: 3, opacity: 1.0 };
+const _UT_HOVER_STYLE = { weight: 3, opacity: 0.95 };
+
+// Generic collapse toggle — used by all three sidebar sections. The body of
+// the section is hidden via the `.collapsed` class while the title banner
+// stays visible. Sections share the available height equally; collapsing one
+// gives its space back to the others.
+function toggleSection(id) {
+  const sec = document.getElementById(id);
+  if (!sec) return;
+  const wasCollapsed = sec.classList.contains('collapsed');
+  sec.classList.toggle('collapsed');
+  // First time the Regionless Tracks section is opened, populate the list.
+  if (id === 'untagged-block' && wasCollapsed && untaggedTracks.length === 0) {
+    loadUntagged();
+  }
+}
+
+let _untaggedLoading = false;
+async function loadUntagged() {
+  if (_untaggedLoading) return;
+  _untaggedLoading = true;
+  const btn = document.getElementById('untagged-refresh-btn');
+  const countEl = document.getElementById('untagged-count');
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '<span class="rs-spinner">↻</span> Refreshing…';
+  }
+  if (countEl) countEl.innerHTML = '<span class="rs-spinner" style="font-size:0.7rem;">↻</span>';
+  try {
+    // cache:'no-store' + cache-busting param so browser/proxy caches can't
+    // serve a stale response when the user is explicitly asking for fresh data.
+    const r = await fetch('/api/regions/untagged?t=' + Date.now(), { cache: 'no-store' });
+    untaggedTracks = await r.json();
+  } catch (e) {
+    untaggedTracks = [];
+  } finally {
+    _untaggedLoading = false;
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = '↻ Refresh';
+    }
+  }
+  if (countEl) countEl.textContent = String(untaggedTracks.length);
+  renderUntaggedList();
+  renderUntaggedLayers();
+}
+
+function toggleUntaggedShow() {
+  untaggedShown = document.getElementById('untagged-show').checked;
+  renderUntaggedLayers();
+}
+
+function renderUntaggedLayers() {
+  _untaggedGroup.clearLayers();
+  untaggedLayers = {};
+  if (!untaggedShown) return;
+  untaggedTracks.forEach(t => {
+    if (!t.coords || t.coords.length < 2) return;
+    const line = L.polyline(t.coords, { ..._UT_BASE_STYLE, interactive: true });
+    line.on('click', () => focusUntagged(t.filename));
+    line.on('mouseover', () => {
+      if (highlightedUntaggedFn !== t.filename) line.setStyle(_UT_HOVER_STYLE);
+    });
+    line.on('mouseout', () => {
+      if (highlightedUntaggedFn !== t.filename) line.setStyle(_UT_BASE_STYLE);
+    });
+    _untaggedGroup.addLayer(line);
+    untaggedLayers[t.filename] = line;
+  });
+  // Re-apply highlight if we still have one
+  if (highlightedUntaggedFn && untaggedLayers[highlightedUntaggedFn]) {
+    untaggedLayers[highlightedUntaggedFn].setStyle(_UT_HIGHLIGHT_STYLE);
+    untaggedLayers[highlightedUntaggedFn].bringToFront();
+  }
+}
+
+function renderUntaggedList() {
+  const list = document.getElementById('untagged-list');
+  if (!untaggedTracks.length) {
+    list.innerHTML = '<div style="padding:14px 16px;color:#666;font-size:0.78rem;text-align:center;">All activities have a region match.</div>';
+    return;
+  }
+  list.innerHTML = '';
+  untaggedTracks.forEach(t => {
+    const el = document.createElement('div');
+    el.className = 'untagged-item' + (t.filename === highlightedUntaggedFn ? ' active' : '');
+    el.dataset.filename = t.filename;
+    el.innerHTML = `<span class="ut-date"></span><span class="ut-name"></span>`;
+    el.querySelector('.ut-date').textContent = t.date || '';
+    el.querySelector('.ut-name').textContent = t.name || t.filename;
+    el.title = `${t.name}\n${t.date}${t.type ? '  ·  ' + t.type : ''}`;
+    el.onclick = () => focusUntagged(t.filename);
+    list.appendChild(el);
+  });
+}
+
+function focusUntagged(filename) {
+  // If overlay is hidden, switch it on so the click has a visible effect
+  if (!untaggedShown) {
+    document.getElementById('untagged-show').checked = true;
+    untaggedShown = true;
+    renderUntaggedLayers();
+  }
+  const layer = untaggedLayers[filename];
+  if (!layer) return;
+  // Drop previous highlight
+  if (highlightedUntaggedFn && untaggedLayers[highlightedUntaggedFn]) {
+    untaggedLayers[highlightedUntaggedFn].setStyle(_UT_BASE_STYLE);
+  }
+  highlightedUntaggedFn = filename;
+  layer.setStyle(_UT_HIGHLIGHT_STYLE);
+  layer.bringToFront();
+  map.fitBounds(layer.getBounds(), { padding: [60, 60], maxZoom: 15 });
+  document.querySelectorAll('.untagged-item').forEach(e =>
+    e.classList.toggle('active', e.dataset.filename === filename));
+}
+
+// Drag handles between sidebar sections. Each handle transfers height between
+// its two adjacent sections only — others keep their flex:1 share. We pin
+// the two affected sections to explicit pixel heights via flex-basis; the
+// initial equal-space layout is preserved until a divider is actually dragged.
+(function wireSectionResizers() {
+  document.querySelectorAll('#regions-sidebar .rs-divider').forEach(div => {
+    let startY = 0, aboveStartH = 0, belowStartH = 0, above = null, below = null;
+    function onMove(e) {
+      const dy = e.clientY - startY;
+      const newAbove = aboveStartH + dy;
+      const newBelow = belowStartH - dy;
+      if (newAbove < 60 || newBelow < 60) return;
+      above.style.flex = '0 0 ' + newAbove + 'px';
+      below.style.flex = '0 0 ' + newBelow + 'px';
+    }
+    function onUp() {
+      div.classList.remove('dragging');
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+    }
+    div.addEventListener('mousedown', e => {
+      e.preventDefault();
+      above = document.getElementById(div.dataset.above);
+      below = document.getElementById(div.dataset.below);
+      if (!above || !below) return;
+      // Don't drag into a collapsed section — there's no body to give/take.
+      if (above.classList.contains('collapsed') || below.classList.contains('collapsed')) return;
+      startY = e.clientY;
+      aboveStartH = above.getBoundingClientRect().height;
+      belowStartH = below.getBoundingClientRect().height;
+      div.classList.add('dragging');
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+    });
+  });
+})();
+
+// Populate Regionless Tracks count once on page open. Subsequent updates only
+// happen when the user hits Refresh or navigates away and back.
+loadUntagged();
+
 // If linked from an activity, switch to regions tab and zoom map to track bounds
 (function applyDeepLink() {
   const params = new URLSearchParams(window.location.search);
@@ -886,6 +1650,90 @@ loadRegions();
     }
   }
 })();
+
+// ─── Odd Times management ───────────────────────────────────────────────────
+let _oddLoaded = false;
+
+async function loadOddTimes() {
+  const btn = document.getElementById('odd-refresh-btn');
+  const summary = document.getElementById('odd-summary');
+  const list = document.getElementById('odd-list');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="rs-spinner">↻</span> Scanning…'; }
+  summary.textContent = 'Scanning…';
+  list.innerHTML = '';
+  try {
+    const r = await fetch('/api/odd-times?t=' + Date.now(), { cache: 'no-store' });
+    const d = await r.json();
+    _oddLoaded = true;
+    renderOddTimes(d);
+  } catch (e) {
+    summary.textContent = 'Failed to load.';
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = '↻ Refresh'; }
+  }
+}
+
+function renderOddTimes(payload) {
+  const summary = document.getElementById('odd-summary');
+  const list = document.getElementById('odd-list');
+  const acts = payload.activities || [];
+  if (!acts.length) {
+    summary.textContent = '';
+    list.innerHTML = '<div class="dup-empty">No activities flagged — every ride starts inside daylight hours.</div>';
+    return;
+  }
+  summary.textContent = `${acts.length} flagged`;
+  list.innerHTML = '';
+  acts.forEach(a => list.appendChild(_renderOddRow(a)));
+}
+
+function _renderOddRow(a) {
+  const row = document.createElement('div');
+  row.className = 'odd-row';
+  const time = _fmtTime(a.start_time) || '—';
+  const dist = a.distance_km != null ? `${a.distance_km.toFixed(1)} km` : '—';
+  const dur  = _fmtDuration(a.duration_sec);
+  const tz   = a.tz_offset != null ? `UTC${a.tz_offset >= 0 ? '+' : ''}${a.tz_offset}` : 'no offset';
+  const regions = (a.regions || []).join(', ');
+
+  const dateEl = document.createElement('div');
+  dateEl.className = 'odd-date';
+  dateEl.textContent = a.date || '—';
+
+  const timeEl = document.createElement('div');
+  timeEl.className = 'odd-time';
+  timeEl.textContent = time;
+
+  const nameWrap = document.createElement('div');
+  nameWrap.style.minWidth = '0';
+  const nameEl = document.createElement('div');
+  nameEl.className = 'odd-name';
+  nameEl.textContent = a.name;
+  nameEl.title = a.filename;
+  const subEl = document.createElement('div');
+  subEl.className = 'odd-tz';
+  subEl.textContent = `${a.type || '—'}${regions ? ' · ' + regions : ''} · ${tz}`;
+  nameWrap.appendChild(nameEl);
+  nameWrap.appendChild(subEl);
+
+  const metaEl = document.createElement('div');
+  metaEl.className = 'odd-meta';
+  metaEl.textContent = `${dist} · ${dur}`;
+
+  const openBtn = document.createElement('a');
+  openBtn.className = 'r-btn';
+  openBtn.textContent = 'Open';
+  openBtn.title = 'Open this activity in Ride Logs (middle-click for new tab)';
+  openBtn.href = `/?file=${encodeURIComponent(a.filename)}`;
+  openBtn.style.textDecoration = 'none';
+
+  row.appendChild(dateEl);
+  row.appendChild(timeEl);
+  row.appendChild(nameWrap);
+  row.appendChild(metaEl);
+  row.appendChild(openBtn);
+  return row;
+}
 
 // ─── Fitness: max HR ─────────────────────────────────────────────────────────
 async function loadMaxHr() {
