@@ -13,8 +13,6 @@
   <script src="/static/utils.js"></script>
   <script src="/static/sync_toast.js" defer></script>
   <link rel="stylesheet" href="/static/base.css">
-  <link rel="stylesheet" href="/static/preview.css">
-  <script src="/static/preview-toggle.js" defer></script>
 
   <link href="https://api.mapbox.com/mapbox-gl-js/v3.3.0/mapbox-gl.css" rel="stylesheet">
   <script src="https://api.mapbox.com/mapbox-gl-js/v3.3.0/mapbox-gl.js"></script>
@@ -24,6 +22,8 @@
     /* position+z-index so the region popover (inside this strip) can render
        above Leaflet map panes (which reach z-index 700) further down the page. */
     #activity-header { background: var(--bg-card); border-bottom: 1px solid var(--border-hair); padding: 8px 20px; display: flex; align-items: center; gap: 14px; flex-shrink: 0; position: relative; z-index: 1100; }
+    #back-to-logs { font-family: var(--font-mono); font-size: 0.7rem; color: var(--text-tertiary); text-decoration: none; padding: 4px 8px; border-radius: 3px; border: 1px solid var(--border-row); transition: all 0.12s; flex-shrink: 0; letter-spacing: 0.04em; }
+    #back-to-logs:hover { color: #fff; border-color: var(--accent); background: rgba(59,130,246,0.05); }
     .ah-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
     .ah-row-1 { display: flex; align-items: center; gap: 10px; min-width: 0; }
     .ah-row-2 { font-size: 0.72rem; color: var(--text-secondary); padding-left: 2px; min-height: 14px; line-height: 1.3; }
@@ -475,8 +475,6 @@
     <a href="/heatmap">Heat Map</a>
     <a href="/training-load">Training Load</a>
     <a href="/setup">Setup</a>
-    <button id="preview-toggle-btn" class="preview-toggle-btn" onclick="togglePreviewStyles()"
-            title="Toggle style-cleanup preview (sticky across pages)">Preview</button>
     <button class="nav-sync-btn" onclick="triggerSyncAll()" title="Sync Strava + Garmin now">Sync</button>
   </nav>
 </header>
@@ -553,6 +551,7 @@
 
   <div id="content">
     <div id="activity-header">
+      <a href="/logs" id="back-to-logs" title="Back to Logs">← Logs</a>
       <div class="ah-main">
         <div class="ah-row-1">
           <span id="header-type-icon" title="Activity type" onclick="openTypePicker()"></span>

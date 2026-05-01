@@ -69,38 +69,31 @@ nav a {
 nav a:hover   { color: #fff; background: rgba(255,255,255,0.05); }
 nav a.active  { color: #3b82f6; background: #1a2a3a; }
 
-/* Sync trigger sits in the header right side, after the nav links. */
+/* Sync trigger — visually distinct from nav links so it reads as an
+   action, not navigation. Sits at the far-right corner of the header
+   via `margin-left: auto`. Subtle uppercase + monospace + hairline
+   border + small icon glyph keep it distinguishable but not loud. */
 .nav-sync-btn {
   margin-left: auto;
-  font-size: 0.75rem;
-  padding: 4px 10px;
-  border-radius: 4px;
-  border: 1px solid rgba(255,255,255,0.08);
+  font-size: 0.7rem;
+  padding: 5px 14px;
+  border-radius: 3px;
+  border: 1px solid rgba(255,255,255,0.14);
   background: transparent;
-  color: rgba(255,255,255,0.7);
+  color: rgba(255,255,255,0.75);
   cursor: pointer;
   transition: all 0.12s;
-  font-family: inherit;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
-.nav-sync-btn:hover { color: #fff; background: rgba(255,255,255,0.05); border-color: #3b82f6; }
+.nav-sync-btn::before { content: '↻'; font-size: 0.95rem; line-height: 1; transform: translateY(-1px); }
+.nav-sync-btn:hover { color: #fff; background: rgba(59,130,246,0.10); border-color: #3b82f6; }
 .nav-sync-btn:active { transform: translateY(1px); }
 
-/* Style-cleanup preview toggle. Sits next to the Sync button. .on highlights
-   the active state so it's clear when the preview is applied. */
-.preview-toggle-btn {
-  font-size: 0.75rem;
-  padding: 4px 10px;
-  border-radius: 4px;
-  border: 1px dashed rgba(255,255,255,0.08);
-  background: transparent;
-  color: rgba(255,255,255,0.4);
-  cursor: pointer;
-  transition: all 0.12s;
-  font-family: inherit;
-  margin-right: 6px;
-}
-.preview-toggle-btn:hover { color: #fff; border-color: #3b82f6; }
-.preview-toggle-btn.on { color: #3b82f6; border-color: #3b82f6; border-style: solid; background: #1a2a3a; }
 
 /* Filter button group (Summary + Heatmap) */
 .filter-btn {

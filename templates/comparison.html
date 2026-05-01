@@ -8,8 +8,6 @@
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="/static/utils.js"></script>
   <script src="/static/sync_toast.js" defer></script>
-  <link rel="stylesheet" href="/static/preview.css">
-  <script src="/static/preview-toggle.js" defer></script>
   <link rel="stylesheet" href="/static/base.css">
   <style>
     body { display: flex; flex-direction: column; min-height: 100vh; }
@@ -113,28 +111,29 @@
 
     #empty-msg { padding: 40px; text-align: center; color: var(--text-muted); font-size: 0.85rem; }
 
-    /* Pair-compare picker — small "+" button per row; selecting two rows
-       reveals a floating bottom bar with a Compare button. No mode
-       toggle: selection is always available. */
-    .cmp-pick { background: transparent; border: 1px solid var(--border-row); color: var(--text-muted);
-                width: 24px; height: 24px; border-radius: 50%;
-                font-size: 0.7rem; font-weight: 600; cursor: pointer;
+    /* Pair-compare picker — leftmost element of each row, sized so
+       it's the obvious "select for compare" affordance. Selection is
+       always available; no mode toggle. */
+    .cmp-pick { background: transparent; border: 1.5px solid rgba(255,255,255,0.18);
+                color: var(--text-secondary);
+                width: 32px; height: 32px; border-radius: 50%;
+                font-size: 1rem; font-weight: 500; cursor: pointer;
                 font-family: var(--font-mono); transition: all 0.12s;
-                flex-shrink: 0; line-height: 1; padding: 0; }
-    .cmp-pick:hover { color: #fff; border-color: var(--accent); }
-    .cmp-pick.is-a { color: var(--accent); border-color: var(--accent); background: rgba(59,130,246,0.10); }
-    .cmp-pick.is-b { color: #f59e0b; border-color: #f59e0b; background: rgba(245,158,11,0.10); }
+                flex-shrink: 0; line-height: 1; padding: 0;
+                display: inline-flex; align-items: center; justify-content: center; }
+    .cmp-pick:hover { color: #fff; border-color: var(--accent); background: rgba(59,130,246,0.10); }
+    .cmp-pick.is-a { color: #fff; border-color: var(--accent); background: var(--accent); }
+    .cmp-pick.is-b { color: #fff; border-color: #f59e0b; background: #f59e0b; }
     .comp-row.cmp-a { border-left: 2px solid var(--accent); padding-left: 10px; }
     .comp-row.cmp-b { border-left: 2px solid #f59e0b; padding-left: 10px; }
 
-    /* Floating bottom action bar — visible only when at least one row is
-       picked. Stays out of the way of the list otherwise. */
-    #cmp-bar { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%);
+    /* Compare action bar — sticky at the top of the rows so picks
+       remain visible while the user keeps scrolling. */
+    #cmp-bar { position: sticky; top: 0; z-index: 50;
                background: var(--bg-card); border: 1px solid var(--border-row);
                border-radius: 4px; padding: 10px 14px; display: none;
-               align-items: center; gap: 14px;
-               box-shadow: 0 6px 18px rgba(0,0,0,0.5); z-index: 100;
-               max-width: calc(100vw - 40px); font-size: 0.78rem; }
+               align-items: center; gap: 14px; margin-bottom: 12px;
+               box-shadow: 0 4px 12px rgba(0,0,0,0.45); font-size: 0.78rem; }
     #cmp-bar.visible { display: flex; }
     #cmp-bar .ab-label { font-size: 0.62rem; text-transform: uppercase; letter-spacing: 0.18em;
                          color: var(--text-tertiary); font-weight: 600; flex-shrink: 0; }
@@ -169,8 +168,6 @@
     <a href="/heatmap">Heat Map</a>
     <a href="/training-load">Training Load</a>
     <a href="/setup">Setup</a>
-    <button id="preview-toggle-btn" class="preview-toggle-btn" onclick="togglePreviewStyles()"
-            title="Toggle style-cleanup preview (sticky across pages)">Preview</button>
     <button class="nav-sync-btn" onclick="triggerSyncAll()" title="Sync Strava + Garmin now">Sync</button>
   </nav>
 </header>
@@ -194,23 +191,24 @@
     <span id="count-label"></span>
   </div>
 
+  <!-- Compare action bar — sticky at the top of the list. Visible only
+       once at least one row is picked via the per-row "+" button. -->
+  <div id="cmp-bar">
+    <span class="ab-label">Compare</span>
+    <div class="ab-slot">
+      <span class="slot-tag a">A</span>
+      <span class="slot-name empty" id="cmp-name-a">pick a row</span>
+    </div>
+    <div class="ab-slot">
+      <span class="slot-tag b">B</span>
+      <span class="slot-name empty" id="cmp-name-b">pick another</span>
+    </div>
+    <button class="ab-go" id="cmp-go" onclick="openCompare()" disabled>Compare →</button>
+    <button class="ab-clear" onclick="clearAllPicks()">Clear</button>
+  </div>
+
   <div id="rows"></div>
 </main>
-
-<!-- Floating action bar — appears when ≥1 row is picked for compare. -->
-<div id="cmp-bar">
-  <span class="ab-label">Compare</span>
-  <div class="ab-slot">
-    <span class="slot-tag a">A</span>
-    <span class="slot-name empty" id="cmp-name-a">pick a row</span>
-  </div>
-  <div class="ab-slot">
-    <span class="slot-tag b">B</span>
-    <span class="slot-name empty" id="cmp-name-b">pick another</span>
-  </div>
-  <button class="ab-go" id="cmp-go" onclick="openCompare()" disabled>Compare →</button>
-  <button class="ab-clear" onclick="clearAllPicks()">Clear</button>
-</div>
 
 <script>
 const TYPES = {{ types_json | safe }};
@@ -323,9 +321,10 @@ function statCell(label, valueText, isMuted, sbClass, sbValue) {
 }
 
 function renderRow(item) {
-  // Anchor element so single-click navigates, right-click / middle-click
-  // get the browser's natural new-tab options. Compare mode hijacks the
-  // click to swap A/B selection instead.
+  // Anchor element so single-click navigates to detail; right-click /
+  // middle-click get the browser's natural new-tab options. The
+  // compare picker (per-row "+") uses preventDefault/stopPropagation
+  // on its own click so it doesn't trigger row navigation.
   const row = document.createElement('a');
   row.className = 'comp-row' + (item.excluded ? ' excluded' : '');
   row.href = `/log/${encodeURIComponent(item.filename)}`;
@@ -335,10 +334,6 @@ function renderRow(item) {
   // without re-parsing item.type at draw time.
   const _t = TYPE_LOOKUP[item.type];
   row.dataset.typeColor = _t ? _t.color : '#3b82f6';
-  row.dataset.title = item.title || item.filename;
-  row.onclick = (e) => {
-    if (compareMode) { e.preventDefault(); onCompareClick(item.filename, row.dataset.title); }
-  };
 
   const t = TYPE_LOOKUP[item.type];
   const KNOWN_ICONS = new Set(['mtb', 'fat_biking', 'snowboard', 'ski', 'hike', 'other']);
@@ -350,6 +345,9 @@ function renderRow(item) {
 
   const dateStr = item.date ? new Date(item.date).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' }) : '';
   const titleStr = item.title || dateStr;
+  // Friendly label for the compare bar — prefer user title, fall back
+  // to date, last resort filename.
+  row.dataset.title = item.title || dateStr || item.filename;
 
   const diffMax = item.difficulty != null && metricMax['sb-difficulty'] && item.difficulty >= metricMax['sb-difficulty'];
   const intMax  = item.intensity  != null && metricMax['sb-intensity']  && item.intensity  >= metricMax['sb-intensity'];
@@ -385,15 +383,15 @@ function renderRow(item) {
     <div class="comp-side">
       <div class="comp-top">
         <div class="comp-top-left">
+          <button class="cmp-pick"
+                  data-fn="${item.filename}"
+                  title="Add to compare">+</button>
           ${iconHtml}
           <div class="comp-title"></div>
         </div>
         <div class="comp-top-right">
           ${regionChips ? `<span>${regionChips}</span><span class="sep">|</span>` : ''}
           <span>${dateStr}</span>
-          <button class="cmp-pick"
-                  data-fn="${item.filename}"
-                  title="Add to compare">+</button>
           <button class="exclude-btn ${item.excluded ? 'active' : ''}"
                   data-fn="${item.filename}"
                   title="${item.excluded ? 'Re-include in statistics' : 'Exclude from statistics'}">⊘</button>
@@ -524,7 +522,7 @@ async function load() {
       pickBtn.addEventListener('click', (ev) => {
         ev.preventDefault();
         ev.stopPropagation();
-        togglePick(item.filename, item.title || item.filename);
+        togglePick(item.filename, row.dataset.title);
       });
     }
     prevDate = item.date;
