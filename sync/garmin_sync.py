@@ -131,25 +131,47 @@ def get_client(interactive: bool = False):
 # ─── Date discovery ───────────────────────────────────────────────────────────
 
 def activity_dates() -> list[str]:
-    """Return sorted unique 'YYYY-MM-DD' strings for every GPX file.
+    """Return sorted unique 'YYYY-MM-DD' strings for every GPX file."""
+    return sorted(activity_windows().keys())
 
-    We only read the first timestamped track point per file - enough to get
-    the date. Much faster than full gpxpy parse.
+
+_TIME_RE = re.compile(r"<time>([^<]+)</time>")
+
+
+def activity_windows() -> dict[str, list[tuple[int, int]]]:
+    """For each YYYY-MM-DD, list of (start_ms, end_ms) UTC tuples — one per
+    activity recorded that date. Used to decide whether the cached HR for a
+    date actually covers every activity on it.
+
+    Reads only the first 4 KB and last 4 KB of each GPX file so we never have
+    to parse multi-MB tracks just to find their start/end timestamps.
     """
-    dates = set()
-    import re
-    date_re = re.compile(r"<time>(\d{4}-\d{2}-\d{2})")
+    out: dict[str, list[tuple[int, int]]] = {}
     for path in sorted(GPX_DIR.glob("*.gpx")):
         try:
-            with open(path, encoding="utf-8", errors="ignore") as f:
-                # Read only enough to find the first <time> - avoids parsing huge files
-                head = f.read(4096)
-            m = date_re.search(head)
-            if m:
-                dates.add(m.group(1))
+            size = path.stat().st_size
+            with open(path, "rb") as f:
+                head = f.read(4096).decode("utf-8", errors="ignore")
+                if size > 8192:
+                    f.seek(max(0, size - 4096))
+                    tail = f.read().decode("utf-8", errors="ignore")
+                else:
+                    tail = head
+            head_times = _TIME_RE.findall(head)
+            tail_times = _TIME_RE.findall(tail)
+            if not head_times or not tail_times:
+                continue
+            start_iso = head_times[0]
+            end_iso   = tail_times[-1]
+            start_dt  = datetime.fromisoformat(start_iso)
+            end_dt    = datetime.fromisoformat(end_iso)
+            date_str  = start_iso[:10]
+            start_ms  = int(start_dt.timestamp() * 1000)
+            end_ms    = int(end_dt.timestamp() * 1000)
+            out.setdefault(date_str, []).append((start_ms, end_ms))
         except Exception:
             continue
-    return sorted(dates)
+    return out
 
 
 # ─── HR cache ─────────────────────────────────────────────────────────────────
@@ -160,6 +182,63 @@ def hr_cache_path(date_str: str) -> Path:
 
 def missing_dates(dates: list[str]) -> list[str]:
     return [d for d in dates if not hr_cache_path(d).exists()]
+
+
+_HR_COVERAGE_TOL_MS = 5 * 60 * 1000
+
+# We give Garmin this many days from the activity to ingest the watch's HR
+# upload. Within the window an empty-sample cache is considered incomplete
+# and gets re-fetched on every --sync (so a delayed manual watch-sync gets
+# picked up automatically). After the window expires we trust the empty
+# cache as "Garmin really has no HR for this date" and stop retrying.
+# --retry-empty re-fetches all empties regardless of age; --retry-date
+# re-fetches one specific date.
+_EMPTY_GIVE_UP_AFTER_DAYS = 7
+
+
+def _hr_covers(samples: list, start_ms: int, end_ms: int) -> bool:
+    if not samples:
+        return False
+    return samples[0][0] <= start_ms + _HR_COVERAGE_TOL_MS \
+       and samples[-1][0] >= end_ms - _HR_COVERAGE_TOL_MS
+
+
+def _date_is_complete(date_str: str, windows: list[tuple[int, int]],
+                      trust_stale_empty: bool = True) -> bool:
+    """True if the cached HR for date_str spans every activity window on it.
+
+    Empty caches inside `_EMPTY_GIVE_UP_AFTER_DAYS` of the activity count as
+    incomplete — `--sync` will re-fetch them so delayed watch-uploads get
+    picked up. Past the cutoff we trust the empty as genuinely-no-data and
+    stop retrying. `trust_stale_empty=False` (used by `--retry-empty`)
+    forces all empties to count as incomplete regardless of age."""
+    path = hr_cache_path(date_str)
+    if not path.exists():
+        return False
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        samples = payload.get("samples") or []
+    except Exception:
+        return False
+    if not samples:
+        if not trust_stale_empty:
+            return False
+        try:
+            activity_date = datetime.fromisoformat(date_str).date()
+            days_since = (datetime.now().date() - activity_date).days
+        except ValueError:
+            return True
+        return days_since >= _EMPTY_GIVE_UP_AFTER_DAYS
+    return all(_hr_covers(samples, s, e) for s, e in windows)
+
+
+def incomplete_dates(windows: dict[str, list[tuple[int, int]]],
+                     trust_stale_empty: bool = True) -> list[str]:
+    """Dates whose HR cache is missing OR has samples that don't cover every
+    activity window. A cache fetched mid-day that stops before an activity
+    ended counts as incomplete and must be re-fetched."""
+    return sorted(d for d, wins in windows.items()
+                  if not _date_is_complete(d, wins, trust_stale_empty))
 
 
 def fetch_and_cache_hr(client, date_str: str) -> tuple[bool, int]:
@@ -224,17 +303,32 @@ def cmd_login():
     print(f"  Tokens saved to: {TOKEN_DIR}")
 
 
-def cmd_sync(only_missing: bool = True, throttle: float = 1.0):
+def cmd_sync(only_missing: bool = True, throttle: float = 1.0,
+             retry_empty: bool = False):
     client = get_client(interactive=False)
-    all_dates = activity_dates()
-    dates = missing_dates(all_dates) if only_missing else all_dates
+    windows  = activity_windows()
+    all_dates = sorted(windows.keys())
+    if retry_empty:
+        # Force every empty-sample cache to re-fetch, regardless of age.
+        # Useful after a delayed manual watch-sync, when the trust window
+        # would otherwise still consider those caches "fresh enough."
+        dates = incomplete_dates(windows, trust_stale_empty=False)
+    elif only_missing:
+        dates = incomplete_dates(windows)
+    else:
+        dates = all_dates
     if not dates:
-        print(f"Nothing to sync - all {len(all_dates)} activity dates already cached.")
+        print(f"Nothing to sync - all {len(all_dates)} activity dates fully covered.")
         update_status(last_sync=int(time.time()), last_synced=0, total_dates=len(all_dates))
         return
 
+    missing = sum(1 for d in dates if not hr_cache_path(d).exists())
+    incomplete = len(dates) - missing
+    breakdown = []
+    if missing:    breakdown.append(f"{missing} missing")
+    if incomplete: breakdown.append(f"{incomplete} incomplete")
     print(f"Syncing {len(dates)} date{'s' if len(dates) != 1 else ''} "
-          f"({len(all_dates)} total activity dates)...")
+          f"({', '.join(breakdown) or 'all'}; {len(all_dates)} total activity dates)...")
     synced_ok = 0
     total_samples = 0
     for i, d in enumerate(dates, 1):
@@ -254,6 +348,25 @@ def cmd_sync(only_missing: bool = True, throttle: float = 1.0):
     print(f"\n[OK] Synced {synced_ok} / {len(dates)} dates ({total_samples:,} HR samples).")
 
 
+def cmd_retry_date(date_str: str):
+    """Re-fetch HR for a single date — escape hatch when --sync's give-up
+    window has passed but you know your watch has data for that date now."""
+    try:
+        datetime.fromisoformat(date_str)
+    except ValueError:
+        print(f"Bad date format: {date_str!r}. Expected YYYY-MM-DD.")
+        sys.exit(2)
+    client = get_client(interactive=False)
+    print(f"Re-fetching HR for {date_str}...")
+    ok, n = fetch_and_cache_hr(client, date_str)
+    if ok:
+        tag = f"{n} samples" if n else "no HR data"
+        print(f"  [OK] {tag}")
+        update_status(last_sync=int(time.time()), last_synced=1)
+    else:
+        sys.exit(1)
+
+
 def cmd_status():
     s = read_status()
     tokens = "present" if is_configured() else "missing - run --login"
@@ -268,41 +381,59 @@ def cmd_status():
         print(f"Last sync:  {datetime.fromtimestamp(s['last_sync']).isoformat(timespec='seconds')}"
               f"  (synced {s.get('last_synced', 0)} dates)")
 
-    # Cache summary
-    all_dates    = activity_dates()
-    cached       = [d for d in all_dates if hr_cache_path(d).exists()]
-    cached_with  = 0
-    cached_empty = 0
-    for d in cached:
-        try:
-            payload = json.loads(hr_cache_path(d).read_text(encoding="utf-8"))
-            if payload.get("samples"):
-                cached_with += 1
-            else:
-                cached_empty += 1
-        except Exception:
-            pass
-    print(f"\nCoverage: {len(cached)} / {len(all_dates)} activity dates cached")
-    print(f"  with HR data:    {cached_with}")
-    print(f"  cached but empty:{cached_empty}")
-    print(f"  still to fetch:  {len(all_dates) - len(cached)}")
+    # Cache summary. Buckets are mutually exclusive so the four counts
+    # always sum to len(all_dates):
+    #   fully_covered  — non-empty cache, samples span every activity window
+    #   incomplete     — cache has samples but doesn't span (or is a stale
+    #                    empty awaiting auto-retry on next --sync)
+    #   trusted_empty  — empty cache past the 7-day give-up window;
+    #                    presumed Garmin genuinely has no HR for that date
+    #   missing        — no cache file at all
+    windows      = activity_windows()
+    all_dates    = sorted(windows.keys())
+    fully_covered = trusted_empty = incomplete = missing = 0
+    for d in all_dates:
+        path = hr_cache_path(d)
+        if not path.exists():
+            missing += 1
+            continue
+        if _date_is_complete(d, windows[d]):
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+                if payload.get("samples"):
+                    fully_covered += 1
+                else:
+                    trusted_empty += 1
+            except Exception:
+                incomplete += 1
+        else:
+            incomplete += 1
+    print(f"\nCoverage: {len(all_dates) - missing} / {len(all_dates)} activity dates cached")
+    print(f"  fully covered:               {fully_covered}")
+    print(f"  incomplete (will retry):     {incomplete}")
+    print(f"  empty (trusted, no retry):   {trusted_empty}")
+    print(f"  missing:                     {missing}")
 
 
 # ─── Entry ────────────────────────────────────────────────────────────────────
 
 def main():
     p = argparse.ArgumentParser(description="Garmin HR sync for AlForks.")
-    p.add_argument("--login",  action="store_true", help="One-time Garmin login. Reads creds from ~/.alforks/garmin_creds.txt or prompts.")
-    p.add_argument("--sync",   action="store_true", help="Pull HR for missing dates.")
-    p.add_argument("--resync", action="store_true", help="Re-fetch every activity date (overwrites cache).")
-    p.add_argument("--status", action="store_true", help="Show auth + sync status.")
+    p.add_argument("--login",       action="store_true", help="One-time Garmin login. Reads creds from ~/.alforks/garmin_creds.txt or prompts.")
+    p.add_argument("--sync",        action="store_true", help="Pull HR for missing dates.")
+    p.add_argument("--retry-empty", action="store_true", help="Re-fetch every empty-cache date regardless of age. Useful after a delayed manual watch-sync when an old empty has fallen past the 7-day give-up window.")
+    p.add_argument("--retry-date",  metavar="YYYY-MM-DD",   help="Re-fetch HR for a single date. Use when you know one specific track is missing data.")
+    p.add_argument("--resync",      action="store_true", help="Re-fetch every activity date (overwrites cache).")
+    p.add_argument("--status",      action="store_true", help="Show auth + sync status.")
     args = p.parse_args()
 
-    if args.login:    cmd_login()
-    elif args.sync:   cmd_sync(only_missing=True)
-    elif args.resync: cmd_sync(only_missing=False)
-    elif args.status: cmd_status()
-    else:             p.print_help()
+    if args.login:                cmd_login()
+    elif args.sync:               cmd_sync(only_missing=True)
+    elif args.retry_empty:        cmd_sync(only_missing=True, retry_empty=True)
+    elif args.retry_date:         cmd_retry_date(args.retry_date)
+    elif args.resync:             cmd_sync(only_missing=False)
+    elif args.status:             cmd_status()
+    else:                         p.print_help()
 
 
 if __name__ == "__main__":
