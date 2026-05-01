@@ -36,15 +36,31 @@
     .day-gap.collapsed { height: 28px !important; background: var(--bg-card); }
     .day-gap.collapsed .day-gap-label { opacity: 1; color: var(--text-secondary); }
 
-    .comp-row { background: var(--bg-card); border: 1px solid var(--border-hair); border-radius: 4px; padding: 12px; display: grid; grid-template-columns: 128px 1fr; gap: 14px; cursor: pointer; transition: border-color 0.15s, transform 0.15s, background 0.15s; color: inherit; text-decoration: none; }
+    /* Row layout: [compare column 64px] [map 128px] [content 1fr]. The
+       compare column houses the per-row picker (label + "+") to the
+       left of the map, separated from row content. */
+    .comp-row { background: var(--bg-card); border: 1px solid var(--border-hair); border-radius: 4px; padding: 12px; display: grid; grid-template-columns: 64px 128px 1fr; gap: 14px; cursor: pointer; transition: border-color 0.15s, transform 0.15s, background 0.15s; color: inherit; text-decoration: none; }
     .comp-row:hover { border-color: var(--accent); transform: translateY(-1px); background: rgba(255,255,255,0.02); }
+    .cmp-col { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; }
+    .cmp-col .cmp-label { font-size: 0.58rem; text-transform: uppercase; letter-spacing: 0.18em; color: var(--text-muted); font-weight: 500; }
     .comp-map { width: 128px; height: 96px; border-radius: 3px; background: var(--bg-page); overflow: hidden; }
     .comp-map .leaflet-container { background: var(--bg-page); }
     .comp-side { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
-    .comp-top { display: flex; align-items: center; gap: 12px; }
-    .comp-top-left { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; }
+    .comp-top { display: flex; align-items: baseline; gap: 12px; }
+    .comp-top-left { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; flex-wrap: wrap; }
     .comp-top-right { display: flex; align-items: center; gap: 8px; flex-shrink: 0; font-size: 0.72rem; color: var(--text-secondary); font-family: var(--font-mono); }
     .comp-top-right .sep { color: var(--text-faint); }
+    /* Activity-page-style title bar: [icon] {type} - {title} · {date} · {time range}.
+       Each segment dim or accented appropriately to read as a single line. */
+    .row-title { display: inline-flex; align-items: baseline; gap: 8px; font-size: 0.92rem;
+                 color: rgba(255,255,255,0.85); min-width: 0; overflow: hidden;
+                 text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+    .row-title .rt-type { color: var(--text-secondary); font-weight: 500; }
+    .row-title .rt-sep  { color: var(--text-faint); font-weight: 400; }
+    .row-title .rt-name { color: #fff; font-weight: 500; }
+    .row-title .rt-meta { color: var(--text-tertiary); font-size: 0.78rem;
+                          font-family: var(--font-mono); font-variant-numeric: tabular-nums;
+                          letter-spacing: 0.02em; }
     .issues-block { background: rgba(245,158,11,0.10); border: 1px solid rgba(245,158,11,0.35); border-radius: 3px; padding: 6px 10px; }
     .issues-head { font-size: 0.74rem; color: #f59e0b; font-weight: 600; margin-bottom: 4px; }
     .issues-list { margin: 0 0 0 18px; padding: 0; font-size: 0.72rem; color: var(--text-secondary); }
@@ -168,11 +184,13 @@
     <a href="/heatmap">Heat Map</a>
     <a href="/training-load">Training Load</a>
     <a href="/setup">Setup</a>
-    <button class="nav-sync-btn" onclick="triggerSyncAll()" title="Sync Strava + Garmin now">Sync</button>
   </nav>
+  <button class="nav-sync-btn" onclick="triggerSyncAll()" title="Sync Strava + Garmin now">Sync</button>
 </header>
 
 <main>
+  <h1 style="font-size: 1.4rem; font-weight: 500; letter-spacing: -0.02em; color: #fff; margin: 0 0 16px;">Logs Overview</h1>
+
   <div id="filters">
     <div class="filter-group">
       <span class="filter-label">Type:</span>
@@ -343,11 +361,20 @@ function renderRow(item) {
     ? item.regions.map(r => `<span class="region-chip">${r.name}</span>`).join('')
     : '';
 
-  const dateStr = item.date ? new Date(item.date).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' }) : '';
-  const titleStr = item.title || dateStr;
-  // Friendly label for the compare bar — prefer user title, fall back
-  // to date, last resort filename.
-  row.dataset.title = item.title || dateStr || item.filename;
+  // Compact date "Apr 30, 2026" and time range "16:55 – 18:01" matched
+  // to the activity-page header style.
+  const dateShort = item.date
+    ? new Date(item.date).toLocaleDateString('en-CA', { month: 'short', day: 'numeric', year: 'numeric' })
+    : '';
+  const timeRange = fmtTimeRange(item.date, item.duration_sec);
+  // Region/title resolution — prefer a user-set title, then the first
+  // matched region name (Nose Hill Park, Sunshine Village, …), then
+  // fall back to date so the row still has an anchor label.
+  const firstRegion = (item.regions && item.regions[0]?.name) || '';
+  const placeName = item.title || firstRegion || dateShort || item.filename;
+  const typeLabel = (t && t.label) || 'Activity';
+  // Friendly label for the compare bar.
+  row.dataset.title = placeName;
 
   const diffMax = item.difficulty != null && metricMax['sb-difficulty'] && item.difficulty >= metricMax['sb-difficulty'];
   const intMax  = item.intensity  != null && metricMax['sb-intensity']  && item.intensity  >= metricMax['sb-intensity'];
@@ -379,19 +406,23 @@ function renderRow(item) {
     : '';
 
   row.innerHTML = `
+    <div class="cmp-col">
+      <span class="cmp-label">Compare</span>
+      <button class="cmp-pick" data-fn="${item.filename}" title="Add to compare">+</button>
+    </div>
     <div class="comp-map"></div>
     <div class="comp-side">
       <div class="comp-top">
         <div class="comp-top-left">
-          <button class="cmp-pick"
-                  data-fn="${item.filename}"
-                  title="Add to compare">+</button>
-          ${iconHtml}
-          <div class="comp-title"></div>
+          <span class="row-title">
+            ${iconHtml}
+            <span class="rt-type">${escapeHtml(typeLabel)}</span>
+            <span class="rt-sep">—</span>
+            <span class="rt-name"></span>
+            <span class="rt-meta">${dateShort}${timeRange ? ` · ${timeRange}` : ''}</span>
+          </span>
         </div>
         <div class="comp-top-right">
-          ${regionChips ? `<span>${regionChips}</span><span class="sep">|</span>` : ''}
-          <span>${dateStr}</span>
           <button class="exclude-btn ${item.excluded ? 'active' : ''}"
                   data-fn="${item.filename}"
                   title="${item.excluded ? 'Re-include in statistics' : 'Exclude from statistics'}">⊘</button>
@@ -412,8 +443,28 @@ function renderRow(item) {
       </div>
     </div>
   `;
-  row.querySelector('.comp-title').textContent = titleStr;
+  // Set name via textContent so user-provided strings can't inject markup.
+  row.querySelector('.rt-name').textContent = placeName;
   return row;
+}
+
+function escapeHtml(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]);
+}
+
+function fmtClock(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d)) return '';
+  return d.toLocaleTimeString('en-CA', { hour: '2-digit', minute: '2-digit', hour12: false });
+}
+
+function fmtTimeRange(startIso, durationSec) {
+  const start = fmtClock(startIso);
+  if (!start) return '';
+  if (!durationSec) return start;
+  const end = new Date(new Date(startIso).getTime() + durationSec * 1000);
+  return `${start} – ${end.toLocaleTimeString('en-CA', { hour: '2-digit', minute: '2-digit', hour12: false })}`;
 }
 
 function renderGap(daysBetween) {
