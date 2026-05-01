@@ -967,7 +967,7 @@ def logs():
     """Logs landing — rich list of activities with mini-maps and stats.
     Click a row to open the detail view at /log/<filename>; pair-select
     two rows to overlay them at /compare."""
-    return render_template("comparison.html", types_json=json.dumps(load_types()),
+    return render_template("logs.html", types_json=json.dumps(load_types()),
                            mapbox_token=load_config().get("mapbox_token", ""))
 
 
@@ -1000,10 +1000,10 @@ def summary():
 
 
 @app.route("/summary/v2")
-def summary_v2():
-    """Engineering-log style summary dashboard (per design/summary-v2). Data
-    is fetched separately from /api/summary/v2 to keep the template thin."""
-    return render_template("summary_v2.html", types_json=json.dumps(load_types()))
+def summary_v2_redirect():
+    """Old route — Summary V2 is now the canonical home page at `/`. 301 so
+    historical bookmarks resolve there directly."""
+    return redirect("/", code=301)
 
 
 @app.route("/training")
@@ -2386,13 +2386,20 @@ def api_comparison():
         if type_filter and meta_type not in type_filter: continue
         if issues_only and not (act.get("issues") or []): continue
 
-        data = get_activity(act["filename"])
-        if not data: continue
-        eff    = _effective_data(act["filename"], data, meta_type)
-        merged = _merge_hr_into_data(eff)
-        s = merged.get("stats") or {}
+        # Stats (including hr_avg/hr_max) are pre-baked into the sidebar
+        # entry by `_activity_payload`, so we read them straight from
+        # `act["stats"]` instead of re-merging HR per request. Cuts ~10–
+        # 15 ms per has-HR row on a 200-row window.
+        s = act.get("stats") or {}
         hr_avg = s.get("hr_avg")
         intensity = round((hr_avg / max_hr) * 100) if (hr_avg and max_hr) else None
+
+        # Polyline still requires the full point list, so we still load
+        # the per-activity data — but we skip the HR-merge call since the
+        # stats we need are already on `act`.
+        data = get_activity(act["filename"])
+        if not data: continue
+        eff = _effective_data(act["filename"], data, meta_type)
 
         items.append({
             "filename":    act["filename"],
@@ -2412,7 +2419,7 @@ def api_comparison():
             "hr_max":       s.get("hr_max"),
             "difficulty":   _difficulty_score(s.get("distance_km"), s.get("elev_gain_m")),
             "intensity":    intensity,
-            "polyline":     _downsample_polyline(merged.get("points") or [], 50),
+            "polyline":     _downsample_polyline(eff.get("points") or [], 50),
             "issues":       act.get("issues") or [],
             "excluded":     bool(act.get("excluded")),
         })
