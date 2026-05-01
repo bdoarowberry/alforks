@@ -10,15 +10,17 @@ body {
   color: #e0e0e0;
 }
 
-/* Header + navigation */
+/* Header + navigation. Palette mirrors the Summary page tokens
+   (bg-card, hair border, secondary text) so the chrome reads as one
+   piece with the dashboard panels below. */
 header {
-  background: #12151a;
+  background: #0f1313;
   padding: 0 20px;
   height: 52px;
   display: flex;
   align-items: center;
   gap: 20px;
-  border-bottom: 1px solid #2a2d35;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
   flex-shrink: 0;
   position: relative;
 }
@@ -34,13 +36,13 @@ nav {
 }
 nav a {
   font-size: 0.8rem;
-  color: #bbb;
+  color: rgba(255,255,255,0.7);
   text-decoration: none;
   padding: 4px 10px;
   border-radius: 4px;
   transition: all 0.12s;
 }
-nav a:hover   { color: #fff; background: #1e2128; }
+nav a:hover   { color: #fff; background: rgba(255,255,255,0.05); }
 nav a.active  { color: #3b82f6; background: #1a2a3a; }
 
 /* Sync trigger sits in the header right side, after the nav links. */
@@ -49,14 +51,14 @@ nav a.active  { color: #3b82f6; background: #1a2a3a; }
   font-size: 0.75rem;
   padding: 4px 10px;
   border-radius: 4px;
-  border: 1px solid #2a2d35;
-  background: #1a1d23;
-  color: #bbb;
+  border: 1px solid rgba(255,255,255,0.08);
+  background: transparent;
+  color: rgba(255,255,255,0.7);
   cursor: pointer;
   transition: all 0.12s;
   font-family: inherit;
 }
-.nav-sync-btn:hover { color: #fff; background: #1e2128; border-color: #3b82f6; }
+.nav-sync-btn:hover { color: #fff; background: rgba(255,255,255,0.05); border-color: #3b82f6; }
 .nav-sync-btn:active { transform: translateY(1px); }
 
 /* Style-cleanup preview toggle. Sits next to the Sync button. .on highlights
@@ -65,9 +67,9 @@ nav a.active  { color: #3b82f6; background: #1a2a3a; }
   font-size: 0.75rem;
   padding: 4px 10px;
   border-radius: 4px;
-  border: 1px dashed #2a2d35;
-  background: #1a1d23;
-  color: #888;
+  border: 1px dashed rgba(255,255,255,0.08);
+  background: transparent;
+  color: rgba(255,255,255,0.4);
   cursor: pointer;
   transition: all 0.12s;
   font-family: inherit;
