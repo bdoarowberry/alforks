@@ -925,7 +925,7 @@ if os.environ.get("ALFORKS_PREWARM") == "1":
 @app.route("/")
 def home():
     """Home page — formerly Summary V2, now the canonical summary view.
-    Old bookmarks like `/?file=foo.gpx` (which used to point to Ride Logs)
+    Old bookmarks like `/?file=foo.gpx` (which used to point to Logs)
     redirect to `/rides?file=foo.gpx` so external links keep working."""
     if "file" in request.args:
         return redirect(f"/rides?{request.query_string.decode()}", code=301)
@@ -934,7 +934,7 @@ def home():
 
 @app.route("/rides")
 def ride_logs():
-    """Ride Logs view — the activity-detail map + sidebar list. Used to live
+    """Logs view — the activity-detail map + sidebar list. Used to live
     at `/`; moved here when Summary V2 became the home page."""
     return render_template("index.html",
         mapbox_token=load_config().get("mapbox_token", ""),

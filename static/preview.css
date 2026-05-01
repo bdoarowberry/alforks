@@ -1,10 +1,10 @@
-/* Style-cleanup preview overrides — Ride Logs (/) only.
+/* Style-cleanup preview overrides — Logs (/) only.
  *
  * Every rule scoped under `body.preview`. Toggle the Preview button to
  * compare. Once approved, these graduate into the page's canonical CSS
  * and the same patterns will be rolled out to the other pages.
  *
- * Focus: internal consistency of the Ride Logs page. The previous
+ * Focus: internal consistency of the Logs page. The previous
  * cross-page round-1/2/3 sweep has been parked — this file now targets
  * only selectors that ship on /.
  */
