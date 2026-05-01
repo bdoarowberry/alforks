@@ -975,11 +975,18 @@ def summary_v2():
     return render_template("summary_v2.html", types_json=json.dumps(load_types()))
 
 
-@app.route("/training-load")
+@app.route("/training")
 def training_load():
     """Coach-view fitness page (per design/training-load). Data fetched from
-    /api/training-load; template stays thin."""
+    /api/training; template stays thin."""
     return render_template("training_load.html", types_json=json.dumps(load_types()))
+
+
+@app.route("/training-load")
+def training_load_redirect():
+    """Old route — `/training-load` shortened to `/training`. 301 so any
+    historical bookmarks resolve cleanly."""
+    return redirect("/training", code=301)
 
 
 def _hex_to_rgba(hex_color: str, alpha: float) -> str:
@@ -2575,9 +2582,9 @@ def _compute_training_load(n_weeks: int) -> dict:
     }
 
 
-@app.route("/api/training-load")
+@app.route("/api/training")
 def api_training_load():
-    """JSON payload for the Training Load page. `weeks` query param accepts
+    """JSON payload for the Training page. `weeks` query param accepts
     4, 8, 12, or 26 — anything else falls back to 12 (the design default)."""
     try:
         requested = int(request.args.get("weeks", 12))

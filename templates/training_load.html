@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AlForks – Training Load</title>
+  <title>AlForks – Training</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
@@ -202,7 +202,7 @@
     <a href="/">Summary</a>
     <a href="/logs">Logs</a>
     <a href="/heatmap">Heat Map</a>
-    <a href="/training-load" class="active">Training Load</a>
+    <a href="/training" class="active">Training</a>
     <a href="/setup">Setup</a>
   </nav>
   <button class="nav-sync-btn" onclick="triggerSyncAll()" title="Sync Strava + Garmin now">Sync</button>
@@ -213,7 +213,7 @@
   <div class="tl-head">
     <div>
       <div class="tl-eyebrow-coach">Coach view</div>
-      <h1 class="tl-title">Training load <span style="color:var(--tl-dimmer);font-weight:400;font-size:14px;letter-spacing:0;" id="tl-today-label"></span></h1>
+      <h1 class="tl-title">Training <span style="color:var(--tl-dimmer);font-weight:400;font-size:14px;letter-spacing:0;" id="tl-today-label"></span></h1>
     </div>
     <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;justify-content:flex-end;">
       <div class="tl-window-ctrl" id="tl-window-ctrl">
@@ -744,7 +744,7 @@ async function loadData(weeks) {
     b.classList.toggle('on', Number(b.dataset.weeks) === weeks);
   });
   try {
-    const res = await fetch(`/api/training-load?weeks=${weeks}`, { cache: 'no-store' });
+    const res = await fetch(`/api/training?weeks=${weeks}`, { cache: 'no-store' });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
     render(data);
