@@ -202,8 +202,7 @@
   <h1>AlForks</h1>
   <nav>
     <a href="/">Summary</a>
-    <a href="/rides">Logs</a>
-    <a href="/comparison">Compare</a>
+    <a href="/logs">Logs</a>
     <a href="/heatmap">Heat Map</a>
     <a href="/training-load">Training Load</a>
     <a href="/setup" class="active">Setup</a>
@@ -627,7 +626,7 @@ function _buildDupActions(t, container) {
   viewBtn.className = 'r-btn';
   viewBtn.textContent = 'Open';
   viewBtn.title = 'Open this activity in Logs (middle-click for new tab)';
-  viewBtn.href = `/rides?file=${encodeURIComponent(t.filename)}`;
+  viewBtn.href = `/log/${encodeURIComponent(t.filename)}`;
   viewBtn.style.textDecoration = 'none';
   const excludeBtn = document.createElement('button');
   excludeBtn.className = 'r-btn' + (t.excluded ? ' active' : '');
@@ -1740,7 +1739,7 @@ function _renderOddRow(a) {
   openBtn.className = 'r-btn';
   openBtn.textContent = 'Open';
   openBtn.title = 'Open this activity in Logs (middle-click for new tab)';
-  openBtn.href = `/rides?file=${encodeURIComponent(a.filename)}`;
+  openBtn.href = `/log/${encodeURIComponent(a.filename)}`;
   openBtn.style.textDecoration = 'none';
 
   row.appendChild(dateEl);

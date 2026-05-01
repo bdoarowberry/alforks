@@ -149,8 +149,7 @@
   <h1>AlForks</h1>
   <nav>
     <a href="/">Summary</a>
-    <a href="/rides">Logs</a>
-    <a href="/comparison" class="active">Compare</a>
+    <a href="/logs" class="active">Logs</a>
     <a href="/heatmap">Heat Map</a>
     <a href="/training-load">Training Load</a>
     <a href="/setup">Setup</a>
@@ -315,7 +314,7 @@ function renderRow(item) {
   // click to swap A/B selection instead.
   const row = document.createElement('a');
   row.className = 'comp-row' + (item.excluded ? ' excluded' : '');
-  row.href = `/rides?file=${encodeURIComponent(item.filename)}`;
+  row.href = `/log/${encodeURIComponent(item.filename)}`;
   row.dataset.filename = item.filename;
   row.dataset.polyline = JSON.stringify(item.polyline);
   // Stash the type colour on the row so the lazy initMap() below can use it

@@ -924,21 +924,42 @@ if os.environ.get("ALFORKS_PREWARM") == "1":
 
 @app.route("/")
 def home():
-    """Home page — formerly Summary V2, now the canonical summary view.
-    Old bookmarks like `/?file=foo.gpx` (which used to point to Logs)
-    redirect to `/rides?file=foo.gpx` so external links keep working."""
+    """Home page — Summary view. Old `/?file=…` bookmarks redirect to
+    the activity-detail page at its current canonical path."""
     if "file" in request.args:
-        return redirect(f"/rides?{request.query_string.decode()}", code=301)
+        return redirect(f"/log/{request.args['file']}", code=301)
     return render_template("summary_v2.html", types_json=json.dumps(load_types()))
 
 
-@app.route("/rides")
-def ride_logs():
-    """Logs view — the activity-detail map + sidebar list. Used to live
-    at `/`; moved here when Summary V2 became the home page."""
+@app.route("/logs")
+def logs():
+    """Logs landing — rich list of activities with mini-maps and stats.
+    Click a row to open the detail view at /log/<filename>; pair-select
+    two rows to overlay them at /compare."""
+    return render_template("comparison.html", types_json=json.dumps(load_types()),
+                           mapbox_token=load_config().get("mapbox_token", ""))
+
+
+@app.route("/log/<path:filename>")
+def log_detail(filename):
+    """Per-activity detail — map + chart + stats + sidebar nav. The
+    sidebar still lists every activity for quick jumping; the canonical
+    way in is via the Logs landing at /logs."""
     return render_template("index.html",
         mapbox_token=load_config().get("mapbox_token", ""),
-        types_json=json.dumps(load_types()))
+        types_json=json.dumps(load_types()),
+        current_filename=filename)
+
+
+@app.route("/rides")
+def rides_redirect():
+    """Old route — `/rides?file=X` was the activity detail; `/rides`
+    alone was the list-with-sidebar landing. Both moved: detail to
+    /log/<filename>, list to /logs."""
+    file = request.args.get("file")
+    if file:
+        return redirect(f"/log/{file}", code=301)
+    return redirect("/logs", code=302)
 
 
 @app.route("/summary")
@@ -2281,9 +2302,10 @@ def _difficulty_score(distance_km: float | None, elev_gain_m: float | None) -> i
 
 
 @app.route("/comparison")
-def comparison_page():
-    return render_template("comparison.html", types_json=json.dumps(load_types()),
-                           mapbox_token=load_config().get("mapbox_token", ""))
+def comparison_redirect():
+    """Old route — the rich-list page is now `/logs` (the canonical
+    "Logs" landing). 301 so historical bookmarks resolve cleanly."""
+    return redirect("/logs", code=301)
 
 
 @app.route("/compare")

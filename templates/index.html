@@ -471,8 +471,7 @@
   <h1>AlForks</h1>
   <nav>
     <a href="/">Summary</a>
-    <a href="/rides" class="active">Logs</a>
-    <a href="/comparison">Compare</a>
+    <a href="/logs" class="active">Logs</a>
     <a href="/heatmap">Heat Map</a>
     <a href="/training-load">Training Load</a>
     <a href="/setup">Setup</a>
@@ -737,6 +736,9 @@
 
 <script>
 const TYPES = {{ types_json | safe }};
+// Server-injected from the URL path (`/log/<filename>`). Empty string
+// when the route is hit without a file (legacy `/rides` fallback).
+const INITIAL_FILENAME = {{ (current_filename or "") | tojson }};
 const TYPE_LABELS = Object.fromEntries(TYPES.map(t => [t.id, t.label]));
 const TYPE_COLORS = Object.fromEntries(TYPES.map(t => [t.id, t.color]));
 const TYPE_BG     = Object.fromEntries(TYPES.map(t => [t.id, t.bg]));
@@ -3077,10 +3079,11 @@ function writeUrlState() {
   if (rg && rg !== 'all')  p.set('region', rg);
   if (sf && sf !== 'date') p.set('sort', sf);
   if (!sortDesc) p.set('dir', 'asc');
-  if (currentFilename) p.set('file', currentFilename);
+  // Filename now lives in the URL path (`/log/<filename>`), so it's
+  // intentionally not a query param here.
   const qs = p.toString();
-  const url = qs ? `/rides?${qs}` : '/rides';
-  history.replaceState(null, '', url);
+  const path = currentFilename ? `/log/${encodeURIComponent(currentFilename)}` : '/logs';
+  history.replaceState(null, '', qs ? `${path}?${qs}` : path);
 }
 
 // Wrap state-mutating handlers so they persist to URL
@@ -3095,10 +3098,12 @@ toggleSortDir = function() { _origToggleSortDir(); writeUrlState(); };
 const _origLoadActivity = loadActivity;
 loadActivity = async function(filename) { await _origLoadActivity(filename); writeUrlState(); };
 
-// Initial load: apply URL state before first fetch, then render
+// Initial load: apply URL state before first fetch, then render. The
+// filename comes from the URL path via Flask (`/log/<filename>`); the
+// server injects it as `INITIAL_FILENAME` so we don't have to parse the
+// path here.
 applyUrlState();
-const urlFile = new URLSearchParams(window.location.search).get('file');
-fetchActivities(urlFile || undefined);
+fetchActivities(INITIAL_FILENAME || undefined);
 </script>
 </body>
 </html>
