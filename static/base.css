@@ -2,12 +2,36 @@
    Included by every template after its own <title>. Template-specific styles
    live in that template's inline <style>. */
 
+/* Inter for body, JetBrains Mono for numerics. Loaded once here so
+   every page has them — individual templates no longer need their own
+   <link rel="stylesheet" href="…fonts.googleapis…"> entry. */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+/* Shared palette tokens — mirror the Summary page so the chrome reads as
+   one design language across the site. Pages with their own inline
+   <style> can still override locally; everywhere else inherits these. */
+:root {
+  --bg-page:       #0a0c0c;
+  --bg-card:       #0f1313;
+  --bg-elev:       #11161a;
+  --border-hair:   rgba(255, 255, 255, 0.06);
+  --border-row:    rgba(255, 255, 255, 0.08);
+  --text-primary:  #fff;
+  --text-secondary: rgba(255, 255, 255, 0.7);
+  --text-tertiary: rgba(255, 255, 255, 0.5);
+  --text-muted:    rgba(255, 255, 255, 0.4);
+  --text-faint:    rgba(255, 255, 255, 0.3);
+  --accent:        #3b82f6;
+  --font-sans:     'Inter', system-ui, -apple-system, sans-serif;
+  --font-mono:     'JetBrains Mono', ui-monospace, 'SF Mono', monospace;
+}
+
 body {
-  font-family: system-ui, -apple-system, sans-serif;
-  background: #1a1d23;
-  color: #e0e0e0;
+  font-family: var(--font-sans);
+  background: var(--bg-page);
+  color: var(--text-secondary);
 }
 
 /* Header + navigation. Palette mirrors the Summary page tokens
