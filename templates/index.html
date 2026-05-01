@@ -183,6 +183,51 @@
     #map-wrap { flex: 1; position: relative; min-height: 0; }
     #map { width: 100%; height: 100%; }
     #map-legend { position: absolute; bottom: 24px; right: 10px; z-index: 1000; background: rgba(15,19,19,0.9); border: 1px solid var(--border-row); border-radius: 4px; padding: 8px 12px; font-size: 0.72rem; color: var(--text-secondary); display: none; }
+
+    /* Leaflet text + control styling — match the page palette so the map
+       chrome reads as part of the same UI rather than a foreign default. */
+    .leaflet-control-attribution {
+      background: rgba(15,19,19,0.85) !important;
+      color: var(--text-tertiary) !important;
+      font-family: var(--font-sans);
+      font-size: 0.65rem;
+      border: 1px solid var(--border-hair);
+      border-right: none;
+      border-bottom: none;
+      border-radius: 4px 0 0 0;
+      padding: 2px 6px;
+    }
+    .leaflet-control-attribution a { color: var(--text-secondary); }
+    .leaflet-control-attribution a:hover { color: var(--accent); }
+
+    .leaflet-bar a, .leaflet-bar a:hover {
+      background-color: rgba(15,19,19,0.92);
+      color: var(--text-secondary);
+      border-bottom-color: var(--border-row);
+    }
+    .leaflet-bar a:hover { background-color: rgba(255,255,255,0.05); color: #fff; }
+    .leaflet-bar { border: 1px solid var(--border-row); box-shadow: none; border-radius: 4px; overflow: hidden; }
+
+    .leaflet-popup-content-wrapper {
+      background: var(--bg-card);
+      color: rgba(255,255,255,0.85);
+      border: 1px solid var(--border-row);
+      border-radius: 4px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+      font-family: var(--font-sans);
+    }
+    .leaflet-popup-content { font-size: 0.78rem; line-height: 1.4; }
+    .leaflet-popup-tip { background: var(--bg-card); border: 1px solid var(--border-row); }
+    .leaflet-popup-close-button { color: var(--text-tertiary) !important; }
+    .leaflet-popup-close-button:hover { color: #fff !important; }
+
+    /* Fullscreen button glyph — slightly heavier since ⛶ renders thin in
+       the default font on some platforms. */
+    .map-fullscreen-ctrl a { font-size: 18px; line-height: 26px; font-weight: 400; }
+    /* When the map container is in browser fullscreen mode, fill the
+       viewport completely. Default fullscreen styling adds black bars. */
+    #map-wrap:fullscreen { background: var(--bg-page); }
+    #map-wrap:fullscreen #map { width: 100%; height: 100%; }
     #map-legend.visible { display: block; }
     .legend-row { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
     .legend-row:last-child { margin-bottom: 0; }
@@ -806,6 +851,34 @@ let editHistory  = [];   // stack of {splits, types} snapshots for undo
 const map = L.map('map', { zoomControl: true, rotate: true, touchRotate: true }).setView([51, -114], 12);
 map.addControl(new L.Control.Rotate({ closeOnZeroBearing: false }));
 
+// Fullscreen control — toggles the browser Fullscreen API on the map
+// container. Uses the standard Leaflet control chrome so it sits next to
+// the zoom + rotate controls. The map auto-resizes via Leaflet's
+// invalidateSize() once the layout settles.
+const FullscreenControl = L.Control.extend({
+  options: { position: 'topleft' },
+  onAdd() {
+    const c = L.DomUtil.create('div', 'leaflet-bar leaflet-control map-fullscreen-ctrl');
+    const a = L.DomUtil.create('a', '', c);
+    a.href = '#'; a.title = 'Toggle fullscreen';
+    a.setAttribute('role', 'button'); a.setAttribute('aria-label', 'Toggle fullscreen');
+    a.innerHTML = '⛶';
+    L.DomEvent.on(a, 'click', (e) => {
+      L.DomEvent.preventDefault(e); L.DomEvent.stopPropagation(e);
+      const target = document.getElementById('map-wrap');
+      if (!document.fullscreenElement) {
+        (target.requestFullscreen?.() || Promise.resolve())
+          .then(() => setTimeout(() => map.invalidateSize(), 100));
+      } else {
+        document.exitFullscreen?.();
+      }
+    });
+    return c;
+  },
+});
+map.addControl(new FullscreenControl());
+document.addEventListener('fullscreenchange', () => setTimeout(() => map.invalidateSize(), 100));
+
 const streetLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
   maxZoom: 19, attribution: '© <a href="https://openstreetmap.org/copyright">OpenStreetMap</a>',
 });
@@ -1391,8 +1464,10 @@ const elevationChart = new Chart(
       legend: { display: false },
       tooltip: {
         enabled: true,
-        backgroundColor: 'rgba(18,21,26,0.95)', borderColor: '#2a2d35', borderWidth: 1,
-        titleColor: '#888', bodyColor: '#fff', padding: 8,
+        backgroundColor: 'rgba(15,19,19,0.95)', borderColor: 'rgba(255,255,255,0.08)', borderWidth: 1,
+        titleColor: 'rgba(255,255,255,0.5)', bodyColor: '#fff', padding: 8,
+        titleFont: { family: 'JetBrains Mono', size: 11 },
+        bodyFont:  { family: 'JetBrains Mono', size: 11 },
         callbacks: {
           title(items) {
             if (!trackData) return '';
@@ -1433,9 +1508,17 @@ const elevationChart = new Chart(
       },
     },
     scales: {
-      x: { type: 'linear', title: { display: true, text: 'Distance (km)', color: '#ccc', font: { size: 10 } }, ticks: { color: '#ccc', font: { size: 10 } }, grid: { color: '#1e2128' } },
-      y: { title: { display: true, text: 'Elevation (m)', color: '#ccc', font: { size: 10 } }, ticks: { color: '#ccc', font: { size: 10 } }, grid: { color: '#1e2128' } },
-      y1: { display: false, position: 'right', title: { display: true, text: 'HR (bpm)', color: '#ef4444', font: { size: 10 } }, ticks: { color: '#ef4444', font: { size: 10 } }, grid: { display: false } }
+      x: { type: 'linear',
+           title: { display: true, text: 'Distance (km)', color: 'rgba(255,255,255,0.5)', font: { family: 'Inter', size: 10 } },
+           ticks: { color: 'rgba(255,255,255,0.5)', font: { family: 'JetBrains Mono', size: 10 } },
+           grid:  { color: 'rgba(255,255,255,0.06)' } },
+      y:  { title: { display: true, text: 'Elevation (m)', color: 'rgba(255,255,255,0.5)', font: { family: 'Inter', size: 10 } },
+           ticks: { color: 'rgba(255,255,255,0.5)', font: { family: 'JetBrains Mono', size: 10 } },
+           grid:  { color: 'rgba(255,255,255,0.06)' } },
+      y1: { display: false, position: 'right',
+           title: { display: true, text: 'HR (bpm)', color: '#ef4444', font: { family: 'Inter', size: 10 } },
+           ticks: { color: '#ef4444', font: { family: 'JetBrains Mono', size: 10 } },
+           grid: { display: false } }
     },
   }
 });
