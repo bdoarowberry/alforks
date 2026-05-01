@@ -21,7 +21,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from pathlib import Path
 
 import gpxpy
-from flask import Flask, Response, abort, jsonify, render_template, request
+from flask import Flask, Response, abort, jsonify, redirect, render_template, request
 
 from cache_utils import LRUCache, _atomic_write, init_backup_tracking
 from detection import (
@@ -923,7 +923,19 @@ if os.environ.get("ALFORKS_PREWARM") == "1":
 # ─── Routes ───────────────────────────────────────────────────────────────────
 
 @app.route("/")
-def index():
+def home():
+    """Home page — formerly Summary V2, now the canonical summary view.
+    Old bookmarks like `/?file=foo.gpx` (which used to point to Ride Logs)
+    redirect to `/rides?file=foo.gpx` so external links keep working."""
+    if "file" in request.args:
+        return redirect(f"/rides?{request.query_string.decode()}", code=301)
+    return render_template("summary_v2.html", types_json=json.dumps(load_types()))
+
+
+@app.route("/rides")
+def ride_logs():
+    """Ride Logs view — the activity-detail map + sidebar list. Used to live
+    at `/`; moved here when Summary V2 became the home page."""
     return render_template("index.html",
         mapbox_token=load_config().get("mapbox_token", ""),
         types_json=json.dumps(load_types()))
@@ -931,6 +943,7 @@ def index():
 
 @app.route("/summary")
 def summary():
+    """Archived. Linked from Setup → Archived; not in the main nav."""
     return render_template("summary.html", types_json=json.dumps(load_types()))
 
 

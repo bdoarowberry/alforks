@@ -178,9 +178,8 @@
 <header>
   <h1>AlForks</h1>
   <nav>
-    <a href="/summary">Summary</a>
-    <a href="/summary/v2" class="active">Summary V2</a>
-    <a href="/">Ride Logs</a>
+    <a href="/" class="active">Summary</a>
+    <a href="/rides">Ride Logs</a>
     <a href="/comparison">Compare Logs</a>
     <a href="/heatmap">Heat Map</a>
     <a href="/training-load">Training Load</a>
@@ -720,7 +719,7 @@ function renderRecent(a) {
     ${recent.length === 0
       ? '<div class="row" style="border:none;color:rgba(255,255,255,0.3);font-style:italic;cursor:default;display:block;padding-top:12px">— no activity in window —</div>'
       : recent.map(x => `
-      <a class="row" href="/?file=${encodeURIComponent(x.id)}" style="grid-template-columns:${cols}">
+      <a class="row" href="/rides?file=${encodeURIComponent(x.id)}" style="grid-template-columns:${cols}">
         <span class="date">${fmtDateShort(x.date)}</span>
         <span class="name">${escapeHtml(x.name)}</span>
         <span class="right" style="color:#fff">${fmtDist(x.dist)}</span>
@@ -759,7 +758,7 @@ function renderRecords(a) {
         // Wrap in an anchor when we have a filename so a single click opens
         // the ride log and right-click / middle-click work as expected.
         return pr.filename
-          ? `<a class="row" href="/?file=${encodeURIComponent(pr.filename)}">${inner}</a>`
+          ? `<a class="row" href="/rides?file=${encodeURIComponent(pr.filename)}">${inner}</a>`
           : `<div class="row">${inner}</div>`;
       }).join('')}`;
   return wrap;

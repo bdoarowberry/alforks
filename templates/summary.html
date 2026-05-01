@@ -105,9 +105,8 @@
 <header>
   <h1>AlForks</h1>
   <nav>
-    <a href="/summary" class="active">Summary</a>
-    <a href="/summary/v2">Summary V2</a>
-    <a href="/">Ride Logs</a>
+    <a href="/">Summary</a>
+    <a href="/rides">Ride Logs</a>
     <a href="/comparison">Compare Logs</a>
     <a href="/heatmap">Heat Map</a>
     <a href="/training-load">Training Load</a>
@@ -623,7 +622,7 @@ function renderRecords() {
       <div class="record-card">
         <div class="record-label">${label}</div>
         <div class="record-value">${value}</div>
-        <div class="record-sub"><a href="/?file=${encodeURIComponent(act.filename)}" style="color:#bbb;text-decoration:none">${displayName}</a> ${typeBadge(act.meta?.type)}</div>
+        <div class="record-sub"><a href="/rides?file=${encodeURIComponent(act.filename)}" style="color:#bbb;text-decoration:none">${displayName}</a> ${typeBadge(act.meta?.type)}</div>
       </div>`;
   }
 
@@ -668,7 +667,7 @@ function renderPerTypeRecords(acts) {
     return `<div class="pt-record-row">
       <span class="pt-record-row-label">${label}</span>
       <span class="pt-record-row-value">${value}</span>
-      <a href="/?file=${encodeURIComponent(act.filename)}" class="pt-record-row-link" title="${name}">${name}</a>
+      <a href="/rides?file=${encodeURIComponent(act.filename)}" class="pt-record-row-link" title="${name}">${name}</a>
     </div>`;
   }
 

@@ -413,9 +413,8 @@
 <header>
   <h1>AlForks</h1>
   <nav>
-    <a href="/summary">Summary</a>
-    <a href="/summary/v2">Summary V2</a>
-    <a href="/" class="active">Ride Logs</a>
+    <a href="/">Summary</a>
+    <a href="/rides" class="active">Ride Logs</a>
     <a href="/comparison">Compare Logs</a>
     <a href="/heatmap">Heat Map</a>
     <a href="/training-load">Training Load</a>
@@ -2985,7 +2984,7 @@ function writeUrlState() {
   if (!sortDesc) p.set('dir', 'asc');
   if (currentFilename) p.set('file', currentFilename);
   const qs = p.toString();
-  const url = qs ? `/?${qs}` : '/';
+  const url = qs ? `/rides?${qs}` : '/rides';
   history.replaceState(null, '', url);
 }
 

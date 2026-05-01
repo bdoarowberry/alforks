@@ -42,7 +42,10 @@
       "Bash(rm _test_fix.py _test_out.txt)",
       "Bash(cat)",
       "Bash(chmod +x /tmp/stage_tz.sh)",
-      "Bash(/tmp/stage_tz.sh)"
+      "Bash(/tmp/stage_tz.sh)",
+      "Bash(pkill -f \"summary/v2\")",
+      "Bash(pkill -f \"app.test_client\")",
+      "Bash(taskkill //IM python.exe //F)"
     ]
   }
 }
