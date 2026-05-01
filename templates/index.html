@@ -540,6 +540,9 @@
       <div class="stat" id="stat-hrzones">
         <div class="stat-value" style="display:flex;flex-direction:column;align-items:center;gap:3px;">
           <div class="hrz-bar"><span data-z="1"></span><span data-z="2"></span><span data-z="3"></span><span data-z="4"></span><span data-z="5"></span></div>
+          <button id="btn-refresh-hr" type="button" onclick="refreshHr()"
+                  style="display:none;background:transparent;border:1px solid #2a2d35;color:#888;font-size:0.7rem;padding:2px 8px;border-radius:3px;cursor:pointer;font-family:inherit;"
+                  title="Re-fetch HR data from Garmin for this activity's date">↻ Refresh HR</button>
         </div>
         <div class="stat-label" id="hrzones-label">HR Zones</div>
       </div>
@@ -1383,9 +1386,7 @@ const elevationChart = new Chart(
             if (!trackData) return '';
             const pt = trackData.points[pointIdxFromDataIdx(items[0].dataIndex)];
             if (!pt) return '';
-            // GPX wall-clock — TrailForks tags local time as +00:00, so we
-            // skip Date parsing and just take the HH:MM substring.
-            const t = pt.time ? `${pt.time.slice(11, 13)}:${pt.time.slice(14, 16)}` : '';
+            const t = fmtClock(pt.time);
             const km = `${pt.dist_km.toFixed(2)} km`;
             return t ? `${km} · ${t}` : km;
           },
@@ -1639,20 +1640,26 @@ function switchChart(mode) {
   elevationChart.update();
 }
 
-// Format "Apr 18, 2026 · 10:09 – 13:56" using the raw clock time from the ISO
-// string (GPX exports can have wrong timezone offsets, but the wall-clock
-// HH:MM is the user's local time).
+// HH:MM in 24-hour, parsed as a real moment so the activity-location TZ baked
+// into the ISO string by the backend (parse_gpx) renders correctly.
+function fmtClock(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d)) return '';
+  return d.toLocaleTimeString('en-CA', { hour: '2-digit', minute: '2-digit', hour12: false });
+}
+
+// Format "Apr 18, 2026 · 10:09 – 13:56".
 function fmtDateTimeRange(iso, durationSec) {
   if (!iso) return '';
   const date = fmtDate(iso);
-  const hh = iso.slice(11, 13), mm = iso.slice(14, 16);
-  if (!hh || !mm) return date;
-  let out = `${date} <span class="ht-time">${hh}:${mm}</span>`;
+  const start = new Date(iso);
+  if (isNaN(start)) return date;
+  const startStr = fmtClock(iso);
+  let out = `${date} <span class="ht-time">${startStr}</span>`;
   if (durationSec) {
-    const total = (+hh) * 60 + (+mm) + Math.round(durationSec / 60);
-    const eH = String(Math.floor(total / 60) % 24).padStart(2, '0');
-    const eM = String(total % 60).padStart(2, '0');
-    out = `${date} <span class="ht-time">${hh}:${mm} – ${eH}:${eM}</span>`;
+    const endStr = fmtClock(new Date(start.getTime() + durationSec * 1000).toISOString());
+    out = `${date} <span class="ht-time">${startStr} – ${endStr}</span>`;
   }
   return out;
 }
@@ -2458,6 +2465,42 @@ function highlightRun(start, end) {
   map.fitBounds(L.latLngBounds(latlngs), { padding: [40, 40] });
 }
 
+// Per-track Garmin HR refresh. Triggered by the ↻ button on activities
+// missing HR — calls the backend to re-run `garmin_sync.py --retry-date`
+// for this activity's date, then reloads the activity to pick up the new
+// samples. Synchronous from the user's perspective: the button shows a
+// spinner until the subprocess finishes (60 s timeout backend-side).
+async function refreshHr() {
+  const fn = trackData?.filename;
+  if (!fn) return;
+  const btn = document.getElementById('btn-refresh-hr');
+  const original = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '↻ Fetching…';
+  try {
+    const res = await fetch(`/api/activity/${encodeURIComponent(fn)}/refresh-hr`, { method: 'POST' });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.ok) {
+      btn.textContent = data.message ? `× ${data.message}`.slice(0, 40) : '× Failed';
+      setTimeout(() => { btn.textContent = original; btn.disabled = false; }, 3500);
+      return;
+    }
+    // Re-load the activity to pull the freshly-cached HR samples.
+    const r2 = await fetch(`/api/activity/${encodeURIComponent(fn)}`, { cache: 'no-store' });
+    if (r2.ok) {
+      trackData = await r2.json();
+      updateStats(trackData.stats || {});
+      elevationChart.data = buildChartData(chartMode);
+      elevationChart.update();
+    }
+    btn.textContent = data.message?.includes('no HR') ? 'Still no HR' : '✓ Done';
+    setTimeout(() => { btn.textContent = original; btn.disabled = false; }, 2000);
+  } catch (e) {
+    btn.textContent = '× Network error';
+    setTimeout(() => { btn.textContent = original; btn.disabled = false; }, 3500);
+  }
+}
+
 // ─── Stats ────────────────────────────────────────────────────────────────────
 function updateStats(stats) {
   document.getElementById('s-dist').textContent = stats.distance_km  != null ? `${stats.distance_km} km`  : '--';
@@ -2491,6 +2534,10 @@ function updateStats(stats) {
     bar.title = 'No HR data';
     bar.querySelectorAll('span').forEach(sp => { sp.style.width = '0%'; });
   }
+  // Show the per-track refresh button only when HR is missing — covers both
+  // "Garmin had no data when last fetched" and "I just sync'd my watch."
+  const refreshBtn = document.getElementById('btn-refresh-hr');
+  if (refreshBtn) refreshBtn.style.display = hasHr ? 'none' : '';
   if (!hasHr && chartMode === 'hr') {
     // Activity has no HR but we were viewing HR — switch back to Elevation
     switchChart('elevation');

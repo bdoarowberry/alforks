@@ -63,6 +63,14 @@ _DEFAULT_TYPES = [
 _types_cache: list | None = None
 _types_lock = threading.Lock()
 
+# GPX producers known to emit wall-clock-local time tagged with a fake +00:00
+# offset rather than genuine UTC. TrailForks-direct exports use this; our
+# `sync/strava_sync.py` deliberately matches the convention so HR-merge math
+# stays consistent (see the docstring at the top of strava_sync.py). Used in
+# `parse_gpx` to decide whether a +00:00 timestamp should be `replace`d
+# (offset stripped, re-anchored at the activity zone) or honestly converted.
+_FAKE_UTC_CREATORS = ("trailforks", "alforks strava sync")
+
 
 def load_types() -> list[dict]:
     global _types_cache
@@ -380,16 +388,75 @@ def _activities_cache_key() -> tuple:
         except OSError:
             return -1.0
     hr_dir = CACHE_DIR / "hr"
+    hr_count = 0
+    hr_max_mtime = 0.0
     try:
-        hr_count = sum(1 for _ in hr_dir.glob("*.json"))
+        for p in hr_dir.glob("*.json"):
+            hr_count += 1
+            try:
+                mt = p.stat().st_mtime
+                if mt > hr_max_mtime:
+                    hr_max_mtime = mt
+            except OSError:
+                pass
     except OSError:
-        hr_count = 0
+        pass
     # _REGION_MATCH_VERSION is included so a bump to the region-matching
     # algorithm forces every cached sidebar row to recompute its `regions`
     # field on the next load — without it the cache would happily serve
     # the old centroid-matched answers until the user touched a file.
+    # hr_max_mtime invalidates when an existing HR file is overwritten by
+    # an incomplete-date re-fetch; previously only count changes were caught.
     return (_m(GPX_DIR), _m(METADATA_FILE), _m(REGIONS_FILE), _m(TYPES_FILE),
-            hr_count, _REGION_MATCH_VERSION)
+            hr_count, hr_max_mtime, _REGION_MATCH_VERSION)
+
+
+# ─── HR coverage check ────────────────────────────────────────────────────────
+# Tolerance applied at both ends of the activity window. Garmin's daily-wellness
+# HR is sampled every ~2 minutes; activities recorded right at the edge of a
+# sample window would otherwise look uncovered even though HR is effectively
+# present.
+_HR_COVERAGE_TOL_MS = 5 * 60 * 1000
+
+# date_str -> (file mtime, (first_ms, last_ms, count) | None)
+_hr_range_cache: dict[str, tuple[float, tuple[int, int, int] | None]] = {}
+
+
+def _hr_sample_range(date_str: str) -> tuple[int, int, int] | None:
+    """First / last sample timestamp (utc ms) and count for a cached HR date,
+    or None when the cache is absent / unreadable / empty. Memoized by mtime."""
+    if not date_str:
+        return None
+    p = CACHE_DIR / "hr" / f"{date_str}.json"
+    try:
+        mtime = p.stat().st_mtime
+    except OSError:
+        _hr_range_cache.pop(date_str, None)
+        return None
+    cached = _hr_range_cache.get(date_str)
+    if cached is not None and cached[0] == mtime:
+        return cached[1]
+    try:
+        payload = json.loads(p.read_text(encoding="utf-8"))
+        samples = payload.get("samples") or []
+    except (OSError, ValueError):
+        _hr_range_cache[date_str] = (mtime, None)
+        return None
+    rng = (samples[0][0], samples[-1][0], len(samples)) if samples else None
+    _hr_range_cache[date_str] = (mtime, rng)
+    return rng
+
+
+def _hr_covers_window(date_str: str, start_ms: int, end_ms: int) -> bool:
+    """True only if the HR cache for this date spans the activity window
+    (within `_HR_COVERAGE_TOL_MS` at each end). Used to set `has_hr` honestly:
+    a cache file existing is not enough — it has to actually cover the ride."""
+    rng = _hr_sample_range(date_str)
+    if not rng:
+        return False
+    first_ms, last_ms, _ = rng
+    return first_ms <= start_ms + _HR_COVERAGE_TOL_MS \
+       and last_ms  >= end_ms   - _HR_COVERAGE_TOL_MS
 
 
 def _build_activity_entry(filename: str, meta: dict, regions: list[dict]) -> tuple[dict, dict] | None:
@@ -421,21 +488,31 @@ def _build_activity_entry(filename: str, meta: dict, regions: list[dict]) -> tup
         if len(spark) < 2:
             spark = None
         start_latlon = (pts[0]["lat"], pts[0]["lon"])
-    # has_hr = HR cache file exists and is large enough to plausibly contain
-    # samples (empty payloads from Garmin's retention cutoff serialize to
-    # ~80 bytes; real samples push it well past 200).
+    # has_hr = HR cache exists AND its samples actually cover the activity's
+    # time window. The previous size-based heuristic flagged any non-empty
+    # cache as present — which lit the HR icon for rides whose window had no
+    # overlapping samples (e.g. post-ride wellness data hadn't propagated to
+    # Garmin yet).
     date_str = (eff.get("date") or "")[:10]
     has_hr = False
-    if date_str:
+    if date_str and pts:
         try:
-            has_hr = (CACHE_DIR / "hr" / f"{date_str}.json").stat().st_size > 200
-        except OSError:
+            t0 = datetime.fromisoformat(pts[0]["time"])
+            t1 = datetime.fromisoformat(pts[-1]["time"])
+            start_ms = int(t0.timestamp() * 1000)
+            end_ms   = int(t1.timestamp() * 1000)
+            has_hr = _hr_covers_window(date_str, start_ms, end_ms)
+        except (KeyError, TypeError, ValueError):
             has_hr = False
     matched_regions = _effective_regions(eff, file_meta, regions)
     entry = {
         "filename": eff["filename"],
         "name":     eff["name"],
         "date":     eff["date"],
+        "start_time": (pts[0].get("time")  if pts else None),
+        "end_time":   (pts[-1].get("time") if pts else None),
+        "tz_name":  eff.get("tz_name"),
+        "start_latlon": list(start_latlon) if start_latlon else None,
         "stats":    eff["stats"],
         "meta":     file_meta,
         "spark":    spark,
@@ -617,6 +694,48 @@ def parse_gpx(path: Path) -> dict:
     is_assisted = _algo_lift(per_pt, latlons, osm_lifts)
     segments = _build_segments(is_assisted)
 
+    # Resolve the activity-location IANA timezone so naive GPX timestamps
+    # (TrailForks-style "wall clock as +00:00") become unambiguous absolute
+    # moments downstream. Network failures are non-fatal — we fall back to
+    # leaving timestamps as-emitted by gpxpy.
+    tz_name = None
+    tz_zone = None
+    if raw[0].time is not None:
+        date_str = raw[0].time.strftime("%Y-%m-%d")
+        try:
+            tz_name = _weather_timezone_name(raw[0].latitude, raw[0].longitude, date_str)
+            if tz_name:
+                tz_zone = ZoneInfo(tz_name)
+        except Exception:
+            tz_name = None
+            tz_zone = None
+
+    # See _FAKE_UTC_CREATORS at module level. For these producers, +00:00
+    # timestamps must be `replace`d (offset stripped, then re-anchored at the
+    # activity zone), not `astimezone`d. Anything else is trusted at face value.
+    creator = (gpx.creator or "").lower()
+    fake_utc = any(
+        creator == s or creator.startswith(s + " ") or creator.startswith(s + ".")
+        for s in _FAKE_UTC_CREATORS
+    )
+
+    def _iso_localized(t):
+        # Emit every timestamp in the activity-location's IANA zone so the
+        # wall-clock portion of the ISO string is always the rider's clock.
+        # Naive timestamps and fake-UTC timestamps from known producers both
+        # need their wall-clock preserved (replace, not convert). Genuine
+        # offsets — including real UTC from non-fake sources — get converted.
+        # HR matching and duration math go through absolute moments so the
+        # downstream stays aligned regardless of which branch runs.
+        if t is None:
+            return None
+        if tz_zone is not None:
+            if t.tzinfo is None or (fake_utc and t.utcoffset() == timedelta(0)):
+                t = t.replace(tzinfo=tz_zone)
+            else:
+                t = t.astimezone(tz_zone)
+        return t.isoformat()
+
     total_dist = riding_dist = 0.0
     elev_gain = elev_loss = assisted_gain = max_speed = 0.0
     riding_dur_sec = 0.0
@@ -643,7 +762,7 @@ def parse_gpx(path: Path) -> dict:
             "lat":     pt.latitude,
             "lon":     pt.longitude,
             "ele":     round(pt.elevation, 1) if pt.elevation is not None else None,
-            "time":    pt.time.isoformat() if pt.time else None,
+            "time":    _iso_localized(pt.time),
             "dist_km": round(total_dist / 1000, 3),
             "speed":   round(per_pt[i]['speed'], 1) if per_pt[i]['speed'] is not None else None,
         })
@@ -661,7 +780,8 @@ def parse_gpx(path: Path) -> dict:
     return {
         "filename": path.name,
         "name":     (gpx.tracks[0].name or "").strip() or path.stem,
-        "date":     start.isoformat() if start else None,
+        "date":     _iso_localized(start),
+        "tz_name":  tz_name,
         "bbox":     [min(lats), min(lons), max(lats), max(lons)],
         "points":   points,
         "segments": segments,
@@ -1589,6 +1709,48 @@ def api_delete_activity(filename):
     if _archive_activity(filename):
         return jsonify({"ok": True})
     abort(404)
+
+
+@app.route("/api/activity/<filename>/refresh-hr", methods=["POST"])
+def api_refresh_hr(filename):
+    """Re-fetch Garmin HR for this activity's date. Used by the per-track
+    "↻ Refresh HR" button when an activity is showing no HR data and the
+    user has just synced their watch. Synchronous — runs `garmin_sync.py
+    --retry-date` for the activity's date and waits for the result."""
+    if _safe_gpx_path(filename) is None:
+        abort(404)
+    activity = get_activity(filename)
+    if not activity:
+        abort(404)
+    date_str = (activity.get("date") or "")[:10]
+    if not date_str:
+        return jsonify({"ok": False, "message": "activity has no date"}), 400
+
+    try:
+        proc = subprocess.run(
+            [sys.executable, str(_ROOT / "sync" / "garmin_sync.py"),
+             "--retry-date", date_str],
+            capture_output=True, text=True, timeout=60,
+        )
+    except subprocess.TimeoutExpired:
+        return jsonify({"ok": False, "message": "fetch timed out after 60s"}), 504
+    except Exception as e:
+        return jsonify({"ok": False, "message": f"error: {e}"}), 500
+
+    if proc.returncode != 0:
+        out = (proc.stderr or proc.stdout).strip()
+        msg = out.splitlines()[-1] if out else "fetch failed"
+        return jsonify({"ok": False, "message": msg}), 502
+
+    # Drop the per-date HR-range cache so the next has_hr check re-stats the
+    # cache file and picks up the new sample range.
+    _hr_range_cache.pop(date_str, None)
+    # Refresh just this activity's sidebar entry so has_hr flips when the
+    # fetch returned samples covering the activity window.
+    _update_activity_entry(filename)
+
+    last = proc.stdout.strip().splitlines()[-1] if proc.stdout.strip() else ""
+    return jsonify({"ok": True, "message": last, "date": date_str})
 
 
 @app.route("/api/activities/bulk-delete", methods=["POST"])
@@ -2521,10 +2683,23 @@ def load_regions() -> list[dict]:
 
 
 def save_regions(regions: list[dict]):
-    global _regions_cache
+    global _regions_cache, _regions_geom_hash_cached
     _atomic_write(REGIONS_FILE, json.dumps(regions, indent=2, ensure_ascii=False))
     with _regions_lock:
         _regions_cache = regions
+    # Activities cache holds each entry's matched-regions list; without this,
+    # adding/editing/deleting a region wouldn't refresh the sidebar `regions`
+    # field nor /api/regions/untagged on Windows where mtime resolution is
+    # coarse enough to occasionally miss a same-second save.
+    _invalidate_activities_cache()
+    # The /api/regions[/<id>] handlers mutate the cached regions list in place
+    # (regions.append(...) / regions.pop(...)), so id(regions) is unchanged
+    # across saves. _regions_geom_hash has a fast-path keyed on id(regions) —
+    # without busting it, the hash stays stale and _regions_match_cache keeps
+    # serving the old per-track matches indefinitely.
+    _regions_geom_hash_cached = None
+    with _regions_match_cache_lock:
+        _regions_match_cache.clear()
 
 
 def _point_in_polygon(lat: float, lon: float, ring: list) -> bool:
@@ -3319,11 +3494,244 @@ def _region_usage_dict() -> dict[str, int]:
         return counts
 
 
+def _decimated_coords(filename: str, max_points: int = 120) -> list[list[float]]:
+    """Lat/lon polyline for a track, evenly thinned to ~max_points samples.
+    Used by lightweight UI overlays (regionless tracks map, duplicates map)
+    where the full point density would balloon the payload for no gain."""
+    data = get_activity(filename)
+    pts = (data or {}).get("points") or []
+    if len(pts) < 2:
+        return []
+    step = max(1, len(pts) // max_points)
+    out = [[round(p["lat"], 5), round(p["lon"], 5)]
+           for p in pts[::step] if "lat" in p and "lon" in p]
+    last = pts[-1]
+    if out and (out[-1][0] != round(last["lat"], 5) or out[-1][1] != round(last["lon"], 5)):
+        out.append([round(last["lat"], 5), round(last["lon"], 5)])
+    return out
+
+
+@app.route("/api/track-coords/<path:filename>")
+def api_track_coords(filename):
+    """Decimated polyline for a single track. Used by the duplicates panel
+    to render small per-group comparison maps without paying for full point
+    data. Returns 404 if the GPX can't be parsed."""
+    if _safe_gpx_path(filename) is None:
+        abort(404)
+    coords = _decimated_coords(filename)
+    if not coords:
+        abort(404)
+    return jsonify({"filename": filename, "coords": coords})
+
+
+_DUPLICATE_STAT_TOL = 0.05  # ±5% on distance and duration
+
+
+def _values_within_tol(a: float, b: float, tol: float) -> bool:
+    if a is None or b is None:
+        return False
+    if a <= 0 and b <= 0:
+        return True
+    denom = max(abs(a), abs(b))
+    if denom == 0:
+        return True
+    return abs(a - b) / denom <= tol
+
+
+@app.route("/api/duplicates")
+def api_duplicates():
+    """Surface likely-duplicate activities so the user can clean up imports
+    that came in from multiple sources (e.g. the same ride synced from both
+    Strava and Garmin).
+
+    Heuristic per pair: same calendar date AND distance_km within
+    ±5% AND duration_sec within ±5%. Within a date, we form transitive
+    groups (if A~B and B~C then A,B,C are one group)."""
+    by_date: dict[str, list[dict]] = {}
+    for a in all_activities():
+        d = (a.get("date") or "")[:10]
+        if not d:
+            continue
+        s = a.get("stats") or {}
+        by_date.setdefault(d, []).append({
+            "filename":     a["filename"],
+            "name":         a.get("name") or a["filename"],
+            "date":         d,
+            "start_time":   a.get("start_time"),
+            "end_time":     a.get("end_time"),
+            "distance_km":  s.get("distance_km"),
+            "duration_sec": s.get("duration_sec"),
+            "elev_gain_m":  s.get("elev_gain_m"),
+            "type":         a.get("effective_type") or "",
+            "excluded":     bool(a.get("excluded")),
+            "regions":      [r.get("name") if isinstance(r, dict) else r
+                             for r in (a.get("regions") or [])],
+        })
+
+    groups: list[dict] = []
+    for d, acts in by_date.items():
+        if len(acts) < 2:
+            continue
+        # Union-find by similarity
+        parent = list(range(len(acts)))
+        def find(i):
+            while parent[i] != i:
+                parent[i] = parent[parent[i]]
+                i = parent[i]
+            return i
+        def union(i, j):
+            ri, rj = find(i), find(j)
+            if ri != rj:
+                parent[ri] = rj
+        for i in range(len(acts)):
+            for j in range(i + 1, len(acts)):
+                if _values_within_tol(acts[i]["distance_km"],  acts[j]["distance_km"],  _DUPLICATE_STAT_TOL) \
+                   and _values_within_tol(acts[i]["duration_sec"], acts[j]["duration_sec"], _DUPLICATE_STAT_TOL):
+                    union(i, j)
+        clusters: dict[int, list[dict]] = {}
+        for i, a in enumerate(acts):
+            clusters.setdefault(find(i), []).append(a)
+        for members in clusters.values():
+            if len(members) >= 2:
+                members.sort(key=lambda a: a["filename"])
+                groups.append({"date": d, "tracks": members})
+
+    groups.sort(key=lambda g: g["date"], reverse=True)
+    return jsonify({"groups": groups, "total_pairs": sum(len(g["tracks"]) for g in groups)})
+
+
+# Activities whose start time falls inside this hour window get flagged on
+# the Setup → Odd Times panel. Hours are interpreted in the activity's local
+# time. Window is [21, 06]: hour 7 (07:00:xx) is daytime and not flagged.
+_ODD_TIME_NIGHT_HOURS = {21, 22, 23, 0, 1, 2, 3, 4, 5, 6}
+
+# Cap on lazy `_weather_timezone_name` lookups per request so a fresh install
+# (every activity missing tz_name) doesn't fan out to ~669 sequential 8 s
+# Open-Meteo calls. Subsequent tab opens make incremental progress as the
+# weather cache fills in.
+_ODD_TIMES_LAZY_LOOKUP_BUDGET = 20
+
+
+@app.route("/api/odd-times")
+def api_odd_times():
+    """Flag rides whose start time, in the activity-location's local zone,
+    falls in the night window. Defensive against the parse-time failure mode
+    where `_weather_timezone_name` returned None and timestamps were cached
+    with their original (often UTC) offset — we re-resolve TZ here from the
+    sidebar entry's lat/lon, which lazily fills the weather cache for next
+    time. Entries we can't classify are skipped rather than false-flagged.
+    """
+    flagged: list[dict] = []
+    lazy_budget = _ODD_TIMES_LAZY_LOOKUP_BUDGET
+    for a in all_activities():
+        st = a.get("start_time")
+        if not st:
+            continue
+        try:
+            dt = datetime.fromisoformat(st)
+        except ValueError:
+            continue
+
+        tz_name = a.get("tz_name")
+        if not tz_name and a.get("start_latlon") and lazy_budget > 0:
+            lat, lon = a["start_latlon"]
+            # Open-Meteo's timezone result is location-only; the date param is
+            # required by the archive endpoint but doesn't affect the zone we
+            # get back. Use the activity's date when available so the cache
+            # entry sits alongside any weather we'd fetch later anyway.
+            date_str = (a.get("date") or "")[:10] or "2024-01-01"
+            lazy_budget -= 1
+            try:
+                tz_name = _weather_timezone_name(lat, lon, date_str)
+            except Exception:
+                tz_name = None
+
+        if tz_name:
+            try:
+                local_dt = dt.astimezone(ZoneInfo(tz_name)) if dt.tzinfo else dt.replace(tzinfo=ZoneInfo(tz_name))
+            except ZoneInfoNotFoundError:
+                continue
+        elif dt.tzinfo is None:
+            # Naive timestamp + no tz_name: trust the wall-clock at face value.
+            # Correct for TrailForks-style files (naive == local clock) but
+            # would re-introduce the original false-flag bug for any naive-UTC
+            # source. Accepted limitation — gpxpy emits naive only when the
+            # source GPX had no timezone marker, and TrailForks is the only
+            # known producer of that shape we ingest.
+            local_dt = dt
+        else:
+            continue
+
+        if local_dt.hour not in _ODD_TIME_NIGHT_HOURS:
+            continue
+        s = a.get("stats") or {}
+        date_str = (a.get("date") or "")[:10]
+        flagged.append({
+            "filename":     a["filename"],
+            "name":         a.get("name") or a["filename"],
+            "date":         date_str,
+            "start_time":   local_dt.isoformat(),
+            "_sort_key":    (date_str, local_dt.hour, local_dt.minute),
+            "duration_sec": s.get("duration_sec"),
+            "distance_km":  s.get("distance_km"),
+            "type":         a.get("effective_type") or "",
+            "regions":      [r.get("name") if isinstance(r, dict) else r
+                             for r in (a.get("regions") or [])],
+            "tz_name":      tz_name,
+            "tz_offset":    local_dt.utcoffset().total_seconds() / 3600 if local_dt.utcoffset() is not None else None,
+        })
+    flagged.sort(key=lambda a: a["_sort_key"], reverse=True)
+    for a in flagged:
+        a.pop("_sort_key", None)
+    return jsonify({"activities": flagged, "window": "21:00–07:00 local"})
+
+
 @app.route("/api/regions/<region_id>/usage")
 def api_region_usage(region_id):
     if not any(r["id"] == region_id for r in load_regions()):
         abort(404)
     return jsonify({"count": _region_usage_dict().get(region_id, 0)})
+
+
+@app.route("/api/regions/untagged")
+def api_regions_untagged():
+    """Activities that match no region and have no pinned regions, with
+    decimated polylines for overlay on the regions setup map. Lets the user
+    see coverage gaps and draw new polygons to fill them.
+
+    Refresh always forces a rebuild: this endpoint is the user's explicit
+    "re-evaluate region matches" trigger, and we don't want a stale cache
+    (e.g. from a same-second mtime collision on Windows) to make Refresh
+    look broken."""
+    _invalidate_activities_cache()
+    out = []
+    for act in all_activities():
+        if act.get("excluded"):
+            continue
+        if act.get("regions"):
+            continue
+        if (act.get("meta") or {}).get("regions_pinned"):
+            continue
+        data = get_activity(act["filename"])
+        pts  = (data or {}).get("points") or []
+        if len(pts) < 2:
+            continue
+        step = max(1, len(pts) // 80)
+        coords = [[round(p["lat"], 5), round(p["lon"], 5)]
+                  for p in pts[::step] if "lat" in p and "lon" in p]
+        if pts[-1] is not pts[::step][-1]:
+            coords.append([round(pts[-1]["lat"], 5), round(pts[-1]["lon"], 5)])
+        if len(coords) < 2:
+            continue
+        out.append({
+            "filename": act["filename"],
+            "name":     act.get("name") or act["filename"],
+            "date":     (act.get("date") or "")[:10],
+            "type":     act.get("effective_type") or "",
+            "coords":   coords,
+        })
+    out.sort(key=lambda a: a["date"], reverse=True)
+    return jsonify(out)
 
 
 @app.route("/api/regions", methods=["GET", "POST"])
