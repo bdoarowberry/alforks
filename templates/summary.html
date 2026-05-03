@@ -3,99 +3,171 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AlForks – Summary (archived)</title>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <title>AlForks – Summary</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/base.css">
   <script src="/static/utils.js"></script>
   <script src="/static/sync_toast.js" defer></script>
-  <link rel="stylesheet" href="/static/base.css">
   <style>
-    body { min-height: 100vh; display: flex; flex-direction: column; }
-    header { padding: 0 24px; }
+    /* ─────────────────────────────────────────────────────────────────────
+       Summary — design tokens transcribed from design/summary/README.md
+       (the historical "v2" draft). Keep the type stack tight; numeric
+       values use JetBrains Mono with tabular-nums everywhere.
+       ───────────────────────────────────────────────────────────────────── */
+    /* Page-local additions only; surface / text / border / font tokens
+       come from static/base.css. Removing the previous :root override
+       resolves the dim-summary drift and keeps Summary in step with
+       the rest of the site. */
+    :root {
+      --sans: var(--font-sans);
+      --mono: var(--font-mono);
+      --border-dotted: rgba(255,255,255,0.05);
+      --border-divider: rgba(255,255,255,0.04);
+      /* Subtle white tint used for chip/segctrl/empty-bar surfaces — a
+         surface token, NOT a text colour, hence not promoted to base.css. */
+      --surface-tint: rgba(255,255,255,0.04);
+      --pos: oklch(0.78 0.15 145);
+      --neg: oklch(0.74 0.14 55);
+    }
 
-    #filter-bar { background: #12151a; border-bottom: 1px solid #2a2d35; padding: 10px 24px; display: flex; align-items: center; gap: 16px; flex-shrink: 0; flex-wrap: wrap; }
-    #filter-bar label { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.07em; color: #bbb; }
-    .sep { width: 1px; height: 20px; background: #2a2d35; }
+    body { background: var(--bg-page); color: var(--text-primary); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+    body, * { box-sizing: border-box; }
 
-    main { flex: 1; padding: 24px; max-width: 1400px; width: 100%; margin: 0 auto; display: flex; flex-direction: column; gap: 28px; }
+    /* The standard AlForks <header> + <nav> sits above this; the dashboard
+       is a centered max-width inner stage. Width matches Logs / Compare
+       (1680px) so all the data-heavy pages share the same outer frame. */
+    main.s2-stage { max-width: 1680px; margin: 0 auto; padding: 32px 36px; display: flex; flex-direction: column; gap: 22px; }
 
-    /* Section wrapper */
-    .section-title { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.1em; color: #888; margin-bottom: 10px; }
+    /* All numeric cells should align column-to-column. */
+    .s2-stage .num,
+    .s2-stage .num * { font-variant-numeric: tabular-nums; }
 
-    /* Hero stats */
-    .hero-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; }
-    .hero-card { background: #12151a; border: 1px solid #2a2d35; border-top: 2px solid #3b82f6; border-radius: 8px; padding: 18px 20px; }
-    .hero-label { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.08em; color: #bbb; margin-bottom: 8px; }
-    .hero-value { font-size: 1.6rem; font-weight: 700; color: #fff; line-height: 1.1; }
-    .hero-sub { font-size: 0.72rem; color: #999; margin-top: 6px; }
-    .hero-delta { font-size: 0.7rem; margin-top: 6px; }
-    .hero-delta.up   { color: #4ade80; }
-    .hero-delta.down { color: #f87171; }
+    /* Eyebrow / uppercase labels */
+    .s2-eyebrow      { font-size: 10px; color: var(--text-tertiary); letter-spacing: 0.14em; text-transform: uppercase; }
+    .s2-eyebrow-hero { font-size: 11px; color: var(--text-tertiary); letter-spacing: 0.18em; text-transform: uppercase; }
+    .s2-eyebrow-section { font-size: 10px; color: var(--text-tertiary); letter-spacing: 0.18em; text-transform: uppercase; margin-top: 4px; }
 
-    /* Lifetime strip — sits above the year-filtered hero grid. Styled
-       slightly differently (amber accent, smaller cards) so it's visually
-       distinct from the year hero. */
-    .lifetime-strip { background: #14171c; border: 1px solid #2a2d35; border-left: 3px solid #f59e0b; border-radius: 8px; padding: 12px 18px; margin-bottom: 14px; display: flex; flex-wrap: wrap; gap: 24px; align-items: baseline; }
-    .lifetime-label { font-size: 0.62rem; text-transform: uppercase; letter-spacing: 0.1em; color: #f59e0b; font-weight: 600; flex-shrink: 0; }
-    .lifetime-stats { display: flex; gap: 22px; flex-wrap: wrap; flex: 1; }
-    .lifetime-stat { display: flex; flex-direction: column; gap: 2px; }
-    .lifetime-stat-label { font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.07em; color: #888; }
-    .lifetime-stat-value { font-size: 1rem; font-weight: 600; color: #fff; }
+    /* "By activity" header row — eyebrow on the left, year chips on the right. */
+    .s2-activities-header { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-top: 4px; flex-wrap: wrap; }
+    .s2-year-chips { display: inline-flex; gap: 4px; flex-wrap: wrap; }
+    .s2-year-chips button { all: unset; cursor: pointer; padding: 4px 10px; font-size: 10px;
+                            font-family: var(--mono); letter-spacing: 0.04em;
+                            color: var(--text-tertiary); background: var(--surface-tint);
+                            border: 1px solid var(--border-hair); border-radius: 3px; }
+    .s2-year-chips button.on { color: #fff; background: rgba(255,255,255,0.10); border-color: rgba(255,255,255,0.18); }
+    .s2-year-chips button:hover:not(.on) { color: var(--text-secondary); }
 
-    /* Activity calendar */
-    .cal-wrap { background: #12151a; border: 1px solid #2a2d35; border-radius: 8px; padding: 18px 20px; }
-    .cal-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 12px; }
-    .cal-title { font-size: 0.8rem; color: #e0e0e0; font-weight: 500; }
-    .cal-total { font-size: 0.72rem; color: #999; }
-    .cal-grid { display: grid; grid-template-columns: auto 1fr; gap: 4px; font-family: ui-monospace, monospace; }
-    .cal-day-labels { display: grid; grid-template-rows: repeat(7, 11px); gap: 2px; align-content: start; padding-top: 14px; font-size: 0.58rem; color: #666; }
-    .cal-day-labels span { line-height: 11px; }
-    .cal-months-row { display: grid; grid-template-rows: 11px 1fr; gap: 2px; }
-    .cal-month-labels { display: grid; grid-template-columns: repeat(53, 13px); font-size: 0.58rem; color: #888; }
-    .cal-days { display: grid; grid-template-columns: repeat(53, 13px); grid-template-rows: repeat(7, 11px); grid-auto-flow: column; gap: 2px; }
-    .cal-day { width: 11px; height: 11px; border-radius: 2px; background: #1e2128; }
-    .cal-legend { margin-top: 12px; font-size: 0.68rem; color: #999; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
-    .cal-legend-item { display: flex; align-items: center; gap: 5px; }
-    .cal-legend-dot { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+    /* ── Page header ─────────────────────────────────────────────────── */
+    .s2-head { display: flex; align-items: flex-end; justify-content: space-between; }
+    .s2-head h1 { font-size: 32px; font-weight: 500; margin: 8px 0 0 0; letter-spacing: -0.02em; }
+    .s2-head h1 .suffix { color: rgba(255,255,255,0.45); font-weight: 300; }
+    .s2-head .right { text-align: right; }
+    .s2-head .right .last-date { font-size: 16px; font-family: var(--mono); margin-top: 6px; }
+    .s2-head .right .ago { margin-left: 10px; font-size: 13px; }
+    .s2-head .right .ago.fresh { color: var(--pos); }
+    .s2-head .right .ago.warm  { color: var(--neg); }
+    .s2-head .right .ago.neutral { color: #fff; }
 
-    /* By-type breakdown */
-    .by-type-grid { display: grid; grid-template-columns: 320px 1fr; gap: 20px; }
-    @media (max-width: 900px) { .by-type-grid { grid-template-columns: 1fr; } }
-    .by-type-card { background: #12151a; border: 1px solid #2a2d35; border-radius: 8px; padding: 18px 20px; }
-    .type-row { display: flex; align-items: center; gap: 12px; padding: 8px 0; border-bottom: 1px solid #1e2128; }
-    .type-row:last-child { border-bottom: none; }
-    .type-swatch-sm { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
-    .type-row-name { flex: 1; font-size: 0.82rem; color: #e0e0e0; }
-    .type-row-stat { font-size: 0.78rem; color: #bbb; }
-    .type-row-stat strong { color: #fff; font-weight: 600; }
+    /* ── KPI strip ──────────────────────────────────────────────────── */
+    .s2-kpi { display: grid; grid-template-columns: repeat(5, 1fr); gap: 1px;
+              background: var(--border-hair); border: 1px solid var(--border-hair);
+              border-radius: 4px; overflow: hidden; }
+    .s2-kpi .cell { background: var(--bg-card); padding: 20px 22px; }
+    .s2-kpi .cell .label { font-size: 10px; color: var(--text-tertiary); letter-spacing: 0.14em; text-transform: uppercase; margin-bottom: 10px; }
+    .s2-kpi .cell .value { font-size: 30px; color: #fff; font-weight: 500; font-family: var(--mono); letter-spacing: -0.02em; line-height: 1; }
+    .s2-kpi .cell .value .suffix { font-size: 13px; color: var(--text-tertiary); margin-left: 4px; font-weight: 400; }
 
-    /* Charts */
-    .chart-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); gap: 14px; }
-    .chart-card { background: #12151a; border: 1px solid #2a2d35; border-radius: 8px; padding: 16px 18px; }
-    .chart-card h3 { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em; color: #bbb; margin-bottom: 10px; }
-    .chart-wrap { position: relative; height: 160px; }
+    @media (max-width: 720px) {
+      .s2-kpi { grid-template-columns: repeat(2, 1fr); }
+    }
 
-    /* Records */
-    .records-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
-    .record-card { background: #12151a; border: 1px solid #2a2d35; border-radius: 8px; padding: 14px 16px; }
-    .record-label { font-size: 0.64rem; text-transform: uppercase; letter-spacing: 0.08em; color: #bbb; margin-bottom: 5px; }
-    .record-value { font-size: 1.15rem; font-weight: 600; color: #f59e0b; }
-    .record-sub { font-size: 0.7rem; color: #999; margin-top: 3px; }
+    /* ── Ribbon ─────────────────────────────────────────────────────── */
+    .s2-ribbon { background: var(--bg-card); border: 1px solid var(--border-hair); border-radius: 4px; padding: 20px 22px; }
+    .s2-ribbon .top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
+    .s2-ribbon .legend { display: flex; gap: 14px; }
+    .s2-ribbon .legend-item { display: flex; align-items: center; gap: 6px; font-size: 10px; font-family: var(--mono); }
+    .s2-ribbon .legend-dot { width: 10px; height: 10px; border-radius: 2px; }
+    .s2-ribbon .legend-label { color: var(--text-secondary); }
+    .s2-ribbon .cells { display: flex; gap: 1px; height: 36px; align-items: stretch; }
+    .s2-ribbon .cell { flex: 1; border-radius: 1px; }
+    .s2-ribbon .cell.on { cursor: pointer; }
+    .s2-ribbon .cell:not(.on) { background: var(--surface-tint); }
+    .s2-ribbon .cell.hover { outline: 1px solid #fff; }
+    .s2-ribbon .caption { margin-top: 8px; display: flex; justify-content: space-between; font-size: 10px; color: var(--text-tertiary); font-family: var(--mono); min-height: 14px; }
 
-    /* Per-type records — one card per type, listing that type's bests
-       as compact rows. Sits below the cross-type Records grid. */
-    .pt-records-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }
-    .pt-record-card { background: #12151a; border: 1px solid #2a2d35; border-radius: 8px; padding: 12px 14px; }
-    .pt-record-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; padding-bottom: 7px; border-bottom: 1px solid #1e2128; }
-    .pt-record-swatch { width: 10px; height: 10px; border-radius: 50%; }
-    .pt-record-type { font-size: 0.78rem; font-weight: 600; color: #e0e0e0; }
-    .pt-record-count { font-size: 0.66rem; color: #777; margin-left: auto; }
-    .pt-record-row { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; padding: 4px 0; font-size: 0.74rem; }
-    .pt-record-row-label { color: #888; flex-shrink: 0; }
-    .pt-record-row-value { color: #f59e0b; font-weight: 500; flex-shrink: 0; }
-    .pt-record-row-link { color: #999; text-decoration: none; font-size: 0.68rem; flex: 1; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-    .pt-record-row-link:hover { color: #ccc; }
+    /* ── Activity stack ─────────────────────────────────────────────── */
+    .s2-activities { background: var(--bg-page); border: 1px solid var(--border-hair); border-top: none; border-radius: 4px; }
+    .s2-row { border-top: 1px solid var(--border-row); border-left: 2px solid #3b82f6; background: var(--bg-page); }
+    .s2-row > .head { all: unset; cursor: pointer; display: flex; align-items: center; gap: 18px; padding: 14px 18px; width: 100%; }
+    .s2-row .glyph { width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; border-radius: 4px; font-family: var(--mono); font-weight: 700; font-size: 13px; flex-shrink: 0; }
+    .s2-row .name  { font-size: 14px; color: #fff; font-weight: 500; }
+    .s2-row .spacer { flex: 1; }
+    .s2-row .stat-inline { font-size: 11px; color: var(--text-secondary); font-family: var(--mono); min-width: 80px; text-align: right; flex-shrink: 0; }
+    .s2-row .stat-inline .v { color: #fff; }
+    .s2-row .stat-inline .u { color: var(--text-tertiary); }
+    .s2-row .stat-inline .l { color: var(--text-muted); margin-left: 6px; font-size: 9px; letter-spacing: 0.1em; text-transform: uppercase; }
+    .s2-row .ago { font-size: 10px; color: rgba(255,255,255,0.45); font-family: var(--mono); min-width: 60px; text-align: right; flex-shrink: 0; }
+    .s2-row .chev { color: var(--text-tertiary); font-size: 16px; font-family: var(--mono); width: 16px; text-align: center; transition: transform 120ms; }
+    .s2-row.open > .head .chev { transform: rotate(90deg); }
+    .s2-row > .body { padding: 4px 18px 22px; display: none; }
+    .s2-row.open > .body { display: block; }
 
-    .type-badge { font-size: 0.58rem; padding: 1px 5px; border-radius: 3px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; display: inline-block; }
+    /* Toolbar */
+    .s2-toolbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; gap: 12px; flex-wrap: wrap; }
+    .s2-toolbar .sub { font-size: 10px; color: var(--text-tertiary); letter-spacing: 0.14em; text-transform: uppercase; }
+    .s2-toolbar .yoy { margin-left: 12px; font-family: var(--mono); letter-spacing: 0; }
+    .s2-toolbar .yoy.pos { color: var(--pos); }
+    .s2-toolbar .yoy.neg { color: var(--neg); }
+    .s2-toolbar .right { display: flex; gap: 10px; align-items: center; }
+
+    .s2-segctrl { display: inline-flex; background: var(--surface-tint); border: 1px solid var(--border-hair); border-radius: 4px; overflow: hidden; }
+    .s2-segctrl button { all: unset; cursor: pointer; padding: 5px 12px; font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; font-family: var(--mono); color: rgba(255,255,255,0.55); border-left: 1px solid var(--border-hair); }
+    .s2-segctrl button:first-child { border-left: none; }
+    .s2-segctrl button.on { color: #0b0d0c; font-weight: 600; }
+    .s2-segctrl.mode button { padding: 5px 10px; font-size: 11px; }
+    .s2-segctrl.mode button.on { background: rgba(255,255,255,0.1); color: #fff; }
+
+    /* Chart */
+    .s2-chart { position: relative; }
+    .s2-chart .grouped { display: grid; grid-template-columns: repeat(12, 1fr); gap: 3px; height: 140px; align-items: flex-end; }
+    .s2-chart .group { display: flex; gap: 1px; height: 100%; align-items: flex-end; }
+    .s2-chart .bar { flex: 1; border-radius: 1px; min-height: 1px; transition: opacity 80ms; }
+    .s2-chart .bar.empty { background: var(--surface-tint); height: 1px; }
+    .s2-chart .bar.has-data { cursor: crosshair; }
+    .s2-chart .tooltip { position: absolute; top: -28px; background: #15191a; border: 1px solid rgba(255,255,255,0.1); color: #fff; font-size: 10px; padding: 4px 8px; border-radius: 3px; font-family: var(--mono); white-space: nowrap; pointer-events: none; transform: translateX(-50%); }
+    .s2-chart .tooltip .month { color: rgba(255,255,255,0.5); }
+    .s2-chart svg.overlay { display: block; width: 100%; height: 140px; }
+    .s2-chart .month-axis { display: grid; grid-template-columns: repeat(12, 1fr); gap: 3px; margin-top: 6px; font-size: 9px; color: var(--text-muted); font-family: var(--mono); text-align: center; }
+    .s2-chart .year-legend { display: flex; gap: 12px; margin-top: 8px; justify-content: flex-end; font-size: 9px; font-family: var(--mono); }
+    .s2-chart .year-legend .swatch { width: 10px; height: 2px; border-radius: 1px; display: inline-block; margin-right: 5px; vertical-align: middle; }
+
+    /* Body grid (Performance / Recent / Records) */
+    .s2-body-grid { display: grid; grid-template-columns: 1fr 1.4fr 1fr; gap: 28px; margin-top: 24px; }
+    @media (max-width: 960px) { .s2-body-grid { grid-template-columns: 1fr; } }
+    .s2-perf .row, .s2-prs .row { display: flex; justify-content: space-between; padding: 6px 0; font-size: 12px; border-bottom: 1px solid var(--border-divider); }
+    .s2-perf .row:last-child, .s2-prs .row:last-child { border-bottom: none; }
+    .s2-perf .label { color: rgba(255,255,255,0.55); }
+    .s2-perf .value { color: #fff; font-family: var(--mono); }
+    .s2-recent .head-row { display: grid; gap: 8px; font-size: 9px; color: var(--text-muted); letter-spacing: 0.08em; text-transform: uppercase; padding-bottom: 6px; border-bottom: 1px solid var(--border-hair); font-family: var(--mono); }
+    .s2-recent .row { display: grid; gap: 8px; padding: 6px 0; font-size: 11px; font-family: var(--mono); border-bottom: 1px dotted var(--border-dotted); cursor: pointer; }
+    .s2-recent .row:last-child { border-bottom: none; }
+    .s2-recent .row .name { font-family: var(--sans); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .s2-recent .row .right { text-align: right; color: rgba(255,255,255,0.65); }
+    .s2-recent .row .date { color: rgba(255,255,255,0.5); }
+    .s2-prs .row { display: grid; grid-template-columns: 14px 1fr auto; gap: 10px; padding: 8px 0; font-size: 12px; align-items: center; }
+    .s2-prs .star { font-size: 14px; line-height: 1; }
+    .s2-prs .lbl { color: rgba(255,255,255,0.7); font-size: 11px; }
+    .s2-prs .sub { color: rgba(255,255,255,0.35); font-size: 9px; font-family: var(--mono); margin-top: 2px; }
+    .s2-prs .val { color: #fff; font-family: var(--mono); }
+    /* Recent + Records rows render as anchors when they link to a ride log
+       — strip the default anchor styling so they look identical to the
+       non-link rows. Hover lights up the row subtly to confirm clickability. */
+    .s2-recent a.row, .s2-prs a.row { color: inherit; text-decoration: none; }
+    .s2-recent a.row:hover, .s2-prs a.row:hover { background: rgba(255,255,255,0.03); }
+
+    .s2-loading { padding: 40px; text-align: center; color: var(--text-tertiary); font-family: var(--mono); font-size: 12px; }
   </style>
 </head>
 <body>
@@ -103,7 +175,7 @@
 <header>
   <h1>AlForks</h1>
   <nav>
-    <a href="/">Summary</a>
+    <a href="/" class="active">Summary</a>
     <a href="/logs">Logs</a>
     <a href="/heatmap">Heat Map</a>
     <a href="/training">Training</a>
@@ -112,685 +184,585 @@
   <button class="nav-sync-btn" onclick="triggerSyncAll()" title="Sync Strava + Garmin now">Sync</button>
 </header>
 
-<div style="padding: 14px 22px 0;">
-  <div style="font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.18em; color: #f59e0b; font-weight: 600; margin-bottom: 4px;">Archived</div>
+<main class="s2-stage">
   <h1 style="font-size: 1.4rem; font-weight: 500; color: #fff; letter-spacing: -0.02em; margin: 0;">Summary</h1>
-</div>
-
-<div id="filter-bar">
-  <label>Year</label>
-  <div id="year-filters" style="display:flex;gap:6px;flex-wrap:wrap;"></div>
-  <div class="sep"></div>
-  <label>Type</label>
-  <div id="type-filters" style="display:flex;gap:6px;flex-wrap:wrap;"></div>
-</div>
-
-<main>
-  <!-- Hero stats -->
-  <div>
-    <div class="lifetime-strip" id="lifetime-strip" style="display:none"></div>
-    <div class="hero-grid" id="hero-grid"></div>
-  </div>
-
-  <!-- Snow season stats (ski + snowboard, shown when applicable) -->
-  <div id="snow-section" style="display:none"></div>
-
-  <!-- Activity Calendar -->
-  <div class="cal-wrap" id="cal-wrap"></div>
-
-  <!-- Type breakdown + Monthly chart -->
-  <div>
-    <div class="section-title">Activity Mix & Monthly Pattern</div>
-    <div class="by-type-grid">
-      <div class="by-type-card">
-        <h3 style="font-size:0.7rem;text-transform:uppercase;letter-spacing:0.08em;color:#bbb;margin-bottom:12px;">By Type <span style="color:#666;font-weight:normal;text-transform:none;letter-spacing:0;">· count · km · share</span></h3>
-        <div id="type-breakdown"></div>
-      </div>
-      <div class="chart-card">
-        <h3>Activity Days per Month</h3>
-        <div class="chart-wrap"><canvas id="ch-month-days"></canvas></div>
-      </div>
-    </div>
-  </div>
-
-  <!-- Year-over-year trends -->
-  <div>
-    <div class="section-title">Year-over-Year</div>
-    <div class="chart-grid">
-      <div class="chart-card"><h3>Activity Days</h3><div class="chart-wrap"><canvas id="ch-year-days"></canvas></div></div>
-      <div class="chart-card"><h3>Distance, km · excl. lifts</h3><div class="chart-wrap"><canvas id="ch-year-dist"></canvas></div></div>
-      <div class="chart-card"><h3>Climbing, m · excl. lifts</h3><div class="chart-wrap"><canvas id="ch-year-gain"></canvas></div></div>
-      <div class="chart-card"><h3>Moving Time, h</h3><div class="chart-wrap"><canvas id="ch-year-dur"></canvas></div></div>
-    </div>
-  </div>
-
-  <!-- Fitness training -->
-  <div>
-    <div class="section-title">Fitness Training <span style="color:#666;font-weight:normal;font-size:0.7rem;text-transform:none;letter-spacing:0;">· last 12 weeks</span></div>
-    <div class="chart-grid">
-      <div class="chart-card"><h3>Weekly Volume — hours</h3><div class="chart-wrap"><canvas id="ch-weekly-hours"></canvas></div></div>
-      <div class="chart-card"><h3>Weekly Climbing — m</h3><div class="chart-wrap"><canvas id="ch-weekly-gain"></canvas></div></div>
-      <div class="chart-card"><h3>Weekly HR-Zone Time</h3><div class="chart-wrap"><canvas id="ch-weekly-zones"></canvas></div></div>
-      <div class="chart-card"><h3>28-Day Z2 HR Avg <span style="color:#666;font-weight:normal;font-size:0.65rem;">· lower = fitter</span></h3><div class="chart-wrap"><canvas id="ch-fitness-trend"></canvas></div></div>
-    </div>
-  </div>
-
-  <!-- Records -->
-  <div>
-    <div class="section-title">Records · Overall</div>
-    <div class="records-grid" id="records-grid"></div>
-  </div>
-
-  <!-- Per-type records -->
-  <div>
-    <div class="section-title">Records · By Type</div>
-    <div class="pt-records-grid" id="pt-records-grid"></div>
+  <div id="root">
+    <div class="s2-loading">Loading summary…</div>
   </div>
 </main>
 
 <script>
 const TYPES = {{ types_json | safe }};
-const TYPE_LABELS = Object.fromEntries(TYPES.map(t => [t.id, t.label]));
-const TYPE_COLORS = Object.fromEntries(TYPES.map(t => [t.id, t.color]));
-const TYPE_BG     = Object.fromEntries(TYPES.map(t => [t.id, t.bg]));
-const MONTHS  = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-const WEEKDAYS = ['Mon','Wed','Fri'];
 
-let allActivities = [];
-let activeYear = 'all', activeType = 'all';
-
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-// fmtNum, fmtDate, fmtDuration come from /static/utils.js. fmtHours used to
-// be a local copy — fmtDuration with default showSeconds=false produces the
-// identical "Hh MMm" / "Mm" output, so callers were ported.
-function typeBadge(type) {
-  if (!type) return '';
-  const t = TYPES.find(x => x.id === type);
-  const style = t ? `style="background:${t.bg};color:${t.color}"` : '';
-  return `<span class="type-badge" ${style}>${TYPE_LABELS[type]||type}</span>`;
-}
-function unique(arr) { return [...new Set(arr)]; }
-
-// ─── Filter helpers ──────────────────────────────────────────────────────────
-function getFilteredByYear() {
-  return allActivities.filter(a => {
-    const d = a.date ? new Date(a.date) : null;
-    if (activeYear !== 'all' && (!d || d.getFullYear() !== +activeYear)) return false;
-    if (activeType !== 'all' && (a.meta?.type || '') !== activeType) return false;
-    return true;
-  });
-}
-function getTypeFiltered() {
-  return allActivities.filter(a => activeType === 'all' || (a.meta?.type||'') === activeType);
-}
-
-// ─── Hero stats ──────────────────────────────────────────────────────────────
-function computeStreaks(acts) {
-  const days = [...new Set(acts.filter(a => a.date).map(a => a.date.slice(0, 10)))].sort();
-  if (!days.length) return { current: 0, longest: 0 };
-
-  // Longest streak
-  let longest = 1, cur = 1;
-  for (let i = 1; i < days.length; i++) {
-    const diff = (new Date(days[i]) - new Date(days[i-1])) / 86400000;
-    if (diff === 1) { cur++; longest = Math.max(longest, cur); }
-    else cur = 1;
+// ── Format helpers ─────────────────────────────────────────────────────────
+function fmtDist(km) { return km < 100 ? km.toFixed(1) : Math.round(km).toLocaleString(); }
+// `fmtElev` is shared via /static/utils.js (null-safe; rounds + locales).
+function fmtSpeed(kmh) { return kmh.toFixed(1); }
+function fmtH(h) { const hr = Math.floor(h); const mn = Math.round((h - hr) * 60); return `${hr}h ${String(mn).padStart(2, '0')}m`; }
+function fmtSec(s) { const h = Math.floor(s/3600), m = Math.floor((s%3600)/60); return h > 0 ? `${h}h ${String(m).padStart(2,'0')}m` : `${m}m`; }
+function fmtDateShort(iso) { if (!iso) return ''; const d = new Date(iso + 'T00:00:00'); return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }); }
+function fmtMetricVal(value, key) {
+  if (value == null) return '—';
+  switch (key) {
+    case 'count':    return Math.round(value).toString();
+    case 'distance': return `${fmtDist(value)} km`;
+    case 'duration': return `${value.toFixed(1)} h`;
+    case 'ascent':
+    case 'descent':  return `${fmtElev(value)} m`;
+    default:         return String(value);
   }
-
-  // Current streak — must include today or yesterday to count as "current"
-  const today = new Date(); today.setHours(0,0,0,0);
-  const last  = new Date(days[days.length - 1]);
-  const gapFromToday = Math.round((today - last) / 86400000);
-  let current = 0;
-  if (gapFromToday <= 1) {
-    current = 1;
-    for (let i = days.length - 2; i >= 0; i--) {
-      const diff = (new Date(days[i+1]) - new Date(days[i])) / 86400000;
-      if (diff === 1) current++;
-      else break;
-    }
-  }
-  return { current, longest };
 }
 
-function renderLifetime() {
-  // Aggregate every activity, ignoring year/type filters — this strip shows
-  // the always-true "since day one" totals.
-  const acts = allActivities;
-  if (!acts.length) {
-    document.getElementById('lifetime-strip').style.display = 'none';
-    return;
-  }
-  const dist     = acts.reduce((s, a) => s + (a.stats.distance_km   || 0), 0);
-  const gain     = acts.reduce((s, a) => s + (a.stats.elev_gain_m   || 0), 0);
-  const loss     = acts.reduce((s, a) => s + (a.stats.elev_loss_m   || 0), 0);
-  const sec      = acts.reduce((s, a) => s + (a.stats.duration_sec  || 0), 0);
-  const earliest = acts
-    .map(a => a.date).filter(Boolean).sort()[0];
-  const sinceLbl = earliest ? `since ${earliest.slice(0, 10)}` : 'lifetime';
+const MONTH_LETTERS = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
+const MONTH_LABELS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
-  const stats = [
-    ['Logs',  fmtNum(acts.length)],
-    ['Distance',    `${fmtNum(dist, 0)} km`],
-    ['Climbing',    `${fmtNum(gain)} m`],
-    ['Descent',     `${fmtNum(loss)} m`],
-    ['Moving Time', fmtDuration(sec)],
-  ];
-  const strip = document.getElementById('lifetime-strip');
-  strip.style.display = '';
-  strip.innerHTML = `
-    <div class="lifetime-label" title="Always reflects all activities, ignoring year and type filters">
-      Lifetime <span style="color:#888;font-weight:normal;text-transform:none;letter-spacing:0;">· ${sinceLbl}</span>
-    </div>
-    <div class="lifetime-stats">
-      ${stats.map(([lbl, val]) => `
-        <div class="lifetime-stat">
-          <div class="lifetime-stat-label">${lbl}</div>
-          <div class="lifetime-stat-value">${val}</div>
-        </div>`).join('')}
-    </div>
-  `;
-}
-
-function renderHero() {
-  const acts = getFilteredByYear();
-  const dist = acts.reduce((s,a) => s + (a.stats.distance_km||0), 0);
-  const gain = acts.reduce((s,a) => s + (a.stats.elev_gain_m||0), 0);
-  const sec  = acts.reduce((s,a) => s + (a.stats.duration_sec||0), 0);
-  const assisted = acts.reduce((s,a) => s + (a.stats.assisted_gain_m||0), 0);
-  const loss = acts.reduce((s,a) => s + (a.stats.elev_loss_m||0), 0);
-  const activeDays = unique(acts.filter(a=>a.date).map(a => a.date.slice(0,10))).length;
-  const peakEle = acts.reduce((m, a) => Math.max(m, a.stats.peak_ele_m || 0), 0);
-  const streaks = computeStreaks(acts);
-
-  const cards = [
-    ['Logs',       fmtNum(acts.length), `${activeDays} active days`],
-    ['Distance',         `${fmtNum(dist, 1)} km`, 'self-powered, excl. lifts'],
-    ['Climbing',         `${fmtNum(gain)} m`, assisted > 0 ? `excl. lifts · +${fmtNum(assisted)} m assisted` : 'excl. lifts'],
-    ['Descent',          `${fmtNum(loss)} m`, 'excl. lifts'],
-    ['Moving Time',      fmtDuration(sec)],
-    ['Peak Altitude',    peakEle ? `${fmtNum(peakEle)} m` : '--', 'highest point reached'],
-    ['Streak',           `${streaks.current} ${streaks.current === 1 ? 'day' : 'days'}`, `longest: ${streaks.longest}`],
-  ];
-  document.getElementById('hero-grid').innerHTML = cards.map(([lbl, val, sub]) => `
-    <div class="hero-card">
-      <div class="hero-label">${lbl}</div>
-      <div class="hero-value">${val}</div>
-      ${sub ? `<div class="hero-sub">${sub}</div>` : ''}
-    </div>`).join('');
-}
-
-// ─── Activity calendar ───────────────────────────────────────────────────────
-const UNTAGGED_CAL_COLOR = '#60a5fa';
-
-function renderCalendar() {
-  const year = activeYear === 'all'
-    ? new Date().getFullYear()
-    : +activeYear;
-
-  const acts = allActivities.filter(a => {
-    if (!a.date || !a.date.startsWith(String(year))) return false;
-    if (activeType !== 'all' && (a.meta?.type||'') !== activeType) return false;
-    return true;
-  });
-
-  // Group activities by day
-  const dayMap = {};
-  acts.forEach(a => {
-    const day = a.date.slice(0, 10);
-    (dayMap[day] = dayMap[day] || []).push(a);
-  });
-
-  // For each day, pick a colour — dominant type by count, fallback to first
-  function dayColor(dayActs) {
-    const byType = {};
-    dayActs.forEach(a => {
-      const t = a.meta?.type || '__untagged__';
-      byType[t] = (byType[t] || 0) + 1;
-    });
-    const dominant = Object.entries(byType).sort((a,b) => b[1] - a[1])[0][0];
-    if (dominant === '__untagged__') return UNTAGGED_CAL_COLOR;
-    const t = TYPES.find(x => x.id === dominant);
-    return t?.color || UNTAGGED_CAL_COLOR;
-  }
-
-  // Tooltip: list types on a day
-  function dayTooltip(d, dayActs) {
-    const byType = {};
-    dayActs.forEach(a => {
-      const t = a.meta?.type || '__untagged__';
-      byType[t] = (byType[t] || 0) + 1;
-    });
-    const parts = Object.entries(byType).map(([t, n]) => {
-      const lbl = t === '__untagged__' ? 'Untagged' : (TYPE_LABELS[t] || t);
-      return `${lbl}${n > 1 ? ' × '+n : ''}`;
-    });
-    return `${d.toDateString()}: ${parts.join(', ')}`;
-  }
-
-  const start = new Date(year, 0, 1);
-  const end   = new Date(year, 11, 31);
-  const dayCount = Math.round((end - start) / 86400000) + 1;
-
-  // Build legend showing types actually present this year
-  const typesPresent = [...new Set(acts.map(a => a.meta?.type || '__untagged__'))].sort();
-  const legendHtml = typesPresent.map(t => {
-    const color = t === '__untagged__' ? UNTAGGED_CAL_COLOR : (TYPES.find(x => x.id === t)?.color || UNTAGGED_CAL_COLOR);
-    const label = t === '__untagged__' ? 'Untagged' : (TYPE_LABELS[t] || t);
-    return `<span class="cal-legend-item"><span class="cal-legend-dot" style="background:${color}"></span>${label}</span>`;
-  }).join('');
-
-  document.getElementById('cal-wrap').innerHTML = `
-    <div class="cal-head">
-      <div class="cal-title">${year} · ${acts.length} activit${acts.length===1?'y':'ies'} across ${Object.keys(dayMap).length} days</div>
-    </div>
-    <div class="cal-grid">
-      <div class="cal-day-labels"><span></span><span>Mon</span><span></span><span>Wed</span><span></span><span>Fri</span><span></span></div>
-      <div class="cal-months-row">
-        <div class="cal-month-labels" id="cal-month-labels"></div>
-        <div class="cal-days" id="cal-days"></div>
-      </div>
-    </div>
-    <div class="cal-legend">${legendHtml || '<span style="color:#666">No activities this year</span>'}</div>`;
-
-  const daysEl   = document.getElementById('cal-days');
-  const labelsEl = document.getElementById('cal-month-labels');
-
-  // Monday = 0, Sunday = 6
-  const mondayIdx = (d) => (d.getDay() + 6) % 7;
-  const startPad  = mondayIdx(start);
-
-  // Pad empty cells before year's first day so the week alignment is correct
-  for (let i = 0; i < startPad; i++) {
-    const cell = document.createElement('div');
-    cell.className = 'cal-day';
-    cell.style.visibility = 'hidden';
-    daysEl.appendChild(cell);
-  }
-
-  // Track month column for labels
-  const monthStartWeek = new Array(12).fill(-1);
-
-  for (let i = 0; i < dayCount; i++) {
-    const d = new Date(year, 0, 1 + i);
-    const key = d.toISOString().slice(0, 10);
-    const dayActs = dayMap[key] || [];
-    const weekIdx = Math.floor((startPad + i) / 7);
-    if (d.getDate() === 1) monthStartWeek[d.getMonth()] = weekIdx;
-
-    const cell = document.createElement('div');
-    cell.className = 'cal-day';
-    if (dayActs.length) {
-      cell.style.background = dayColor(dayActs);
-      cell.title = dayTooltip(d, dayActs);
-    } else {
-      cell.title = d.toDateString();
-    }
-    daysEl.appendChild(cell);
-  }
-
-  let labelHtml = '';
-  for (let m = 0; m < 12; m++) {
-    const col = monthStartWeek[m];
-    if (col >= 0) labelHtml += `<div style="grid-column:${col + 1} / span 1">${MONTHS[m]}</div>`;
-  }
-  labelsEl.innerHTML = labelHtml;
-}
-
-// ─── By-type breakdown ───────────────────────────────────────────────────────
-function renderTypeBreakdown() {
-  const acts = activeYear === 'all'
-    ? allActivities
-    : allActivities.filter(a => a.date && a.date.startsWith(String(activeYear)));
-
-  const buckets = {};
-  acts.forEach(a => {
-    const t = a.meta?.type || '__untagged__';
-    if (!buckets[t]) buckets[t] = { count: 0, dist: 0, gain: 0 };
-    buckets[t].count++;
-    buckets[t].dist += a.stats.distance_km || 0;
-    buckets[t].gain += a.stats.elev_gain_m || 0;
-  });
-
-  const rows = Object.entries(buckets)
-    .map(([id, b]) => ({ id, ...b }))
-    .sort((a, b) => b.count - a.count);
-
-  const total = rows.reduce((s, r) => s + r.count, 0);
-
-  const container = document.getElementById('type-breakdown');
-  container.innerHTML = rows.map(r => {
-    const t = TYPES.find(x => x.id === r.id);
-    const color = t?.color || '#666';
-    const label = t?.label || (r.id === '__untagged__' ? 'Untagged' : r.id);
-    const pct = total ? Math.round(r.count / total * 100) : 0;
-    return `
-      <div class="type-row">
-        <span class="type-swatch-sm" style="background:${color}"></span>
-        <div class="type-row-name">${label}</div>
-        <div class="type-row-stat"><strong>${r.count}</strong> · ${fmtNum(r.dist,0)} km · ${pct}%</div>
-      </div>`;
-  }).join('');
-}
-
-// ─── Charts ──────────────────────────────────────────────────────────────────
-const CHART_DEFAULTS = {
-  animation: false, responsive: true, maintainAspectRatio: false,
-  plugins: {
-    legend: { display: false },
-    tooltip: { backgroundColor:'rgba(18,21,26,.95)', borderColor:'#2a2d35', borderWidth:1,
-      titleColor:'#bbb', bodyColor:'#fff', padding:8 },
-  },
-  scales: {
-    x: { ticks:{ color:'#ccc', font:{size:10} }, grid:{ color:'#1e2128' } },
-    y: { ticks:{ color:'#ccc', font:{size:10} }, grid:{ color:'#1e2128' }, beginAtZero:true },
-  },
-};
-
-function barChart(id, color, labelFn) {
-  return new Chart(document.getElementById(id).getContext('2d'), {
-    type: 'bar',
-    data: { labels: [], datasets: [{
-      data: [], backgroundColor: color + 'aa', borderColor: color, borderWidth: 1, borderRadius: 3,
-    }]},
-    options: { ...CHART_DEFAULTS,
-      plugins: { ...CHART_DEFAULTS.plugins,
-        tooltip: { ...CHART_DEFAULTS.plugins.tooltip, callbacks: { label: labelFn } } } },
-  });
-}
-
-const chMonthDays = barChart('ch-month-days', '#3b82f6', i => ` ${i.raw} day${i.raw===1?'':'s'}`);
-const chYearDays  = barChart('ch-year-days',  '#3b82f6', i => ` ${i.raw} day${i.raw===1?'':'s'}`);
-const chYearDist  = barChart('ch-year-dist',  '#10b981', i => ` ${fmtNum(i.raw,0)} km`);
-const chYearGain  = barChart('ch-year-gain',  '#f59e0b', i => ` ${fmtNum(i.raw,0)} m`);
-const chYearDur   = barChart('ch-year-dur',   '#a78bfa', i => ` ${fmtNum(i.raw,1)} h`);
-
-// ─── Fitness charts ──────────────────────────────────────────────────────────
-const ZONE_COLORS = ['#6b7280', '#3b82f6', '#10b981', '#f59e0b', '#ef4444'];
-const ZONE_LABELS = ['Z1 Recovery', 'Z2 Endurance', 'Z3 Tempo', 'Z4 Threshold', 'Z5 VO2max'];
-
-const chWeekHours = barChart('ch-weekly-hours', '#a78bfa', i => ` ${fmtNum(i.raw,1)} h`);
-const chWeekGain  = barChart('ch-weekly-gain',  '#f59e0b', i => ` ${fmtNum(i.raw,0)} m`);
-
-const chWeekZones = new Chart(document.getElementById('ch-weekly-zones').getContext('2d'), {
-  type: 'bar',
-  data: { labels: [], datasets: ZONE_LABELS.map((label, i) => ({
-    label, data: [], backgroundColor: ZONE_COLORS[i] + 'cc', borderWidth: 0, stack: 'z',
-  })) },
-  options: { ...CHART_DEFAULTS,
-    plugins: { ...CHART_DEFAULTS.plugins,
-      legend: { display: true, position: 'bottom', labels: { color: '#ccc', font: { size: 10 }, boxWidth: 10 } },
-      tooltip: { ...CHART_DEFAULTS.plugins.tooltip, callbacks: {
-        label: i => ` ${i.dataset.label}: ${fmtNum(i.raw/60, 0)} min`
-      }} },
-    scales: { ...CHART_DEFAULTS.scales,
-      x: { ...CHART_DEFAULTS.scales.x, stacked: true },
-      y: { ...CHART_DEFAULTS.scales.y, stacked: true,
-           ticks: { ...CHART_DEFAULTS.scales.y.ticks, callback: v => `${(v/3600).toFixed(1)}h` } } },
-  },
-});
-
-const chFitness = new Chart(document.getElementById('ch-fitness-trend').getContext('2d'), {
-  type: 'line',
-  data: { labels: [], datasets: [{ data: [], borderColor: '#ef4444', backgroundColor: 'rgba(239,68,68,0.1)',
-                                   fill: true, borderWidth: 2, pointRadius: 3, tension: 0.2, spanGaps: true }] },
-  options: { ...CHART_DEFAULTS,
-    plugins: { ...CHART_DEFAULTS.plugins,
-      tooltip: { ...CHART_DEFAULTS.plugins.tooltip, callbacks: {
-        label: i => i.raw != null ? ` ${i.raw} bpm avg` : ' (no Z2 data)' } } },
-    scales: { ...CHART_DEFAULTS.scales,
-      y: { ...CHART_DEFAULTS.scales.y, beginAtZero: false, ticks: { ...CHART_DEFAULTS.scales.y.ticks, callback: v => `${v}` } } },
-  },
-});
-
-async function loadFitnessCharts() {
-  try {
-    const typeQ = activeType && activeType !== 'all' ? `&type=${encodeURIComponent(activeType)}` : '';
-    const r = await fetch(`/api/fitness/weekly?weeks=12${typeQ}`);
-    const d = await r.json();
-    const labels = d.weeks.map(w => w.start.slice(5));  // MM-DD
-    chWeekHours.data.labels = labels;
-    chWeekHours.data.datasets[0].data = d.weeks.map(w => w.hours);
-    chWeekHours.update();
-    chWeekGain.data.labels = labels;
-    chWeekGain.data.datasets[0].data = d.weeks.map(w => w.gain_m);
-    chWeekGain.update();
-    chWeekZones.data.labels = labels;
-    for (let i = 0; i < 5; i++) {
-      chWeekZones.data.datasets[i].data = d.weeks.map(w => w.zones_sec[i]);
-    }
-    chWeekZones.update();
-    chFitness.data.labels = labels;
-    chFitness.data.datasets[0].data = d.weeks.map(w => w.z2_hr_28d);
-    chFitness.update();
-  } catch (e) {}
-}
-
-function renderCharts() {
-  const typeActs = getTypeFiltered();
-
-  // Monthly days (for selected year, or current year if all)
-  const monthYear = activeYear === 'all' ? new Date().getFullYear() : +activeYear;
-  const monthDays = Array(12).fill(null).map(() => new Set());
-  typeActs.filter(a => a.date && a.date.startsWith(String(monthYear))).forEach(a => {
-    monthDays[new Date(a.date).getMonth()].add(a.date.slice(0,10));
-  });
-  chMonthDays.data.labels = MONTHS;
-  chMonthDays.data.datasets[0].data = monthDays.map(s => s.size);
-  chMonthDays.update();
-
-  // Annual: all years regardless of year filter (type filter applies)
-  const byYear = {};
-  typeActs.forEach(a => {
-    if (!a.date) return;
-    const y = new Date(a.date).getFullYear();
-    if (!byYear[y]) byYear[y] = { days: new Set(), dist: 0, gain: 0, dur: 0 };
-    byYear[y].days.add(a.date.slice(0,10));
-    byYear[y].dist += a.stats.distance_km || 0;
-    byYear[y].gain += a.stats.elev_gain_m || 0;
-    byYear[y].dur  += a.stats.duration_sec || 0;
-  });
-  const years = Object.keys(byYear).sort();
-  const update = (ch, key, tx) => {
-    ch.data.labels = years;
-    ch.data.datasets[0].data = years.map(y => tx ? tx(byYear[y][key]) : byYear[y][key]);
-    ch.update();
-  };
-  update(chYearDays, 'days', d => d.size);
-  update(chYearDist, 'dist', d => +d.toFixed(1));
-  update(chYearGain, 'gain', d => Math.round(d));
-  update(chYearDur,  'dur',  d => +(d/3600).toFixed(1));
-}
-
-// ─── Records ─────────────────────────────────────────────────────────────────
-function renderRecords() {
-  const acts = getFilteredByYear();
-  if (!acts.length) { document.getElementById('records-grid').innerHTML = '<div class="hero-sub">No activities.</div>'; return; }
-
-  function byMax(key) { return [...acts].sort((a,b) => (b.stats[key]||0) - (a.stats[key]||0))[0]; }
-  const byDist  = byMax('distance_km');
-  const byGain  = byMax('elev_gain_m');
-  const bySpeed = byMax('max_speed_kmh');
-  const byDur   = byMax('duration_sec');
-
-  // Vertical leader (useful for ski/snowboard) — sum of elev_loss on days
-  const byLoss  = byMax('elev_loss_m');
-
-  function card(label, value, act) {
-    const displayName = act.meta?.title || act.name || act.filename;
-    return `
-      <div class="record-card">
-        <div class="record-label">${label}</div>
-        <div class="record-value">${value}</div>
-        <div class="record-sub"><a href="/log/${encodeURIComponent(act.filename)}" style="color:#bbb;text-decoration:none">${displayName}</a> ${typeBadge(act.meta?.type)}</div>
-      </div>`;
-  }
-
-  document.getElementById('records-grid').innerHTML = [
-    card('Longest Ride',       `${byDist.stats.distance_km} km`, byDist),
-    card('Most Climbing',      `${fmtNum(byGain.stats.elev_gain_m)} m`, byGain),
-    card('Most Descent',       `${fmtNum(byLoss.stats.elev_loss_m)} m`, byLoss),
-    card('Fastest Max Speed',  `${bySpeed.stats.max_speed_kmh} km/h`, bySpeed),
-    card('Longest Duration',   fmtDuration(byDur.stats.duration_sec), byDur),
-  ].join('');
-
-  renderPerTypeRecords(acts);
-}
-
-// Per-type records — one compact card per activity type that has at least
-// one ride in the filtered set. Each card lists that type's bests for the
-// same five metrics as the overall Records grid.
-function renderPerTypeRecords(acts) {
-  const grid = document.getElementById('pt-records-grid');
-  if (!acts.length) { grid.innerHTML = ''; return; }
-
-  // Bucket by effective_type so an MTB ride in an MTB region without an
-  // explicit meta.type still groups under MTB.
-  const byType = {};
-  acts.forEach(a => {
-    const t = a.effective_type || a.meta?.type || '';
-    if (!t) return;  // skip untagged
-    (byType[t] = byType[t] || []).push(a);
-  });
-
-  // Render in TYPES order so colours and ordering stay consistent with the
-  // rest of the page.
-  const order = TYPES.map(t => t.id).filter(id => byType[id] && byType[id].length);
-  if (!order.length) { grid.innerHTML = '<div class="hero-sub">No tagged activities in this view.</div>'; return; }
-
-  function topBy(typeActs, key) {
-    return [...typeActs].sort((a, b) => (b.stats[key] || 0) - (a.stats[key] || 0))[0];
-  }
-  function row(label, value, act) {
-    if (!act) return '';
-    const name = act.meta?.title || act.name || act.filename;
-    return `<div class="pt-record-row">
-      <span class="pt-record-row-label">${label}</span>
-      <span class="pt-record-row-value">${value}</span>
-      <a href="/log/${encodeURIComponent(act.filename)}" class="pt-record-row-link" title="${name}">${name}</a>
-    </div>`;
-  }
-
-  grid.innerHTML = order.map(typeId => {
-    const t = TYPES.find(x => x.id === typeId);
-    const tActs = byType[typeId];
-    const dist  = topBy(tActs, 'distance_km');
-    const gain  = topBy(tActs, 'elev_gain_m');
-    const loss  = topBy(tActs, 'elev_loss_m');
-    const speed = topBy(tActs, 'max_speed_kmh');
-    const dur   = topBy(tActs, 'duration_sec');
-    return `<div class="pt-record-card">
-      <div class="pt-record-head">
-        <span class="pt-record-swatch" style="background:${t.color}"></span>
-        <span class="pt-record-type">${t.label}</span>
-        <span class="pt-record-count">${tActs.length} activit${tActs.length === 1 ? 'y' : 'ies'}</span>
-      </div>
-      ${row('Longest',   `${dist.stats.distance_km} km`, dist)}
-      ${row('Climbing',  `${fmtNum(gain.stats.elev_gain_m)} m`, gain)}
-      ${row('Descent',   `${fmtNum(loss.stats.elev_loss_m)} m`, loss)}
-      ${row('Top speed', speed.stats.max_speed_kmh != null ? `${speed.stats.max_speed_kmh} km/h` : '--', speed)}
-      ${row('Duration',  fmtDuration(dur.stats.duration_sec), dur)}
-    </div>`;
-  }).join('');
-}
-
-// ─── Filters UI ──────────────────────────────────────────────────────────────
-function buildFilters() {
-  const years = unique(allActivities.filter(a=>a.date).map(a => new Date(a.date).getFullYear())).sort((a,b)=>b-a);
-  const typesPresent = unique(allActivities.map(a => a.meta?.type).filter(Boolean)).sort();
-
-  function makeGroup(id, items, getV, setV) {
-    const div = document.getElementById(id);
-    div.innerHTML = '';
-    [['all','All'], ...items].forEach(([val,label]) => {
-      const btn = document.createElement('button');
-      btn.className = 'filter-btn' + (val === getV() ? ' active' : '');
-      btn.textContent = label;
-      btn.onclick = () => { setV(val); buildFilters(); renderAll(); };
-      div.appendChild(btn);
-    });
-  }
-  makeGroup('year-filters', years.map(y => [String(y), String(y)]), ()=>activeYear, v => activeYear = v);
-  makeGroup('type-filters', typesPresent.map(t => [t, TYPE_LABELS[t]||t]), ()=>activeType, v => activeType = v);
-}
-
-function renderSnow() {
-  // Snow (ski + snowboard) aggregate — runs, vertical, best days
-  const snowIds = new Set(['ski', 'snowboard']);
-  const snowActs = allActivities.filter(a => {
-    if (activeYear !== 'all' && (!a.date || !new Date(a.date) || new Date(a.date).getFullYear() !== +activeYear)) return false;
-    return snowIds.has(a.meta?.type || '');
-  });
-  const section = document.getElementById('snow-section');
-  if (!snowActs.length) { section.style.display = 'none'; return; }
-
-  const days     = unique(snowActs.filter(a=>a.date).map(a => a.date.slice(0,10))).length;
-  const runs     = snowActs.reduce((s, a) => s + (a.stats.lift_count || 0), 0);
-  const vertical = snowActs.reduce((s, a) => s + (a.stats.elev_loss_m || 0), 0);
-  const assisted = snowActs.reduce((s, a) => s + (a.stats.assisted_gain_m || 0), 0);
-
-  // Best single-day stats
-  const byDate = {};
-  snowActs.forEach(a => {
-    const d = a.date?.slice(0,10); if (!d) return;
-    if (!byDate[d]) byDate[d] = { runs: 0, vert: 0, maxSpd: 0, sample: a };
-    byDate[d].runs += a.stats.lift_count || 0;
-    byDate[d].vert += a.stats.elev_loss_m || 0;
-    byDate[d].maxSpd = Math.max(byDate[d].maxSpd, a.stats.max_speed_kmh || 0);
-  });
-  const days_arr = Object.entries(byDate).map(([d, v]) => ({ date: d, ...v }));
-  const mostRuns  = days_arr.reduce((b, d) => (d.runs > (b?.runs||0) ? d : b), null);
-  const mostVert  = days_arr.reduce((b, d) => (d.vert > (b?.vert||0) ? d : b), null);
-
-  section.style.display = 'block';
-  section.innerHTML = `
-    <div class="section-title">Snow Season ${activeYear !== 'all' ? `· ${activeYear}` : ''}</div>
-    <div class="hero-grid">
-      <div class="hero-card" style="border-top-color:#60a5fa">
-        <div class="hero-label">Days on Snow</div>
-        <div class="hero-value">${fmtNum(days)}</div>
-        <div class="hero-sub">${fmtNum(snowActs.length)} activit${snowActs.length===1?'y':'ies'}</div>
-      </div>
-      <div class="hero-card" style="border-top-color:#60a5fa">
-        <div class="hero-label">Lift Rides</div>
-        <div class="hero-value">${fmtNum(runs)}</div>
-        <div class="hero-sub">${runs && days ? (runs/days).toFixed(1) : '--'} avg per day</div>
-      </div>
-      <div class="hero-card" style="border-top-color:#60a5fa">
-        <div class="hero-label">Vertical Descent</div>
-        <div class="hero-value">${fmtNum(vertical)} m</div>
-        <div class="hero-sub">${fmtNum(assisted)} m assisted up</div>
-      </div>
-      <div class="hero-card" style="border-top-color:#60a5fa">
-        <div class="hero-label">Biggest Day</div>
-        <div class="hero-value">${mostVert ? fmtNum(Math.round(mostVert.vert)) + ' m' : '--'}</div>
-        <div class="hero-sub">${mostVert ? new Date(mostVert.date).toLocaleDateString('en-CA',{year:'numeric',month:'short',day:'numeric'}) : ''}</div>
-      </div>
-      <div class="hero-card" style="border-top-color:#60a5fa">
-        <div class="hero-label">Most Lifts / Day</div>
-        <div class="hero-value">${mostRuns ? fmtNum(mostRuns.runs) : '--'}</div>
-        <div class="hero-sub">${mostRuns ? new Date(mostRuns.date).toLocaleDateString('en-CA',{year:'numeric',month:'short',day:'numeric'}) : ''}</div>
-      </div>
-    </div>`;
-}
-
-function renderAll() {
-  renderLifetime();
-  renderHero();
-  renderSnow();
-  renderCalendar();
-  renderTypeBreakdown();
-  renderCharts();
-  renderRecords();
-  loadFitnessCharts();
-}
+// ── Render ─────────────────────────────────────────────────────────────────
+let DATA = null;
+const rowState = {};   // activityId → { metric, mode, open }
+let SELECTED_YEARS = new Set();  // which years to include in the per-activity charts
 
 async function init() {
-  const res = await fetch('/api/activities');
-  allActivities = await res.json();
-  buildFilters();
-  renderAll();
+  const r = await fetch('/api/summary?days=365&units=metric');
+  if (!r.ok) {
+    document.getElementById('root').innerHTML =
+      '<div class="s2-loading">Failed to load summary.</div>';
+    return;
+  }
+  DATA = await r.json();
+  // initial per-row state: open by default; metric default 'descent' for snow else 'count'
+  DATA.activities.forEach(a => {
+    rowState[a.id] = {
+      open:   true,
+      metric: a.isSnow ? 'descent' : 'count',
+      mode:   'grouped',
+    };
+  });
+  // Default selected years: the most recent 3 years that have data.
+  const allYears = (DATA.years || []).slice().sort();
+  SELECTED_YEARS = new Set(allYears.slice(-3));
+  render();
 }
+
+function rangeLabel(d) {
+  if (d === 365) return 'Rolling 365 days';
+  if (d === 90)  return 'Last 90 days';
+  if (d === 30)  return 'Last 30 days';
+  return `${d}d`;
+}
+
+function render() {
+  const root = document.getElementById('root');
+  root.innerHTML = '';
+  root.appendChild(renderHead());
+  root.appendChild(renderKpi());
+  root.appendChild(renderRibbon());
+  root.appendChild(renderActivitiesHeader());
+  root.appendChild(renderActivities());
+}
+
+function renderActivitiesHeader() {
+  // Eyebrow on the left, year-toggle chips on the right. Toggling a chip
+  // re-renders the activities below — the chip set drives the YoY chart's
+  // year selection.
+  const wrap = document.createElement('div');
+  wrap.className = 's2-activities-header';
+  const eb = document.createElement('div');
+  eb.className = 's2-eyebrow-section';
+  eb.textContent = 'By activity';
+  wrap.appendChild(eb);
+
+  const chips = document.createElement('div');
+  chips.className = 's2-year-chips';
+  const allYears = (DATA.years || []).slice().sort();
+  allYears.forEach(y => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.textContent = y;
+    if (SELECTED_YEARS.has(y)) btn.classList.add('on');
+    btn.addEventListener('click', () => {
+      if (SELECTED_YEARS.has(y)) {
+        // Don't allow deselecting the last selected year — the chart needs
+        // at least one series.
+        if (SELECTED_YEARS.size <= 1) return;
+        SELECTED_YEARS.delete(y);
+      } else {
+        SELECTED_YEARS.add(y);
+      }
+      // Re-render activities only — KPI / ribbon / header don't depend on
+      // year selection.
+      const oldActs = document.querySelector('.s2-activities');
+      const newActs = renderActivities();
+      if (oldActs) oldActs.replaceWith(newActs);
+      // Re-render the chip row to update on/off styling.
+      const oldHeader = document.querySelector('.s2-activities-header');
+      const newHeader = renderActivitiesHeader();
+      if (oldHeader) oldHeader.replaceWith(newHeader);
+    });
+    chips.appendChild(btn);
+  });
+  wrap.appendChild(chips);
+  return wrap;
+}
+
+function renderHead() {
+  const wrap = document.createElement('div');
+  wrap.className = 's2-head num';
+  const t = DATA.totals;
+  const ds = t.days_since;
+  let agoCls = 'neutral';
+  if (ds != null) agoCls = ds <= 1 ? 'fresh' : ds <= 7 ? 'neutral' : 'warm';
+  wrap.innerHTML = `
+    <div>
+      <div class="s2-eyebrow-hero">${rangeLabel(DATA.daysBack)}</div>
+      <h1>${t.days} <span class="suffix">days outside</span></h1>
+    </div>
+    <div class="right">
+      <div class="s2-eyebrow">Last activity</div>
+      <div class="last-date">
+        ${t.last_date ? fmtDateShort(t.last_date) : '—'}
+        ${ds != null ? `<span class="ago ${agoCls}">· ${ds}d ago</span>` : ''}
+      </div>
+    </div>`;
+  return wrap;
+}
+
+function renderKpi() {
+  const t = DATA.totals;
+  const wrap = document.createElement('div');
+  wrap.className = 's2-kpi num';
+  const cells = [
+    ['Total days',     t.days,                                   null],
+    ['Last 2 weeks',   `${t.last_14d_active_days ?? 0} of 14`,   'd'],
+    ['Total climbing', fmtElev(t.elev_gain_m),                   'm'],
+    ['Total descent',  fmtElev(t.elev_loss_m),                   'm'],
+    ['Moving time',    fmtH(t.moving_h),                         null],
+  ];
+  wrap.innerHTML = cells.map(([l, v, suf]) => `
+    <div class="cell">
+      <div class="label">${l}</div>
+      <div class="value">${v}${suf ? `<span class="suffix">${suf}</span>` : ''}</div>
+    </div>`).join('');
+  return wrap;
+}
+
+function renderRibbon() {
+  const wrap = document.createElement('div');
+  wrap.className = 's2-ribbon num';
+
+  const top = document.createElement('div');
+  top.className = 'top';
+  top.innerHTML = `
+    <div class="s2-eyebrow">Active days · ${rangeLabel(DATA.daysBack).toLowerCase()}</div>
+    <div class="legend">
+      ${DATA.activities.map(a => `
+        <span class="legend-item">
+          <span class="legend-dot" style="background:${a.accent}"></span>
+          <span class="legend-label">${a.short}</span>
+        </span>`).join('')}
+    </div>`;
+  wrap.appendChild(top);
+
+  const cells = document.createElement('div');
+  cells.className = 'cells';
+  const accents = Object.fromEntries(DATA.activities.map(a => [a.id, a.accent]));
+  const labels  = Object.fromEntries(DATA.activities.map(a => [a.id, a.label]));
+  const today = new Date(DATA.today + 'T00:00:00');
+  const cellEls = [];
+  for (let i = DATA.daysBack - 1; i >= 0; i--) {
+    const d = new Date(today);
+    d.setDate(d.getDate() - i);
+    const iso = d.toISOString().slice(0, 10);
+    const dom = DATA.dominantByDate[iso];
+    const cell = document.createElement('div');
+    cell.className = 'cell' + (dom ? ' on' : '');
+    cell.style.background = dom ? accents[dom] : '';
+    cell.dataset.iso = iso;
+    if (dom) cell.dataset.type = dom;
+    cells.appendChild(cell);
+    cellEls.push(cell);
+  }
+  wrap.appendChild(cells);
+
+  const caption = document.createElement('div');
+  caption.className = 'caption';
+  caption.innerHTML = `<span>${DATA.daysBack} days back</span><span>today →</span>`;
+  wrap.appendChild(caption);
+
+  cellEls.forEach(c => {
+    if (!c.classList.contains('on')) return;
+    c.addEventListener('mouseenter', () => {
+      cellEls.forEach(x => x.classList.remove('hover'));
+      c.classList.add('hover');
+      const tid = c.dataset.type;
+      caption.innerHTML = `<span>${c.dataset.iso}</span>
+        <span style="color:${accents[tid]}">${labels[tid]}</span>`;
+    });
+    c.addEventListener('mouseleave', () => {
+      c.classList.remove('hover');
+      caption.innerHTML = `<span>${DATA.daysBack} days back</span><span>today →</span>`;
+    });
+  });
+
+  return wrap;
+}
+
+function renderActivities() {
+  const wrap = document.createElement('div');
+  wrap.className = 's2-activities';
+  DATA.activities.forEach(a => wrap.appendChild(renderActivityRow(a)));
+  return wrap;
+}
+
+function renderActivityRow(a) {
+  const r = DATA.rollups[a.id] || {};
+  const state = rowState[a.id];
+  const row = document.createElement('div');
+  row.className = 's2-row' + (state.open ? ' open' : '');
+  row.style.borderLeftColor = a.accent;
+
+  // Header
+  const head = document.createElement('button');
+  head.className = 'head num';
+  head.type = 'button';
+
+  // Headline stats per the activity's metrics array
+  const headlineMap = {
+    days:     { label: 'days',     v: r.days, u: null },
+    distance: { label: 'distance', v: fmtDist(r.distance_km || 0), u: 'km' },
+    ascent:   { label: 'ascent',   v: fmtElev(r.elev_gain_m || 0), u: 'm' },
+    descent:  { label: 'descent',  v: fmtElev(r.elev_loss_m || 0), u: 'm' },
+    moving:   { label: 'moving',   v: fmtH(r.moving_h || 0), u: null },
+  };
+  const headlineHtml = a.metrics.map(m => {
+    const s = headlineMap[m];
+    if (!s) return '';
+    return `<span class="stat-inline">
+        <span class="v">${s.v}</span>${s.u ? `<span class="u"> ${s.u}</span>` : ''}<span class="l">${s.label}</span>
+      </span>`;
+  }).join('');
+
+  let ago = '';
+  if (r.last_date) {
+    const dt = new Date(r.last_date + 'T00:00:00');
+    const today = new Date(DATA.today + 'T00:00:00');
+    const diff = Math.round((today - dt) / 86400000);
+    ago = `<span class="ago">${diff}d ago</span>`;
+  }
+
+  head.innerHTML = `
+    <span class="glyph" style="background:${a.accentSoft};color:${a.accent}">${a.glyph}</span>
+    <span class="name">${a.label}</span>
+    <span class="spacer"></span>
+    ${headlineHtml}
+    ${ago}
+    <span class="chev">›</span>`;
+  head.addEventListener('click', () => {
+    state.open = !state.open;
+    row.classList.toggle('open', state.open);
+  });
+  row.appendChild(head);
+
+  // Body — built lazily on first open / re-rendered on metric/mode change
+  const body = document.createElement('div');
+  body.className = 'body';
+  buildRowBody(body, a);
+  row.appendChild(body);
+
+  return row;
+}
+
+function buildRowBody(body, a) {
+  const state = rowState[a.id];
+  body.innerHTML = '';
+
+  // Toolbar
+  const tb = document.createElement('div');
+  tb.className = 's2-toolbar num';
+  const metricLabel = a.chartMetrics.find(m => m.key === state.metric)?.label || state.metric;
+  // YoY %: this year vs last year, same months elapsed
+  const h = DATA.history[a.id] || {};
+  const years = Object.keys(h).map(Number).sort();
+  const yThis = years[years.length - 1];
+  const yPrev = years[years.length - 2];
+  let yoyHtml = '';
+  if (yThis && yPrev && h[yThis] && h[yPrev]) {
+    const thisArr = h[yThis][state.metric] || [];
+    const lastArr = h[yPrev][state.metric] || [];
+    const elapsed = thisArr.filter(v => v != null).length;
+    const sumThis = thisArr.slice(0, elapsed).reduce((s,v) => s + (v || 0), 0);
+    const sumLast = lastArr.slice(0, elapsed).reduce((s,v) => s + (v || 0), 0);
+    if (sumLast > 0) {
+      const pct = ((sumThis - sumLast) / sumLast) * 100;
+      const cls = pct >= 0 ? 'pos' : 'neg';
+      const arr = pct >= 0 ? '↑' : '↓';
+      yoyHtml = `<span class="yoy ${cls}">${arr} ${Math.abs(pct).toFixed(0)}% vs '${String(yPrev).slice(2)} (${elapsed}mo)</span>`;
+    }
+  }
+  tb.innerHTML = `
+    <div class="sub">
+      ${metricLabel} · year over year ${yoyHtml}
+    </div>
+    <div class="right">
+      <div class="s2-segctrl metric"></div>
+      <div class="s2-segctrl mode"></div>
+    </div>`;
+  body.appendChild(tb);
+
+  // Metric toggle buttons
+  const metricCtl = tb.querySelector('.s2-segctrl.metric');
+  a.chartMetrics.forEach(m => {
+    const b = document.createElement('button');
+    b.textContent = m.label;
+    b.style.background = state.metric === m.key ? a.accent : 'transparent';
+    if (state.metric === m.key) b.classList.add('on');
+    b.addEventListener('click', () => {
+      state.metric = m.key;
+      buildRowBody(body, a);
+    });
+    metricCtl.appendChild(b);
+  });
+
+  // Mode toggle buttons — text labels render more reliably than glyphs.
+  const modeCtl = tb.querySelector('.s2-segctrl.mode');
+  [{k:'grouped', l:'Bars'}, {k:'overlay', l:'Lines'}].forEach(m => {
+    const b = document.createElement('button');
+    b.textContent = m.l;
+    b.title = m.k;
+    if (state.mode === m.k) b.classList.add('on');
+    b.addEventListener('click', () => {
+      state.mode = m.k;
+      buildRowBody(body, a);
+    });
+    modeCtl.appendChild(b);
+  });
+
+  // Chart
+  body.appendChild(renderYoYChart(a, state.metric, state.mode));
+
+  // Body trio (Performance / Recent / Records)
+  body.appendChild(renderBodyGrid(a));
+}
+
+function renderYoYChart(a, metric, mode) {
+  const wrap = document.createElement('div');
+  wrap.className = 's2-chart num';
+
+  const h = DATA.history[a.id] || {};
+  const allYears = Object.keys(h).map(Number).sort();
+  // Honor the user's chip selection; fall back to most-recent-4 if (somehow)
+  // none of the selected years have history for this activity.
+  let years = allYears.filter(y => SELECTED_YEARS.has(y));
+  if (years.length === 0) years = allYears.slice(-4);
+  const series = years.map(y => ({ year: y, data: (h[y] && h[y][metric]) || Array(12).fill(null) }));
+  const max = Math.max(1, ...series.flatMap(s => s.data.map(v => v == null ? 0 : v)));
+
+  const yearOpacity = (yi) => {
+    const t = yi / Math.max(1, years.length - 1);
+    return 0.32 + t * 0.68;
+  };
+
+  const chartArea = document.createElement('div');
+  chartArea.style.position = 'relative';
+
+  if (mode === 'overlay') {
+    const W = 100, H = 140, pad = 2;
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('class', 'overlay');
+    svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+    svg.setAttribute('preserveAspectRatio', 'none');
+    series.forEach((s, yi) => {
+      const op = yearOpacity(yi);
+      const isLatest = yi === series.length - 1;
+      const pts = [];
+      s.data.forEach((v, mi) => {
+        if (v == null) return;
+        const x = pad + (mi / 11) * (W - pad * 2);
+        const y = H - 4 - (v / max) * (H - 8);
+        pts.push([x, y]);
+      });
+      if (!pts.length) return;
+      const path = pts.map((p, i) => (i === 0 ? `M${p[0]},${p[1]}` : `L${p[0]},${p[1]}`)).join(' ');
+      const line = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      line.setAttribute('d', path);
+      line.setAttribute('fill', 'none');
+      line.setAttribute('stroke', a.accent);
+      line.setAttribute('stroke-opacity', op);
+      line.setAttribute('stroke-width', isLatest ? 2 : 1.2);
+      line.setAttribute('vector-effect', 'non-scaling-stroke');
+      svg.appendChild(line);
+      if (isLatest) {
+        pts.forEach(p => {
+          const c = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+          c.setAttribute('cx', p[0]);
+          c.setAttribute('cy', p[1]);
+          c.setAttribute('r', 1.6);
+          c.setAttribute('fill', a.accent);
+          c.setAttribute('vector-effect', 'non-scaling-stroke');
+          svg.appendChild(c);
+        });
+      }
+    });
+    chartArea.appendChild(svg);
+  } else {
+    // Grouped bars
+    const grid = document.createElement('div');
+    grid.className = 'grouped';
+    for (let mi = 0; mi < 12; mi++) {
+      const group = document.createElement('div');
+      group.className = 'group';
+      series.forEach((s, yi) => {
+        const v = s.data[mi];
+        const isLatest = yi === series.length - 1;
+        const op = yearOpacity(yi);
+        const bar = document.createElement('div');
+        bar.className = 'bar' + (v == null ? ' empty' : ' has-data');
+        if (v != null) {
+          const h = Math.max(1, (v / max) * 140);
+          bar.style.height = h + 'px';
+          bar.style.background = a.accent;
+          bar.style.opacity = op;
+          if (isLatest) bar.style.borderTop = `1px solid ${a.accent}`;
+          bar.dataset.year = s.year;
+          bar.dataset.month = mi;
+          bar.dataset.value = v;
+          bar.addEventListener('mouseenter', () => {
+            bar.style.opacity = 1;
+            const tt = chartArea.querySelector('.tooltip') || document.createElement('div');
+            tt.className = 'tooltip';
+            tt.style.left = `${(mi + 0.5) / 12 * 100}%`;
+            tt.innerHTML = `<span class="month">${MONTH_LABELS[mi]} ${s.year}</span> · ${fmtMetricVal(v, metric)}`;
+            if (!tt.parentElement) chartArea.appendChild(tt);
+          });
+          bar.addEventListener('mouseleave', () => {
+            bar.style.opacity = op;
+            const tt = chartArea.querySelector('.tooltip');
+            if (tt) tt.remove();
+          });
+        }
+        group.appendChild(bar);
+      });
+      grid.appendChild(group);
+    }
+    chartArea.appendChild(grid);
+  }
+  wrap.appendChild(chartArea);
+
+  // Month axis
+  const axis = document.createElement('div');
+  axis.className = 'month-axis';
+  axis.innerHTML = MONTH_LETTERS.map(l => `<div>${l}</div>`).join('');
+  wrap.appendChild(axis);
+
+  // Year legend
+  const legend = document.createElement('div');
+  legend.className = 'year-legend';
+  legend.innerHTML = years.map((y, i) => {
+    const op = yearOpacity(i);
+    const isLatest = i === years.length - 1;
+    return `<span style="display:flex;align-items:center;gap:5px">
+      <span class="swatch" style="background:${a.accent};opacity:${op}"></span>
+      <span style="color:${isLatest ? '#fff' : 'rgba(255,255,255,0.5)'}">${y}</span>
+    </span>`;
+  }).join('');
+  wrap.appendChild(legend);
+
+  return wrap;
+}
+
+function renderBodyGrid(a) {
+  const wrap = document.createElement('div');
+  wrap.className = 's2-body-grid';
+  wrap.appendChild(renderPerformance(a));
+  wrap.appendChild(renderRecent(a));
+  wrap.appendChild(renderRecords(a));
+  return wrap;
+}
+
+function renderPerformance(a) {
+  const r = DATA.rollups[a.id] || {};
+  const isSnow = a.isSnow;
+  const rows = [
+    ['avg speed',  r.avg_speed_kmh != null ? `${fmtSpeed(r.avg_speed_kmh)} km/h` : '—'],
+    ['top speed',  r.max_speed_kmh != null ? `${fmtSpeed(r.max_speed_kmh)} km/h` : '—'],
+    ['avg HR',     r.avg_hr != null ? `${r.avg_hr} bpm` : '—'],
+    ['max HR',     r.max_hr != null ? `${r.max_hr} bpm` : '—'],
+  ];
+  const wrap = document.createElement('div');
+  wrap.className = 's2-perf num';
+  wrap.innerHTML = `<div class="s2-eyebrow" style="margin-bottom:12px">performance</div>
+    ${rows.map(([l, v]) => `<div class="row"><span class="label">${l}</span><span class="value">${v}</span></div>`).join('')}`;
+  return wrap;
+}
+
+function renderRecent(a) {
+  const recent = (DATA.recent || []).filter(x => x.type === a.id).slice(0, 5);
+  const showAscent = !a.isSnow;
+  // Columns: date · name · dist · ↑/↓ · dur · HR
+  const cols = '58px 1fr 56px 56px 50px 48px';
+  const wrap = document.createElement('div');
+  wrap.className = 's2-recent num';
+  wrap.innerHTML = `
+    <div class="s2-eyebrow" style="display:flex;justify-content:space-between;margin-bottom:12px">
+      <span>recent</span>
+      <span style="color:rgba(255,255,255,0.3);font-family:var(--mono)">${recent.length}</span>
+    </div>
+    <div class="head-row" style="grid-template-columns:${cols}">
+      <span>date</span><span>name</span>
+      <span style="text-align:right">dist</span>
+      <span style="text-align:right">${showAscent ? '↑' : '↓'}</span>
+      <span style="text-align:right">dur</span>
+      <span style="text-align:right">HR</span>
+    </div>
+    ${recent.length === 0
+      ? '<div class="row" style="border:none;color:rgba(255,255,255,0.3);font-style:italic;cursor:default;display:block;padding-top:12px">— no activity in window —</div>'
+      : recent.map(x => `
+      <a class="row" href="/log/${encodeURIComponent(x.id)}" style="grid-template-columns:${cols}">
+        <span class="date">${fmtDateShort(x.date)}</span>
+        <span class="name">${escapeHtml(x.name)}</span>
+        <span class="right" style="color:#fff">${fmtDist(x.dist)}</span>
+        <span class="right">${fmtElev(x.elev)}</span>
+        <span class="right">${x.dur}</span>
+        <span class="right">${x.hr != null ? x.hr : '—'}</span>
+      </a>`).join('')}`;
+  return wrap;
+}
+
+function renderRecords(a) {
+  const r = DATA.rollups[a.id] || {};
+  const prs = (r.prs || []).slice(0, 5);
+  const wrap = document.createElement('div');
+  wrap.className = 's2-prs num';
+
+  function prValue(pr) {
+    if (pr.value_km  != null) return `${fmtDist(pr.value_km)} km`;
+    if (pr.value_m   != null) return `${fmtElev(pr.value_m)} m`;
+    if (pr.value_kmh != null) return `${fmtSpeed(pr.value_kmh)} km/h`;
+    if (pr.value_sec != null) return fmtSec(pr.value_sec);
+    return '—';
+  }
+
+  wrap.innerHTML = `<div class="s2-eyebrow" style="margin-bottom:12px">records</div>
+    ${prs.length === 0
+      ? '<div class="row" style="border:none;color:rgba(255,255,255,0.3);font-style:italic;display:block;padding-top:8px">— no records yet —</div>'
+      : prs.map(pr => {
+        const inner = `
+        <span class="star" style="color:${a.accent}">★</span>
+        <div>
+          <div class="lbl">${pr.label}</div>
+          <div class="sub">${pr.date || ''}${pr.name ? ' · ' + escapeHtml(pr.name) : ''}</div>
+        </div>
+        <span class="val">${prValue(pr)}</span>`;
+        // Wrap in an anchor when we have a filename so a single click opens
+        // the ride log and right-click / middle-click work as expected.
+        return pr.filename
+          ? `<a class="row" href="/log/${encodeURIComponent(pr.filename)}">${inner}</a>`
+          : `<div class="row">${inner}</div>`;
+      }).join('')}`;
+  return wrap;
+}
+
+// `escapeHtml` is shared via /static/utils.js.
+
 init();
 </script>
 </body>

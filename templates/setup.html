@@ -100,8 +100,9 @@
     .osm-search-row input { flex: 1; min-width: 0; background: #1a1d23; border: 1px solid #2a2d35; border-radius: 4px; color: #e0e0e0; font-size: 0.78rem; padding: 5px 8px; font-family: inherit; }
     .osm-search-row input:focus { outline: none; border-color: #3b82f6; }
     .osm-search-row button { width: 26px; height: 26px; padding: 0; border-radius: 4px; border: 1px solid #2a2d35; background: #1a1d23; color: #888; font-size: 0.82rem; line-height: 1; cursor: pointer; font-family: inherit; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
-    #region-search-btn { border-color: #3b82f6; background: #1a2a3a; color: #3b82f6; }
-    #region-search-btn:hover { background: #3b82f6; color: #fff; }
+    /* #region-search-btn used to have a blue-accent treatment; it now
+       inherits the generic .osm-search-row button style so it reads
+       consistently with its siblings (clear, filters-toggle). */
     #region-search-clear:hover { color: #ef4444; border-color: #ef4444; }
     #osm-filters-toggle:hover { color: #ccc; border-color: #3b82f6; }
     .osm-deny-chip { font-size: 0.7rem; padding: 2px 4px 2px 8px; border-radius: 3px; background: #1a1d23; border: 1px solid #2a2d35; color: #ccc; display: inline-flex; align-items: center; gap: 4px; }
@@ -192,6 +193,116 @@
     #delete-region-btn { padding: 6px 10px; border-radius: 4px; border: 1px solid #ef4444; background: transparent; color: #ef4444; font-size: 0.72rem; cursor: pointer; transition: all 0.12s; font-family: inherit; }
     #delete-region-btn:hover { background: #ef4444; color: #fff; }
     #region-edit-hint { font-size: 0.68rem; color: #888; margin-top: 4px; line-height: 1.4; }
+
+    /* ── Canonical panel / control treatments ───────────────────────
+       These supersede many of the literal-hex rules above (the
+       originals are preserved for now to keep the diff small; they
+       can be culled in a follow-up pass). Source order means these
+       rules win. */
+
+    /* Panels, cards, group containers */
+    .type-card,
+    .dup-group,
+    .odd-row { background: var(--bg-card); border: 1px solid var(--border-hair); border-radius: 4px; }
+    .dup-minimap-cell { background: var(--bg-card); }
+    .dup-minimaps { background: var(--border-hair); border-top: 1px solid var(--border-hair); }
+    #untagged-block { background: var(--bg-card); }
+    #color-popover { background: var(--bg-card); border: 1px solid var(--border-hair); }
+
+    /* Tab bar */
+    #tab-bar { background: var(--bg-card); border-bottom: 1px solid var(--border-hair); }
+    .tab-btn { color: var(--text-secondary); }
+    .tab-btn:hover { color: var(--text-primary); }
+    .tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+    /* Section headers (regions sidebar, dup groups, edit card) */
+    .rs-section-header { color: var(--text-secondary); border-bottom: 1px solid var(--border-hair); background: var(--bg-card); }
+    .rs-count,
+    .rs-section-toggle { color: var(--text-tertiary); }
+    #regions-sidebar { background: var(--bg-card); border-right: 1px solid var(--border-hair); }
+    .rs-padded { border-bottom: 1px solid var(--border-row); }
+    .rs-padded > input[type=text] { background: transparent; border: 1px solid var(--border-row); color: var(--text-secondary); }
+    .rs-padded > input[type=text]:focus { border-color: var(--accent); }
+    .rs-divider { border-top: 1px solid var(--border-hair); }
+    .rs-or { color: var(--text-muted); }
+    #edit-region-card { border-top: 1px solid var(--border-hair); background: var(--bg-card); }
+    #edit-region-card h3 { color: var(--text-secondary); }
+    .rfield label { color: var(--text-secondary); }
+    .rfield input { background: transparent; border: 1px solid var(--border-row); color: var(--text-secondary); }
+    .rfield input:focus { border-color: var(--accent); }
+
+    /* Generic small buttons (t-btn / r-btn / osm-search button / dup-map-toggle / .osm-deny-chip).
+       #region-search-btn deliberately falls into THIS group (not the
+       primary-action group below) so it reads consistently with its
+       siblings in the OSM search row. */
+    .t-btn,
+    .r-btn,
+    .osm-search-row button,
+    .dup-map-toggle { border: 1px solid var(--border-row); background: transparent; color: var(--text-secondary); }
+    .t-btn:hover,
+    .r-btn:hover,
+    .dup-map-toggle:hover,
+    .osm-search-row button:hover { border-color: var(--accent); color: var(--text-primary); }
+    .osm-search-row input { background: transparent; border: 1px solid var(--border-row); color: var(--text-secondary); }
+    .osm-search-row input:focus { border-color: var(--accent); }
+    .osm-deny-chip { background: rgba(255,255,255,0.04); border: 1px solid var(--border-hair); color: var(--text-secondary); }
+    .osm-deny-chip button { color: var(--text-muted); }
+
+    /* Primary-action buttons (blue-tinted): use accent rgba over transparent. */
+    #add-type-btn,
+    .rs-primary-btn,
+    #save-region-btn { background: rgba(59,130,246,0.10); border: 1px solid var(--accent); color: var(--accent); }
+    #add-type-btn:hover,
+    .rs-primary-btn:hover,
+    .rs-primary-btn.active,
+    #save-region-btn:hover { background: var(--accent); color: var(--text-primary); }
+
+    /* Inputs (regular text fields) */
+    #new-type-input { background: transparent; border: 1px solid var(--border-row); color: var(--text-secondary); }
+    #new-type-input:focus { border-color: var(--accent); }
+    .type-label-input { color: var(--text-primary); }
+    .type-label-input:focus { border-bottom-color: var(--accent); }
+    .type-id { color: var(--text-muted); }
+
+    /* Section headings on tab content */
+    #types-panel h2 { color: var(--text-secondary); }
+
+    /* Region list / untagged */
+    .region-item { border-bottom: 1px solid var(--border-row); }
+    .region-item:hover { background: rgba(255,255,255,0.04); }
+    .region-name { color: var(--text-secondary); }
+    #untagged-controls { border-bottom: 1px solid var(--border-row); color: var(--text-secondary); }
+    .untagged-item { border-bottom: 1px solid var(--border-row); }
+    .untagged-item:hover,
+    .untagged-item.active { background: rgba(255,255,255,0.04); }
+    .untagged-item .ut-date { color: var(--text-tertiary); }
+    .untagged-item .ut-name { color: var(--text-secondary); }
+    .untagged-item.active .ut-name { color: var(--text-primary); }
+    #no-regions { color: var(--text-muted); }
+    #region-edit-hint { color: var(--text-tertiary); }
+
+    /* Duplicates / Odd-times rows */
+    .dup-group-header { background: var(--bg-card); border-bottom: 1px solid var(--border-hair); color: var(--text-secondary); }
+    .dup-group-header .dup-date { color: var(--text-primary); }
+    .dup-group-header .dup-count { color: var(--text-tertiary); }
+    .dup-row { border-top: 1px solid var(--border-row); }
+    .dup-row .dup-name { color: var(--text-secondary); }
+    .dup-row .dup-meta { color: var(--text-tertiary); }
+    .dup-row .dup-filename { color: var(--text-muted); }
+    .dup-empty { color: var(--text-muted); }
+    .dup-metrics { background: var(--bg-card); border-bottom: 1px solid var(--border-row); }
+    .dup-metrics .m .lbl { color: var(--text-muted); }
+    .dup-metrics .m .val { color: var(--text-secondary); }
+    .dup-minimap-head { border-bottom: 1px solid var(--border-row); }
+    .dup-minimap-head .name { color: var(--text-secondary); }
+    .dup-minimap-map { background: var(--bg-page); }
+    .odd-row .odd-date { color: var(--text-secondary); }
+    .odd-row .odd-name { color: var(--text-secondary); }
+    .odd-row .odd-meta { color: var(--text-tertiary); }
+    .odd-row .odd-tz { color: var(--text-muted); }
+
+    /* Draw instructions panel */
+    #draw-instructions { background: var(--bg-page); border: 1px solid var(--border-hair); color: var(--text-secondary); }
   </style>
 </head>
 <body>
@@ -853,7 +964,9 @@ function renderTypes() {
     swatch.className = 'type-swatch';
     swatch.style.background = t.bg;
     swatch.style.color = t.color;
-    swatch.textContent = t.label.slice(0, 3).toUpperCase();
+    // Glyph is derived from the type id (mtb / snowboard / ski / hike /
+    // fat_biking …) so "Mountain Bike" reads as MTB rather than MOU.
+    swatch.textContent = t.id.replace(/_/g, '').slice(0, 3).toUpperCase();
     swatch.title = 'Click to change colour';
     swatch.onclick = (e) => openColorPopover(e, t);
 
@@ -966,7 +1079,7 @@ let selectedColor = PALETTE[0];
 let editingId = null;
 let pendingLayer = null;
 
-const map = L.map('map').setView([51, -114], 9);
+const map = L.map('map', { zoomSnap: 0.25 }).setView([51, -114], 9);
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
   maxZoom: 19, attribution: '© <a href="https://openstreetmap.org/copyright">OpenStreetMap</a>',
 }).addTo(map);

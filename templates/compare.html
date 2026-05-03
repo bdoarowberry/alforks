@@ -7,78 +7,134 @@
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="https://unpkg.com/leaflet-rotate@0.2.8/dist/leaflet-rotate-src.js"></script>
+  <link href="https://api.mapbox.com/mapbox-gl-js/v3.3.0/mapbox-gl.css" rel="stylesheet">
+  <script src="https://api.mapbox.com/mapbox-gl-js/v3.3.0/mapbox-gl.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <script src="/static/utils.js"></script>
   <script src="/static/sync_toast.js" defer></script>
   <link rel="stylesheet" href="/static/base.css">
   <style>
-    body { display: flex; flex-direction: column; min-height: 100vh; }
-    main { flex: 1; padding: 18px 22px 32px; max-width: 1680px; margin: 0 auto; width: 100%; display: flex; flex-direction: column; gap: 16px; }
-    h2 { font-size: 0.9rem; color: #ddd; font-weight: 500; margin-bottom: 10px; }
+    /* Page fits the viewport. The previous attempts using flex / grid
+       on body weren't propagating a definite height to main on this
+       browser, leaving map-charts collapsed at content size (~5px).
+       Explicit calc() on main is brittle (hard-codes the 52px header
+       from base.css) but bulletproof — flex: 1 children of main now
+       have a guaranteed definite parent height to grow into. */
+    body { height: 100vh; overflow: hidden; }
+    main { box-sizing: border-box; height: calc(100vh - 52px); padding: 18px 22px 24px; max-width: 1680px; margin: 0 auto; width: 100%; display: flex; flex-direction: column; gap: 14px; min-height: 0; }
+    /* Short viewports (e.g. dev tools docked at the bottom): drop the
+       no-scroll viewport-fit so map-wrap's 500px min-height can render
+       fully and the user can scroll the page. */
+    @media (max-height: 700px) {
+      body { height: auto; overflow: visible; }
+      main { height: auto; }
+    }
+    h2 { font-size: 0.9rem; color: var(--text-secondary); font-weight: 500; margin-bottom: 10px; }
 
     /* Activity pickers */
     .pickers { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
-    .picker { background: #12151a; border: 1px solid #2a2d35; border-radius: 8px; padding: 12px 14px; }
+    .picker { background: var(--bg-card); border: 1px solid var(--border-hair); border-radius: 4px; padding: 12px 14px; }
     .picker.a { border-left: 3px solid #3b82f6; }
     .picker.b { border-left: 3px solid #f59e0b; }
-    .picker-label { font-size: 0.62rem; text-transform: uppercase; letter-spacing: 0.1em; color: #888; margin-bottom: 6px; font-weight: 600; }
+    .picker-label { font-size: 0.62rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-tertiary); margin-bottom: 6px; font-weight: 600; display: inline-flex; align-items: center; gap: 8px; }
     .picker.a .picker-label { color: #3b82f6; }
     .picker.b .picker-label { color: #f59e0b; }
-    .picker select { width: 100%; background: #1a1d23; border: 1px solid #2a2d35; border-radius: 4px; color: #e0e0e0; padding: 6px 8px; font-size: 0.82rem; font-family: inherit; }
-    .picker select:focus { outline: none; border-color: #3b82f6; }
+    .picker select { width: 100%; background: transparent; border: 1px solid var(--border-row); border-radius: 4px; color: var(--text-secondary); padding: 6px 8px; font-size: 0.82rem; font-family: inherit; }
+    .picker select:focus { outline: none; border-color: var(--accent); }
+    /* Type glyph next to picker label (MTB / SNO / SKI / HIK / OTH / FAT). */
+    .picker-glyph { display: inline-flex; align-items: center; justify-content: center; height: 16px; padding: 0 6px; border-radius: 3px; font-family: var(--font-mono); font-size: 9px; font-weight: 600; letter-spacing: 0.05em; color: #fff; }
+    .picker-glyph:empty { display: none; }
 
-    /* Map + chart column layout. Below 1100px the chart column wraps below
-       the map so we don't squeeze either pane. */
-    .map-charts { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(280px, 1fr); gap: 14px; }
-    @media (max-width: 1100px) { .map-charts { grid-template-columns: 1fr; } }
+    /* Map + chart column layout. Flex (not grid) — flex stretches its
+       items along the cross-axis by default and doesn't have grid's
+       auto-track-collapse pathology with column-flex parents. Below
+       1100px we fall back to a stacked layout with normal page scroll. */
+    .map-charts { display: flex; gap: 14px; flex: 1; min-height: 0; }
+    #map-wrap { flex: 1.6 1 0; min-width: 0; }
+    @media (max-width: 1100px) {
+      body { height: auto; overflow: visible; }
+      .map-charts { flex-direction: column; flex: none; min-height: auto; }
+      #map-wrap { flex: none; height: 540px; }
+    }
 
-    /* Map */
-    #compare-map { height: 540px; border-radius: 8px; border: 1px solid #2a2d35; background: #0a0c10; }
-    .layer-toggle-btn { background: rgba(18,21,26,0.88); border: 1px solid #2a2d35; color: #ccc; font-size: 0.72rem; padding: 4px 10px; border-radius: 4px; cursor: pointer; font-family: inherit; transition: all 0.12s; }
-    .layer-toggle-btn:hover { border-color: #3b82f6; color: #fff; }
+    /* Map wrapper — holds the Leaflet (#compare-map), Mapbox (#map-3d),
+       and dual-map container (#map-dual) canvases stacked, plus the
+       view-toggle / fullscreen overlay. Each fills the wrapper via
+       position: absolute. The min-height is a safety net for short
+       viewports where the flex chain above otherwise collapses. */
+    #map-wrap { position: relative; min-height: 500px; border-radius: 4px; overflow: hidden; }
+    #compare-map { position: absolute; inset: 0; border: 1px solid var(--border-hair); border-radius: 4px; background: var(--bg-page); }
+    #map-3d { position: absolute; inset: 0; display: none; border-radius: 4px; }
 
-    /* Chart column */
-    .chart-col { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
-    .chart-card { background: #12151a; border: 1px solid #2a2d35; border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
-    .chart-head { display: flex; align-items: baseline; gap: 8px; font-size: 0.72rem; color: #ccc; font-weight: 500; }
-    .chart-head .head-sub { color: #777; font-size: 0.66rem; font-weight: normal; margin-left: auto; }
+    /* Dual-map mode — activities in different regions get one map each
+       so each track fills its own viewport instead of being a tiny dot
+       in a wide combined fit. Triggered by body.dual-map. */
+    #map-dual { position: absolute; inset: 0; display: none; grid-template-columns: 1fr 1fr; gap: 6px; }
+    body.dual-map #map-dual    { display: grid; }
+    body.dual-map #compare-map { display: none; }
+    body.dual-map #map-3d      { display: none !important; }
+    #dual-map-a, #dual-map-b { position: relative; border: 1px solid var(--border-hair); border-radius: 4px; background: var(--bg-page); overflow: hidden; }
+    #dual-map-a { border-left: 3px solid #3b82f6; }
+    #dual-map-b { border-left: 3px solid #f59e0b; }
+    #dual-map-a .dual-tag, #dual-map-b .dual-tag { position: absolute; top: 8px; left: 8px; z-index: 500; padding: 3px 8px; font-size: 10px; font-family: var(--font-mono); letter-spacing: 0.06em; text-transform: uppercase; color: #fff; border-radius: 3px; pointer-events: none; backdrop-filter: blur(4px); }
+    #dual-map-a .dual-tag { background: rgba(59,130,246,0.85); }
+    #dual-map-b .dual-tag { background: rgba(245,158,11,0.85); }
+
+    /* Top-right cluster on the map: basemap toggle + fullscreen.
+       Same idiom as Heatmap so the chrome reads consistently. */
+    #view-controls { position: absolute; top: 10px; right: 10px; z-index: 1000; display: flex; gap: 6px; }
+    #view-toggle { display: flex; background: rgba(15,19,19,0.88); border: 1px solid var(--border-hair); border-radius: 4px; overflow: hidden; backdrop-filter: blur(6px); }
+    .vtbtn { padding: 5px 12px; background: transparent; color: rgba(255,255,255,0.55); border: none; border-right: 1px solid var(--border-hair); cursor: pointer; font-size: 11px; font-family: var(--font-mono); letter-spacing: 0.06em; text-transform: uppercase; transition: color 0.12s, background 0.12s; }
+    .vtbtn:last-child { border-right: none; }
+    .vtbtn:hover:not(.active):not(:disabled) { color: var(--text-secondary); }
+    .vtbtn.active { background: rgba(255,255,255,0.10); color: var(--text-primary); }
+    .vtbtn:disabled { opacity: 0.35; cursor: default; }
+    #fs-btn { padding: 4px 10px; background: rgba(15,19,19,0.88); color: rgba(255,255,255,0.55); border: 1px solid var(--border-hair); border-radius: 4px; cursor: pointer; font-size: 14px; line-height: 1; backdrop-filter: blur(6px); transition: color 0.12s, background 0.12s; font-family: var(--font-mono); }
+    #fs-btn:hover,
+    #fs-btn.active { color: var(--text-primary); background: rgba(255,255,255,0.10); }
+
+    /* Mapbox attribution and zoom controls — match site chrome. */
+    .mapboxgl-ctrl-group { background: rgba(15,19,19,0.9) !important; border: 1px solid var(--border-hair) !important; }
+    .mapboxgl-ctrl button { background-color: transparent !important; }
+    .mapboxgl-ctrl button .mapboxgl-ctrl-icon { filter: invert(0.7); }
+    .mapboxgl-ctrl-attrib { background: rgba(15,19,19,0.7) !important; color: var(--text-muted) !important; font-size: 10px; font-family: var(--font-mono); }
+    .mapboxgl-ctrl-attrib a { color: var(--text-muted) !important; }
+
+    /* Chart column — flex item alongside #map-wrap. Scrolls internally
+       if content exceeds the available row height. */
+    .chart-col { flex: 1 1 280px; min-width: 280px; min-height: 0; display: flex; flex-direction: column; gap: 10px; overflow-y: auto; }
+    @media (max-width: 1100px) { .chart-col { flex: none; min-width: 0; } }
+    .chart-card { background: var(--bg-card); border: 1px solid var(--border-hair); border-radius: 4px; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
+    .chart-head { display: flex; align-items: baseline; gap: 8px; font-size: 0.72rem; color: var(--text-secondary); font-weight: 500; }
+    .chart-head .head-sub { color: var(--text-muted); font-size: 0.66rem; font-weight: normal; margin-left: auto; }
     .chart-wrap { position: relative; height: 130px; }
-    .chart-empty { font-size: 0.72rem; color: #666; text-align: center; padding: 20px 0; }
+    .chart-empty { font-size: 0.72rem; color: var(--text-muted); text-align: center; padding: 20px 0; }
     /* HR-zones bar uses pure CSS so we don't need another Chart.js instance */
     .zones-grid { display: grid; grid-template-columns: 24px 1fr auto; row-gap: 4px; column-gap: 8px; font-size: 0.7rem; align-items: center; }
-    .zones-grid .z-label { color: #888; }
+    .zones-grid .z-label { color: var(--text-tertiary); }
     .zones-grid .z-bars { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
     .zones-grid .z-bar { height: 6px; border-radius: 2px; min-width: 1px; }
     .zones-grid .z-bar.a { background: #3b82f6; }
     .zones-grid .z-bar.b { background: #f59e0b; }
-    .zones-grid .z-times { color: #999; font-size: 0.64rem; line-height: 1.1; text-align: right; min-width: 80px; }
+    .zones-grid .z-times { color: var(--text-tertiary); font-size: 0.64rem; line-height: 1.1; text-align: right; min-width: 80px; }
     .zones-grid .z-times .a { color: #3b82f6; }
     .zones-grid .z-times .b { color: #f59e0b; }
 
-    /* Stats panel */
-    .stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
-    .stats-card { background: #12151a; border: 1px solid #2a2d35; border-radius: 8px; padding: 12px 14px; }
-    .stats-card.a { border-top: 2px solid #3b82f6; }
-    .stats-card.b { border-top: 2px solid #f59e0b; }
-    .stats-title { font-size: 0.86rem; color: #fff; font-weight: 500; margin-bottom: 4px; }
-    .stats-sub { font-size: 0.7rem; color: #999; margin-bottom: 10px; }
-    .stats-rows { display: grid; grid-template-columns: 1fr auto; row-gap: 4px; column-gap: 12px; font-size: 0.78rem; }
-    .stats-rows .label { color: #888; }
-    .stats-rows .value { color: #e0e0e0; font-weight: 500; }
-
-    /* Diff column */
-    .diff-card { background: #14171c; border: 1px solid #2a2d35; border-radius: 8px; padding: 12px 14px; margin-top: 14px; }
-    .diff-title { font-size: 0.62rem; text-transform: uppercase; letter-spacing: 0.1em; color: #888; margin-bottom: 8px; font-weight: 600; }
+    /* Diff card — sole source of A | B | Δ values. Lives in the chart
+       column (after the charts) so it sits beside the map rather than
+       sprawling full-width below it. */
+    .diff-card { background: var(--bg-card); border: 1px solid var(--border-hair); border-radius: 4px; padding: 12px 14px; }
+    .diff-title { font-size: 0.62rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-tertiary); margin-bottom: 8px; font-weight: 600; }
     .diff-rows { display: grid; grid-template-columns: 1fr auto auto auto; column-gap: 12px; row-gap: 4px; font-size: 0.78rem; align-items: baseline; }
-    .diff-rows .label { color: #888; }
+    .diff-rows .label { color: var(--text-tertiary); }
     .diff-rows .a-val  { color: #3b82f6; text-align: right; }
     .diff-rows .b-val  { color: #f59e0b; text-align: right; }
     .diff-rows .delta  { text-align: right; font-size: 0.72rem; }
     .diff-rows .delta.up   { color: #4ade80; }
     .diff-rows .delta.down { color: #f87171; }
-    .diff-rows .delta.flat { color: #888; }
+    .diff-rows .delta.flat { color: var(--text-muted); }
 
-    .empty { padding: 32px; text-align: center; color: #888; font-size: 0.85rem; }
+    .empty { padding: 32px; text-align: center; color: var(--text-tertiary); font-size: 0.85rem; }
   </style>
 </head>
 <body>
@@ -106,17 +162,32 @@
 
   <div class="pickers">
     <div class="picker a">
-      <div class="picker-label">Activity A · blue</div>
+      <div class="picker-label">Activity A · blue<span class="picker-glyph" id="picker-glyph-a"></span></div>
       <select id="picker-a"></select>
     </div>
     <div class="picker b">
-      <div class="picker-label">Activity B · amber</div>
+      <div class="picker-label">Activity B · amber<span class="picker-glyph" id="picker-glyph-b"></span></div>
       <select id="picker-b"></select>
     </div>
   </div>
 
   <div class="map-charts">
-    <div id="compare-map"></div>
+    <div id="map-wrap">
+      <div id="compare-map"></div>
+      <div id="map-3d"></div>
+      <div id="map-dual">
+        <div id="dual-map-a"><span class="dual-tag">A</span></div>
+        <div id="dual-map-b"><span class="dual-tag">B</span></div>
+      </div>
+      <div id="view-controls">
+        <div id="view-toggle">
+          <button class="vtbtn active" id="vt-map"       onclick="setMapView('map')">Map</button>
+          <button class="vtbtn"        id="vt-satellite" onclick="setMapView('satellite')">Satellite</button>
+          <button class="vtbtn"        id="vt-3d"        onclick="setMapView('3d')"{% if not mapbox_token %} disabled title="No Mapbox token configured"{% endif %}>3D</button>
+        </div>
+        <button id="fs-btn" onclick="toggleFullscreen()" title="Toggle fullscreen (Esc to exit)" aria-label="Toggle fullscreen">⛶</button>
+      </div>
+    </div>
     <div class="chart-col">
       <div class="chart-card">
         <div class="chart-head">Elevation profile <span class="head-sub">m vs km</span></div>
@@ -130,16 +201,16 @@
         <div class="chart-head">HR zone time <span class="head-sub">seconds</span></div>
         <div class="zones-grid" id="hr-zones-body"></div>
       </div>
+      <div id="stats-area">
+        <div class="empty">Pick two activities to overlay them.</div>
+      </div>
     </div>
-  </div>
-
-  <div id="stats-area">
-    <div class="empty">Pick two activities to overlay them.</div>
   </div>
 </main>
 
 <script>
 const TYPES = {{ types_json | safe }};
+const MAPBOX_TOKEN = '{{ mapbox_token }}';
 
 // ─── State ───────────────────────────────────────────────────────────────
 let allActivities = [];
@@ -148,6 +219,18 @@ let map;
 // (e.g.) the tile layer or any future highlight rectangles.
 let drawnOverlays = [];
 let layerA, layerB;
+// Cached parsed track data so 3D init / view toggles don't have to re-fetch.
+let lastDataA = null, lastDataB = null;
+let mapView = 'map';   // 'map' | 'satellite' | '3d'
+let mb3d = null, mb3dReady = false, mb3dFitDone = false;
+
+// Dual-map mode — when activity centroids are far apart we render each
+// track on its own Leaflet map side-by-side. State for those:
+let mapA = null, mapB = null;
+let mapAStreet, mapASat, mapBStreet, mapBSat;
+let dualOverlaysA = [], dualOverlaysB = [];
+let dualMode = false;
+const DUAL_THRESHOLD_KM = 15;
 
 function colorFor(slot) { return slot === 'a' ? '#3b82f6' : '#f59e0b'; }
 
@@ -158,7 +241,10 @@ function colorFor(slot) { return slot === 'a' ? '#3b82f6' : '#f59e0b'; }
 let streetLayer, satelliteLayer;
 
 function initMap() {
-  map = L.map('compare-map', { zoomControl: true, rotate: true, touchRotate: true })
+  // zoomSnap: 0.25 lets fitBounds pick fractional zoom levels so tracks
+  // fill the map tightly. Default snap of 1 floors the optimal zoom and
+  // can leave 30–50% of the map as empty space around the tracks.
+  map = L.map('compare-map', { zoomControl: true, rotate: true, touchRotate: true, zoomSnap: 0.25 })
     .setView([51, -114], 11);
   map.addControl(new L.Control.Rotate({ closeOnZeroBearing: false }));
 
@@ -169,23 +255,237 @@ function initMap() {
     maxZoom: 19, attribution: '© <a href="https://www.esri.com/">Esri</a> World Imagery',
   });
   streetLayer.addTo(map);
-
-  const LayerToggle = L.Control.extend({
-    onAdd() {
-      const btn = L.DomUtil.create('button', 'layer-toggle-btn');
-      btn.textContent = 'Satellite';
-      L.DomEvent.disableClickPropagation(btn);
-      let sat = false;
-      btn.onclick = () => {
-        sat = !sat;
-        if (sat) { map.removeLayer(streetLayer);    satelliteLayer.addTo(map); btn.textContent = 'Map'; }
-        else     { map.removeLayer(satelliteLayer); streetLayer.addTo(map);    btn.textContent = 'Satellite'; }
-      };
-      return btn;
-    },
-  });
-  new LayerToggle({ position: 'topright' }).addTo(map);
 }
+
+// ─── Dual-map mode ─────────────────────────────────────────────────────────
+// When two activities are in different regions (centroids > 15km apart), we
+// render each on its own Leaflet map so each track fills its own viewport
+// instead of becoming a dot in a wide combined fit. The 3D button is
+// disabled in dual mode; the Map / Satellite toggle still applies (to both
+// maps in tandem).
+
+function _trackCentroid(data) {
+  if (!data?.points?.length) return null;
+  let sumLat = 0, sumLon = 0, n = 0;
+  for (const p of data.points) {
+    if (Number.isFinite(p?.lat) && Number.isFinite(p?.lon)
+        && (p.lat !== 0 || p.lon !== 0)) {
+      sumLat += p.lat; sumLon += p.lon; n++;
+    }
+  }
+  return n ? { lat: sumLat / n, lon: sumLon / n } : null;
+}
+
+function _haversineKm(a, b) {
+  const R = 6371;
+  const toRad = d => d * Math.PI / 180;
+  const dLat = toRad(b.lat - a.lat);
+  const dLon = toRad(b.lon - a.lon);
+  const lat1 = toRad(a.lat), lat2 = toRad(b.lat);
+  const x = Math.sin(dLat/2) ** 2
+          + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon/2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x));
+}
+
+function shouldUseDualMap(dataA, dataB) {
+  if (!dataA?.points || !dataB?.points) return false;
+  const cA = _trackCentroid(dataA);
+  const cB = _trackCentroid(dataB);
+  if (!cA || !cB) return false;
+  return _haversineKm(cA, cB) > DUAL_THRESHOLD_KM;
+}
+
+function ensureDualMaps() {
+  if (mapA && mapB) return;
+  // Map A
+  mapA = L.map('dual-map-a', { zoomControl: true, rotate: true, touchRotate: true, zoomSnap: 0.25 })
+    .setView([51, -114], 11);
+  mapA.addControl(new L.Control.Rotate({ closeOnZeroBearing: false }));
+  mapAStreet = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19, attribution: '© <a href="https://openstreetmap.org/copyright">OpenStreetMap</a>',
+  });
+  mapASat = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+    maxZoom: 19, attribution: '© <a href="https://www.esri.com/">Esri</a> World Imagery',
+  });
+  // Map B
+  mapB = L.map('dual-map-b', { zoomControl: true, rotate: true, touchRotate: true, zoomSnap: 0.25 })
+    .setView([51, -114], 11);
+  mapB.addControl(new L.Control.Rotate({ closeOnZeroBearing: false }));
+  mapBStreet = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19, attribution: '© <a href="https://openstreetmap.org/copyright">OpenStreetMap</a>',
+  });
+  mapBSat = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+    maxZoom: 19, attribution: '© <a href="https://www.esri.com/">Esri</a> World Imagery',
+  });
+  // Apply current basemap to both
+  applyDualBasemap();
+}
+
+function applyDualBasemap() {
+  if (!mapA || !mapB) return;
+  for (const m of [mapA, mapB]) {
+    [mapAStreet, mapASat, mapBStreet, mapBSat].forEach(l => { if (l && m.hasLayer(l)) m.removeLayer(l); });
+  }
+  if (mapView === 'satellite') {
+    mapASat.addTo(mapA); mapBSat.addTo(mapB);
+  } else {
+    mapAStreet.addTo(mapA); mapBStreet.addTo(mapB);
+  }
+}
+
+function _drawTrackOnMap(targetMap, data, slot, prevOverlays) {
+  prevOverlays.forEach(l => targetMap.removeLayer(l));
+  prevOverlays.length = 0;
+  if (!data?.points || data.points.length < 2) return null;
+  const latlngs = data.points
+    .filter(p => p && Number.isFinite(p.lat) && Number.isFinite(p.lon)
+              && (p.lat !== 0 || p.lon !== 0)
+              && p.lat >= -90 && p.lat <= 90
+              && p.lon >= -180 && p.lon <= 180)
+    .map(p => [p.lat, p.lon]);
+  if (latlngs.length < 2) return null;
+  const color = colorFor(slot);
+  const layer = L.polyline(latlngs, { color, weight: 3, opacity: 0.9 }).addTo(targetMap);
+  prevOverlays.push(layer);
+  prevOverlays.push(L.circleMarker(latlngs[0],                  { radius: 6, color: '#22c55e', fillColor: '#22c55e', fillOpacity: 0.9, weight: 2 }).addTo(targetMap));
+  prevOverlays.push(L.circleMarker(latlngs[latlngs.length - 1], { radius: 6, color: '#f97316', fillColor: '#f97316', fillOpacity: 0.9, weight: 2 }).addTo(targetMap));
+  targetMap.invalidateSize({ animate: false });
+  targetMap.fitBounds(layer.getBounds(), { padding: [12, 12] });
+  return layer;
+}
+
+function setDualMode(on) {
+  dualMode = on;
+  document.body.classList.toggle('dual-map', on);
+  const btn3d = document.getElementById('vt-3d');
+  if (btn3d) {
+    btn3d.disabled = on || !MAPBOX_TOKEN;
+    btn3d.title = on
+      ? '3D not available in dual-map mode'
+      : (MAPBOX_TOKEN ? '' : 'No Mapbox token configured');
+  }
+  if (on && mapView === '3d') setMapView('map');  // 3D doesn't apply in dual
+  if (on) {
+    ensureDualMaps();
+    // CSS just changed display: ensure both maps refresh size after layout settles.
+    requestAnimationFrame(() => {
+      mapA?.invalidateSize({ animate: false });
+      mapB?.invalidateSize({ animate: false });
+    });
+  }
+}
+
+// ─── Mapbox 3D ────────────────────────────────────────────────────────────
+// Lazy init on first switch to 3D. Both tracks render as coloured lines
+// (A=blue, B=amber, matching the 2D Leaflet view).
+function init3D() {
+  if (mb3d) { mb3d.resize(); return; }
+  if (!MAPBOX_TOKEN) return;
+  mapboxgl.accessToken = MAPBOX_TOKEN;
+  mb3d = new mapboxgl.Map({
+    container: 'map-3d',
+    style: 'mapbox://styles/mapbox/satellite-streets-v12',
+    center: [-114.74, 50.89], zoom: 10, pitch: 55, bearing: -15, antialias: true,
+  });
+  mb3d.addControl(new mapboxgl.NavigationControl({ visualizePitch: true }), 'top-right');
+  mb3d.on('load', () => {
+    mb3d.addSource('mapbox-dem', { type: 'raster-dem', url: 'mapbox://mapbox.mapbox-terrain-dem-v1', tileSize: 512, maxzoom: 14 });
+    mb3d.setTerrain({ source: 'mapbox-dem', exaggeration: 1.5 });
+    mb3d.addLayer({ id: 'sky', type: 'sky', paint: { 'sky-type': 'atmosphere', 'sky-atmosphere-sun': [0.0, 90.0], 'sky-atmosphere-sun-intensity': 15 } });
+    mb3d.addSource('compare3d', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+    mb3d.addLayer({ id: 'compare3d-layer', type: 'line', source: 'compare3d',
+      layout: { 'line-join': 'round', 'line-cap': 'round' },
+      paint: { 'line-color': ['get', 'color'], 'line-width': 3, 'line-opacity': 0.9 },
+    });
+    mb3dReady = true;
+    update3DLayers();
+    fit3DToBoth();
+  });
+}
+
+function build3DGeoJSON() {
+  const features = [];
+  const push = (data, slot) => {
+    if (!data?.points || data.points.length < 2) return;
+    features.push({
+      type: 'Feature',
+      properties: { color: colorFor(slot) },
+      geometry: { type: 'LineString', coordinates: data.points.map(p => [p.lon, p.lat]) },
+    });
+  };
+  push(lastDataA, 'a');
+  push(lastDataB, 'b');
+  return { type: 'FeatureCollection', features };
+}
+
+function update3DLayers() {
+  if (!mb3d || !mb3dReady) return;
+  mb3d.getSource('compare3d')?.setData(build3DGeoJSON());
+}
+
+function fit3DToBoth() {
+  if (!mb3d || !mb3dReady || mb3dFitDone) return;
+  const lats = [], lons = [];
+  for (const d of [lastDataA, lastDataB]) {
+    if (!d?.points) continue;
+    for (const p of d.points) { lats.push(p.lat); lons.push(p.lon); }
+  }
+  if (!lats.length) return;
+  mb3d.fitBounds(
+    [[Math.min(...lons), Math.min(...lats)], [Math.max(...lons), Math.max(...lats)]],
+    { padding: 60, pitch: 55, bearing: -15, duration: 1000 }
+  );
+  mb3dFitDone = true;
+}
+
+// ─── View toggle ──────────────────────────────────────────────────────────
+function setMapView(view) {
+  // 3D is mutually exclusive with dual mode — guard against both.
+  if (view === '3d' && dualMode) return;
+  mapView = view;
+  ['map', 'satellite', '3d'].forEach(v =>
+    document.getElementById(`vt-${v}`).classList.toggle('active', v === view));
+
+  const leafletEl = document.getElementById('compare-map');
+  const mb3dEl    = document.getElementById('map-3d');
+
+  if (view === '3d') {
+    leafletEl.style.display = 'none';
+    mb3dEl.style.display    = 'block';
+    init3D();
+    if (mb3dReady) { update3DLayers(); fit3DToBoth(); }
+  } else {
+    leafletEl.style.display = '';
+    mb3dEl.style.display    = 'none';
+    map.removeLayer(view === 'map' ? satelliteLayer : streetLayer);
+    (view === 'map' ? streetLayer : satelliteLayer).addTo(map);
+    map.invalidateSize();
+    // Dual maps share the same basemap selection.
+    applyDualBasemap();
+    if (dualMode) {
+      mapA?.invalidateSize();
+      mapB?.invalidateSize();
+    }
+  }
+}
+
+// ─── Fullscreen ───────────────────────────────────────────────────────────
+function toggleFullscreen() {
+  const target = document.getElementById('map-wrap');
+  if (document.fullscreenElement) document.exitFullscreen?.();
+  else                            target.requestFullscreen?.();
+}
+
+document.addEventListener('fullscreenchange', () => {
+  const fs = !!document.fullscreenElement;
+  document.getElementById('fs-btn').classList.toggle('active', fs);
+  setTimeout(() => {
+    map.invalidateSize();
+    if (mb3d) mb3d.resize();
+    if (mapA) mapA.invalidateSize();
+    if (mapB) mapB.invalidateSize();
+  }, 60);
+});
 
 function readQuery() {
   const u = new URL(location.href);
@@ -247,18 +547,44 @@ async function loadActivity(filename) {
 }
 
 function fitBoundsBoth(boundsA, boundsB) {
-  if (boundsA && boundsB) {
-    map.fitBounds(boundsA.extend(boundsB.getSouthWest()).extend(boundsB.getNorthEast()), { padding: [24, 24] });
-  } else if (boundsA) {
-    map.fitBounds(boundsA, { padding: [24, 24] });
-  } else if (boundsB) {
-    map.fitBounds(boundsB, { padding: [24, 24] });
+  // Refresh the cached container size first — when render() fires soon
+  // after page load (before fonts/layout fully settle), Leaflet may have
+  // measured a smaller container, which makes fitBounds pick a lower
+  // zoom than the visible map can actually accommodate.
+  map.invalidateSize({ animate: false });
+
+  // Build a combined bounds from valid corner points only. extend()
+  // mutation has bitten us before — explicit construction is safer.
+  const corners = [];
+  if (boundsA && boundsA.isValid && boundsA.isValid()) {
+    corners.push(boundsA.getSouthWest(), boundsA.getNorthEast());
   }
+  if (boundsB && boundsB.isValid && boundsB.isValid()) {
+    corners.push(boundsB.getSouthWest(), boundsB.getNorthEast());
+  }
+  if (!corners.length) return;
+  const combined = L.latLngBounds(corners);
+
+  // Two-pass fit: a layout reflow can happen between the polylines
+  // mounting and the chart cards mounting (charts can grow the
+  // chart-col which nudges the grid). Re-fitting after one frame
+  // guarantees the final view uses the settled container size.
+  const fit = () => map.fitBounds(combined, { padding: [4, 4], maxZoom: 19, animate: false });
+  fit();
+  requestAnimationFrame(() => { map.invalidateSize({ animate: false }); fit(); });
 }
 
 function drawTrack(data, slot) {
   if (!data || !data.points || data.points.length < 2) return null;
-  const latlngs = data.points.map(p => [p.lat, p.lon]);
+  // Defensive coord filter: occasional GPX exports include (0,0) or NaN
+  // points which inflate getBounds() and force fitBounds to zoom way out.
+  const latlngs = data.points
+    .filter(p => p && Number.isFinite(p.lat) && Number.isFinite(p.lon)
+              && (p.lat !== 0 || p.lon !== 0)
+              && p.lat >= -90 && p.lat <= 90
+              && p.lon >= -180 && p.lon <= 180)
+    .map(p => [p.lat, p.lon]);
+  if (latlngs.length < 2) return null;
   // Polyline weight matches Logs SEGMENT_STYLES (3) for visual parity
   // when the user navigates between pages.
   const layer = L.polyline(latlngs, {
@@ -284,9 +610,31 @@ async function render(aFile, bFile) {
     : '<div class="empty">Pick two activities to overlay them.</div>';
 
   const [dataA, dataB] = await Promise.all([loadActivity(aFile), loadActivity(bFile)]);
-  layerA = drawTrack(dataA, 'a');
-  layerB = drawTrack(dataB, 'b');
-  fitBoundsBoth(layerA?.getBounds(), layerB?.getBounds());
+  lastDataA = dataA; lastDataB = dataB;
+  // Reset 3D fit so the new pair re-frames the camera; subsequent mode
+  // toggles within the same pair won't refit.
+  mb3dFitDone = false;
+
+  // Decide single combined map vs side-by-side per region.
+  const useDual = shouldUseDualMap(dataA, dataB);
+  setDualMode(useDual);
+
+  if (useDual) {
+    // Each track on its own map, fitted independently.
+    _drawTrackOnMap(mapA, dataA, 'a', dualOverlaysA);
+    _drawTrackOnMap(mapB, dataB, 'b', dualOverlaysB);
+    // Clear single-map overlays so they don't persist if we toggle back.
+    drawnOverlays.forEach(l => map.removeLayer(l));
+    drawnOverlays = [];
+    layerA = layerB = null;
+  } else {
+    // Single combined map (and 3D, if user is in 3D).
+    layerA = drawTrack(dataA, 'a');
+    layerB = drawTrack(dataB, 'b');
+    fitBoundsBoth(layerA?.getBounds(), layerB?.getBounds());
+    if (mapView === '3d') { update3DLayers(); fit3DToBoth(); }
+  }
+
   renderStats(dataA, dataB);
   renderCharts(dataA, dataB);
 }
@@ -407,30 +755,24 @@ function renderCharts(dataA, dataB) {
 }
 
 // ─── Stats panel ─────────────────────────────────────────────────────────
-function statsCardHtml(data, slot) {
-  if (!data) return `<div class="stats-card ${slot}"><div class="empty">Not loaded.</div></div>`;
-  const s = data.stats || {};
-  const meta = data.meta || {};
-  const t = TYPES.find(x => x.id === (meta.type || data.effective_type)) || null;
-  const tBadge = t ? `<span class="type-badge" style="background:${t.color};color:#fff;font-size:0.6rem;padding:1px 5px;border-radius:3px;text-transform:uppercase;letter-spacing:0.05em;font-weight:600;margin-left:6px">${t.label}</span>` : '';
-  const date = (data.date || '').slice(0, 10);
-  const title = meta.title || data.name || data.filename;
-  const rows = [
-    ['Distance',     s.distance_km    != null ? `${fmtNum(s.distance_km, 1)} km` : '--'],
-    ['Climbing',     s.elev_gain_m    != null ? `${fmtNum(s.elev_gain_m)} m` : '--'],
-    ['Descent',      s.elev_loss_m    != null ? `${fmtNum(s.elev_loss_m)} m` : '--'],
-    ['Avg speed',    s.avg_speed_kmh  != null ? `${fmtNum(s.avg_speed_kmh, 1)} km/h` : '--'],
-    ['Max speed',    s.max_speed_kmh  != null ? `${fmtNum(s.max_speed_kmh, 1)} km/h` : '--'],
-    ['Duration',     fmtDuration(s.duration_sec)],
-    ['Lift count',   fmtNum(s.lift_count || 0)],
-  ];
-  return `<div class="stats-card ${slot}">
-    <div class="stats-title">${title}${tBadge}</div>
-    <div class="stats-sub">${date}</div>
-    <div class="stats-rows">
-      ${rows.map(([l, v]) => `<span class="label">${l}</span><span class="value">${v}</span>`).join('')}
-    </div>
-  </div>`;
+// The picker dropdown already shows date · name · distance, so we don't
+// repeat that here — the only stats display is the A | B | Δ diff-card
+// below. Activity type is shown via the picker-glyph next to the picker
+// label (set by updatePickerGlyph).
+function updatePickerGlyph(slot, data) {
+  const el = document.getElementById(`picker-glyph-${slot}`);
+  if (!el) return;
+  const meta = (data && data.meta) || {};
+  const t = data
+    ? TYPES.find(x => x.id === (meta.type || data.effective_type))
+    : null;
+  if (!t) {
+    el.textContent = '';
+    el.style.background = '';
+    return;
+  }
+  el.textContent = t.id.replace(/_/g, '').slice(0, 3).toUpperCase();
+  el.style.background = t.color;
 }
 
 function deltaHtml(metric, aVal, bVal, fmt, higherIsBetter) {
@@ -451,31 +793,33 @@ function deltaHtml(metric, aVal, bVal, fmt, higherIsBetter) {
 
 function renderStats(dataA, dataB) {
   const area = document.getElementById('stats-area');
+  updatePickerGlyph('a', dataA);
+  updatePickerGlyph('b', dataB);
   if (!dataA && !dataB) {
     area.innerHTML = '<div class="empty">Pick two activities to overlay them.</div>';
     return;
   }
-  let html = `<div class="stats-grid">${statsCardHtml(dataA, 'a')}${statsCardHtml(dataB, 'b')}</div>`;
-  if (dataA && dataB) {
-    const sa = dataA.stats || {}, sb = dataB.stats || {};
-    html += `<div class="diff-card">
-      <div class="diff-title">B − A</div>
-      <div class="diff-rows">
-        <span class="label" style="grid-column:1"></span>
-        <span class="a-val" style="font-size:0.62rem;color:#3b82f6">A</span>
-        <span class="b-val" style="font-size:0.62rem;color:#f59e0b">B</span>
-        <span class="delta" style="font-size:0.62rem;color:#888">Δ</span>
-        ${deltaHtml('Distance',   sa.distance_km,   sb.distance_km,   v => `${fmtNum(v, 1)} km`,    true)}
-        ${deltaHtml('Climbing',   sa.elev_gain_m,   sb.elev_gain_m,   v => `${fmtNum(v)} m`,        true)}
-        ${deltaHtml('Descent',    sa.elev_loss_m,   sb.elev_loss_m,   v => `${fmtNum(v)} m`,        true)}
-        ${deltaHtml('Avg speed',  sa.avg_speed_kmh, sb.avg_speed_kmh, v => `${fmtNum(v, 1)} km/h`,  true)}
-        ${deltaHtml('Max speed',  sa.max_speed_kmh, sb.max_speed_kmh, v => `${fmtNum(v, 1)} km/h`,  true)}
-        ${deltaHtml('Duration',   sa.duration_sec,  sb.duration_sec,  v => fmtDuration(v),          false)}
-        ${deltaHtml('Lift count', sa.lift_count,    sb.lift_count,    v => fmtNum(v),               true)}
-      </div>
-    </div>`;
+  if (!(dataA && dataB)) {
+    area.innerHTML = '<div class="empty">Pick a second activity to compare.</div>';
+    return;
   }
-  area.innerHTML = html;
+  const sa = dataA.stats || {}, sb = dataB.stats || {};
+  area.innerHTML = `<div class="diff-card">
+    <div class="diff-title">B − A</div>
+    <div class="diff-rows">
+      <span class="label" style="grid-column:1"></span>
+      <span class="a-val" style="font-size:0.62rem;color:#3b82f6">A</span>
+      <span class="b-val" style="font-size:0.62rem;color:#f59e0b">B</span>
+      <span class="delta" style="font-size:0.62rem;color:var(--text-tertiary)">Δ</span>
+      ${deltaHtml('Distance',   sa.distance_km,   sb.distance_km,   v => `${fmtNum(v, 1)} km`,    true)}
+      ${deltaHtml('Climbing',   sa.elev_gain_m,   sb.elev_gain_m,   v => `${fmtNum(v)} m`,        true)}
+      ${deltaHtml('Descent',    sa.elev_loss_m,   sb.elev_loss_m,   v => `${fmtNum(v)} m`,        true)}
+      ${deltaHtml('Avg speed',  sa.avg_speed_kmh, sb.avg_speed_kmh, v => `${fmtNum(v, 1)} km/h`,  true)}
+      ${deltaHtml('Max speed',  sa.max_speed_kmh, sb.max_speed_kmh, v => `${fmtNum(v, 1)} km/h`,  true)}
+      ${deltaHtml('Duration',   sa.duration_sec,  sb.duration_sec,  v => fmtDuration(v),          false)}
+      ${deltaHtml('Lift count', sa.lift_count,    sb.lift_count,    v => fmtNum(v),               true)}
+    </div>
+  </div>`;
 }
 
 // ─── Init ────────────────────────────────────────────────────────────────

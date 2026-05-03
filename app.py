@@ -136,6 +136,10 @@ def _migrate_cache_layout() -> None:
 _migrate_cache_layout()
 
 app = Flask(__name__)
+# Always auto-reload templates so iterating on `templates/*.html` doesn't
+# need a Flask restart. Independent of debug mode (which still gates the
+# Python reloader and traceback verbosity).
+app.config["TEMPLATES_AUTO_RELOAD"] = True
 
 
 # ─── Response compression ─────────────────────────────────────────────────────
@@ -518,7 +522,7 @@ def _build_activity_entry(filename: str, meta: dict, regions: list[dict]) -> tup
             has_hr = False
     matched_regions = _effective_regions(eff, file_meta, regions)
     # Bake hr_avg / hr_max into the sidebar entry's stats once at build time
-    # so the Summary V2 / Training Load aggregations don't have to re-merge
+    # so the Summary / Training Load aggregations don't have to re-merge
     # HR per request. The cache invalidates correctly already — `has_hr`
     # tracks the HR cache's mtime via the activities-cache key.
     stats = dict(eff["stats"])
@@ -959,7 +963,7 @@ def home():
     the activity-detail page at its current canonical path."""
     if "file" in request.args:
         return redirect(f"/log/{request.args['file']}", code=301)
-    return render_template("summary_v2.html", types_json=json.dumps(load_types()))
+    return render_template("summary.html", types_json=json.dumps(load_types()))
 
 
 @app.route("/logs")
@@ -994,14 +998,14 @@ def rides_redirect():
 
 
 @app.route("/summary")
-def summary():
+def summary_archived():
     """Archived. Linked from Setup → Archived; not in the main nav."""
-    return render_template("summary.html", types_json=json.dumps(load_types()))
+    return render_template("summary_archived.html", types_json=json.dumps(load_types()))
 
 
 @app.route("/summary/v2")
 def summary_v2_redirect():
-    """Old route — Summary V2 is now the canonical home page at `/`. 301 so
+    """Old route — Summary is now the canonical home page at `/`. 301 so
     historical bookmarks resolve there directly."""
     return redirect("/", code=301)
 
@@ -1052,8 +1056,8 @@ def _three_letter_short(type_id: str, label: str) -> str:
 _SUMMARY_V2_TYPE_ORDER = ("mtb", "snowboard", "ski", "hike", "other")
 
 
-def _summary_v2_data(days_back: int, units: str) -> dict:
-    """Build the data contract documented in design/summary-v2/README.md from
+def _summary_data(days_back: int, units: str) -> dict:
+    """Build the data contract documented in design/summary/README.md from
     the user's real activities. Window is rolling-`days_back`-days back from
     today, inclusive of today.
     """
@@ -1443,8 +1447,8 @@ def _summary_v2_data(days_back: int, units: str) -> dict:
     }
 
 
-@app.route("/api/summary/v2")
-def api_summary_v2():
+@app.route("/api/summary")
+def api_summary():
     try:
         days_back = max(1, min(3650, int(request.args.get("days", 365))))
     except (TypeError, ValueError):
@@ -1452,7 +1456,7 @@ def api_summary_v2():
     units = request.args.get("units", "metric")
     if units not in ("metric", "imperial"):
         units = "metric"
-    return jsonify(_summary_v2_data(days_back, units))
+    return jsonify(_summary_data(days_back, units))
 
 
 def _make_etag(*parts) -> str:
@@ -1477,12 +1481,15 @@ def api_activities():
 
 @app.route("/api/activities/filters")
 def api_activities_filters():
-    """Lightweight endpoint — just filename, date, type for building filter UI."""
+    """Lightweight endpoint — just filename, date, type for building filter UI.
+    Type falls through to effective_type so freshly-imported activities
+    (no user-set metadata yet) still appear under their auto-detected
+    chip rather than as 'Untagged'."""
     return jsonify([
         {
             "filename": a["filename"],
             "date":     a["date"],
-            "type":     a["meta"].get("type", ""),
+            "type":     a["meta"].get("type", "") or a.get("effective_type") or "",
         }
         for a in all_activities()
     ])
@@ -2363,7 +2370,9 @@ def compare_overlay_page():
     """Pair two activities: overlay both polylines on a single map and show
     stats side-by-side. Filenames come in as ?a=<file>&b=<file>.
     """
-    return render_template("compare.html", types_json=json.dumps(load_types()))
+    return render_template("compare.html",
+                           types_json=json.dumps(load_types()),
+                           mapbox_token=load_config().get("mapbox_token", ""))
 
 
 @app.route("/api/comparison")
@@ -2383,7 +2392,11 @@ def api_comparison():
         if start_str and date < start_str: continue
         if end_str   and date > end_str:   continue
         meta_type = (act.get("meta") or {}).get("type", "")
-        if type_filter and meta_type not in type_filter: continue
+        # Match the filter against meta type OR the auto-detected
+        # effective type, so an unedited fresh import still shows up
+        # under the right type chip on /logs.
+        match_type = meta_type or act.get("effective_type") or ""
+        if type_filter and match_type not in type_filter: continue
         if issues_only and not (act.get("issues") or []): continue
 
         # Stats (including hr_avg/hr_max) are pre-baked into the sidebar
@@ -2404,7 +2417,11 @@ def api_comparison():
         items.append({
             "filename":    act["filename"],
             "date":        act.get("date"),
-            "type":        meta_type,
+            # Fall through to the auto-detected type so freshly-imported
+            # activities (no user-set metadata yet) still render with the
+            # correct icon on /logs — matches the precedence used by
+            # /api/activity/<filename> and /api/summary.
+            "type":        meta_type or act.get("effective_type") or "",
             "title":       (act.get("meta") or {}).get("title") or "",
             "regions":     [{"id": rid, "name": region_lookup.get(rid, {}).get("name", rid),
                              "color": region_lookup.get(rid, {}).get("color", "#888")}

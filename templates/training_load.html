@@ -39,7 +39,9 @@
     .tl-stage .num,
     .tl-stage .num * { font-variant-numeric: tabular-nums; }
 
-    main.tl-stage { max-width: 1320px; margin: 0 auto; padding: 20px;
+    /* Width and outer padding match Logs / Compare / Summary so the
+       page-frame is consistent across the data-heavy pages. */
+    main.tl-stage { max-width: 1680px; margin: 0 auto; padding: 18px 22px 32px;
                     display: flex; flex-direction: column; gap: 12px; }
 
     /* Header */
