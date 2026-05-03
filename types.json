@@ -12,16 +12,10 @@
     "bg": "#1a2a4a"
   },
   {
-    "id": "ski",
-    "label": "Ski",
-    "color": "#a78bfa",
-    "bg": "#2a1a4a"
-  },
-  {
     "id": "hike",
     "label": "Hike",
-    "color": "#fb923c",
-    "bg": "#3a2a1a"
+    "color": "#8b5cf6",
+    "bg": "#8b5cf61f"
   },
   {
     "id": "other",

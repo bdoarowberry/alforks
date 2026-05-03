@@ -116,9 +116,10 @@
     .zones-grid .z-bar { height: 6px; border-radius: 2px; min-width: 1px; }
     .zones-grid .z-bar.a { background: #3b82f6; }
     .zones-grid .z-bar.b { background: #f59e0b; }
-    .zones-grid .z-times { color: var(--text-tertiary); font-size: 0.64rem; line-height: 1.1; text-align: right; min-width: 80px; }
+    .zones-grid .z-times { color: var(--text-tertiary); font-size: 0.64rem; line-height: 1.1; text-align: right; min-width: 110px; }
     .zones-grid .z-times .a { color: #3b82f6; }
     .zones-grid .z-times .b { color: #f59e0b; }
+    .zones-grid .z-times .pct { color: var(--text-tertiary); font-family: var(--font-mono); margin-left: 4px; }
 
     /* Diff card — sole source of A | B | Δ values. Lives in the chart
        column (after the charts) so it sits beside the map rather than
@@ -349,9 +350,30 @@ function _drawTrackOnMap(targetMap, data, slot, prevOverlays) {
   prevOverlays.push(layer);
   prevOverlays.push(L.circleMarker(latlngs[0],                  { radius: 6, color: '#22c55e', fillColor: '#22c55e', fillOpacity: 0.9, weight: 2 }).addTo(targetMap));
   prevOverlays.push(L.circleMarker(latlngs[latlngs.length - 1], { radius: 6, color: '#f97316', fillColor: '#f97316', fillOpacity: 0.9, weight: 2 }).addTo(targetMap));
-  targetMap.invalidateSize({ animate: false });
-  targetMap.fitBounds(layer.getBounds(), { padding: [12, 12] });
   return layer;
+}
+
+// Fit both dual-mode maps at the SAME zoom level so the two tracks are
+// visually comparable in size. Without this, Map A might be zoomed
+// further in than Map B (or vice-versa), defeating the point of a
+// side-by-side comparison.
+function fitDualMapsMatched(layA, layB) {
+  if (!mapA || !mapB) return;
+  mapA.invalidateSize({ animate: false });
+  mapB.invalidateSize({ animate: false });
+  const PAD = [12, 12];
+  const bA = layA?.getBounds(), bB = layB?.getBounds();
+  // Independent fits first to compute each best zoom.
+  const zA = bA ? mapA.getBoundsZoom(bA, false, PAD) : null;
+  const zB = bB ? mapB.getBoundsZoom(bB, false, PAD) : null;
+  // The shared zoom is the lower (more zoomed-out) of the two so both
+  // tracks fit within their respective viewports at the SAME scale —
+  // a 5km loop next to a 15km loop will visibly look like one is 3×
+  // the other rather than both filling the frame.
+  const z = (zA != null && zB != null) ? Math.min(zA, zB)
+          : (zA ?? zB);
+  if (bA && z != null) mapA.setView(bA.getCenter(), z, { animate: false });
+  if (bB && z != null) mapB.setView(bB.getCenter(), z, { animate: false });
 }
 
 function setDualMode(on) {
@@ -452,8 +474,14 @@ function setMapView(view) {
   if (view === '3d') {
     leafletEl.style.display = 'none';
     mb3dEl.style.display    = 'block';
-    init3D();
-    if (mb3dReady) { update3DLayers(); fit3DToBoth(); }
+    // Defer init/resize one frame so the browser has applied the
+    // display change and the Mapbox container has real dimensions
+    // before we measure.
+    requestAnimationFrame(() => {
+      init3D();
+      if (mb3d) mb3d.resize();
+      if (mb3dReady) { update3DLayers(); fit3DToBoth(); }
+    });
   } else {
     leafletEl.style.display = '';
     mb3dEl.style.display    = 'none';
@@ -620,9 +648,11 @@ async function render(aFile, bFile) {
   setDualMode(useDual);
 
   if (useDual) {
-    // Each track on its own map, fitted independently.
-    _drawTrackOnMap(mapA, dataA, 'a', dualOverlaysA);
-    _drawTrackOnMap(mapB, dataB, 'b', dualOverlaysB);
+    // Each track on its own map, fit at a SHARED zoom level so the two
+    // tracks are visually size-comparable.
+    const layA = _drawTrackOnMap(mapA, dataA, 'a', dualOverlaysA);
+    const layB = _drawTrackOnMap(mapB, dataB, 'b', dualOverlaysB);
+    fitDualMapsMatched(layA, layB);
     // Clear single-map overlays so they don't persist if we toggle back.
     drawnOverlays.forEach(l => map.removeLayer(l));
     drawnOverlays = [];
@@ -727,6 +757,11 @@ function renderHrZones(dataA, dataB) {
     ...(zb || [0, 0, 0, 0, 0]),
     1,  // avoid /0
   );
+  // Per-side totals for percentage-of-time-in-zone.
+  const totalA = (za || []).reduce((s, v) => s + (v || 0), 0) || 0;
+  const totalB = (zb || []).reduce((s, v) => s + (v || 0), 0) || 0;
+  const fmtPct = (v, total) =>
+    total > 0 ? `<span class="pct">${(v / total * 100).toFixed(0)}%</span>` : '';
   const body = document.getElementById('hr-zones-body');
   body.innerHTML = labels.map((lbl, i) => {
     const va = za?.[i] || 0;
@@ -740,8 +775,8 @@ function renderHrZones(dataA, dataB) {
         <div class="z-bar b" style="width:${wb}%"></div>
       </div>
       <div class="z-times">
-        <div class="a">${fmtZoneTime(va)}</div>
-        <div class="b">${fmtZoneTime(vb)}</div>
+        <div class="a">${fmtZoneTime(va)}${fmtPct(va, totalA)}</div>
+        <div class="b">${fmtZoneTime(vb)}${fmtPct(vb, totalB)}</div>
       </div>`;
   }).join('');
 }
@@ -771,7 +806,7 @@ function updatePickerGlyph(slot, data) {
     el.style.background = '';
     return;
   }
-  el.textContent = t.id.replace(/_/g, '').slice(0, 3).toUpperCase();
+  el.textContent = typeGlyph(t.id);
   el.style.background = t.color;
 }
 

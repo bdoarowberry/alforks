@@ -11,27 +11,31 @@
   <script src="/static/utils.js"></script>
   <script src="/static/sync_toast.js" defer></script>
   <style>
-    /* Design tokens transcribed from design/training-load/README.md.
-       Coach view — technical, dense, monospace-heavy. */
+    /* Page-local tokens. Surface / text / font tokens alias base.css
+       so Training shares the canonical chrome with the rest of the
+       site; the semantic accent and HR-zone tokens are deliberately
+       Training-specific. */
     :root {
-      --tl-sans:  'Inter', system-ui, -apple-system, sans-serif;
-      --tl-mono:  'JetBrains Mono', ui-monospace, 'SF Mono', monospace;
-      --tl-bg:        #080a0c;
-      --tl-panel:     #0d1115;
-      --tl-line:      rgba(255, 255, 255, 0.07);
-      --tl-dim:       rgba(255, 255, 255, 0.5);
-      --tl-dimmer:    rgba(255, 255, 255, 0.32);
-      --tl-ink:       oklch(0.96 0 0);
-      --tl-green:     oklch(0.78 0.15 145);
-      --tl-red:       oklch(0.7  0.20  25);
-      --tl-blue:      oklch(0.78 0.13 230);
-      --tl-amber:     oklch(0.78 0.16  60);
-      --tl-purple:    oklch(0.72 0.13 305);
-      --tl-z1:        oklch(0.6  0.02 240);
-      --tl-z2:        oklch(0.78 0.13 230);
-      --tl-z3:        oklch(0.78 0.15 145);
-      --tl-z4:        oklch(0.78 0.16  60);
-      --tl-z5:        oklch(0.7  0.20  25);
+      --tl-sans:    var(--font-sans);
+      --tl-mono:    var(--font-mono);
+      --tl-bg:      var(--bg-page);
+      --tl-panel:   var(--bg-card);
+      --tl-line:    var(--border-hair);
+      --tl-dim:     var(--text-secondary);
+      --tl-dimmer:  var(--text-muted);
+      --tl-ink:     var(--text-primary);
+      /* Semantic accents — chart fills, delta good/bad, hero border. */
+      --tl-green:   oklch(0.78 0.15 145);
+      --tl-red:     oklch(0.7  0.20  25);
+      --tl-blue:    oklch(0.78 0.13 230);
+      --tl-amber:   oklch(0.78 0.16  60);
+      --tl-purple:  oklch(0.72 0.13 305);
+      /* HR-zone colours. */
+      --tl-z1:      oklch(0.6  0.02 240);
+      --tl-z2:      oklch(0.78 0.13 230);
+      --tl-z3:      oklch(0.78 0.15 145);
+      --tl-z4:      oklch(0.78 0.16  60);
+      --tl-z5:      oklch(0.7  0.20  25);
     }
 
     body { background: var(--tl-bg); color: #fff; font-family: var(--tl-sans); -webkit-font-smoothing: antialiased; }
@@ -47,10 +51,17 @@
     /* Header */
     .tl-head { display: flex; align-items: baseline; justify-content: space-between;
                padding: 4px 4px 8px; gap: 12px; flex-wrap: wrap; }
-    .tl-eyebrow-coach { font-size: 9px; color: var(--tl-red); letter-spacing: 0.3em;
-                        text-transform: uppercase; font-weight: 700; }
+
+    /* Filter bar — type chips. Canonical chip pattern shared with
+       Logs / Heatmap / Summary (neutral-white active state). */
+    .tl-filter-bar { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; padding: 0 4px 4px; }
+    .tl-filter-label { font-size: 10px; color: var(--tl-dimmer); text-transform: uppercase; letter-spacing: 0.14em; font-family: var(--tl-mono); }
+    .tl-chip-row { display: flex; gap: 6px; flex-wrap: wrap; }
+    .tl-chip { padding: 4px 10px; font-size: 10px; font-family: var(--tl-mono); letter-spacing: 0.04em; color: var(--text-tertiary); background: rgba(255,255,255,0.04); border: 1px solid var(--border-hair); border-radius: 3px; cursor: pointer; transition: color 0.12s, background 0.12s, border-color 0.12s; }
+    .tl-chip:hover:not(.active) { color: var(--text-secondary); }
+    .tl-chip.active { color: var(--text-primary); background: rgba(255,255,255,0.10); border-color: rgba(255,255,255,0.18); }
     .tl-title { font-size: 22px; font-weight: 500; color: #fff; letter-spacing: -0.02em;
-                margin: 4px 0 0; }
+                margin: 0; }
     .tl-meta  { font-size: 11px; color: var(--tl-dimmer); font-family: var(--tl-mono); text-align: right; }
 
     /* Window length toggle (segmented control) */
@@ -73,6 +84,88 @@
                   text-transform: uppercase; font-weight: 600; }
     .tl-eyebrow.tight { letter-spacing: 0.18em; }
 
+    /* Info bubble next to chart eyebrows / metric labels.
+       — Filled subtle background so it doesn't read as a hollow checkbox
+       — Custom CSS tooltip via ::after using `data-tip` attribute, so
+         we skip the slow / unstyled browser-native title tooltip
+       — Tooltip is sans-font (readable prose) on a blurred dark card,
+         positioned above the icon with a soft shadow */
+    .tl-info-icon { display: inline-flex; align-items: center; justify-content: center;
+                    width: 16px; height: 16px; border-radius: 50%;
+                    background: rgba(255,255,255,0.07); color: var(--tl-dim);
+                    font-size: 10px; font-weight: 600; line-height: 1;
+                    margin-left: 8px; cursor: help; vertical-align: middle;
+                    font-family: var(--tl-mono); letter-spacing: 0; text-transform: none;
+                    user-select: none; position: relative;
+                    transition: background 0.12s, color 0.12s; }
+    .tl-info-icon:hover { background: rgba(255,255,255,0.16); color: var(--tl-ink); }
+
+    .tl-info-icon::after {
+      content: attr(data-tip);
+      position: absolute;
+      bottom: calc(100% + 10px);
+      left: 50%;
+      width: max-content;
+      max-width: 340px;
+      padding: 12px 14px;
+      background: rgba(15, 19, 19, 0.96);
+      border: 1px solid var(--tl-line);
+      border-radius: 6px;
+      font-family: var(--font-sans);
+      font-size: 12px;
+      font-weight: 400;
+      letter-spacing: 0;
+      text-transform: none;
+      line-height: 1.55;
+      color: var(--tl-dim);
+      text-align: left;
+      /* pre-wrap respects literal newlines in data-tip so we can split
+         a long tip into a one-line headline + body + (optional) tail
+         paragraph, separated by &#10;&#10; in markup or \n\n in JS. */
+      white-space: pre-wrap;
+      pointer-events: none;
+      opacity: 0;
+      visibility: hidden;
+      transform: translateX(-50%) translateY(4px);
+      transition: opacity 0.16s ease, transform 0.16s ease, visibility 0.16s;
+      z-index: 1000;
+      box-shadow: 0 10px 28px rgba(0, 0, 0, 0.55);
+      backdrop-filter: blur(8px);
+    }
+    .tl-info-icon:hover::after,
+    .tl-info-icon:focus::after { opacity: 1; visibility: visible; transform: translateX(-50%) translateY(0); }
+
+    /* Flip tooltip BELOW the icon when there isn't room above (e.g., the
+       hero chart eyebrow sits near the top of the viewport — tooltip
+       above would clip). JS toggles `.tl-info-below` based on bounding
+       rect on hover. Combined with the alignment classes below, the
+       tooltip stays inside the viewport regardless of icon position. */
+    .tl-info-icon.tl-info-below::after {
+      bottom: auto;
+      top: calc(100% + 10px);
+      transform: translateX(-50%) translateY(-4px);
+    }
+    .tl-info-icon.tl-info-below:hover::after,
+    .tl-info-icon.tl-info-below:focus::after { transform: translateX(-50%) translateY(0); }
+
+    /* Anchor RIGHT edge of tooltip to right edge of icon (when icon is
+       too close to the right side of the viewport). */
+    .tl-info-icon.tl-info-align-right::after { left: auto; right: -8px; transform: translateY(4px); }
+    .tl-info-icon.tl-info-align-right:hover::after,
+    .tl-info-icon.tl-info-align-right:focus::after { transform: translateY(0); }
+    .tl-info-icon.tl-info-align-right.tl-info-below::after { transform: translateY(-4px); }
+    .tl-info-icon.tl-info-align-right.tl-info-below:hover::after,
+    .tl-info-icon.tl-info-align-right.tl-info-below:focus::after { transform: translateY(0); }
+
+    /* Anchor LEFT edge of tooltip to left edge of icon (when icon is
+       too close to the left side of the viewport). */
+    .tl-info-icon.tl-info-align-left::after  { left: -8px; transform: translateY(4px); }
+    .tl-info-icon.tl-info-align-left:hover::after,
+    .tl-info-icon.tl-info-align-left:focus::after  { transform: translateY(0); }
+    .tl-info-icon.tl-info-align-left.tl-info-below::after { transform: translateY(-4px); }
+    .tl-info-icon.tl-info-align-left.tl-info-below:hover::after,
+    .tl-info-icon.tl-info-align-left.tl-info-below:focus::after { transform: translateY(0); }
+
     /* ─── Z2 hero ──────────────────────────────────────────────────── */
     .tl-hero-row { display: flex; align-items: flex-start; justify-content: space-between;
                    gap: 18px; margin-bottom: 18px; flex-wrap: wrap; }
@@ -88,17 +181,88 @@
     .tl-hero-delta.bad  { color: var(--tl-red); }
     .tl-hero-svg { display: block; width: 100%; height: 220px; }
 
-    /* ─── Load cards ──────────────────────────────────────────────── */
-    .tl-load-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
+    /* ─── Fitness row: hero chart + metrics grid side-by-side ──────
+       Hero takes the wider column so the SVG trend line has room to
+       breathe; the 10 metric cards fit in a compact 2-col × 5-row
+       grid on the right with horizontal value+sparkline cards so
+       each row is short enough to match hero height. */
+    .tl-fitness-row { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); gap: 8px; align-items: stretch; }
+    /* Left column stacks the Z2 hero and the TRIMP load chart so the
+       column matches the height of the metrics grid on the right
+       (avoids the empty space we used to have under the hero). */
+    .tl-fitness-left { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+
+    /* Training-load (TRIMP) chart panel */
+    .tl-trimp-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; margin-bottom: 12px; flex-wrap: wrap; }
+    .tl-trimp-title { font-size: 16px; font-weight: 500; color: #fff; letter-spacing: -0.01em; margin: 4px 0 0; }
+    .tl-trimp-suffix { color: var(--tl-dimmer); font-size: 11px; font-weight: 400; margin-left: 6px; }
+    .tl-trimp-legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 10px; font-family: var(--tl-mono); color: var(--tl-dim); }
+    .tl-trimp-legend .item { display: flex; align-items: center; gap: 5px; }
+    .tl-trimp-legend .swatch { width: 14px; height: 2px; border-radius: 1px; }
+    .tl-trimp-svg { display: block; width: 100%; height: 180px; }
+    .tl-metrics-grid { display: grid; grid-template-columns: 1fr 1fr; grid-auto-rows: 1fr; gap: 6px; }
+    @media (max-width: 1100px) { .tl-metrics-grid { grid-template-columns: repeat(3, 1fr); } }
+    @media (max-width: 600px)  { .tl-metrics-grid { grid-template-columns: 1fr 1fr; } }
+
+    /* Compact metric card — label / (value · sparkline) / sub. */
     .tl-load-card { background: var(--tl-panel); border: 1px solid var(--tl-line);
-                    border-radius: 4px; padding: 16px 18px; }
-    .tl-load-card .lbl { font-size: 9px; color: var(--tl-dimmer); letter-spacing: 0.18em;
-                         text-transform: uppercase; font-weight: 600; margin-bottom: 10px; }
-    .tl-load-card .val { font-size: 24px; font-family: var(--tl-mono);
-                         letter-spacing: -0.01em; line-height: 1; }
-    .tl-load-card .val .unit { color: var(--tl-dimmer); font-size: 12px; margin-left: 3px; }
-    .tl-load-card .sub { font-size: 10px; color: var(--tl-dimmer); margin-top: 8px;
-                         font-family: var(--tl-mono); }
+                    border-radius: 4px; padding: 8px 11px; display: flex; flex-direction: column;
+                    gap: 3px; min-width: 0; justify-content: space-between; }
+    .tl-load-card .lbl { font-size: 9px; color: var(--tl-dimmer); letter-spacing: 0.16em;
+                         text-transform: uppercase; font-weight: 600; }
+    .tl-load-card .val-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+    .tl-load-card .val { font-size: 18px; font-family: var(--tl-mono);
+                         letter-spacing: -0.01em; line-height: 1; flex-shrink: 0; }
+    .tl-load-card .val .unit { color: var(--tl-dimmer); font-size: 11px; margin-left: 2px; }
+    .tl-load-card .spark { flex: 1; min-width: 0; height: 14px; opacity: 0.85; display: block; }
+    .tl-load-card .sub { font-size: 9px; color: var(--tl-dimmer);
+                         font-family: var(--tl-mono); white-space: nowrap;
+                         overflow: hidden; text-overflow: ellipsis; }
+    /* Clickable metric cards (e.g. Weight) — subtle hover to signal
+       the card is interactive without a separate affordance. */
+    .tl-load-card.clickable { cursor: pointer; transition: border-color 0.12s, background 0.12s; }
+    .tl-load-card.clickable:hover { border-color: rgba(255,255,255,0.18); background: rgba(255,255,255,0.03); }
+    /* Stale-data highlight — used by the Weight card when its latest
+       entry is over 7 days old. Amber left border so it's easy to
+       glance-detect in the grid. */
+    .tl-load-card.stale { border-left: 3px solid var(--tl-amber); }
+
+    /* ─── Weight log strip ───────────────────────────────────────
+       Slim row below the metric cards. The latest value + trend
+       sparkline live in the Weight metric card alongside the
+       others; this strip is the input form and history list. */
+    .tl-weight-strip { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; padding: 0 4px; }
+    .tl-weight-add-btn { cursor: pointer; padding: 4px 10px; font-size: 10px; font-family: var(--tl-mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--tl-dim); background: rgba(255,255,255,0.04); border: 1px solid var(--tl-line); border-radius: 3px; transition: color 0.12s, background 0.12s, border-color 0.12s; }
+    .tl-weight-add-btn:hover { color: var(--tl-ink); background: rgba(255,255,255,0.10); border-color: rgba(255,255,255,0.18); }
+
+    /* Form is shown by setting inline `display: flex` from JS; the CSS
+       default keeps it hidden until then. flex-basis: 100% makes it
+       wrap to its own row inside the strip's flex-wrap parent. */
+    .tl-weight-form { display: none; align-items: flex-end; gap: 12px; flex-wrap: wrap; flex-basis: 100%; padding: 12px 0 0; }
+    .tl-weight-field { display: flex; flex-direction: column; gap: 4px; }
+    .tl-weight-field span { font-size: 9px; color: var(--tl-dimmer); letter-spacing: 0.14em; text-transform: uppercase; font-family: var(--tl-mono); }
+    .tl-weight-field input { background: transparent; border: 1px solid var(--tl-line); border-radius: 3px; color: var(--tl-ink); font-size: 13px; padding: 5px 8px; font-family: var(--tl-mono); color-scheme: dark; min-width: 90px; }
+    .tl-weight-field input:focus { outline: none; border-color: var(--accent); }
+    .tl-weight-form-actions { display: flex; gap: 8px; margin-left: auto; }
+    .tl-weight-save-btn,
+    .tl-weight-cancel-btn { cursor: pointer; padding: 6px 12px; font-size: 11px; font-family: var(--tl-mono); letter-spacing: 0.06em; text-transform: uppercase; border: 1px solid var(--tl-line); border-radius: 3px; background: transparent; }
+    .tl-weight-save-btn { color: var(--accent); border-color: var(--accent); background: rgba(59,130,246,0.10); }
+    .tl-weight-save-btn:hover { background: var(--accent); color: var(--tl-ink); }
+    .tl-weight-cancel-btn { color: var(--tl-dim); }
+    .tl-weight-cancel-btn:hover { color: var(--tl-ink); }
+
+    .tl-weight-history { font-family: var(--tl-mono); font-size: 11px; flex: 1; }
+    .tl-weight-history summary { cursor: pointer; color: var(--tl-dimmer); padding: 4px 0; user-select: none; letter-spacing: 0.06em; text-transform: uppercase; font-size: 10px; }
+    .tl-weight-history summary:hover { color: var(--tl-ink); }
+    .tl-weight-history[open] #tl-weight-history-body { margin-top: 6px; padding: 8px 12px; background: var(--tl-panel); border: 1px solid var(--tl-line); border-radius: 4px; }
+    .tl-weight-history-row { display: grid; grid-template-columns: 110px 1fr 1fr 1fr auto; gap: 12px; padding: 5px 0; border-bottom: 1px dotted var(--tl-line); align-items: center; }
+    .tl-weight-history-row:last-child { border-bottom: none; }
+    .tl-weight-history-row .date { color: var(--tl-dim); }
+    .tl-weight-history-row .stlb { color: var(--tl-ink); }
+    .tl-weight-history-row .lb   { color: var(--tl-dim); }
+    .tl-weight-history-row .kg   { color: var(--tl-dimmer); }
+    .tl-weight-history-row button { cursor: pointer; background: transparent; border: none; color: var(--tl-dimmer); padding: 0 6px; font-size: 14px; line-height: 1; transition: color 0.12s; }
+    .tl-weight-history-row button:hover { color: var(--tl-red); }
 
     /* ─── HR-zone stack ───────────────────────────────────────────── */
     .tl-hrstack-head { display: flex; justify-content: space-between; align-items: baseline;
@@ -166,12 +330,25 @@
     .tl-record-row .value { font-size: 18px; color: var(--tl-amber); font-family: var(--tl-mono);
                             letter-spacing: -0.01em; }
 
+    /* Header row above the totals — gives the unlabelled metric
+       columns names (Days / Time / Climb·Descent). */
+    .tl-totals-head { display: grid; grid-template-columns: auto 1fr auto auto auto;
+                      gap: 18px; align-items: baseline; padding: 0 0 8px;
+                      border-bottom: 1px solid var(--tl-line);
+                      font-size: 9px; letter-spacing: 0.18em; text-transform: uppercase;
+                      color: var(--tl-dimmer); font-family: var(--tl-mono); font-weight: 600; }
+    .tl-totals-head .col { text-align: right; }
+    .tl-totals-head .col.days { min-width: 70px; }
+    .tl-totals-head .col.time { min-width: 90px; }
+    .tl-totals-head .col.elev { min-width: 90px; }
+
     .tl-totals-row { display: grid; grid-template-columns: auto 1fr auto auto auto;
                      gap: 18px; align-items: baseline; padding: 6px 0;
                      border-bottom: 1px solid var(--tl-line); }
-    .tl-totals-row .glyph { width: 22px; height: 22px; border-radius: 3px;
+    .tl-totals-row .glyph { min-width: 38px; height: 22px; padding: 0 6px; border-radius: 3px;
                             display: inline-flex; align-items: center; justify-content: center;
-                            font-size: 11px; font-family: var(--tl-mono); font-weight: 700; }
+                            font-size: 10px; font-family: var(--tl-mono); font-weight: 600;
+                            letter-spacing: 0.04em; }
     .tl-totals-row .name  { font-size: 13px; color: #fff; }
     .tl-totals-row .col   { font-size: 13px; font-family: var(--tl-mono); text-align: right; }
     .tl-totals-row .col.days { color: var(--tl-dim); min-width: 70px; }
@@ -183,8 +360,10 @@
                 font-size: 13px; font-family: var(--tl-mono); }
 
     /* ─── Responsive ─────────────────────────────────────────────── */
+    @media (max-width: 1100px) {
+      .tl-fitness-row { grid-template-columns: 1fr; }
+    }
     @media (max-width: 1000px) {
-      .tl-load-grid { grid-template-columns: repeat(2, 1fr); }
       .tl-vcd-row   { grid-template-columns: 1fr; }
     }
     @media (max-width: 900px) {
@@ -213,10 +392,7 @@
 <main class="tl-stage num">
   <!-- Header -->
   <div class="tl-head">
-    <div>
-      <div class="tl-eyebrow-coach">Coach view</div>
-      <h1 class="tl-title">Training <span style="color:var(--tl-dimmer);font-weight:400;font-size:14px;letter-spacing:0;" id="tl-today-label"></span></h1>
-    </div>
+    <h1 class="tl-title">Training</h1>
     <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;justify-content:flex-end;">
       <div class="tl-window-ctrl" id="tl-window-ctrl">
         <button data-weeks="4">4w</button>
@@ -228,30 +404,79 @@
     </div>
   </div>
 
-  <!-- Z2 hero -->
-  <div class="tl-panel tl-panel-hero" id="tl-hero">
-    <div class="tl-hero-row">
-      <div>
-        <div class="tl-eyebrow">Aerobic fitness</div>
-        <h2 class="tl-hero-title">28-day Z2 heart-rate average <span class="suffix">lower = fitter</span></h2>
-      </div>
-      <div class="tl-hero-right">
-        <div class="tl-eyebrow tight">Latest</div>
-        <div class="tl-hero-latest" id="tl-hero-latest">—<span class="unit">bpm</span></div>
-        <div class="tl-hero-delta" id="tl-hero-delta">&nbsp;</div>
-      </div>
-    </div>
-    <div id="tl-hero-chart"></div>
+  <!-- Type filter -->
+  <div class="tl-filter-bar">
+    <span class="tl-filter-label">Type</span>
+    <div id="tl-type-chips" class="tl-chip-row"></div>
   </div>
 
-  <!-- Load cards -->
-  <div class="tl-load-grid" id="tl-load-cards"></div>
+  <!-- Z2 hero + Training load chart (left column) | metrics grid (right) -->
+  <div class="tl-fitness-row">
+    <div class="tl-fitness-left">
+      <div class="tl-panel tl-panel-hero" id="tl-hero">
+        <div class="tl-hero-row">
+          <div>
+            <div class="tl-eyebrow">Aerobic fitness<span class="tl-info-icon" data-tip="An indirect aerobic-fitness indicator from your Z2 HR data.&#10;&#10;As fitness improves, your HR at any given intensity drops — so the line trending DOWN over months means you're getting fitter.&#10;&#10;Read the trend, not the points: single-week wiggles are noise from sleep, hydration, weather, or caffeine. Requires consistent Z2 efforts to be reliable.">?</span></div>
+            <h2 class="tl-hero-title">28-day Z2 heart-rate average <span class="suffix">lower = fitter</span></h2>
+          </div>
+          <div class="tl-hero-right">
+            <div class="tl-eyebrow tight">Latest</div>
+            <div class="tl-hero-latest" id="tl-hero-latest">—<span class="unit">bpm</span></div>
+            <div class="tl-hero-delta" id="tl-hero-delta">&nbsp;</div>
+          </div>
+        </div>
+        <div id="tl-hero-chart"></div>
+      </div>
+      <div class="tl-panel" id="tl-trimp-panel">
+        <div class="tl-trimp-head">
+          <div>
+            <div class="tl-eyebrow">Training load · intensity-weighted<span class="tl-info-icon" data-tip="Banister TRIMP per week — intensity-weighted training load.&#10;&#10;Z1×1 + Z2×2 + Z3×3 + Z4×4 + Z5×5, summed in zone-minutes. Bars are the raw weekly TRIMP.&#10;&#10;When acute (amber) crosses ABOVE chronic (purple) you're overloading; below = recovering or detraining. The gap between them is your training stress balance.">?</span></div>
+            <h3 class="tl-trimp-title">Acute vs chronic TRIMP <span class="tl-trimp-suffix">zone-min/wk</span></h3>
+          </div>
+          <div class="tl-trimp-legend">
+            <span class="item"><span class="swatch" style="background:var(--tl-amber)"></span>Acute · 4 wk</span>
+            <span class="item"><span class="swatch" style="background:var(--tl-purple)"></span>Chronic · 8 wk</span>
+          </div>
+        </div>
+        <div id="tl-trimp-chart"></div>
+      </div>
+    </div>
+    <div class="tl-metrics-grid" id="tl-metrics-cards"></div>
+  </div>
+
+  <!-- Weight log strip — triggered by clicking the Weight metric card
+       above. Form is hidden until the card is clicked; the entries
+       collapsible is always available for editing/deleting history. -->
+  <div class="tl-weight-strip">
+    <details class="tl-weight-history" id="tl-weight-history-details">
+      <summary>Weight log · <span id="tl-weight-count">0</span> entries</summary>
+      <div id="tl-weight-history-body"></div>
+    </details>
+    <form class="tl-weight-form" id="tl-weight-form" style="display:none;" onsubmit="return saveWeight(event)">
+      <label class="tl-weight-field">
+        <span>Date</span>
+        <input type="date" id="tl-weight-date" required>
+      </label>
+      <label class="tl-weight-field">
+        <span>Stone</span>
+        <input type="number" id="tl-weight-st" min="0" max="40" step="1" required>
+      </label>
+      <label class="tl-weight-field">
+        <span>Pounds</span>
+        <input type="number" id="tl-weight-lb" min="0" max="13.99" step="0.1" required>
+      </label>
+      <div class="tl-weight-form-actions">
+        <button type="submit" class="tl-weight-save-btn">Save</button>
+        <button type="button" class="tl-weight-cancel-btn" onclick="closeWeightForm()">Cancel</button>
+      </div>
+    </form>
+  </div>
 
   <!-- HR zone stack -->
   <div class="tl-panel" id="tl-hrstack-panel">
     <div class="tl-hrstack-head">
       <div>
-        <div class="tl-eyebrow">Weekly HR-zone time</div>
+        <div class="tl-eyebrow">Weekly HR-zone time<span class="tl-info-icon" data-tip="Time spent in each heart-rate zone, per week.&#10;&#10;Z1 = recovery, Z2 = endurance / base, Z3 = tempo, Z4 = threshold, Z5 = VO2max.&#10;&#10;Most aerobic gains come from a lot of Z2 with limited Z3-Z5 — the classic 80/20 rule says ~80% of training time should be easy.">?</span></div>
         <div class="tl-hrstack-subtitle">Where you spend your minutes</div>
       </div>
       <div class="tl-hrstack-legend" id="tl-hrstack-legend"></div>
@@ -263,16 +488,16 @@
   <div class="tl-vcd-row">
     <div class="tl-vc-grid">
       <div class="tl-panel">
-        <div class="tl-eyebrow">Weekly volume</div>
+        <div class="tl-eyebrow">Weekly volume<span class="tl-info-icon" data-tip="Total moving hours per week.&#10;&#10;Wall-clock duration of recorded activities — trend up = building, flat = maintaining, down = backing off.&#10;&#10;The Acute load card on the right averages the last 4 weeks of this.">?</span></div>
         <div id="tl-volume-chart"></div>
       </div>
       <div class="tl-panel">
-        <div class="tl-eyebrow">Weekly climbing</div>
+        <div class="tl-eyebrow">Weekly climbing<span class="tl-info-icon" data-tip="Total elevation gain per week.&#10;&#10;Excludes lift-assisted segments where automatic detection identifies them — so a snowboard day shouldn't double-count chair lifts as climbing.">?</span></div>
         <div id="tl-climbing-chart"></div>
       </div>
     </div>
     <div class="tl-panel" id="tl-donut">
-      <div class="tl-eyebrow" id="tl-donut-eyebrow">Last 4 weeks · zone composition</div>
+      <div class="tl-eyebrow" id="tl-donut-eyebrow">Last 4 weeks · zone composition<span class="tl-info-icon" data-tip="How your last 4 weeks broke down across HR zones.&#10;&#10;Z2 share is the headline number for base season — the classic 60-80% Z2 target.&#10;&#10;Too much Z3 ('grey zone') is the most common mistake: hard enough to fatigue you, not hard enough to drive top-end gains.">?</span></div>
       <div class="tl-donut-bar"  id="tl-donut-bar"></div>
       <div class="tl-donut-legend" id="tl-donut-legend"></div>
       <div class="tl-donut-footer" id="tl-donut-footer">
@@ -311,12 +536,6 @@ let CURRENT_WEEKS = 12;    // active window length
 function fmtMonthDay(iso) {
   // 'YYYY-MM-DD' → 'MM-DD' (matches the design's wk labels).
   return iso ? iso.slice(5) : '';
-}
-
-function fmtTodayLabel(iso) {
-  if (!iso) return '';
-  const d = new Date(iso + 'T00:00:00');
-  return '· ' + d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
 function fmtSignedHours(h) {
@@ -449,43 +668,272 @@ function renderHero(weeks) {
   chartEl.appendChild(svg);
 }
 
-// ─── Load cards ───────────────────────────────────────────────────────────
-function renderLoadCards(weeks) {
-  const volumes = weeks.map(w => w.hours);
-  const last4 = volumes.slice(-4);
-  const last8 = volumes.slice(-8);
-  const atl = last4.reduce((s, v) => s + v, 0) / Math.max(1, last4.length);
-  const ctl = last8.reduce((s, v) => s + v, 0) / Math.max(1, last8.length);
-  const tsb = ctl - atl;
-  const totalH = volumes.reduce((s, v) => s + v, 0);
-  const totalClimb = weeks.reduce((s, w) => s + w.gain_m, 0);
+// ─── TRIMP load chart ─────────────────────────────────────────────────────
+// Promoted from a metric card to its own panel below the Z2 HR hero.
+// Bars = raw weekly TRIMP; lines = acute (4w rolling) and chronic (8w
+// rolling). Crossings tell the training-load story — when the amber
+// (acute) crosses ABOVE the purple (chronic) you're overloading; when
+// it dips BELOW you're recovering or detraining.
+function renderTrimpChart(weeks) {
+  const chartEl = document.getElementById('tl-trimp-chart');
+  if (!chartEl) return;
+  chartEl.innerHTML = '';
+  if (!weeks || weeks.length < 2) return;
 
-  const tsbState = tsb > 1
-    ? { label: 'Fresh', color: 'var(--tl-green)' }
-    : tsb < -1
-      ? { label: 'Fatigued', color: 'var(--tl-red)' }
-      : { label: 'Steady', color: 'var(--tl-blue)' };
+  const trimp = weeks.map(w => {
+    const z = w.zones_sec || [0,0,0,0,0];
+    return ((z[0]||0)*1 + (z[1]||0)*2 + (z[2]||0)*3 + (z[3]||0)*4 + (z[4]||0)*5) / 60;
+  });
+  const rolling = (arr, n) => arr.map((_, i) => {
+    const slice = arr.slice(Math.max(0, i - n + 1), i + 1);
+    return slice.reduce((s, v) => s + v, 0) / Math.max(1, slice.length);
+  });
+  const acute   = rolling(trimp, 4);
+  const chronic = rolling(trimp, 8);
 
-  const cards = [
-    { lbl: 'Acute load',   val: atl.toFixed(1), unit: 'h/wk', sub: 'last 4 weeks',  color: 'var(--tl-amber)'  },
-    { lbl: 'Chronic load', val: ctl.toFixed(1), unit: 'h/wk', sub: 'last 8 weeks',  color: 'var(--tl-purple)' },
-    { lbl: 'Form',         val: fmtSignedHours(tsb), unit: 'h', sub: tsbState.label, color: tsbState.color    },
-    { lbl: 'Volume',       val: totalH.toFixed(0), unit: 'h', sub: `${weeks.length} weeks total`,    color: 'var(--tl-blue)'   },
-    { lbl: 'Climbing',     val: Math.round(totalClimb).toLocaleString(), unit: 'm', sub: `${weeks.length} weeks total`, color: 'var(--tl-amber)' },
-  ];
+  const maxV = Math.max(...trimp, ...acute, ...chronic, 1);
+  const W = 720, H = 180, padL = 36, padR = 12, padT = 12, padB = 22;
+  const innerW = W - padL - padR;
+  const innerH = H - padT - padB;
+  const xFor = i => padL + (weeks.length === 1 ? innerW / 2 : (i / (weeks.length - 1)) * innerW);
+  const yFor = v => padT + innerH - (v / maxV) * innerH;
+  const barX = i => padL + (weeks.length === 1 ? 0 : (i / weeks.length) * innerW);
+  const barW = innerW / Math.max(1, weeks.length) * 0.8;
 
-  const grid = document.getElementById('tl-load-cards');
+  const svg = document.createElementNS(SVG_NS, 'svg');
+  svg.setAttribute('class', 'tl-trimp-svg');
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  svg.setAttribute('preserveAspectRatio', 'none');
+
+  // Faint horizontal gridlines at quarter-marks for scale anchor.
+  for (let q = 1; q <= 4; q++) {
+    const y = padT + innerH - (q / 4) * innerH;
+    const g = document.createElementNS(SVG_NS, 'line');
+    g.setAttribute('x1', padL); g.setAttribute('x2', W - padR);
+    g.setAttribute('y1', y); g.setAttribute('y2', y);
+    g.setAttribute('stroke', 'var(--tl-line)');
+    g.setAttribute('stroke-width', '1');
+    g.setAttribute('vector-effect', 'non-scaling-stroke');
+    svg.appendChild(g);
+    // Y-axis labels — use the 25/50/75/100% marks.
+    const lbl = document.createElementNS(SVG_NS, 'text');
+    lbl.setAttribute('x', padL - 6);
+    lbl.setAttribute('y', y + 3);
+    lbl.setAttribute('text-anchor', 'end');
+    lbl.setAttribute('font-size', '9');
+    lbl.setAttribute('fill', 'var(--tl-dimmer)');
+    lbl.setAttribute('font-family', 'JetBrains Mono, ui-monospace, monospace');
+    lbl.textContent = Math.round((maxV * q) / 4);
+    svg.appendChild(lbl);
+  }
+
+  // Weekly TRIMP bars (faint amber).
+  trimp.forEach((v, i) => {
+    if (v <= 0) return;
+    const y = yFor(v);
+    const x = barX(i) + (innerW / Math.max(1, weeks.length) - barW) / 2;
+    const r = document.createElementNS(SVG_NS, 'rect');
+    r.setAttribute('x', x);
+    r.setAttribute('y', y);
+    r.setAttribute('width', barW);
+    r.setAttribute('height', padT + innerH - y);
+    r.setAttribute('fill', 'var(--tl-amber)');
+    r.setAttribute('opacity', '0.18');
+    svg.appendChild(r);
+  });
+
+  // Rolling lines.
+  const linePath = (values) => values.map((v, i) =>
+    `${i === 0 ? 'M' : 'L'}${xFor(i).toFixed(1)},${yFor(v).toFixed(1)}`
+  ).join(' ');
+  const acuteLine = document.createElementNS(SVG_NS, 'path');
+  acuteLine.setAttribute('d', linePath(acute));
+  acuteLine.setAttribute('fill', 'none');
+  acuteLine.setAttribute('stroke', 'var(--tl-amber)');
+  acuteLine.setAttribute('stroke-width', '2');
+  acuteLine.setAttribute('vector-effect', 'non-scaling-stroke');
+  svg.appendChild(acuteLine);
+
+  const chronicLine = document.createElementNS(SVG_NS, 'path');
+  chronicLine.setAttribute('d', linePath(chronic));
+  chronicLine.setAttribute('fill', 'none');
+  chronicLine.setAttribute('stroke', 'var(--tl-purple)');
+  chronicLine.setAttribute('stroke-width', '2');
+  chronicLine.setAttribute('vector-effect', 'non-scaling-stroke');
+  svg.appendChild(chronicLine);
+
+  // X-axis week labels — sparse so they don't crowd at narrow widths.
+  const labelEvery = Math.max(1, Math.ceil(weeks.length / 6));
+  weeks.forEach((w, i) => {
+    if (i % labelEvery !== 0 && i !== weeks.length - 1) return;
+    const t = document.createElementNS(SVG_NS, 'text');
+    t.setAttribute('x', xFor(i));
+    t.setAttribute('y', H - 6);
+    t.setAttribute('text-anchor', 'middle');
+    t.setAttribute('font-size', '9');
+    t.setAttribute('fill', 'var(--tl-dimmer)');
+    t.setAttribute('font-family', 'JetBrains Mono, ui-monospace, monospace');
+    t.textContent = fmtMonthDay(w.start);
+    svg.appendChild(t);
+  });
+
+  chartEl.appendChild(svg);
+}
+
+// ─── Metric cards ─────────────────────────────────────────────────────────
+// All 10 cards in one grid alongside the hero. Each carries a tooltip
+// (via the `?` icon) and a sparkline showing the underlying weekly trend.
+function _attrEsc(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+}
+
+// SVG sparkline polyline — width: 100% via preserveAspectRatio, fixed
+// internal viewBox so the line scales with the card's actual width.
+function _sparkSvg(values, color) {
+  if (!values || values.length < 2) return '';
+  const W = 80, H = 14;
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const range = (max - min) || 1;
+  const dx = W / (values.length - 1);
+  const pts = values.map((v, i) =>
+    `${(i * dx).toFixed(1)},${(H - ((v - min) / range) * H).toFixed(1)}`
+  ).join(' ');
+  return `<svg class="spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">`
+       + `<polyline points="${pts}" fill="none" stroke="${color}" stroke-width="1.2" vector-effect="non-scaling-stroke"/>`
+       + `</svg>`;
+}
+
+function renderMetricCards(gridId, cards) {
+  const grid = document.getElementById(gridId);
+  if (!grid) return;
   grid.innerHTML = '';
   cards.forEach(c => {
     const card = document.createElement('div');
-    card.className = 'tl-load-card';
+    card.className = 'tl-load-card'
+      + (c.onClick ? ' clickable' : '')
+      + (c.extraClass ? ' ' + c.extraClass : '');
+    const tipIcon = c.tip ? `<span class="tl-info-icon" data-tip="${_attrEsc(c.tip)}">?</span>` : '';
+    const spark = c.spark ? _sparkSvg(c.spark, c.color) : '';
     card.innerHTML = `
-      <div class="lbl">${c.lbl}</div>
-      <div class="val" style="color:${c.color};">${c.val}<span class="unit">${c.unit}</span></div>
+      <div class="lbl">${c.lbl}${tipIcon}</div>
+      <div class="val-row">
+        <span class="val" style="color:${c.color};">${c.val}<span class="unit">${c.unit}</span></span>
+        ${spark}
+      </div>
       <div class="sub">${c.sub}</div>
     `;
+    if (c.onClick) {
+      card.addEventListener('click', (e) => {
+        // Don't trigger when the click is on the inline ? icon — that's
+        // its own help affordance and the cursor: help signals it.
+        if (e.target.classList.contains('tl-info-icon')) return;
+        c.onClick();
+      });
+    }
     grid.appendChild(card);
   });
+}
+
+function renderMetrics(weeks) {
+  // Helpers
+  const last4 = arr => arr.slice(-4);
+  const last8 = arr => arr.slice(-8);
+  const avg   = arr => arr.length ? arr.reduce((s, v) => s + v, 0) / arr.length : 0;
+  const sum   = arr => arr.reduce((s, v) => s + v, 0);
+  // Centered rolling N-week avg for the smoothed series (Acute / Chronic / Form / TRIMP rolling).
+  const rolling = (arr, n) => arr.map((_, i) => avg(arr.slice(Math.max(0, i - n + 1), i + 1)));
+
+  // Per-week derived series — used both for headline values and for sparklines.
+  const volume_h = weeks.map(w => w.hours || 0);
+  const climb_m  = weeks.map(w => w.gain_m || 0);
+  const dist_km  = weeks.map(w => w.distance_km || 0);
+  const z2_h     = weeks.map(w => (w.zones_sec?.[1] || 0) / 3600);
+  const hard_h   = weeks.map(w => ((w.zones_sec?.[3] || 0) + (w.zones_sec?.[4] || 0)) / 3600);
+  const all_zoned_h = weeks.map(w => {
+    const z = w.zones_sec || [];
+    return ((z[1]||0) + (z[2]||0) + (z[3]||0) + (z[4]||0)) / 3600;
+  });
+  const hard_share_pct = weeks.map((_, i) =>
+    all_zoned_h[i] > 0 ? (hard_h[i] / all_zoned_h[i] * 100) : 0
+  );
+  const trimp = weeks.map(w => {
+    const z = w.zones_sec || [0,0,0,0,0];
+    return ((z[0]||0)*1 + (z[1]||0)*2 + (z[2]||0)*3 + (z[3]||0)*4 + (z[4]||0)*5) / 60;
+  });
+  const acute_h_series   = rolling(volume_h, 4);
+  const chronic_h_series = rolling(volume_h, 8);
+  const form_h_series    = chronic_h_series.map((c, i) => c - acute_h_series[i]);
+  const rides_series     = weeks.map(w => w.rides || 0);
+
+  // Aggregates (the headline values)
+  const totalH      = sum(volume_h);
+  const totalClimb  = sum(climb_m);
+  const totalDist   = sum(dist_km);
+  const atl         = avg(last4(volume_h));
+  const ctl         = avg(last8(volume_h));
+  const tsb         = ctl - atl;
+  const z2_avg      = avg(last4(z2_h));
+  const hard_avg    = avg(last4(hard_h));
+  const allWorkSum  = sum(all_zoned_h);
+  const hardSum     = sum(hard_h);
+  const hard_share  = allWorkSum > 0 ? (hardSum / allWorkSum * 100) : 0;
+  const consistent  = weeks.filter(w => (w.rides || 0) >= 3).length;
+  const consistency_pct = weeks.length ? (consistent / weeks.length * 100) : 0;
+  const atl_trimp   = avg(last4(trimp));
+  const ctl_trimp   = avg(last8(trimp));
+
+  const tsbState = tsb > 1 ? { label: 'Fresh',    color: 'var(--tl-green)' }
+                : tsb < -1 ? { label: 'Fatigued', color: 'var(--tl-red)'   }
+                :            { label: 'Steady',   color: 'var(--tl-blue)'  };
+  const hardColor = hard_share > 20 ? 'var(--tl-red)'
+                  : hard_share < 10 ? 'var(--tl-blue)'
+                  :                   'var(--tl-green)';
+  const consColor = consistency_pct >= 70 ? 'var(--tl-green)'
+                  : consistency_pct >= 40 ? 'var(--tl-blue)'
+                  :                         'var(--tl-red)';
+
+  // Ordered by decision-making importance for a personal training tool:
+  // load story (Form/Acute/Chronic) → aerobic dose (Z2 / Hard / Hard share)
+  // → habit (Consistency) → body (Weight) → energy (Calories) → totals.
+  // TRIMP load is now the dedicated chart panel below the hero — it
+  // used to live here as a card.
+  const cards = [
+    { lbl: 'Form',         val: fmtSignedHours(tsb),     unit: 'h',    sub: tsbState.label,
+      color: tsbState.color,       spark: form_h_series,
+      tip: 'Chronic minus acute load — your readiness state.\n\nPositive (Fresh): under-trained recently, peak-ready.\nNegative (Fatigued): building, may need recovery.\n\nSlightly negative is normal during a build phase.' },
+    { lbl: 'Acute load',   val: atl.toFixed(1),          unit: 'h/wk', sub: 'avg, last 4 wk',
+      color: 'var(--tl-amber)',    spark: acute_h_series,
+      tip: 'Recent training stress.\n\nAverage weekly hours over the last 4 weeks — reflects what your body is currently absorbing.\n\nHours-based; for the intensity-weighted version see the TRIMP chart above.' },
+    { lbl: 'Chronic load', val: ctl.toFixed(1),          unit: 'h/wk', sub: 'avg, last 8 wk',
+      color: 'var(--tl-purple)',   spark: chronic_h_series,
+      tip: 'Sustained training stress.\n\nAverage weekly hours over the last 8 weeks — your aerobic baseline, what your body is built to absorb.' },
+    { lbl: 'Z2 hrs/wk',    val: z2_avg.toFixed(1),       unit: 'h',    sub: 'avg, last 4 wk',
+      color: 'var(--tl-green)',    spark: z2_h,
+      tip: 'Average hours per week in Zone 2 (endurance), last 4 weeks.\n\nDirect measure of base-aerobic volume — most aerobic adaptation comes from this.\n\nBuild-season target: 4–8+ h/wk.' },
+    { lbl: 'Hard hrs/wk',  val: hard_avg.toFixed(1),     unit: 'h',    sub: 'Z4+Z5, avg 4 wk',
+      color: 'var(--tl-red)',      spark: hard_h,
+      tip: 'Average hours per week in Z4 (threshold) + Z5 (VO2max), last 4 weeks.\n\nThe intensity dose — easy to overshoot without realising.' },
+    { lbl: 'Hard share',   val: hard_share.toFixed(0),   unit: '%',    sub: 'of Z2–Z5 time',
+      color: hardColor,            spark: hard_share_pct,
+      tip: 'Proportion of zoned time (Z2–Z5) spent at Z4+Z5 intensity.\n\nThe 80/20 rule says ~20% hard, ~80% easy.\n\nGreen = in range (10–20%), blue = under-stimulus for top-end gains, red = skewing too hard.' },
+    { lbl: 'Consistency',  val: consistency_pct.toFixed(0), unit: '%', sub: `${consistent}/${weeks.length} wk ≥ 3 rides`,
+      color: consColor,            spark: rides_series,
+      tip: 'Percentage of weeks in the window with ≥3 activities.\n\nConsistency over months matters more than peak weekly volume for amateur athletes.\n\nSparkline shows weekly ride count.' },
+    _weightCard(weeks),
+    _caloriesCard(weeks),
+    { lbl: 'Volume',       val: totalH.toFixed(0),      unit: 'h',    sub: `${weeks.length} wk total`,
+      color: 'var(--tl-blue)',     spark: volume_h,
+      tip: 'Total moving hours across the selected window.' },
+    { lbl: 'Distance',     val: Math.round(totalDist).toLocaleString(), unit: 'km', sub: `${(totalDist / Math.max(1, weeks.length)).toFixed(1)} km/wk avg`,
+      color: 'var(--tl-purple)',   spark: dist_km,
+      tip: 'Total distance covered across the selected window.\n\nSub-line shows the per-week average.' },
+    { lbl: 'Climbing',     val: Math.round(totalClimb).toLocaleString(), unit: 'm', sub: `${weeks.length} wk total`,
+      color: 'var(--tl-amber)',    spark: climb_m,
+      tip: 'Total elevation gain across the window.\n\nExcludes lift-assisted segments where automatic detection identifies them.' },
+  ];
+
+  renderMetricCards('tl-metrics-cards', cards);
 }
 
 // ─── HR-zone stack ────────────────────────────────────────────────────────
@@ -706,13 +1154,27 @@ function renderTotals(payload) {
     return;
   }
 
+  // Header row for the metric columns. "Vert" is climb for ground
+  // sports and descent for snow sports — matches what the data row
+  // shows for each type.
+  const head = document.createElement('div');
+  head.className = 'tl-totals-head';
+  head.innerHTML = `
+    <span></span>
+    <span></span>
+    <span class="col days">Days</span>
+    <span class="col time">Time</span>
+    <span class="col elev">Vert</span>
+  `;
+  body.appendChild(head);
+
   totals.forEach(t => {
-    const isSnowboard = t.type === 'snowboard' || t.type === 'ski';
-    const elev = isSnowboard ? t.elev_loss_m : t.elev_gain_m;
+    const isSnowSport = t.type === 'snowboard' || t.type === 'ski';
+    const elev = isSnowSport ? t.elev_loss_m : t.elev_gain_m;
     const row = document.createElement('div');
     row.className = 'tl-totals-row';
     row.innerHTML = `
-      <span class="glyph" style="background:${t.color_bg};color:${t.color};">${t.glyph}</span>
+      <span class="glyph" style="background:${t.color};color:#fff;">${typeGlyph(t.type)}</span>
       <span class="name">${t.label}</span>
       <span class="col days">${t.days}d</span>
       <span class="col time">${fmtMovingTime(t.moving_h)}</span>
@@ -725,10 +1187,10 @@ function renderTotals(payload) {
 // ─── Page render orchestration ────────────────────────────────────────────
 function render(payload) {
   CURRENT = payload;
-  document.getElementById('tl-today-label').textContent = fmtTodayLabel(payload.today);
   document.getElementById('tl-meta').textContent = `${payload.n_weeks} weeks of data`;
   renderHero(payload.weeks);
-  renderLoadCards(payload.weeks);
+  renderTrimpChart(payload.weeks);
+  renderMetrics(payload.weeks);
   renderHRStack(payload.weeks);
   renderBarChart('tl-volume-chart',   payload.weeks, 'hours',  'h', 'volume');
   renderBarChart('tl-climbing-chart', payload.weeks, 'gain_m', 'm', 'climbing');
@@ -737,13 +1199,217 @@ function render(payload) {
   renderTotals(payload);
 }
 
+// Type filter — multi-select chips. Empty Set means "all types".
+let activeTypes = new Set();
+
+function buildTypeChips() {
+  const div = document.getElementById('tl-type-chips');
+  div.innerHTML = '';
+  // "All" chip — clears the set.
+  const allBtn = document.createElement('button');
+  allBtn.className = 'tl-chip' + (activeTypes.size === 0 ? ' active' : '');
+  allBtn.textContent = 'All';
+  allBtn.onclick = () => { activeTypes.clear(); buildTypeChips(); loadData(CURRENT_WEEKS); };
+  div.appendChild(allBtn);
+  TYPES_RAW.forEach(t => {
+    const btn = document.createElement('button');
+    btn.className = 'tl-chip' + (activeTypes.has(t.id) ? ' active' : '');
+    btn.textContent = t.label;
+    btn.onclick = () => {
+      if (activeTypes.has(t.id)) activeTypes.delete(t.id);
+      else activeTypes.add(t.id);
+      buildTypeChips();
+      loadData(CURRENT_WEEKS);
+    };
+    div.appendChild(btn);
+  });
+}
+
+// ─── Body weight log ──────────────────────────────────────────────────────
+// Storage is canonical kg via /api/weights; the UI talks stones + pounds.
+const LB_PER_KG = 2.2046226218;
+let WEIGHTS = [];
+
+function kgToStLb(kg) {
+  const totalLb = kg * LB_PER_KG;
+  const st      = Math.floor(totalLb / 14);
+  const lb      = totalLb - st * 14;
+  return { st, lb };
+}
+
+function stLbToKg(st, lb) {
+  return ((st * 14) + lb) / LB_PER_KG;
+}
+
+function fmtStLb(kg) {
+  const { st, lb } = kgToStLb(kg);
+  return `${st} st ${lb.toFixed(1)} lb`;
+}
+
+async function loadWeights() {
+  try {
+    const r = await fetch('/api/weights', { cache: 'no-store' });
+    WEIGHTS = await r.json();
+  } catch { WEIGHTS = []; }
+  renderWeight();
+}
+
+// Weight card data for the metrics grid. Latest value as kg (matching
+// the other cards' single-number-with-unit pattern); sub line shows
+// total lb + st+lb so a British reader sees what they expect.
+// Sparkline uses weights within the visible window so it lines up
+// with the other weekly sparklines on either side.
+function _weightCard(weeks) {
+  const latest = WEIGHTS.length ? WEIGHTS[WEIGHTS.length - 1] : null;
+  let inWindow = [];
+  if (weeks.length && WEIGHTS.length) {
+    const winStart = weeks[0].start;
+    const lastStart = weeks[weeks.length - 1].start;
+    const winEnd = new Date(lastStart);
+    winEnd.setDate(winEnd.getDate() + 6);
+    const winEndStr = winEnd.toISOString().slice(0, 10);
+    inWindow = WEIGHTS
+      .filter(w => w.date >= winStart && w.date <= winEndStr)
+      .map(w => w.weight_kg);
+  }
+
+  if (!latest) {
+    return {
+      lbl: 'Weight', val: '—', unit: '', sub: 'Click to log',
+      color: 'var(--tl-dimmer)', spark: [], onClick: openWeightForm,
+      tip: 'No weight entries yet.\n\nClick the card to log your first reading; subsequent entries will plot here as a trend.',
+    };
+  }
+  const totalLb = latest.weight_kg * LB_PER_KG;
+  // Stale highlight: latest entry older than 7 days flags the card so
+  // the calorie / metric calculations can be trusted-but-noted.
+  const ageDays = Math.floor((Date.now() - new Date(latest.date).getTime()) / 86_400_000);
+  const stale = ageDays > 7;
+  return {
+    lbl: 'Weight',
+    val: latest.weight_kg.toFixed(1),
+    unit: 'kg',
+    sub: stale
+      ? `${fmtStLb(latest.weight_kg)} · ${ageDays}d old — log a fresh reading`
+      : `${fmtStLb(latest.weight_kg)} · ${totalLb.toFixed(1)} lb`,
+    color: stale ? 'var(--tl-amber)' : 'var(--tl-blue)',
+    spark: inWindow,
+    onClick: openWeightForm,
+    extraClass: stale ? 'stale' : '',
+    tip: 'Latest body weight from your weight log.\n\nClick the card to log a new entry.\n\nCard highlights amber when the latest reading is over 7 days old, since calorie / weight-dependent calculations get stale fast.\n\nStorage is canonical kg; inputs are in stones + pounds.',
+  };
+}
+
+// Calories — total kcal in the window, sparkline of weekly kcal.
+// Backend (_compute_fitness_weeks) computes kcal per activity using
+// HR-zone-weighted METs when available, per-sport MET fallback otherwise,
+// and the most recent logged weight on or before each activity.
+function _caloriesCard(weeks) {
+  const kcal_per_week = weeks.map(w => w.kcal || 0);
+  const total = kcal_per_week.reduce((s, v) => s + v, 0);
+  const avg   = weeks.length ? total / weeks.length : 0;
+  const hasWeight = WEIGHTS && WEIGHTS.length > 0;
+  return {
+    lbl: 'Calories',
+    val: Math.round(total).toLocaleString(),
+    unit: 'kcal',
+    sub: hasWeight
+      ? `${Math.round(avg).toLocaleString()} kcal/wk avg`
+      : `assumes 75 kg — log your weight`,
+    color: 'var(--tl-amber)',
+    spark: kcal_per_week,
+    tip: 'Estimated calories burned across the visible window.\n\nPer-activity kcal uses HR-zone-weighted METs (Z1×3, Z2×5, Z3×8, Z4×11, Z5×14) when HR data is available — so a hard week scores higher than the same hours of easy spinning. Falls back to per-sport METs otherwise.\n\nMultiplied by your most recent logged weight on each activity\'s date. Defaults to 75 kg if you haven\'t logged anything.',
+  };
+}
+
+function renderWeight() {
+  const countEl  = document.getElementById('tl-weight-count');
+  const histBody = document.getElementById('tl-weight-history-body');
+  if (countEl) countEl.textContent = WEIGHTS.length;
+
+  // History list (newest-first), with kg / total-lb / st+lb columns.
+  histBody.innerHTML = '';
+  [...WEIGHTS].reverse().forEach(w => {
+    const totalLb = w.weight_kg * LB_PER_KG;
+    const row = document.createElement('div');
+    row.className = 'tl-weight-history-row';
+    row.innerHTML = `
+      <span class="date">${w.date}</span>
+      <span class="stlb">${fmtStLb(w.weight_kg)}</span>
+      <span class="lb">${totalLb.toFixed(1)} lb</span>
+      <span class="kg">${w.weight_kg.toFixed(1)} kg</span>
+      <button type="button" title="Delete entry">✕</button>
+    `;
+    row.querySelector('button').onclick = () => deleteWeight(w.date);
+    histBody.appendChild(row);
+  });
+
+  // Re-render the metrics grid so the Weight card reflects the new
+  // latest value + sparkline.
+  if (CURRENT) renderMetrics(CURRENT.weeks);
+}
+
+function openWeightForm() {
+  const form = document.getElementById('tl-weight-form');
+  form.style.display = 'flex';
+  document.getElementById('tl-weight-date').value = new Date().toISOString().slice(0, 10);
+  if (WEIGHTS.length) {
+    const latest = WEIGHTS[WEIGHTS.length - 1];
+    const { st, lb } = kgToStLb(latest.weight_kg);
+    document.getElementById('tl-weight-st').value = st;
+    document.getElementById('tl-weight-lb').value = lb.toFixed(1);
+  }
+  document.getElementById('tl-weight-st').focus();
+}
+
+function closeWeightForm() {
+  document.getElementById('tl-weight-form').style.display = 'none';
+}
+
+async function saveWeight(ev) {
+  ev.preventDefault();
+  const date = document.getElementById('tl-weight-date').value;
+  const st   = Number(document.getElementById('tl-weight-st').value || 0);
+  const lb   = Number(document.getElementById('tl-weight-lb').value || 0);
+  if (!date) return false;
+  const kg = stLbToKg(st, lb);
+  if (!Number.isFinite(kg) || kg < 20 || kg > 300) {
+    alert('Weight outside expected range (≈ 3 st – 47 st).');
+    return false;
+  }
+  try {
+    const r = await fetch('/api/weights', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ date, weight_kg: kg }),
+    });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  } catch (e) {
+    alert('Could not save weight: ' + e.message);
+    return false;
+  }
+  closeWeightForm();
+  await loadWeights();
+  return false;
+}
+
+async function deleteWeight(date) {
+  if (!confirm(`Delete the weight entry for ${date}?`)) return;
+  try {
+    await fetch(`/api/weights/${date}`, { method: 'DELETE' });
+  } catch {}
+  await loadWeights();
+}
+
 async function loadData(weeks) {
   CURRENT_WEEKS = weeks;
   document.querySelectorAll('#tl-window-ctrl button').forEach(b => {
     b.classList.toggle('on', Number(b.dataset.weeks) === weeks);
   });
+  const params = new URLSearchParams({ weeks: String(weeks) });
+  if (activeTypes.size > 0) params.set('type', [...activeTypes].join(','));
   try {
-    const res = await fetch(`/api/training?weeks=${weeks}`, { cache: 'no-store' });
+    const res = await fetch(`/api/training?${params.toString()}`, { cache: 'no-store' });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
     render(data);
@@ -756,7 +1422,38 @@ document.querySelectorAll('#tl-window-ctrl button').forEach(b => {
   b.addEventListener('click', () => loadData(Number(b.dataset.weeks)));
 });
 
+buildTypeChips();
 loadData(12);
+loadWeights();
+
+// ─── Tooltip viewport-clipping handler ───────────────────────────────────
+// CSS-only positioning would clip the tooltip when the icon is near the
+// top or sides of the viewport. On every mouseover that lands inside (or
+// on) an info icon, we measure the icon's bounding rect and flip the
+// tooltip's anchor points so it stays on-screen.
+{
+  const TOOLTIP_H_ESTIMATE = 220;   // covers our longest tips at 340px max-width
+  const TOOLTIP_HALF_W     = 170;   // half of max-width
+  const EDGE_MARGIN        = 8;
+  document.addEventListener('mouseover', (e) => {
+    const icon = e.target.closest && e.target.closest('.tl-info-icon');
+    if (!icon) return;
+    const r  = icon.getBoundingClientRect();
+    const vw = window.innerWidth;
+    // Vertical: flip below if there isn't enough room above.
+    icon.classList.toggle('tl-info-below', r.top < TOOLTIP_H_ESTIMATE + EDGE_MARGIN);
+    // Horizontal: anchor to the side that has room.
+    if (r.right + TOOLTIP_HALF_W > vw - EDGE_MARGIN) {
+      icon.classList.add('tl-info-align-right');
+      icon.classList.remove('tl-info-align-left');
+    } else if (r.left - TOOLTIP_HALF_W < EDGE_MARGIN) {
+      icon.classList.add('tl-info-align-left');
+      icon.classList.remove('tl-info-align-right');
+    } else {
+      icon.classList.remove('tl-info-align-left', 'tl-info-align-right');
+    }
+  }, false);
+}
 </script>
 
 </body>

@@ -964,9 +964,8 @@ function renderTypes() {
     swatch.className = 'type-swatch';
     swatch.style.background = t.bg;
     swatch.style.color = t.color;
-    // Glyph is derived from the type id (mtb / snowboard / ski / hike /
-    // fat_biking …) so "Mountain Bike" reads as MTB rather than MOU.
-    swatch.textContent = t.id.replace(/_/g, '').slice(0, 3).toUpperCase();
+    // Shared abbreviation logic — see static/utils.js / typeGlyph().
+    swatch.textContent = typeGlyph(t.id);
     swatch.title = 'Click to change colour';
     swatch.onclick = (e) => openColorPopover(e, t);
 

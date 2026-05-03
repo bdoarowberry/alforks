@@ -259,10 +259,7 @@ What's known to be off the system, in roughly priority order.
 
 ### High-impact drift (worth fixing)
 
-**`training_load.html` defines parallel surface tokens**
-- `--tl-bg: #080a0c` (vs `--bg-page: #0a0c0c`), `--tl-panel: #0d1115` (vs `--bg-card: #0f1313`), `--tl-line: rgba(255,255,255,0.07)` (vs `--border-hair: 0.06`).
-- Differences are 1–2% lightness; not a deliberate identity, just drift from when this page was built independently.
-- Action: replace `--tl-*` references with the global tokens; keep `--tl-z1..z5` (HR-zone colours — those are legitimately Training-specific).
+_None outstanding. Previously listed items have all been resolved._
 
 ### Medium-impact drift
 

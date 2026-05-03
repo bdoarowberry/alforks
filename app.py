@@ -50,6 +50,7 @@ METADATA_FILE = _ROOT / "metadata.json"
 CONFIG_FILE   = _ROOT / "config.json"
 REGIONS_FILE  = _ROOT / "regions.json"
 TYPES_FILE    = _ROOT / "types.json"
+WEIGHTS_FILE  = _ROOT / "weights.json"
 
 _DEFAULT_TYPES = [
     {"id": "mtb",       "label": "Mountain Bike", "color": "#4ade80", "bg": "#1a3a2a"},
@@ -1419,6 +1420,7 @@ def _summary_data(days_back: int, units: str) -> dict:
 
     totals = {
         "days":            len(unique_active),
+        "distance_km":     round(sum((a.get("stats") or {}).get("distance_km") or 0 for a in all_in_window), 1),
         "elev_gain_m":     sum((a.get("stats") or {}).get("elev_gain_m") or 0 for a in all_in_window),
         "elev_loss_m":     sum((a.get("stats") or {}).get("elev_loss_m") or 0 for a in all_in_window),
         "moving_h":        round(sum((a.get("stats") or {}).get("duration_sec") or 0 for a in all_in_window) / 3600.0, 2),
@@ -2444,12 +2446,55 @@ def api_comparison():
     return jsonify({"items": items, "max_hr": max_hr})
 
 
+_TYPE_METS = {
+    # MET values from the Compendium of Physical Activities (Ainsworth 2011).
+    # Used as a fall-back when an activity has no HR-zone data.
+    "mtb":         8.5,
+    "snowboard":   5.3,
+    "ski":         5.5,
+    "hike":        6.0,
+    "fat_biking":  8.0,
+    "other":       6.0,
+}
+_ZONE_METS = [3.0, 5.0, 8.0, 11.0, 14.0]   # Z1..Z5
+_DEFAULT_WEIGHT_KG = 75.0
+
+
+def _weight_for_date(date_str: str, weights_log: list[dict]) -> float | None:
+    """Most recent weight (kg) on or before the given date. weights_log
+    is sorted oldest-first; we walk forward and remember the latest match."""
+    chosen = None
+    for w in weights_log:
+        if w["date"] <= date_str:
+            chosen = w["weight_kg"]
+        else:
+            break
+    return chosen
+
+
+def _activity_kcal(act_zones, duration_sec, type_id, weight_kg) -> float:
+    """Estimate kcal for one activity. When HR-zone seconds are available
+    we use intensity-weighted METs (more accurate — a hard ride scores
+    higher than a cruise of the same duration); otherwise we fall back
+    to a per-sport MET × duration."""
+    if act_zones and any(act_zones):
+        hours_per_zone = sum(
+            (act_zones[i] / 3600.0) * _ZONE_METS[i]
+            for i in range(min(5, len(act_zones)))
+        )
+        return hours_per_zone * weight_kg
+    duration_h = (duration_sec or 0) / 3600.0
+    met = _TYPE_METS.get(type_id, 6.0)
+    return met * weight_kg * duration_h
+
+
 def _compute_fitness_weeks(n_weeks: int, type_filter: set | None = None) -> list[dict]:
     """Return `n_weeks` of trailing weekly fitness rollups (Monday-anchored).
     Each week dict carries: start, hours, gain_m, zones_sec[5], rides,
-    z2_hr_28d. Used by `/api/fitness/weekly` and the Training Load page."""
+    z2_hr_28d, kcal. Used by `/api/fitness/weekly` and the Training Load page."""
     type_filter = type_filter or set()
     cutoff = datetime.now().date() - timedelta(weeks=n_weeks)
+    weights_log = _load_weights()
 
     per_day: dict[str, dict] = {}
     rolling_z2_input: list[tuple[str, int, int]] = []  # (date, avg_hr, z2_seconds)
@@ -2464,16 +2509,20 @@ def _compute_fitness_weeks(n_weeks: int, type_filter: set | None = None) -> list
             continue
         if d < cutoff:
             continue
-        if type_filter and (act.get("meta") or {}).get("type", "") not in type_filter:
-            continue
+        if type_filter:
+            t = (act.get("meta") or {}).get("type") or act.get("effective_type") or ""
+            if t not in type_filter:
+                continue
         if act.get("excluded"):
             continue
-        bucket = per_day.setdefault(date, {"sec": 0, "gain": 0, "zones": [0]*5, "n": 0})
+        bucket = per_day.setdefault(date, {"sec": 0, "gain": 0, "zones": [0]*5, "n": 0, "kcal": 0.0, "dist_km": 0.0})
         s = act.get("stats") or {}
-        bucket["sec"]  += int(s.get("duration_sec") or 0)
-        bucket["gain"] += int(s.get("elev_gain_m")  or 0)
-        bucket["n"]    += 1
+        bucket["sec"]     += int(s.get("duration_sec") or 0)
+        bucket["gain"]    += int(s.get("elev_gain_m")  or 0)
+        bucket["dist_km"] += float(s.get("distance_km") or 0)
+        bucket["n"]       += 1
 
+        act_zones = None
         if act.get("has_hr"):
             data = get_activity(act["filename"])
             if data:
@@ -2481,19 +2530,31 @@ def _compute_fitness_weeks(n_weeks: int, type_filter: set | None = None) -> list
                 merged = _merge_hr_into_data(eff)
                 ms     = merged.get("stats") or {}
                 z      = ms.get("hr_zones") or [0]*5
+                act_zones = z
                 for i in range(5):
                     bucket["zones"][i] += int(z[i])
                 if ms.get("hr_avg") is not None and z[1] > 0:
                     rolling_z2_input.append((date, int(ms["hr_avg"]), int(z[1])))
 
+        # Calories — intensity-weighted from HR zones when available,
+        # MET-by-sport fallback otherwise. Weight comes from the most
+        # recent weight-log entry on or before this activity's date,
+        # falling back to a 75kg default if the user hasn't logged
+        # anything yet.
+        weight_kg = _weight_for_date(date, weights_log) or _DEFAULT_WEIGHT_KG
+        type_id   = (act.get("meta") or {}).get("type") or act.get("effective_type") or ""
+        bucket["kcal"] += _activity_kcal(act_zones, int(s.get("duration_sec") or 0), type_id, weight_kg)
+
     weeks: dict[str, dict] = {}
     for date_str, b in per_day.items():
         d = datetime.fromisoformat(date_str).date()
         wk_start = (d - timedelta(days=d.weekday())).isoformat()
-        w = weeks.setdefault(wk_start, {"hours": 0.0, "gain_m": 0, "zones_sec": [0]*5, "rides": 0})
-        w["hours"]   += b["sec"] / 3600
-        w["gain_m"]  += b["gain"]
-        w["rides"]   += b["n"]
+        w = weeks.setdefault(wk_start, {"hours": 0.0, "gain_m": 0, "zones_sec": [0]*5, "rides": 0, "kcal": 0.0, "dist_km": 0.0})
+        w["hours"]    += b["sec"] / 3600
+        w["gain_m"]   += b["gain"]
+        w["rides"]    += b["n"]
+        w["kcal"]     += b.get("kcal", 0.0)
+        w["dist_km"]  += b.get("dist_km", 0.0)
         for i in range(5):
             w["zones_sec"][i] += b["zones"][i]
 
@@ -2502,13 +2563,15 @@ def _compute_fitness_weeks(n_weeks: int, type_filter: set | None = None) -> list
     output = []
     for w in range(n_weeks - 1, -1, -1):
         wk = (today_monday - timedelta(weeks=w)).isoformat()
-        bucket = weeks.get(wk, {"hours": 0, "gain_m": 0, "zones_sec": [0]*5, "rides": 0})
+        bucket = weeks.get(wk, {"hours": 0, "gain_m": 0, "zones_sec": [0]*5, "rides": 0, "kcal": 0.0, "dist_km": 0.0})
         output.append({
-            "start":     wk,
-            "hours":     round(bucket["hours"], 1),
-            "gain_m":    int(bucket["gain_m"]),
-            "zones_sec": [int(s) for s in bucket["zones_sec"]],
-            "rides":     int(bucket["rides"]),
+            "start":       wk,
+            "hours":       round(bucket["hours"], 1),
+            "gain_m":      int(bucket["gain_m"]),
+            "zones_sec":   [int(s) for s in bucket["zones_sec"]],
+            "rides":       int(bucket["rides"]),
+            "kcal":        int(round(bucket.get("kcal", 0.0))),
+            "distance_km": round(bucket.get("dist_km", 0.0), 1),
         })
 
     for week in output:
@@ -2550,11 +2613,13 @@ def _fmt_hours_h_mm(hours: float) -> str:
     return f"{total_min // 60}:{total_min % 60:02d}"
 
 
-def _compute_training_load(n_weeks: int) -> dict:
-    """Build the Training Load page payload: 12 weeks of fitness rollups, the
+def _compute_training_load(n_weeks: int, type_filter: set | None = None) -> dict:
+    """Build the Training Load page payload: N weeks of fitness rollups, the
     in-window activities for window-scoped PRs, and per-type totals rolled up
-    over the same window. Returns a dict matching the design contract."""
-    weeks = _compute_fitness_weeks(n_weeks)
+    over the same window. `type_filter` is an optional set of type ids; when
+    given, only matching activities (by meta.type or effective_type) feed
+    the weeks/recent/totals output."""
+    weeks = _compute_fitness_weeks(n_weeks, type_filter)
     types_list = load_types()
     types_by_id = {t["id"]: t for t in types_list}
 
@@ -2568,6 +2633,8 @@ def _compute_training_load(n_weeks: int) -> dict:
         win_end   = today
 
     # In-window activities — used by both records and per-type totals.
+    # Apply the same meta-or-effective type fall-through used elsewhere
+    # so freshly-imported activities still match a type filter.
     in_window: list[dict] = []
     for a in all_activities():
         date = (a.get("date") or "")[:10]
@@ -2579,6 +2646,10 @@ def _compute_training_load(n_weeks: int) -> dict:
             continue
         if d < win_start or d > win_end:
             continue
+        if type_filter:
+            t = (a.get("meta") or {}).get("type") or a.get("effective_type") or ""
+            if t not in type_filter:
+                continue
         in_window.append(a)
 
     # Recent activities — flat list with the design's RecentActivity shape.
@@ -2649,16 +2720,86 @@ def _compute_training_load(n_weeks: int) -> dict:
     }
 
 
+# ─── Body weight log ──────────────────────────────────────────────────────
+# Manually-entered weight history. Stored canonically in kg (UI converts
+# to/from stones+lbs). One entry per date — adding for a date that already
+# has an entry replaces it.
+_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def _load_weights() -> list[dict]:
+    if not WEIGHTS_FILE.exists():
+        return []
+    try:
+        data = json.loads(WEIGHTS_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+    weights = data.get("weights") if isinstance(data, dict) else None
+    if not isinstance(weights, list):
+        return []
+    out = []
+    for w in weights:
+        if not isinstance(w, dict):
+            continue
+        date = (w.get("date") or "").strip()
+        kg = w.get("weight_kg")
+        if _DATE_RE.match(date) and isinstance(kg, (int, float)):
+            out.append({"date": date, "weight_kg": round(float(kg), 2)})
+    out.sort(key=lambda w: w["date"])
+    return out
+
+
+def _save_weights(weights: list[dict]) -> None:
+    weights = sorted(weights, key=lambda w: w["date"])
+    _atomic_write(WEIGHTS_FILE, json.dumps({"weights": weights}, indent=2))
+
+
+@app.route("/api/weights")
+def api_weights_list():
+    return jsonify(_load_weights())
+
+
+@app.route("/api/weights", methods=["POST"])
+def api_weights_add():
+    body = request.get_json(force=True) or {}
+    date = (body.get("date") or "").strip()
+    if not _DATE_RE.match(date):
+        abort(400)
+    try:
+        kg = float(body.get("weight_kg"))
+    except (TypeError, ValueError):
+        abort(400)
+    if not (20.0 <= kg <= 300.0):
+        abort(400)
+    weights = [w for w in _load_weights() if w["date"] != date]
+    weights.append({"date": date, "weight_kg": round(kg, 2)})
+    _save_weights(weights)
+    return jsonify({"ok": True})
+
+
+@app.route("/api/weights/<date>", methods=["DELETE"])
+def api_weights_delete(date):
+    if not _DATE_RE.match(date):
+        abort(400)
+    weights = [w for w in _load_weights() if w["date"] != date]
+    _save_weights(weights)
+    return jsonify({"ok": True})
+
+
 @app.route("/api/training")
 def api_training_load():
     """JSON payload for the Training page. `weeks` query param accepts
-    4, 8, 12, or 26 — anything else falls back to 12 (the design default)."""
+    4, 8, 12, or 26 — anything else falls back to 12 (the design default).
+    `type` is an optional comma-separated list of activity-type ids; when
+    set, the rollups only include matching activities."""
     try:
         requested = int(request.args.get("weeks", 12))
     except ValueError:
         requested = 12
     n_weeks = requested if requested in _ALLOWED_TRAINING_LOAD_WEEKS else 12
-    return jsonify(_compute_training_load(n_weeks))
+    type_arg = (request.args.get("type") or "").strip()
+    type_filter = {t for t in type_arg.split(",") if t and t != "all"}
+    return jsonify(_compute_training_load(n_weeks, type_filter or None))
 
 
 @app.route("/api/fitness/max-hr", methods=["GET", "POST"])

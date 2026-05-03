@@ -77,8 +77,13 @@
     .issues-approve { background: rgba(59,130,246,0.10); border: 1px solid var(--accent); color: var(--accent); padding: 5px 12px; border-radius: 3px; font-size: 0.72rem; cursor: pointer; font-family: inherit; flex-shrink: 0; transition: all 0.12s; }
     .issues-approve:hover { background: var(--accent); color: #fff; }
     .comp-title { font-size: 0.95rem; color: #fff; font-weight: 500; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .type-icon { width: 26px; height: 26px; border-radius: 4px; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; border: 1px solid transparent; }
-    .type-icon::before { content: ''; display: block; width: 18px; height: 18px; background-color: currentColor; -webkit-mask: var(--icon-url) center / contain no-repeat; mask: var(--icon-url) center / contain no-repeat; }
+    /* Type badge — 3–4 letter abbreviation in a coloured box. Replaces
+       the previous SVG icon so the type identifier is consistent with
+       the badge style used on Compare / Setup / Training / Summary. */
+    .type-badge-row { display: inline-flex; align-items: center; justify-content: center;
+                      height: 22px; padding: 0 8px; border-radius: 4px; flex-shrink: 0;
+                      font-family: var(--font-mono); font-size: 10px; font-weight: 600;
+                      letter-spacing: 0.05em; color: #fff; }
     .region-chip { font-weight: 500; white-space: nowrap; color: #fff; }
     .region-chip:not(:last-child)::after { content: ' · '; color: var(--text-faint); font-weight: normal; }
     .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 8px 14px; }
@@ -109,7 +114,7 @@
     .comp-row.excluded .comp-title,
     .comp-row.excluded .stats-grid,
     .comp-row.excluded .comp-top-right,
-    .comp-row.excluded .type-icon { opacity: 0.45; }
+    .comp-row.excluded .type-badge-row { opacity: 0.45; }
     .comp-row.excluded .comp-title::after { content: ' (excluded)'; font-size: 0.7rem; color: #f59e0b; opacity: 0.9; font-weight: normal; }
     /* Highlight the cell holding the highest value across the visible list,
        tinted to match the metric's sparkbar colour. */
@@ -244,12 +249,19 @@ let activeType = 'all';
 let dateStart = '';
 let dateEnd   = '';
 
-// Default range = last 90 days
+// Default range = last 90 days, or whatever the URL ?start= / ?end=
+// query params say (used by the Summary calendar click-through).
 {
   const today = new Date();
   const past  = new Date(); past.setDate(today.getDate() - 90);
   const iso = d => d.toISOString().slice(0, 10);
-  dateStart = iso(past); dateEnd = iso(today);
+  const url  = new URL(location.href);
+  const qs   = url.searchParams.get('start');
+  const qe   = url.searchParams.get('end');
+  const qt   = url.searchParams.get('type');
+  dateStart = (qs && /^\d{4}-\d{2}-\d{2}$/.test(qs)) ? qs : iso(past);
+  dateEnd   = (qe && /^\d{4}-\d{2}-\d{2}$/.test(qe)) ? qe : iso(today);
+  if (qt) activeType = qt;
 }
 
 function renderTypeChips() {
@@ -395,9 +407,9 @@ function renderRow(item) {
   row.dataset.typeColor = _t ? _t.color : '#3b82f6';
 
   const t = TYPE_LOOKUP[item.type];
-  const KNOWN_ICONS = new Set(['mtb', 'fat_biking', 'snowboard', 'ski', 'hike', 'other']);
-  const iconId = KNOWN_ICONS.has(item.type) ? item.type : 'unknown';
-  const iconHtml = `<span class="type-icon" title="${t ? t.label : 'Unknown type'}" style="--icon-url:url('/static/icons/${iconId}.svg');background:${t ? t.bg : '#1a1d23'};color:${t ? t.color : '#888'};border-color:${t ? t.color : '#2a2d35'}"></span>`;
+  const badgeBg    = t ? t.color : 'var(--text-muted)';
+  const badgeTitle = t ? t.label : 'Unknown type';
+  const iconHtml = `<span class="type-badge-row" title="${escapeHtml(badgeTitle)}" style="background:${badgeBg}">${escapeHtml(typeGlyph(item.type))}</span>`;
   const regionChips = item.regions.length
     ? item.regions.map(r => `<span class="region-chip">${escapeHtml(r.name)}</span>`).join('')
     : '';
@@ -457,8 +469,6 @@ function renderRow(item) {
         <div class="comp-top-left">
           <span class="row-title">
             ${iconHtml}
-            <span class="rt-type">${escapeHtml(typeLabel)}</span>
-            <span class="rt-sep">—</span>
             <span class="rt-name"></span>
             <span class="rt-meta">${dateShort}${timeRange ? ` · ${timeRange}` : ''}</span>
           </span>

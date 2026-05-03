@@ -307,9 +307,11 @@
     /* Type badge + region chips — now in the second-row activity header */
     #header-type { position: absolute; opacity: 0; pointer-events: none; width: 1px; height: 1px; }
     #header-type option { background: #12151a; color: #e0e0e0; }
-    #header-type-icon { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; border-radius: 6px; cursor: pointer; border: 1px solid transparent; flex-shrink: 0; user-select: none; transition: filter 0.1s; }
-    #header-type-icon:hover { filter: brightness(1.2); }
-    #header-type-icon::before { content: ''; display: block; width: 22px; height: 22px; background-color: currentColor; -webkit-mask: var(--icon-url) center / contain no-repeat; mask: var(--icon-url) center / contain no-repeat; }
+    /* Activity type indicator in the header — text badge (3–4 letter
+       abbreviation) on a coloured background, consistent with Logs /
+       Compare / Setup / Training. Click opens the type picker. */
+    #header-type-icon { position: relative; display: inline-flex; align-items: center; justify-content: center; min-width: 44px; height: 26px; padding: 0 8px; border-radius: 4px; cursor: pointer; flex-shrink: 0; user-select: none; transition: filter 0.1s; font-family: var(--font-mono); font-size: 11px; font-weight: 600; letter-spacing: 0.05em; color: #fff; }
+    #header-type-icon:hover { filter: brightness(1.15); }
     .ah-row-place { font-size: 0.72rem; color: #fff; padding: 2px 4px; min-height: 1em; }
     #header-issues { background: #2a1f0e; border: 1px solid #f59e0b; border-radius: 4px; padding: 6px 10px; margin-top: 6px; font-size: 0.74rem; color: #f59e0b; display: flex; align-items: flex-start; gap: 10px; }
     #header-issues .issues-text { flex: 1; color: #ccc; }
@@ -819,17 +821,14 @@ function applyTypeStyle(el, typeId) {
   const t = TYPES.find(t => t.id === typeId);
   const icon = document.getElementById('header-type-icon');
   if (icon) {
-    icon.style.setProperty('--icon-url', iconUrlForType(typeId));
     if (t) {
-      icon.style.background  = t.bg;
-      icon.style.color       = t.color;
-      icon.style.borderColor = t.color;
-      icon.title = t.label;
+      icon.style.background = t.color;
+      icon.textContent      = typeGlyph(t.id);
+      icon.title            = t.label;
     } else {
-      icon.style.background  = '#1a1d23';
-      icon.style.color       = '#bbb';
-      icon.style.borderColor = '#2a2d35';
-      icon.title = 'Unknown type — click to set';
+      icon.style.background = 'var(--text-muted)';
+      icon.textContent      = '?';
+      icon.title            = 'Unknown type — click to set';
     }
   }
 }
@@ -2819,9 +2818,48 @@ let allActivitiesData = [];
 let sortField = 'date';
 let sortDesc  = true;
 
+// Sidebar filter persistence — search / sort / year / type / region all
+// survive a reload via localStorage. Restored on init before the first
+// renderActivityList() call so filters are applied to the initial render.
+const SIDEBAR_STATE_KEY = 'sidebar_filters_v1';
+
+function saveSidebarState() {
+  try {
+    const state = {
+      search:    document.getElementById('search-input')?.value || '',
+      sortField: document.getElementById('sort-field')?.value || 'date',
+      sortDesc,
+      year:      document.getElementById('filter-year')?.value || 'all',
+      type:      document.getElementById('filter-type')?.value || 'all',
+      region:    document.getElementById('filter-region')?.value || 'all',
+    };
+    localStorage.setItem(SIDEBAR_STATE_KEY, JSON.stringify(state));
+  } catch {}
+}
+
+function restoreSidebarState() {
+  try {
+    const raw = localStorage.getItem(SIDEBAR_STATE_KEY);
+    if (!raw) return;
+    const s = JSON.parse(raw);
+    const set = (id, v) => { const el = document.getElementById(id); if (el && v != null) el.value = v; };
+    set('search-input', s.search);
+    set('sort-field',   s.sortField);
+    set('filter-year',  s.year);
+    set('filter-type',  s.type);
+    set('filter-region', s.region);
+    if (typeof s.sortDesc === 'boolean') {
+      sortDesc = s.sortDesc;
+      const btn = document.getElementById('sort-dir-btn');
+      if (btn) btn.textContent = sortDesc ? '▼' : '▲';
+    }
+  } catch {}
+}
+
 function toggleSortDir() {
   sortDesc = !sortDesc;
   document.getElementById('sort-dir-btn').textContent = sortDesc ? '▼' : '▲';
+  saveSidebarState();
   renderActivityList();
 }
 
@@ -2857,6 +2895,7 @@ function renderActivityList(reSelectFilename) {
   const region = document.getElementById('filter-region')?.value || 'all';
   const search = (document.getElementById('search-input')?.value || '').toLowerCase().trim();
   sortField   = document.getElementById('sort-field').value;
+  saveSidebarState();
 
   let acts = allActivitiesData.filter(act => {
     if (year !== 'all' && (!act.date || !act.date.startsWith(year))) return false;
@@ -3029,6 +3068,12 @@ async function fetchActivities(reSelectFilename) {
   const res = await fetch('/api/activities');
   allActivitiesData = await res.json();
   populateYearFilter();
+  // Restore localStorage state AFTER the year/region selects have been
+  // populated, then let URL params override (deep-links win). On
+  // subsequent calls this is a no-op since the selects already hold
+  // the right values.
+  restoreSidebarState();
+  applyUrlState();
   renderActivityList(reSelectFilename);
 }
 
@@ -3090,11 +3135,11 @@ toggleSortDir = function() { _origToggleSortDir(); writeUrlState(); };
 const _origLoadActivity = loadActivity;
 loadActivity = async function(filename) { await _origLoadActivity(filename); writeUrlState(); };
 
-// Initial load: apply URL state before first fetch, then render. The
-// filename comes from the URL path via Flask (`/log/<filename>`); the
-// server injects it as `INITIAL_FILENAME` so we don't have to parse the
-// path here.
-applyUrlState();
+// Initial load — fetchActivities() populates the year/region selects
+// then internally restores localStorage sidebar state and applies URL
+// overrides before rendering. The filename comes from the URL path
+// via Flask (`/log/<filename>`); the server injects it as
+// `INITIAL_FILENAME`.
 fetchActivities(INITIAL_FILENAME || undefined);
 </script>
 </body>

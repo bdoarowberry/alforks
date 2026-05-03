@@ -34,6 +34,25 @@ function escapeHtml(s) {
   ));
 }
 
+// Activity-type abbreviation (3–4 chars) used as the badge text wherever
+// activities are listed: Logs row, Compare picker, Setup swatch, Training
+// totals, Summary list, etc. Hand-tuned for built-in types (so Snowboard
+// reads "SNOW" rather than "SNO"); falls back to a 4-char id-derived
+// slice for custom user-added types.
+const TYPE_GLYPH_OVERRIDES = {
+  mtb:        'MTB',
+  snowboard:  'SNOW',
+  ski:        'SKI',
+  hike:       'HIKE',
+  fat_biking: 'FAT',
+  other:      'OTH',
+};
+function typeGlyph(typeId) {
+  if (!typeId) return '?';
+  if (TYPE_GLYPH_OVERRIDES[typeId]) return TYPE_GLYPH_OVERRIDES[typeId];
+  return String(typeId).replace(/_/g, '').slice(0, 4).toUpperCase();
+}
+
 // Open-Meteo weather code → emoji glyph. Used by the activity header
 // weather strip and the per-row weather summary on /logs.
 function weatherIcon(code) {

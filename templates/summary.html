@@ -49,8 +49,10 @@
     .s2-eyebrow-hero { font-size: 11px; color: var(--text-tertiary); letter-spacing: 0.18em; text-transform: uppercase; }
     .s2-eyebrow-section { font-size: 10px; color: var(--text-tertiary); letter-spacing: 0.18em; text-transform: uppercase; margin-top: 4px; }
 
-    /* "By activity" header row — eyebrow on the left, year chips on the right. */
-    .s2-activities-header { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-top: 4px; flex-wrap: wrap; }
+    /* "By activity" header row — eyebrow on the left, year chips on the right.
+       Extra top margin so it visually separates from the rolling-365 KPI strip
+       above (the page-level gap of 22px alone reads as too tight here). */
+    .s2-activities-header { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-top: 22px; flex-wrap: wrap; }
     .s2-year-chips { display: inline-flex; gap: 4px; flex-wrap: wrap; }
     .s2-year-chips button { all: unset; cursor: pointer; padding: 4px 10px; font-size: 10px;
                             font-family: var(--mono); letter-spacing: 0.04em;
@@ -91,8 +93,9 @@
     .s2-ribbon .legend-dot { width: 10px; height: 10px; border-radius: 2px; }
     .s2-ribbon .legend-label { color: var(--text-secondary); }
     .s2-ribbon .cells { display: flex; gap: 1px; height: 36px; align-items: stretch; }
-    .s2-ribbon .cell { flex: 1; border-radius: 1px; }
-    .s2-ribbon .cell.on { cursor: pointer; }
+    .s2-ribbon .cell { flex: 1; border-radius: 1px; text-decoration: none; }
+    .s2-ribbon a.cell.on { cursor: pointer; }
+    .s2-ribbon a.cell.on:hover { filter: brightness(1.2); }
     .s2-ribbon .cell:not(.on) { background: var(--surface-tint); }
     .s2-ribbon .cell.hover { outline: 1px solid #fff; }
     .s2-ribbon .caption { margin-top: 8px; display: flex; justify-content: space-between; font-size: 10px; color: var(--text-tertiary); font-family: var(--mono); min-height: 14px; }
@@ -101,7 +104,7 @@
     .s2-activities { background: var(--bg-page); border: 1px solid var(--border-hair); border-top: none; border-radius: 4px; }
     .s2-row { border-top: 1px solid var(--border-row); border-left: 2px solid #3b82f6; background: var(--bg-page); }
     .s2-row > .head { all: unset; cursor: pointer; display: flex; align-items: center; gap: 18px; padding: 14px 18px; width: 100%; }
-    .s2-row .glyph { width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; border-radius: 4px; font-family: var(--mono); font-weight: 700; font-size: 13px; flex-shrink: 0; }
+    .s2-row .glyph { min-width: 38px; height: 28px; padding: 0 7px; display: inline-flex; align-items: center; justify-content: center; border-radius: 4px; font-family: var(--mono); font-weight: 600; font-size: 11px; letter-spacing: 0.05em; flex-shrink: 0; }
     .s2-row .name  { font-size: 14px; color: #fff; font-weight: 500; }
     .s2-row .spacer { flex: 1; }
     .s2-row .stat-inline { font-size: 11px; color: var(--text-secondary); font-family: var(--mono); min-width: 80px; text-align: right; flex-shrink: 0; }
@@ -331,7 +334,7 @@ function renderKpi() {
   const wrap = document.createElement('div');
   wrap.className = 's2-kpi num';
   const cells = [
-    ['Total days',     t.days,                                   null],
+    ['Distance',       fmtDist(t.distance_km ?? 0),              'km'],
     ['Last 2 weeks',   `${t.last_14d_active_days ?? 0} of 14`,   'd'],
     ['Total climbing', fmtElev(t.elev_gain_m),                   'm'],
     ['Total descent',  fmtElev(t.elev_loss_m),                   'm'],
@@ -357,7 +360,7 @@ function renderRibbon() {
       ${DATA.activities.map(a => `
         <span class="legend-item">
           <span class="legend-dot" style="background:${a.accent}"></span>
-          <span class="legend-label">${a.short}</span>
+          <span class="legend-label">${typeGlyph(a.id)}</span>
         </span>`).join('')}
     </div>`;
   wrap.appendChild(top);
@@ -373,11 +376,18 @@ function renderRibbon() {
     d.setDate(d.getDate() - i);
     const iso = d.toISOString().slice(0, 10);
     const dom = DATA.dominantByDate[iso];
-    const cell = document.createElement('div');
+    // Active days render as anchors so middle-click opens in a new
+    // tab; idle days are inert <span>s. Both keep their dataset
+    // metadata for the hover caption.
+    const cell = document.createElement(dom ? 'a' : 'span');
     cell.className = 'cell' + (dom ? ' on' : '');
     cell.style.background = dom ? accents[dom] : '';
     cell.dataset.iso = iso;
-    if (dom) cell.dataset.type = dom;
+    if (dom) {
+      cell.dataset.type = dom;
+      cell.href = `/logs?start=${iso}&end=${iso}`;
+      cell.title = `${iso} — open in Logs`;
+    }
     cells.appendChild(cell);
     cellEls.push(cell);
   }
@@ -450,7 +460,7 @@ function renderActivityRow(a) {
   }
 
   head.innerHTML = `
-    <span class="glyph" style="background:${a.accentSoft};color:${a.accent}">${a.glyph}</span>
+    <span class="glyph" style="background:${a.accentSoft};color:${a.accent}">${typeGlyph(a.id)}</span>
     <span class="name">${a.label}</span>
     <span class="spacer"></span>
     ${headlineHtml}
