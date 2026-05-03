@@ -409,7 +409,9 @@ function renderRow(item) {
   const t = TYPE_LOOKUP[item.type];
   const badgeBg    = t ? t.color : 'var(--text-muted)';
   const badgeTitle = t ? t.label : 'Unknown type';
-  const iconHtml = `<span class="type-badge-row" title="${escapeHtml(badgeTitle)}" style="background:${badgeBg}">${escapeHtml(typeGlyph(item.type))}</span>`;
+  // Pass the full type object so an explicit `glyph` field (set on the
+  // Setup page) wins over the id-based fallback.
+  const iconHtml = `<span class="type-badge-row" title="${escapeHtml(badgeTitle)}" style="background:${badgeBg}">${escapeHtml(typeGlyph(t || item.type))}</span>`;
   const regionChips = item.regions.length
     ? item.regions.map(r => `<span class="region-chip">${escapeHtml(r.name)}</span>`).join('')
     : '';

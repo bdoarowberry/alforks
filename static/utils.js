@@ -34,23 +34,29 @@ function escapeHtml(s) {
   ));
 }
 
-// Activity-type abbreviation (3–4 chars) used as the badge text wherever
-// activities are listed: Logs row, Compare picker, Setup swatch, Training
-// totals, Summary list, etc. Hand-tuned for built-in types (so Snowboard
-// reads "SNOW" rather than "SNO"); falls back to a 4-char id-derived
-// slice for custom user-added types.
+// Activity-type abbreviation — exactly 3 characters, used as the badge
+// text wherever activities are listed (Logs row, Compare picker, Setup
+// swatch, Training totals, Summary, etc.). Accepts either a type object
+// or a type id; if the type object carries an explicit `glyph` field
+// (set on the Setup page), that wins. Otherwise falls back to a hand-
+// tuned override map for built-in types, then to a 3-char uppercase
+// slice of the id.
 const TYPE_GLYPH_OVERRIDES = {
   mtb:        'MTB',
-  snowboard:  'SNOW',
+  snowboard:  'SNO',
   ski:        'SKI',
-  hike:       'HIKE',
+  hike:       'HIK',
   fat_biking: 'FAT',
-  other:      'OTH',
+  other:      'UNK',
 };
-function typeGlyph(typeId) {
-  if (!typeId) return '?';
-  if (TYPE_GLYPH_OVERRIDES[typeId]) return TYPE_GLYPH_OVERRIDES[typeId];
-  return String(typeId).replace(/_/g, '').slice(0, 4).toUpperCase();
+function typeGlyph(input) {
+  if (!input) return '?';
+  if (typeof input === 'object') {
+    if (input.glyph) return String(input.glyph).toUpperCase().slice(0, 3);
+    return typeGlyph(input.id);
+  }
+  if (TYPE_GLYPH_OVERRIDES[input]) return TYPE_GLYPH_OVERRIDES[input];
+  return String(input).replace(/_/g, '').slice(0, 3).toUpperCase();
 }
 
 // Open-Meteo weather code → emoji glyph. Used by the activity header

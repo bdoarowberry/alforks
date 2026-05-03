@@ -1174,7 +1174,7 @@ function renderTotals(payload) {
     const row = document.createElement('div');
     row.className = 'tl-totals-row';
     row.innerHTML = `
-      <span class="glyph" style="background:${t.color};color:#fff;">${typeGlyph(t.type)}</span>
+      <span class="glyph" style="background:${t.color};color:#fff;">${typeGlyph(t)}</span>
       <span class="name">${t.label}</span>
       <span class="col days">${t.days}d</span>
       <span class="col time">${fmtMovingTime(t.moving_h)}</span>

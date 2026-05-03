@@ -35,7 +35,6 @@
     .type-info { flex: 1; min-width: 0; }
     .type-label-input { background: transparent; border: none; border-bottom: 1px solid transparent; color: #e0e0e0; font-size: 0.9rem; font-weight: 500; font-family: inherit; padding: 2px 4px; width: 100%; transition: border-color 0.1s; }
     .type-label-input:focus { outline: none; border-bottom-color: #3b82f6; }
-    .type-id { font-size: 0.62rem; color: #666; text-transform: uppercase; letter-spacing: 0.06em; margin-top: 2px; font-family: ui-monospace, monospace; padding-left: 4px; }
     .type-actions { display: flex; gap: 6px; }
     .t-btn { font-size: 0.65rem; padding: 3px 9px; border-radius: 3px; border: 1px solid #2a2d35; background: #1a1d23; color: #ccc; cursor: pointer; transition: all 0.12s; }
     .t-btn:hover { border-color: #aaa; color: #fff; }
@@ -49,9 +48,16 @@
     #add-type-btn:hover { background: #3b82f6; color: #fff; }
 
     /* Colour picker popover */
-    #color-popover { position: fixed; background: #12151a; border: 1px solid #2a2d35; border-radius: 6px; padding: 10px; z-index: 10000; display: none; box-shadow: 0 4px 16px rgba(0,0,0,0.5); }
+    #color-popover { position: fixed; background: #12151a; border: 1px solid #2a2d35; border-radius: 6px; padding: 12px; z-index: 10000; display: none; box-shadow: 0 4px 16px rgba(0,0,0,0.5); min-width: 200px; }
     #color-popover.visible { display: block; }
     #color-popover .swatch-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; }
+    /* Edit-popover row — acronym field on top, colour swatches below.
+       Each row is "label : control"; rows stacked with a small gap. */
+    #color-popover .cp-row { display: flex; flex-direction: column; gap: 6px; }
+    #color-popover .cp-row + .cp-row { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border-hair); }
+    #color-popover .cp-label { font-size: 9px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.14em; font-family: var(--font-mono); }
+    #color-popover #cp-glyph { background: transparent; border: 1px solid var(--border-row); border-radius: 3px; color: var(--text-primary); font-size: 0.95rem; font-family: var(--font-mono); font-weight: 600; letter-spacing: 0.08em; padding: 6px 10px; width: 100%; text-align: center; text-transform: uppercase; transition: border-color 0.1s; }
+    #color-popover #cp-glyph:focus { outline: none; border-color: var(--accent); }
     .color-pick { width: 24px; height: 24px; border-radius: 50%; cursor: pointer; border: 2px solid transparent; }
     .color-pick:hover { border-color: #fff; }
 
@@ -262,7 +268,6 @@
     #new-type-input:focus { border-color: var(--accent); }
     .type-label-input { color: var(--text-primary); }
     .type-label-input:focus { border-bottom-color: var(--accent); }
-    .type-id { color: var(--text-muted); }
 
     /* Section headings on tab content */
     #types-panel h2 { color: var(--text-secondary); }
@@ -453,6 +458,17 @@
             <span style="color:#777;">(11–4 = Nov–Apr)</span>
           </div>
         </div>
+        <div class="rfield">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+            <input id="r-assisted" type="checkbox"
+                   style="width:14px;height:14px;cursor:pointer;accent-color:#f59e0b;margin:0;">
+            <span>Lift / shuttle assisted</span>
+          </label>
+          <div style="font-size:0.65rem;color:#777;margin-top:3px;">
+            Bike parks and ski hills. Rides matching this region are excluded from
+            distance and duration records.
+          </div>
+        </div>
         <div class="region-edit-actions">
           <button id="save-region-btn" onclick="saveRegion()">Save Region</button>
           <button id="delete-region-btn" onclick="deleteCurrentRegion()" style="display:none;">Delete</button>
@@ -603,9 +619,16 @@
   </div>
 </main>
 
-<!-- Floating colour picker for types -->
+<!-- Floating type-edit popover — colour swatches + acronym input. -->
 <div id="color-popover">
-  <div class="swatch-grid" id="color-popover-swatches"></div>
+  <div class="cp-row">
+    <span class="cp-label">Acronym</span>
+    <input id="cp-glyph" maxlength="3" autocomplete="off" spellcheck="false">
+  </div>
+  <div class="cp-row">
+    <span class="cp-label">Colour</span>
+    <div class="swatch-grid" id="color-popover-swatches"></div>
+  </div>
 </div>
 
 <script>
@@ -964,8 +987,9 @@ function renderTypes() {
     swatch.className = 'type-swatch';
     swatch.style.background = t.bg;
     swatch.style.color = t.color;
-    // Shared abbreviation logic — see static/utils.js / typeGlyph().
-    swatch.textContent = typeGlyph(t.id);
+    // Pass the full type object so an explicit `glyph` field wins over
+    // the id-based fallback. See static/utils.js / typeGlyph().
+    swatch.textContent = typeGlyph(t);
     swatch.title = 'Click to change colour';
     swatch.onclick = (e) => openColorPopover(e, t);
 
@@ -977,12 +1001,7 @@ function renderTypes() {
     label.value = t.label;
     label.onchange = () => saveType(t.id, { label: label.value.trim() || t.label });
 
-    const id = document.createElement('div');
-    id.className = 'type-id';
-    id.textContent = t.id;
-
     info.appendChild(label);
-    info.appendChild(id);
 
     const actions = document.createElement('div');
     actions.className = 'type-actions';
@@ -1002,6 +1021,30 @@ function renderTypes() {
 function openColorPopover(e, type) {
   const pop = document.getElementById('color-popover');
   const grid = document.getElementById('color-popover-swatches');
+  const glyphInput = document.getElementById('cp-glyph');
+
+  // Glyph editor — pre-fill with the current acronym; live-clean to
+  // uppercase A-Z / 0-9, max 3 chars; save on blur / Enter.
+  glyphInput.value = typeGlyph(type);
+  const cleanGlyph = (raw) =>
+    String(raw || '').replace(/[^a-zA-Z0-9]/g, '').toUpperCase().slice(0, 3);
+  glyphInput.oninput = () => {
+    const cleaned = cleanGlyph(glyphInput.value);
+    if (cleaned !== glyphInput.value) glyphInput.value = cleaned;
+  };
+  const commitGlyph = async () => {
+    const next = cleanGlyph(glyphInput.value) || typeGlyph(type.id);
+    if (next === typeGlyph(type)) return;        // no change
+    glyphInput.value = next;
+    await saveType(type.id, { glyph: next });
+  };
+  glyphInput.onchange = commitGlyph;             // fires on blur
+  glyphInput.onkeydown = (ev) => {
+    if (ev.key === 'Enter') { ev.preventDefault(); commitGlyph(); pop.classList.remove('visible'); }
+    if (ev.key === 'Escape') { pop.classList.remove('visible'); }
+  };
+
+  // Colour swatches.
   grid.innerHTML = '';
   PALETTE.forEach(color => {
     const sw = document.createElement('div');
@@ -1013,14 +1056,22 @@ function openColorPopover(e, type) {
     };
     grid.appendChild(sw);
   });
-  const rect = e.target.getBoundingClientRect();
+
+  // Position next to the swatch.
+  const rect = e.currentTarget.getBoundingClientRect();
   pop.style.left = (rect.left + rect.width + 8) + 'px';
   pop.style.top  = rect.top + 'px';
   pop.classList.add('visible');
-  // Close on outside click
+  glyphInput.focus();
+  glyphInput.select();
+  // Close on outside click. We commit any pending glyph edit on close
+  // so the user doesn't have to explicitly tab out before clicking away.
   setTimeout(() => {
-    const close = (ev) => {
-      if (!pop.contains(ev.target)) { pop.classList.remove('visible'); document.removeEventListener('click', close); }
+    const close = async (ev) => {
+      if (pop.contains(ev.target)) return;
+      await commitGlyph();
+      pop.classList.remove('visible');
+      document.removeEventListener('click', close);
     };
     document.addEventListener('click', close);
   }, 0);
@@ -1357,6 +1408,7 @@ function showRegionEditPanel(id) {
     const wm = r?.winter_months || [11,12,1,2,3,4];
     document.getElementById('r-winter-start').value = wm[0] || 11;
     document.getElementById('r-winter-end').value   = wm[wm.length - 1] || 4;
+    document.getElementById('r-assisted').checked   = !!r?.assisted;
     selectedColor = r?.color || PALETTE[0];
     _enableRegionEditing(id);
     zoomToRegion(id);
@@ -1366,6 +1418,7 @@ function showRegionEditPanel(id) {
     document.getElementById('r-winter-type').value  = '';
     document.getElementById('r-winter-start').value = 11;
     document.getElementById('r-winter-end').value   = 4;
+    document.getElementById('r-assisted').checked   = false;
     selectedColor = PALETTE[regions.length % PALETTE.length];
   }
   buildRegionSwatches();
@@ -1410,8 +1463,9 @@ async function saveRegion() {
     document.getElementById('r-winter-start').value,
     document.getElementById('r-winter-end').value,
   );
+  const assisted            = document.getElementById('r-assisted').checked;
   if (editingId) {
-    const body = { name, color: selectedColor, default_type, winter_default_type, winter_months };
+    const body = { name, color: selectedColor, default_type, winter_default_type, winter_months, assisted };
     // If the polygon was reshaped, persist the new geometry too.
     const geom = _editedGeometry(editingId);
     if (geom) body.geometry = geom;
@@ -1425,7 +1479,7 @@ async function saveRegion() {
     const geojson = pendingLayer.toGeoJSON().geometry;
     await fetch('/api/regions', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, color: selectedColor, geometry: geojson, default_type, winter_default_type, winter_months, source: _pendingSource }),
+      body: JSON.stringify({ name, color: selectedColor, geometry: geojson, default_type, winter_default_type, winter_months, assisted, source: _pendingSource }),
     });
     drawnItems.removeLayer(pendingLayer);
     pendingLayer = null;

@@ -1,31 +1,36 @@
 [
   {
     "id": "mtb",
-    "label": "Mountain Bike",
+    "label": "Mountain Biking",
+    "glyph": "MTB",
     "color": "#4ade80",
     "bg": "#1a3a2a"
   },
   {
     "id": "snowboard",
-    "label": "Snowboard",
+    "label": "Snowboarding",
+    "glyph": "SNO",
     "color": "#60a5fa",
     "bg": "#1a2a4a"
   },
   {
     "id": "hike",
-    "label": "Hike",
+    "label": "Hiking",
+    "glyph": "HIK",
     "color": "#8b5cf6",
     "bg": "#8b5cf61f"
   },
   {
     "id": "other",
-    "label": "Other",
+    "label": "Unknown",
+    "glyph": "UNK",
     "color": "#9ca3af",
     "bg": "#2a2a2a"
   },
   {
     "id": "fat_biking",
     "label": "Fat Biking",
+    "glyph": "FAT",
     "color": "#fb923c",
     "bg": "#fb923c1f"
   }

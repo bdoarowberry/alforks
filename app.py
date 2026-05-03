@@ -53,11 +53,11 @@ TYPES_FILE    = _ROOT / "types.json"
 WEIGHTS_FILE  = _ROOT / "weights.json"
 
 _DEFAULT_TYPES = [
-    {"id": "mtb",       "label": "Mountain Bike", "color": "#4ade80", "bg": "#1a3a2a"},
-    {"id": "snowboard", "label": "Snowboard",     "color": "#60a5fa", "bg": "#1a2a4a"},
-    {"id": "ski",       "label": "Ski",           "color": "#a78bfa", "bg": "#2a1a4a"},
-    {"id": "hike",      "label": "Hike",          "color": "#fb923c", "bg": "#3a2a1a"},
-    {"id": "other",     "label": "Other",         "color": "#9ca3af", "bg": "#2a2a2a"},
+    {"id": "mtb",       "label": "Mountain Bike", "glyph": "MTB", "color": "#4ade80", "bg": "#1a3a2a"},
+    {"id": "snowboard", "label": "Snowboard",     "glyph": "SNO", "color": "#60a5fa", "bg": "#1a2a4a"},
+    {"id": "ski",       "label": "Ski",           "glyph": "SKI", "color": "#a78bfa", "bg": "#2a1a4a"},
+    {"id": "hike",      "label": "Hike",          "glyph": "HIK", "color": "#fb923c", "bg": "#3a2a1a"},
+    {"id": "other",     "label": "Unknown",       "glyph": "UNK", "color": "#9ca3af", "bg": "#2a2a2a"},
 ]
 
 
@@ -552,6 +552,7 @@ def _build_activity_entry(filename: str, meta: dict, regions: list[dict]) -> tup
         "effective_type": _effective_type_for(file_meta.get("type", ""),
                                               matched_regions, regions,
                                               eff.get("date") or ""),
+        "effective_assisted": _is_effectively_assisted(file_meta, matched_regions, regions),
         "issues":   [] if file_meta.get("issues_approved") else _detect_issues_cached(eff),
         "excluded": bool(file_meta.get("excluded_from_stats")),
     }
@@ -1097,8 +1098,8 @@ def _summary_data(days_back: int, units: str) -> dict:
         activities_def.append({
             "id":         tid,
             "label":      label,
-            "short":      _three_letter_short(tid, label),
-            "glyph":      label[:1].upper() or "?",
+            "short":      td.get("glyph") or _three_letter_short(tid, label),
+            "glyph":      td.get("glyph") or label[:1].upper() or "?",
             "accent":     accent,
             "accentSoft": _hex_to_rgba(accent, 0.18),
             "metrics":    (["days", "descent", "distance", "moving"] if is_snow
@@ -1203,64 +1204,65 @@ def _summary_data(days_back: int, units: str) -> dict:
 
         last_date_iso = max(unique_dates) if unique_dates else None
 
-        # Records — best-of across the user's full history (not just window).
-        # Top distance, top climbing, top descent, top max-speed, top duration.
-        def _rank(key, top=1):
-            ranked = sorted(
-                (a for a in type_acts if (a.get("stats") or {}).get(key) is not None),
-                key=lambda a: a["stats"][key], reverse=True,
-            )
-            return ranked[:top]
+        # Records — emitted twice: once from the rolling window (period
+        # records) and once from full history (all-time records). The
+        # frontend renders them side-by-side so the user can compare a
+        # year's bests against their lifetime bests.
+        def _build_prs(source):
+            # Distance and Duration records exclude lift/shuttle-assisted rides
+            # (bike park lap days, ski-hill rides) so they don't dominate
+            # rankings against point-to-point efforts. Climbing / Descent /
+            # Top speed are still legitimate so we keep assisted rides in
+            # those rankings.
+            unassisted = [a for a in source if not a.get("effective_assisted")]
 
-        prs = []
-        # Snow types lead with descent ("vertical"), others with distance.
-        if tid in ("snowboard", "ski"):
-            for top in _rank("elev_loss_m"):
-                prs.append({"label": "Vertical",   "value_m": top["stats"]["elev_loss_m"], "kind": "elev",
-                            "name": (top.get("meta") or {}).get("title") or top.get("name") or top["filename"],
-                            "date": (top.get("date") or "")[:10],
-                            "filename": top["filename"]})
-            for top in _rank("distance_km"):
-                prs.append({"label": "Longest",    "value_km": top["stats"]["distance_km"], "kind": "dist",
-                            "name": (top.get("meta") or {}).get("title") or top.get("name") or top["filename"],
-                            "date": (top.get("date") or "")[:10],
-                            "filename": top["filename"]})
-            for top in _rank("max_speed_kmh"):
-                prs.append({"label": "Top speed",  "value_kmh": top["stats"]["max_speed_kmh"], "kind": "speed",
-                            "name": (top.get("meta") or {}).get("title") or top.get("name") or top["filename"],
-                            "date": (top.get("date") or "")[:10],
-                            "filename": top["filename"]})
-            for top in _rank("duration_sec"):
-                prs.append({"label": "Duration",   "value_sec": top["stats"]["duration_sec"], "kind": "dur",
-                            "name": (top.get("meta") or {}).get("title") or top.get("name") or top["filename"],
-                            "date": (top.get("date") or "")[:10],
-                            "filename": top["filename"]})
-        else:
-            for top in _rank("distance_km"):
-                prs.append({"label": "Longest",    "value_km": top["stats"]["distance_km"], "kind": "dist",
-                            "name": (top.get("meta") or {}).get("title") or top.get("name") or top["filename"],
-                            "date": (top.get("date") or "")[:10],
-                            "filename": top["filename"]})
-            for top in _rank("elev_gain_m"):
-                prs.append({"label": "Climbing",   "value_m": top["stats"]["elev_gain_m"], "kind": "elev",
-                            "name": (top.get("meta") or {}).get("title") or top.get("name") or top["filename"],
-                            "date": (top.get("date") or "")[:10],
-                            "filename": top["filename"]})
-            for top in _rank("elev_loss_m"):
-                prs.append({"label": "Descent",    "value_m": top["stats"]["elev_loss_m"], "kind": "elev",
-                            "name": (top.get("meta") or {}).get("title") or top.get("name") or top["filename"],
-                            "date": (top.get("date") or "")[:10],
-                            "filename": top["filename"]})
-            for top in _rank("max_speed_kmh"):
-                prs.append({"label": "Top speed",  "value_kmh": top["stats"]["max_speed_kmh"], "kind": "speed",
-                            "name": (top.get("meta") or {}).get("title") or top.get("name") or top["filename"],
-                            "date": (top.get("date") or "")[:10],
-                            "filename": top["filename"]})
-            for top in _rank("duration_sec"):
-                prs.append({"label": "Duration",   "value_sec": top["stats"]["duration_sec"], "kind": "dur",
-                            "name": (top.get("meta") or {}).get("title") or top.get("name") or top["filename"],
-                            "date": (top.get("date") or "")[:10],
-                            "filename": top["filename"]})
+            def _rank(key, top=1, src=None):
+                items = src if src is not None else source
+                ranked = sorted(
+                    (a for a in items if (a.get("stats") or {}).get(key) is not None),
+                    key=lambda a: a["stats"][key], reverse=True,
+                )
+                return ranked[:top]
+
+            def _entry(top, label, value_key, value_field, kind):
+                return {
+                    "label":     label,
+                    value_field: top["stats"][value_key],
+                    "kind":      kind,
+                    "name":      (top.get("meta") or {}).get("title") or top.get("name") or top["filename"],
+                    "date":      (top.get("date") or "")[:10],
+                    "filename":  top["filename"],
+                }
+
+            out = []
+            # Snow types lead with descent ("vertical"), others with distance.
+            if tid in ("snowboard", "ski"):
+                for top in _rank("elev_loss_m"):                 out.append(_entry(top, "Vertical",  "elev_loss_m",   "value_m",   "elev"))
+                for top in _rank("distance_km", src=unassisted): out.append(_entry(top, "Longest",   "distance_km",   "value_km",  "dist"))
+                for top in _rank("max_speed_kmh"):               out.append(_entry(top, "Top speed", "max_speed_kmh", "value_kmh", "speed"))
+                for top in _rank("duration_sec",  src=unassisted): out.append(_entry(top, "Duration", "duration_sec", "value_sec", "dur"))
+            else:
+                for top in _rank("distance_km", src=unassisted): out.append(_entry(top, "Longest",   "distance_km",   "value_km",  "dist"))
+                for top in _rank("elev_gain_m"):                 out.append(_entry(top, "Climbing",  "elev_gain_m",   "value_m",   "elev"))
+                for top in _rank("elev_loss_m"):                 out.append(_entry(top, "Descent",   "elev_loss_m",   "value_m",   "elev"))
+                for top in _rank("max_speed_kmh"):               out.append(_entry(top, "Top speed", "max_speed_kmh", "value_kmh", "speed"))
+                for top in _rank("duration_sec",  src=unassisted): out.append(_entry(top, "Duration", "duration_sec", "value_sec", "dur"))
+            return out
+
+        prs = _build_prs(type_acts)   # all-time
+        # Per-year top-1 snapshots so the frontend can merge any year-chip
+        # selection client-side. Top-1 per year, then max across selected
+        # years, is equivalent to running the rank on the union of those
+        # years' activities (which is what the user expects from the
+        # "Records" column when they toggle year chips).
+        prs_by_year: dict = {}
+        acts_by_year: dict = {}
+        for a in type_acts:
+            yr = (a.get("date") or "")[:4]
+            if yr.isdigit():
+                acts_by_year.setdefault(yr, []).append(a)
+        for yr, acts in acts_by_year.items():
+            prs_by_year[yr] = _build_prs(acts)
 
         rollups[tid] = {
             "days":            len(unique_dates),
@@ -1277,6 +1279,7 @@ def _summary_data(days_back: int, units: str) -> dict:
             "current_streak":  current_streak,
             "last_date":       last_date_iso,
             "prs":             prs,
+            "prs_by_year":     prs_by_year,
         }
         # avg_speed: total distance / total riding time
         total_dist = rollups[tid]["distance_km"]
@@ -1467,7 +1470,7 @@ def _make_etag(*parts) -> str:
 
 # Bump when changing the shape/contents of /api/activity responses so clients
 # refetch even if all input files are unchanged.
-_ACTIVITY_RESPONSE_VERSION = 9
+_ACTIVITY_RESPONSE_VERSION = 10
 
 
 @app.route("/api/activities")
@@ -1719,7 +1722,8 @@ def api_activity(filename):
     issues = [] if file_meta.get("issues_approved") else _detect_issues_cached(data)
     resp = jsonify({**data, "meta": file_meta, "regions": regions, "place": place,
                     "effective_type": eff_type, "issues": issues,
-                    "excluded": bool(file_meta.get("excluded_from_stats"))})
+                    "excluded": bool(file_meta.get("excluded_from_stats")),
+                    "effective_assisted": _is_effectively_assisted(file_meta, regions, all_regions)})
     resp.set_etag(etag)
     resp.headers["Cache-Control"] = "no-cache"
     return resp
@@ -1921,8 +1925,13 @@ def api_save_metadata(filename):
         abort(404)
     body    = request.get_json(force=True) or {}
     allowed = {"type", "title", "location", "notes", "trim", "issues_approved",
-               "smoothing", "excluded_from_stats", "regions_pinned"}
+               "smoothing", "excluded_from_stats", "regions_pinned", "assisted"}
     update  = {k: v for k, v in body.items() if k in allowed}
+    # `assisted` is a tri-state override (True / False / null). Coerce to bool
+    # when present so the JSON file holds a clean shape; null means "clear
+    # the override" (handled by the empty-value strip below).
+    if "assisted" in update and update["assisted"] is not None:
+        update["assisted"] = bool(update["assisted"])
     # Shape-check structured fields so a bad payload doesn't corrupt metadata.
     if "trim" in update and update["trim"]:
         update["trim"] = _validate_trim(update["trim"])
@@ -2699,7 +2708,10 @@ def _compute_training_load(n_weeks: int, type_filter: set | None = None) -> dict
             "label":       td.get("label", tid),
             "color":       td.get("color", "#9ca3af"),
             "color_bg":    td.get("bg", "#2a2a2a"),
-            "glyph":       (td.get("label", tid)[:1] or "?").upper(),
+            # Frontend prefers `t.glyph` (set on Setup) over the
+            # id-derived fallback. Single-letter fallback retained for
+            # historical activity types that pre-date the glyph field.
+            "glyph":       td.get("glyph") or (td.get("label", tid)[:1] or "?").upper(),
             "days":        len(b["days"]),
             "moving_h":    round(b["moving_h"], 1),
             "elev_gain_m": b["elev_gain_m"],
@@ -3495,6 +3507,28 @@ def _effective_type_for(meta_type: str, region_ids: list[str], regions: list[dic
     return ""
 
 
+def _is_effectively_assisted(meta: dict, region_ids: list, regions: list) -> bool:
+    """True when an activity should be treated as lift- or shuttle-assisted.
+
+    Activity-level `meta.assisted` overrides everything (set to True or False
+    explicitly to force a per-ride answer). When unset, fall back to any
+    matched region having `assisted: True` — typical use is flagging a ski
+    hill or DH bike park so every ride there is auto-tagged.
+
+    Used to exclude lapping rides from distance/duration record rankings
+    where they'd otherwise dominate against point-to-point efforts.
+    """
+    if isinstance(meta, dict) and meta.get("assisted") is not None:
+        return bool(meta["assisted"])
+    if not region_ids:
+        return False
+    by_id = {r["id"]: r for r in regions}
+    for rid in region_ids:
+        if (by_id.get(rid) or {}).get("assisted"):
+            return True
+    return False
+
+
 # Cache of (filename, gpx_mtime, regions_geom_hash) → [region_ids]. Region
 # matching is driven by the track centroid and polygon point-in-polygon; for
 # our dataset that's O(regions) per activity per rebuild, which adds up to
@@ -3756,6 +3790,10 @@ def api_types():
         new_type = {
             "id":    tid,
             "label": label,
+            # Glyph defaults to a 3-char uppercase slice of the label (or
+            # the id, if the label is too short). User can override on
+            # the Setup page.
+            "glyph": _normalise_glyph(body.get("glyph") or label or tid),
             "color": body.get("color", "#9ca3af"),
             "bg":    body.get("bg",    "#2a2a2a"),
         }
@@ -3763,6 +3801,14 @@ def api_types():
         save_types(types)
         return jsonify(new_type)
     return jsonify(load_types())
+
+
+def _normalise_glyph(raw: str) -> str:
+    """3-char uppercase glyph; strips non-alphanumerics and pads/truncates."""
+    if not raw:
+        return "?"
+    cleaned = "".join(c for c in str(raw) if c.isalnum()).upper()
+    return (cleaned[:3] or "?")
 
 
 @app.route("/api/types/<type_id>", methods=["PATCH", "DELETE"])
@@ -3789,6 +3835,8 @@ def api_type(type_id):
         for k in ("label", "color", "bg"):
             if k in body:
                 types[idx][k] = body[k]
+        if "glyph" in body:
+            types[idx]["glyph"] = _normalise_glyph(body["glyph"])
     save_types(types)
     return jsonify({"ok": True})
 
@@ -4202,6 +4250,7 @@ def api_regions():
             "default_type":         body.get("default_type", ""),
             "winter_default_type":  body.get("winter_default_type", ""),
             "winter_months":        body.get("winter_months") or [11, 12, 1, 2, 3, 4],
+            "assisted":             bool(body.get("assisted", False)),
             "source":               body.get("source", ""),
         }
         regions.append(region)
@@ -4221,9 +4270,11 @@ def api_region(region_id):
     else:
         body = request.get_json(force=True) or {}
         for k in ("name", "color", "geometry", "default_type",
-                  "winter_default_type", "winter_months"):
+                  "winter_default_type", "winter_months", "assisted"):
             if k in body:
                 regions[idx][k] = body[k]
+        if "assisted" in regions[idx]:
+            regions[idx]["assisted"] = bool(regions[idx]["assisted"])
     save_regions(regions)
     return jsonify({"ok": True})
 

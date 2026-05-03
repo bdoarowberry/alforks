@@ -38,6 +38,15 @@
     #exclude-activity-btn:hover { color: #f59e0b; border-color: #f59e0b; background: #2a1f0e; }
     #exclude-activity-btn.active { color: #fff; border-color: #f59e0b; background: #f59e0b; }
     #exclude-activity-btn.active:hover { background: #d97706; border-color: #d97706; }
+    /* Lift / shuttle button — text label, distinguished by colour from
+       Exclude. Inherited (region-driven) state shows muted; explicit
+       override (meta.assisted=true) shows solid amber. */
+    #assisted-activity-btn { font-size: 9px; font-family: var(--font-mono, ui-monospace, monospace);
+                             letter-spacing: 0.06em; padding: 0 7px; color: #888; border-color: #2a2d35; }
+    #assisted-activity-btn:hover { color: #d4d4d4; border-color: #3a3d45; }
+    #assisted-activity-btn.inherited { color: #f59e0b; border-color: #4a3a1f; }
+    #assisted-activity-btn.active    { color: #fff;     border-color: #f59e0b; background: #f59e0b; }
+    #assisted-activity-btn.active:hover { background: #d97706; border-color: #d97706; }
     #delete-activity-btn { color: #ef4444; border-color: #4a2020; }
     #delete-activity-btn:hover { color: #fff; border-color: #ef4444; background: #ef4444; }
 
@@ -574,6 +583,8 @@
                   title="Pair this activity with another and overlay them on a map">⇄</button>
           <button id="exclude-activity-btn" class="ah-action-btn" onclick="toggleExcluded()"
                   title="Exclude from statistics">⊘</button>
+          <button id="assisted-activity-btn" class="ah-action-btn" onclick="toggleAssisted()"
+                  title="Lift / shuttle assisted">LIFT</button>
           <button id="delete-activity-btn" class="ah-action-btn" onclick="deleteCurrent()"
                   title="Delete this ride log">🗑</button>
         </div>
@@ -823,7 +834,7 @@ function applyTypeStyle(el, typeId) {
   if (icon) {
     if (t) {
       icon.style.background = t.color;
-      icon.textContent      = typeGlyph(t.id);
+      icon.textContent      = typeGlyph(t);
       icon.title            = t.label;
     } else {
       icon.style.background = 'var(--text-muted)';
@@ -2316,6 +2327,29 @@ async function toggleExcluded() {
   await fetchActivities(currentFilename);
 }
 
+async function toggleAssisted() {
+  // Three observable states for the user, two persisted ones:
+  //   ┌───────────────────────────┬────────────────┬─────────────────┐
+  //   │ before click              │ persisted      │ becomes         │
+  //   ├───────────────────────────┼────────────────┼─────────────────┤
+  //   │ off (region & meta both)  │ -              │ on  (override)  │
+  //   │ inherited from region     │ -              │ off (override)  │
+  //   │ on  (override or region)  │ true / inherit │ off / inherit   │
+  //   └───────────────────────────┴────────────────┴─────────────────┘
+  // Toggle simply flips the effective value via meta.assisted. No way to
+  // "clear back to inherit" from this button — fine, since unchecking it
+  // just sets meta.assisted=false explicitly which has the same effect
+  // unless the region default ever flips later.
+  if (!currentFilename) return;
+  const eff = !!trackData?.effective_assisted;
+  await fetch(`/api/activity/${encodeURIComponent(currentFilename)}/metadata`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ assisted: !eff }),
+  });
+  await loadActivity(currentFilename);
+  await fetchActivities(currentFilename);
+}
+
 async function approveIssues() {
   if (!currentFilename) return;
   if (!confirm('Approve this recording? The warnings will be permanently suppressed for this activity, even if you trim or edit it later.')) return;
@@ -2696,6 +2730,23 @@ async function loadActivity(filename) {
   excludeBtn.title = trackData.excluded
     ? 'Excluded from statistics — click to include'
     : 'Exclude from statistics';
+
+  // Assisted (lift / shuttle) button. Three visual states:
+  //   • plain      — neither region nor meta marks this assisted
+  //   • inherited  — region marks the area assisted, no per-ride override
+  //   • active     — explicit per-ride override (meta.assisted = true)
+  // Either of the latter two count as "effectively assisted" → click to flip.
+  const assistedBtn = document.getElementById('assisted-activity-btn');
+  if (assistedBtn) {
+    const metaAssisted = trackData?.meta?.assisted;
+    const eff = !!trackData?.effective_assisted;
+    assistedBtn.classList.remove('active', 'inherited');
+    if (metaAssisted === true)             assistedBtn.classList.add('active');
+    else if (eff && metaAssisted == null)  assistedBtn.classList.add('inherited');
+    assistedBtn.title = eff
+      ? 'Assisted (lift / shuttle) — click to mark as self-powered'
+      : 'Mark as lift / shuttle assisted';
+  }
 
   // Issue warnings + Approve button
   const issuesEl = document.getElementById('header-issues');

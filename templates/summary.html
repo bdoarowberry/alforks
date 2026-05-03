@@ -49,10 +49,17 @@
     .s2-eyebrow-hero { font-size: 11px; color: var(--text-tertiary); letter-spacing: 0.18em; text-transform: uppercase; }
     .s2-eyebrow-section { font-size: 10px; color: var(--text-tertiary); letter-spacing: 0.18em; text-transform: uppercase; margin-top: 4px; }
 
-    /* "By activity" header row — eyebrow on the left, year chips on the right.
-       Extra top margin so it visually separates from the rolling-365 KPI strip
-       above (the page-level gap of 22px alone reads as too tight here). */
-    .s2-activities-header { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-top: 22px; flex-wrap: wrap; }
+    /* Promoted section titles. Sized to match the page-title scale used on
+       Logs / Compare / Setup / Training so the app reads consistently
+       across pages. */
+    .s2-section-title { font-size: 1.4rem; font-weight: 500; color: #fff;
+                        letter-spacing: -0.02em; margin: 0; line-height: 1.2; }
+
+    /* "By activity" header — title on its own row, year chips on the row
+       below it. Extra top margin so it visually separates from the
+       rolling-365 KPI strip above (the page-level gap of 22px alone reads
+       as too tight here). */
+    .s2-activities-header { display: flex; flex-direction: column; gap: 10px; margin-top: 22px; }
     .s2-year-chips { display: inline-flex; gap: 4px; flex-wrap: wrap; }
     .s2-year-chips button { all: unset; cursor: pointer; padding: 4px 10px; font-size: 10px;
                             font-family: var(--mono); letter-spacing: 0.04em;
@@ -62,18 +69,24 @@
     .s2-year-chips button:hover:not(.on) { color: var(--text-secondary); }
 
     /* ── Page header ─────────────────────────────────────────────────── */
-    .s2-head { display: flex; align-items: flex-end; justify-content: space-between; }
-    .s2-head h1 { font-size: 32px; font-weight: 500; margin: 8px 0 0 0; letter-spacing: -0.02em; }
-    .s2-head h1 .suffix { color: rgba(255,255,255,0.45); font-weight: 300; }
-    .s2-head .right { text-align: right; }
-    .s2-head .right .last-date { font-size: 16px; font-family: var(--mono); margin-top: 6px; }
-    .s2-head .right .ago { margin-left: 10px; font-size: 13px; }
-    .s2-head .right .ago.fresh { color: var(--pos); }
-    .s2-head .right .ago.warm  { color: var(--neg); }
-    .s2-head .right .ago.neutral { color: #fff; }
+    /* Promoted section title left, "Last activity" caption right — both on
+       the same baseline. The big-number hero moved into the KPI strip
+       below, so the head row stays light. Bottom margin gives the KPI
+       box room to breathe (in addition to the page-level 22px gap). */
+    .s2-head { display: flex; align-items: baseline; justify-content: space-between; gap: 18px; flex-wrap: wrap; margin-bottom: 14px; }
+    .s2-head .last { font-size: 13px; color: var(--text-secondary); font-family: var(--mono); white-space: nowrap; }
+    .s2-head .last .lbl { color: var(--text-tertiary); letter-spacing: 0.14em; text-transform: uppercase; font-size: 10px; margin-right: 8px; }
+    .s2-head .last .date { color: #fff; }
+    .s2-head .last .ago { margin-left: 10px; }
+    .s2-head .last .ago.fresh { color: var(--pos); }
+    .s2-head .last .ago.warm  { color: var(--neg); }
+    .s2-head .last .ago.neutral { color: #fff; }
 
     /* ── KPI strip ──────────────────────────────────────────────────── */
-    .s2-kpi { display: grid; grid-template-columns: repeat(5, 1fr); gap: 1px;
+    /* Six cells (Days outside · Last 2 weeks · Distance · Climbing ·
+       Descent · Moving). Boxed — hairline outer border with a 1 px gap
+       letting the border colour show through as inter-cell dividers. */
+    .s2-kpi { display: grid; grid-template-columns: repeat(6, 1fr); gap: 1px;
               background: var(--border-hair); border: 1px solid var(--border-hair);
               border-radius: 4px; overflow: hidden; }
     .s2-kpi .cell { background: var(--bg-card); padding: 20px 22px; }
@@ -146,8 +159,10 @@
     .s2-chart .year-legend { display: flex; gap: 12px; margin-top: 8px; justify-content: flex-end; font-size: 9px; font-family: var(--mono); }
     .s2-chart .year-legend .swatch { width: 10px; height: 2px; border-radius: 1px; display: inline-block; margin-right: 5px; vertical-align: middle; }
 
-    /* Body grid (Performance / Recent / Records) */
-    .s2-body-grid { display: grid; grid-template-columns: 1fr 1.4fr 1fr; gap: 28px; margin-top: 24px; }
+    /* Body grid (Performance / Recent / Records / All-time records) —
+       Performance is the narrowest column since it's only 4 stat rows;
+       Recent is the widest because it carries 6-column ride rows. */
+    .s2-body-grid { display: grid; grid-template-columns: 0.7fr 1.6fr 1fr 1fr; gap: 24px; margin-top: 24px; }
     @media (max-width: 960px) { .s2-body-grid { grid-template-columns: 1fr; } }
     .s2-perf .row, .s2-prs .row { display: flex; justify-content: space-between; padding: 6px 0; font-size: 12px; border-bottom: 1px solid var(--border-divider); }
     .s2-perf .row:last-child, .s2-prs .row:last-child { border-bottom: none; }
@@ -188,7 +203,6 @@
 </header>
 
 <main class="s2-stage">
-  <h1 style="font-size: 1.4rem; font-weight: 500; color: #fff; letter-spacing: -0.02em; margin: 0;">Summary</h1>
   <div id="root">
     <div class="s2-loading">Loading summary…</div>
   </div>
@@ -247,9 +261,9 @@ async function init() {
 }
 
 function rangeLabel(d) {
-  if (d === 365) return 'Rolling 365 days';
-  if (d === 90)  return 'Last 90 days';
-  if (d === 30)  return 'Last 30 days';
+  if (d === 365) return 'Rolling 365 Days';
+  if (d === 90)  return 'Last 90 Days';
+  if (d === 30)  return 'Last 30 Days';
   return `${d}d`;
 }
 
@@ -264,19 +278,49 @@ function render() {
 }
 
 function renderActivitiesHeader() {
-  // Eyebrow on the left, year-toggle chips on the right. Toggling a chip
-  // re-renders the activities below — the chip set drives the YoY chart's
-  // year selection.
+  // Promoted section title with year-toggle chips on the row below it.
+  // Toggling a chip re-renders the activities below — the chip set drives
+  // the YoY chart's year selection.
   const wrap = document.createElement('div');
   wrap.className = 's2-activities-header';
-  const eb = document.createElement('div');
-  eb.className = 's2-eyebrow-section';
-  eb.textContent = 'By activity';
-  wrap.appendChild(eb);
+  const title = document.createElement('h2');
+  title.className = 's2-section-title';
+  title.textContent = 'By Activity';
+  wrap.appendChild(title);
 
   const chips = document.createElement('div');
   chips.className = 's2-year-chips';
-  const allYears = (DATA.years || []).slice().sort();
+  // Newest year first — easier to scan recent activity at a glance.
+  const allYears = (DATA.years || []).slice().sort((a, b) => b - a);
+
+  const refresh = () => {
+    const oldActs = document.querySelector('.s2-activities');
+    const newActs = renderActivities();
+    if (oldActs) oldActs.replaceWith(newActs);
+    const oldHeader = document.querySelector('.s2-activities-header');
+    const newHeader = renderActivitiesHeader();
+    if (oldHeader) oldHeader.replaceWith(newHeader);
+  };
+
+  // "All" toggle — convenience to flood-select / collapse to a sensible
+  // default. When every year is on, click collapses to the most recent
+  // 3 (the same default init() picks). Otherwise it selects every year.
+  const allOn = allYears.length > 0 && allYears.every(y => SELECTED_YEARS.has(y));
+  const allBtn = document.createElement('button');
+  allBtn.type = 'button';
+  allBtn.textContent = 'All';
+  if (allOn) allBtn.classList.add('on');
+  allBtn.addEventListener('click', () => {
+    if (allOn) {
+      const recent = allYears.slice(0, 3);  // already desc → these are newest
+      SELECTED_YEARS = new Set(recent);
+    } else {
+      SELECTED_YEARS = new Set(allYears);
+    }
+    refresh();
+  });
+  chips.appendChild(allBtn);
+
   allYears.forEach(y => {
     const btn = document.createElement('button');
     btn.type = 'button';
@@ -291,15 +335,7 @@ function renderActivitiesHeader() {
       } else {
         SELECTED_YEARS.add(y);
       }
-      // Re-render activities only — KPI / ribbon / header don't depend on
-      // year selection.
-      const oldActs = document.querySelector('.s2-activities');
-      const newActs = renderActivities();
-      if (oldActs) oldActs.replaceWith(newActs);
-      // Re-render the chip row to update on/off styling.
-      const oldHeader = document.querySelector('.s2-activities-header');
-      const newHeader = renderActivitiesHeader();
-      if (oldHeader) oldHeader.replaceWith(newHeader);
+      refresh();
     });
     chips.appendChild(btn);
   });
@@ -315,16 +351,11 @@ function renderHead() {
   let agoCls = 'neutral';
   if (ds != null) agoCls = ds <= 1 ? 'fresh' : ds <= 7 ? 'neutral' : 'warm';
   wrap.innerHTML = `
-    <div>
-      <div class="s2-eyebrow-hero">${rangeLabel(DATA.daysBack)}</div>
-      <h1>${t.days} <span class="suffix">days outside</span></h1>
-    </div>
-    <div class="right">
-      <div class="s2-eyebrow">Last activity</div>
-      <div class="last-date">
-        ${t.last_date ? fmtDateShort(t.last_date) : '—'}
-        ${ds != null ? `<span class="ago ${agoCls}">· ${ds}d ago</span>` : ''}
-      </div>
+    <h2 class="s2-section-title">${rangeLabel(DATA.daysBack)}</h2>
+    <div class="last">
+      <span class="lbl">Last activity</span>
+      <span class="date">${t.last_date ? fmtDateShort(t.last_date) : '—'}</span>
+      ${ds != null ? `<span class="ago ${agoCls}">· ${ds}d ago</span>` : ''}
     </div>`;
   return wrap;
 }
@@ -334,8 +365,9 @@ function renderKpi() {
   const wrap = document.createElement('div');
   wrap.className = 's2-kpi num';
   const cells = [
-    ['Distance',       fmtDist(t.distance_km ?? 0),              'km'],
+    ['Days outside',   `${t.days ?? 0}`,                         'd'],
     ['Last 2 weeks',   `${t.last_14d_active_days ?? 0} of 14`,   'd'],
+    ['Distance',       fmtDist(t.distance_km ?? 0),              'km'],
     ['Total climbing', fmtElev(t.elev_gain_m),                   'm'],
     ['Total descent',  fmtElev(t.elev_loss_m),                   'm'],
     ['Moving time',    fmtH(t.moving_h),                         null],
@@ -360,7 +392,7 @@ function renderRibbon() {
       ${DATA.activities.map(a => `
         <span class="legend-item">
           <span class="legend-dot" style="background:${a.accent}"></span>
-          <span class="legend-label">${typeGlyph(a.id)}</span>
+          <span class="legend-label">${typeGlyph(a)}</span>
         </span>`).join('')}
     </div>`;
   wrap.appendChild(top);
@@ -460,7 +492,7 @@ function renderActivityRow(a) {
   }
 
   head.innerHTML = `
-    <span class="glyph" style="background:${a.accentSoft};color:${a.accent}">${typeGlyph(a.id)}</span>
+    <span class="glyph" style="background:${a.accentSoft};color:${a.accent}">${typeGlyph(a)}</span>
     <span class="name">${a.label}</span>
     <span class="spacer"></span>
     ${headlineHtml}
@@ -684,7 +716,8 @@ function renderBodyGrid(a) {
   wrap.className = 's2-body-grid';
   wrap.appendChild(renderPerformance(a));
   wrap.appendChild(renderRecent(a));
-  wrap.appendChild(renderRecords(a));
+  wrap.appendChild(renderRecords(a, 'window'));
+  wrap.appendChild(renderRecords(a, 'all'));
   return wrap;
 }
 
@@ -737,10 +770,39 @@ function renderRecent(a) {
   return wrap;
 }
 
-function renderRecords(a) {
+function prCompareValue(pr) {
+  if (pr.value_km  != null) return pr.value_km;
+  if (pr.value_m   != null) return pr.value_m;
+  if (pr.value_kmh != null) return pr.value_kmh;
+  if (pr.value_sec != null) return pr.value_sec;
+  return 0;
+}
+
+function periodPrs(rollup, selectedYears) {
+  // Merge per-year top-1 entries across the user's selected years and
+  // pick the best per label. Order follows the all-time list so columns
+  // line up row-for-row.
+  const byYear = rollup.prs_by_year || {};
+  const byLabel = new Map();
+  selectedYears.forEach(y => {
+    (byYear[String(y)] || []).forEach(pr => {
+      const cur = byLabel.get(pr.label);
+      if (!cur || prCompareValue(pr) > prCompareValue(cur)) byLabel.set(pr.label, pr);
+    });
+  });
+  const order = (rollup.prs || []).map(p => p.label);
+  return order.map(l => byLabel.get(l)).filter(Boolean);
+}
+
+function renderRecords(a, scope = 'all') {
+  // scope='window' → bests across the user's selected years (chip filter)
+  // scope='all'    → lifetime bests
   const r = DATA.rollups[a.id] || {};
-  const prs = (r.prs || []).slice(0, 5);
-  const wrap = document.createElement('div');
+  const list  = scope === 'window' ? periodPrs(r, [...SELECTED_YEARS]) : (r.prs || []);
+  const prs   = list.slice(0, 5);
+  const title = scope === 'window' ? 'records' : 'all time records';
+  const empty = scope === 'window' ? '— no records in this period —' : '— no records yet —';
+  const wrap  = document.createElement('div');
   wrap.className = 's2-prs num';
 
   function prValue(pr) {
@@ -751,9 +813,9 @@ function renderRecords(a) {
     return '—';
   }
 
-  wrap.innerHTML = `<div class="s2-eyebrow" style="margin-bottom:12px">records</div>
+  wrap.innerHTML = `<div class="s2-eyebrow" style="margin-bottom:12px">${title}</div>
     ${prs.length === 0
-      ? '<div class="row" style="border:none;color:rgba(255,255,255,0.3);font-style:italic;display:block;padding-top:8px">— no records yet —</div>'
+      ? `<div class="row" style="border:none;color:rgba(255,255,255,0.3);font-style:italic;display:block;padding-top:8px">${empty}</div>`
       : prs.map(pr => {
         const inner = `
         <span class="star" style="color:${a.accent}">★</span>
