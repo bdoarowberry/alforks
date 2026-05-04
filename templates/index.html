@@ -319,7 +319,7 @@
     /* Activity type indicator in the header — text badge (3–4 letter
        abbreviation) on a coloured background, consistent with Logs /
        Compare / Setup / Training. Click opens the type picker. */
-    #header-type-icon { position: relative; display: inline-flex; align-items: center; justify-content: center; min-width: 44px; height: 26px; padding: 0 8px; border-radius: 4px; cursor: pointer; flex-shrink: 0; user-select: none; transition: filter 0.1s; font-family: var(--font-mono); font-size: 11px; font-weight: 600; letter-spacing: 0.05em; color: #fff; }
+    #header-type-icon { position: relative; display: inline-flex; align-items: center; justify-content: center; min-width: 44px; height: 26px; padding: 0 8px; border-radius: 4px; cursor: pointer; flex-shrink: 0; user-select: none; transition: filter 0.1s; font-family: var(--font-mono); font-size: 11px; font-weight: 600; letter-spacing: 0.05em; }
     #header-type-icon:hover { filter: brightness(1.15); }
     .ah-row-place { font-size: 0.72rem; color: #fff; padding: 2px 4px; min-height: 1em; }
     #header-issues { background: #2a1f0e; border: 1px solid #f59e0b; border-radius: 4px; padding: 6px 10px; margin-top: 6px; font-size: 0.74rem; color: #f59e0b; display: flex; align-items: flex-start; gap: 10px; }
@@ -758,10 +758,12 @@ const TYPE_COLORS = Object.fromEntries(TYPES.map(t => [t.id, t.color]));
 const TYPE_BG     = Object.fromEntries(TYPES.map(t => [t.id, t.bg]));
 
 function typeShortLabel(id) {
-  const lbl = TYPE_LABELS[id] || id;
-  // Abbreviate common types for compact display
-  if (lbl === 'Mountain Bike') return 'MTB';
-  return lbl;
+  // Always use the canonical 3-letter glyph — typeGlyph() reads the
+  // per-type `glyph` field set in Setup, falling back to a derived
+  // 3-char acronym when the user hasn't customised it. Older callers
+  // expected the legacy "Mountain Bike → MTB" hard-code which broke
+  // the moment a label was edited.
+  return typeGlyph(id);
 }
 
 // Populate the header type selector + sidebar filter + bulk type dropdowns
@@ -833,11 +835,16 @@ function applyTypeStyle(el, typeId) {
   const icon = document.getElementById('header-type-icon');
   if (icon) {
     if (t) {
-      icon.style.background = t.color;
+      // Match the sidebar / canonical type-badge style: dark tinted
+      // background (t.bg) with the saturated colour as the text. Keeps
+      // every type icon across the app on the same visual treatment.
+      icon.style.background = t.bg;
+      icon.style.color      = t.color;
       icon.textContent      = typeGlyph(t);
       icon.title            = t.label;
     } else {
       icon.style.background = 'var(--text-muted)';
+      icon.style.color      = '#fff';
       icon.textContent      = '?';
       icon.title            = 'Unknown type — click to set';
     }
@@ -2361,6 +2368,19 @@ async function approveIssues() {
   await fetchActivities(currentFilename);
 }
 
+async function repairSpikes(enable = true) {
+  // Toggle GPS phantom-warp repair for this activity. The actual repair runs
+  // server-side at request time and re-derives distance / speed / bbox from
+  // interpolated lat-lons — the GPX file is never modified.
+  if (!currentFilename) return;
+  await fetch(`/api/activity/${encodeURIComponent(currentFilename)}/metadata`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ spike_repair: !!enable }),
+  });
+  await loadActivity(currentFilename);
+  await fetchActivities(currentFilename);
+}
+
 async function deleteCurrent() {
   if (!currentFilename) return;
   const label = trackData?.meta?.title || currentFilename;
@@ -2748,16 +2768,27 @@ async function loadActivity(filename) {
       : 'Mark as lift / shuttle assisted';
   }
 
-  // Issue warnings + Approve button
+  // Issue warnings + Approve button. The Repair-spikes button only renders
+  // when a `speed_spike` issue is present — clicking it sets meta.spike_repair
+  // so the GPS phantoms get interpolated out at request time.
   const issuesEl = document.getElementById('header-issues');
   const issues = trackData.issues || [];
-  if (issues.length) {
+  const hasSpikeIssue = issues.some(i => i.code === 'speed_spike');
+  const repairOn = !!trackData?.meta?.spike_repair;
+  if (issues.length || repairOn) {
+    const buttons = [];
+    if (hasSpikeIssue) buttons.push(`<button onclick="repairSpikes()">Repair spikes</button>`);
+    if (repairOn)      buttons.push(`<button onclick="repairSpikes(false)">Disable repair</button>`);
+    if (issues.length) buttons.push(`<button onclick="approveIssues()">Approve</button>`);
+    const banner = issues.length
+      ? `⚠ ${issues.length} possible issue${issues.length===1?'':'s'}`
+      : `✓ Spike repair active`;
     issuesEl.innerHTML = `
       <div class="issues-text">
-        <strong>⚠ ${issues.length} possible issue${issues.length===1?'':'s'}</strong>
+        <strong>${banner}</strong>
         <ul style="margin:0 0 0 18px;padding:0;">${issues.map(i => `<li></li>`).join('')}</ul>
       </div>
-      <button onclick="approveIssues()">Approve</button>`;
+      ${buttons.join('')}`;
     issuesEl.querySelectorAll('li').forEach((li, i) => { li.textContent = issues[i].msg; });
     issuesEl.style.display = 'flex';
   } else {
@@ -3023,8 +3054,12 @@ function renderActivityList(reSelectFilename) {
     const regionPart = (act.regions || [])
       .map(id => _allRegions.find(x => x.id === id)?.name)
       .filter(Boolean).join(' · ');
-    const typeLabel = TYPES.find(t => t.id === typeKey)?.label || '';
-    const displayName = meta.title || regionPart || typeLabel || act.filename;
+    // Display-name fallback: user title → matched region(s) → GPX-embedded
+    // name (e.g. "Aug 22, 2024 PowderedToast Ride") → filename. We *don't*
+    // fall through to the type label because it's already shown as the
+    // coloured badge in the date row above; "Mountain Biking" repeated
+    // beneath the badge was just visual noise.
+    const displayName = meta.title || regionPart || act.name || act.filename;
     const dist = act.stats.distance_km != null ? `${act.stats.distance_km} km` : '';
     const dur  = fmtDuration(act.stats.duration_sec, { showSeconds: true });
 

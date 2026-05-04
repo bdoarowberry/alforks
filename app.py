@@ -492,6 +492,8 @@ def _build_activity_entry(filename: str, meta: dict, regions: list[dict]) -> tup
     trim = file_meta.get("trim") or {}
     if trim:
         eff = _apply_trim(eff, trim)
+    if file_meta.get("spike_repair"):
+        eff = _apply_spike_repair(eff)
     sm = file_meta.get("smoothing") or {}
     if isinstance(sm, dict) and int(sm.get("window") or 0) > 1:
         eff = _apply_smoothing(eff, sm)
@@ -1470,7 +1472,7 @@ def _make_etag(*parts) -> str:
 
 # Bump when changing the shape/contents of /api/activity responses so clients
 # refetch even if all input files are unchanged.
-_ACTIVITY_RESPONSE_VERSION = 10
+_ACTIVITY_RESPONSE_VERSION = 11
 
 
 @app.route("/api/activities")
@@ -1709,6 +1711,8 @@ def api_activity(filename):
     trim = file_meta.get("trim") or {}
     if trim and not request.args.get("notrim"):
         data = _apply_trim(data, trim)
+    if file_meta.get("spike_repair") and not request.args.get("norepair"):
+        data = _apply_spike_repair(data)
     smoothing = file_meta.get("smoothing") or {}
     sm_window = int(smoothing.get("window") or 0) if isinstance(smoothing, dict) else 0
     if sm_window > 1 and not request.args.get("nosmoothing"):
@@ -1925,13 +1929,16 @@ def api_save_metadata(filename):
         abort(404)
     body    = request.get_json(force=True) or {}
     allowed = {"type", "title", "location", "notes", "trim", "issues_approved",
-               "smoothing", "excluded_from_stats", "regions_pinned", "assisted"}
+               "smoothing", "excluded_from_stats", "regions_pinned", "assisted",
+               "spike_repair"}
     update  = {k: v for k, v in body.items() if k in allowed}
     # `assisted` is a tri-state override (True / False / null). Coerce to bool
     # when present so the JSON file holds a clean shape; null means "clear
     # the override" (handled by the empty-value strip below).
     if "assisted" in update and update["assisted"] is not None:
         update["assisted"] = bool(update["assisted"])
+    if "spike_repair" in update and update["spike_repair"] is not None:
+        update["spike_repair"] = bool(update["spike_repair"])
     # Shape-check structured fields so a bad payload doesn't corrupt metadata.
     if "trim" in update and update["trim"]:
         update["trim"] = _validate_trim(update["trim"])
@@ -3326,6 +3333,184 @@ def _apply_smoothing(data: dict, smoothing) -> dict:
             "smoothing_applied": applied}
 
 
+# ─── GPS phantom-warp detection + repair ───────────────────────────────────
+# Some GPS exports (notably Strava's stitched re-uploads) emit clusters of
+# 1-3 samples whose implied inter-point speed is wildly above the
+# surrounding ride. The existing speed clamp at parse time (>150 km/h)
+# misses them because they cluster around 100-130 km/h, and a length-5
+# median filter passes a 3-sample plateau through unchanged. Detection
+# here uses local-median context instead of an absolute threshold so it
+# scales to whatever activity speed the rider is actually doing.
+
+# A leg counts as a phantom if its implied km/h is > _SPIKE_RATIO × the
+# median of nearby legs AND above _SPIKE_FLOOR_KMH absolute. The floor
+# stops slow-walking GPS noise (where a 0.3→1.2 m/s jump is also a 4×
+# multiple of the local median) from constantly flagging.
+# A wider window helps the median resist contamination by adjacent
+# phantoms — a 3-sample warp cluster is less than a quarter of 21 samples,
+# so the median still reflects the true ride pace.
+_SPIKE_WINDOW = 10           # ± samples for the local-median context
+_SPIKE_RATIO = 4.0
+# Floor stops slow-walking GPS jitter (where 0.3→1.5 m/s blips are 5× the
+# local median) from constantly tripping. 40 km/h is well above any
+# plausible MTB / hike / fat-bike pace but below typical phantom warps.
+_SPIKE_FLOOR_KMH = 40.0
+# Absolute upper bound — anything implying speeds beyond this is flagged
+# regardless of local context. Necessary because warp clusters can be
+# longer than the median window (e.g. 40+ consecutive samples), which
+# contaminates the median itself and hides the cluster from the ratio
+# test. 80 km/h is safely above any of the user's activity types
+# (MTB / snowboard / hike / fat-bike) but below most phantom warps.
+_SPIKE_HARD_CAP_KMH = 80.0
+
+
+def _find_speed_spikes(pts: list) -> tuple:
+    """Detect phantom-warp legs. Returns (mask, max_implied_kmh):
+       - mask[i] is True when the leg from pts[i-1] to pts[i] implies an
+         outlier speed. Index 0 is always False — there's no leg into the
+         first point.
+       - max_implied_kmh is the highest implied km/h across all flagged
+         legs. 0.0 when nothing was flagged.
+    The implied speed comes from raw haversine / dt, which is what made
+    the warp anomalous in the first place — the per-point `speed` field
+    has already been median-filtered and may hide it.
+    """
+    n = len(pts)
+    if n < 2 * _SPIKE_WINDOW + 1:
+        return [False] * n, 0.0
+    speeds = [0.0] * n
+    for i in range(1, n):
+        t_prev, t_cur = pts[i-1].get("time"), pts[i].get("time")
+        if not t_prev or not t_cur:
+            continue
+        try:
+            dt = (datetime.fromisoformat(t_cur) - datetime.fromisoformat(t_prev)).total_seconds()
+        except Exception:
+            continue
+        if dt <= 0:
+            continue
+        d_m = haversine((pts[i-1]["lat"], pts[i-1]["lon"]),
+                        (pts[i]["lat"],   pts[i]["lon"]))
+        speeds[i] = (d_m / dt) * 3.6
+    phantom = [False] * n
+    max_implied = 0.0
+    for i in range(1, n):
+        if speeds[i] <= _SPIKE_FLOOR_KMH:
+            continue
+        lo = max(1, i - _SPIKE_WINDOW)
+        hi = min(n, i + _SPIKE_WINDOW + 1)
+        nbr = sorted(speeds[j] for j in range(lo, hi) if j != i and speeds[j] > 0)
+        if not nbr:
+            continue
+        med = nbr[len(nbr) // 2]
+        if speeds[i] > max(med * _SPIKE_RATIO, _SPIKE_FLOOR_KMH):
+            phantom[i] = True
+            if speeds[i] > max_implied:
+                max_implied = speeds[i]
+    return phantom, max_implied
+
+
+def _apply_spike_repair(data: dict) -> dict:
+    """Repair a track by clamping the distance contribution of each phantom
+    leg to the local-median leg length, and snapping the phantom point's
+    lat/lon to the nearest non-phantom anchor so the map renders the warp
+    as a straight skip rather than a 100 km/h jag. Re-derives cumulative
+    distance, per-point speed, bbox, and stats. Original GPX is untouched
+    — this is an at-request transform driven by meta.spike_repair = True.
+
+    We don't try to interpolate phantom positions back onto a "true" path
+    because in practice the warps are time-compression artifacts (the GPX
+    reports 5 s elapsed for 150 m of trail, with the underlying positions
+    on a smooth track). Interpolating between the surrounding anchors just
+    redistributes the same impossible speed across more samples.
+    """
+    pts = data.get("points") or []
+    n = len(pts)
+    if n < 3:
+        return data
+    phantom, _ = _find_speed_spikes(pts)
+    if not any(phantom):
+        return data
+
+    new_pts = [dict(p) for p in pts]
+
+    # Raw haversine leg lengths from the original positions, used both for
+    # accumulating clean legs and for finding the local median to clamp
+    # phantom legs to.
+    raw_legs = [0.0] * n
+    for k in range(1, n):
+        raw_legs[k] = haversine((pts[k-1]["lat"], pts[k-1]["lon"]),
+                                (pts[k]["lat"],   pts[k]["lon"])) / 1000
+
+    # Cumulative distance: for phantom legs, substitute the median of
+    # non-phantom legs in the surrounding window. Falls back to 0 if every
+    # neighbouring leg is itself a phantom (rare; only on a long run of
+    # consecutive warps with no clean anchor inside the window).
+    new_pts[0]["dist_km"] = 0.0
+    cum = 0.0
+    for k in range(1, n):
+        if phantom[k]:
+            lo = max(1, k - _SPIKE_WINDOW)
+            hi = min(n, k + _SPIKE_WINDOW + 1)
+            nbr = sorted(raw_legs[j] for j in range(lo, hi) if j != k and not phantom[j])
+            cum += nbr[len(nbr) // 2] if nbr else 0.0
+        else:
+            cum += raw_legs[k]
+        new_pts[k]["dist_km"] = round(cum, 4)
+
+    # Snap phantom positions to the previous (or next, for early phantoms)
+    # non-phantom anchor so the map draws a clean skip. Forward-fill is
+    # enough for the common case; one backward pass handles phantoms that
+    # appear before the first clean point.
+    last_good = None
+    for k in range(n):
+        if phantom[k]:
+            if last_good is not None:
+                new_pts[k]["lat"] = pts[last_good]["lat"]
+                new_pts[k]["lon"] = pts[last_good]["lon"]
+        else:
+            last_good = k
+    if any(phantom[:last_good or 0]) or (last_good is None):
+        next_good = None
+        for k in range(n - 1, -1, -1):
+            if phantom[k] and next_good is not None and \
+               (new_pts[k]["lat"] == pts[k]["lat"] and new_pts[k]["lon"] == pts[k]["lon"]):
+                new_pts[k]["lat"] = pts[next_good]["lat"]
+                new_pts[k]["lon"] = pts[next_good]["lon"]
+            elif not phantom[k]:
+                next_good = k
+
+    # Per-point speed re-derived from clamped cumulative distance, then
+    # passed through the same k=5 median filter that parse_gpx applies so
+    # max_speed stays consistent with how it's computed elsewhere.
+    raw_speeds = [None] * n
+    for k in range(1, n):
+        t_prev, t_cur = new_pts[k-1].get("time"), new_pts[k].get("time")
+        if not t_prev or not t_cur:
+            continue
+        try:
+            dt = (datetime.fromisoformat(t_cur) - datetime.fromisoformat(t_prev)).total_seconds()
+        except Exception:
+            continue
+        if dt > 0:
+            dd_km = new_pts[k]["dist_km"] - new_pts[k-1]["dist_km"]
+            raw_speeds[k] = dd_km / (dt / 3600)
+    smoothed = _median_filter(raw_speeds, k=5)
+    for k in range(n):
+        if smoothed[k] is not None:
+            new_pts[k]["speed"] = round(smoothed[k], 2)
+    if n > 1 and new_pts[0].get("speed") is None:
+        new_pts[0]["speed"] = new_pts[1].get("speed", 0)
+
+    bbox = (
+        min(p["lat"] for p in new_pts), min(p["lon"] for p in new_pts),
+        max(p["lat"] for p in new_pts), max(p["lon"] for p in new_pts),
+    )
+    new_stats = _stats_from_trimmed(new_pts, data.get("segments") or [], data.get("stats") or {})
+    return {**data, "points": new_pts, "bbox": bbox, "stats": new_stats,
+            "spike_repair_applied": {"count": sum(phantom)}}
+
+
 def _apply_trim(data: dict, trim: dict) -> dict:
     """Slice an activity to [start_km, end_km] (in original distances).
     Re-bases dist_km so the trimmed track starts at 0, adjusts segment
@@ -3457,7 +3642,23 @@ def _detect_issues(eff: dict) -> list[dict]:
             issues.append({"code": "teleport", "severity": "high",
                            "msg": f"GPS jump of {max_jump:.1f} km in under 5 min"})
 
-    # 5. GPS jitter — recorded path much longer than a smoothed path. Compute
+    # 5. Speed spikes — short clusters of points whose implied inter-point
+    # speed is wildly out of line with the surrounding ride. Distinct from
+    # rule 2 (absolute >150 km/h cap, which is rare and obvious) and rule 4
+    # (>1 km position jump, which is teleport not phantom). Catches Strava-
+    # export warps in the 60-130 km/h range that the absolute cap misses.
+    # Only fires when there's enough evidence that stats are likely
+    # impacted: ≥3 spikes, or a single high-magnitude spike (>80 km/h).
+    # Lower-confidence single spikes get logged silently so the repair
+    # button is still available, but don't create a noisy issue card.
+    if pts and not eff.get("spike_repair_applied"):
+        spikes, max_implied = _find_speed_spikes(pts)
+        n_spikes = sum(spikes)
+        if n_spikes >= 3 or (n_spikes >= 1 and max_implied >= 80.0):
+            issues.append({"code": "speed_spike", "severity": "med",
+                           "msg": f"{n_spikes} GPS sample{'' if n_spikes == 1 else 's'} with implausible inter-point speed (peak {max_implied:.0f} km/h)"})
+
+    # 6. GPS jitter — recorded path much longer than a smoothed path. Compute
     # a 5-point moving-average path and compare cumulative lengths.
     if len(pts) >= 30 and dist > 1.0:
         win = 5
@@ -4186,6 +4387,48 @@ def api_odd_times():
     for a in flagged:
         a.pop("_sort_key", None)
     return jsonify({"activities": flagged, "window": "21:00–07:00 local"})
+
+
+@app.route("/api/speed-spikes")
+def api_speed_spikes():
+    """Scan every activity for unrepaired GPS phantom warps. The expensive
+    bit is the per-leg haversine + local-median pass which has to read each
+    activity's full point list — a few seconds across a multi-year archive
+    on the first call, then served from the regular activity cache.
+    """
+    flagged: list[dict] = []
+    for act in all_activities():
+        if act.get("excluded"):
+            continue
+        file_meta = act.get("meta") or {}
+        if file_meta.get("spike_repair") or file_meta.get("issues_approved"):
+            # Already repaired or user-acknowledged — don't re-flag.
+            continue
+        data = get_activity(act["filename"])
+        if not data:
+            continue
+        pts = data.get("points") or []
+        if len(pts) < 2 * _SPIKE_WINDOW + 1:
+            continue
+        spikes, max_implied = _find_speed_spikes(pts)
+        n = sum(spikes)
+        if n < 3 and not (n >= 1 and max_implied >= 80.0):
+            continue
+        s = act.get("stats") or {}
+        flagged.append({
+            "filename":      act["filename"],
+            "name":          act.get("name") or act["filename"],
+            "date":          (act.get("date") or "")[:10],
+            "type":          act.get("effective_type") or "",
+            "regions":       [r for r in (act.get("regions") or [])],
+            "n_spikes":      n,
+            "max_implied":   round(max_implied, 1),
+            "distance_km":   s.get("distance_km"),
+            "duration_sec":  s.get("duration_sec"),
+            "max_speed_kmh": s.get("max_speed_kmh"),
+        })
+    flagged.sort(key=lambda a: (-a["max_implied"], -(a["n_spikes"] or 0)))
+    return jsonify({"activities": flagged})
 
 
 @app.route("/api/regions/<region_id>/usage")

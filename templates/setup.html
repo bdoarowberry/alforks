@@ -331,6 +331,7 @@
   <button class="tab-btn" onclick="showTab('types')">Activity Types</button>
   <button class="tab-btn" onclick="showTab('duplicates')">Duplicates</button>
   <button class="tab-btn" onclick="showTab('odd-times')">Odd Times</button>
+  <button class="tab-btn" onclick="showTab('speed-spikes')">GPS Spikes</button>
   <button class="tab-btn" onclick="showTab('fitness')">Fitness</button>
   <button class="tab-btn" onclick="showTab('sync')">Sync</button>
   <button class="tab-btn" onclick="showTab('archived')">Archived</button>
@@ -514,6 +515,26 @@
     <div id="odd-list"></div>
   </div>
 
+  <!-- Speed Spikes panel -->
+  <div id="speed-spikes-panel" class="tab-panel" style="flex-direction: column; padding: 24px; overflow-y: auto;">
+    <div style="display:flex;align-items:baseline;gap:14px;margin-bottom:6px;">
+      <h2 style="font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.08em; color: #bbb; font-weight: 500;">
+        GPS Speed Spikes
+      </h2>
+      <span id="spk-summary" style="font-size:0.75rem;color:#888;">—</span>
+      <button id="spk-refresh-btn" class="r-btn" onclick="loadSpeedSpikes()" style="margin-left:auto;">↻ Refresh</button>
+    </div>
+    <div style="font-size:0.78rem;color:#888;line-height:1.5;margin-bottom:16px;max-width:820px;">
+      Activities containing GPS samples whose implied inter-point speed is
+      &gt;4× the local-median pace and ≥40 km/h. Strava&apos;s downsampled
+      exports are the usual culprit. Click <strong>Repair</strong> to clamp
+      the offending legs to a sane local distance, or <strong>Open</strong>
+      to inspect the ride and approve / disable manually. Already-repaired
+      and previously-approved activities are hidden.
+    </div>
+    <div id="spk-list"></div>
+  </div>
+
   <!-- Sync panel -->
   <div id="sync-panel" class="tab-panel" style="flex-direction: column; padding: 24px; overflow-y: auto;">
     <h2 style="font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.08em; color: #bbb; margin-bottom: 16px; font-weight: 500;">
@@ -645,6 +666,7 @@ function showTab(name) {
   if (name === 'regions') setTimeout(() => map && map.invalidateSize(), 50);
   if (name === 'duplicates' && !_dupLoaded) loadDuplicates();
   if (name === 'odd-times' && !_oddLoaded) loadOddTimes();
+  if (name === 'speed-spikes' && !_spkLoaded) loadSpeedSpikes();
 }
 
 // ─── Duplicates management ───────────────────────────────────────────────────
@@ -1907,6 +1929,123 @@ function _renderOddRow(a) {
   row.appendChild(nameWrap);
   row.appendChild(metaEl);
   row.appendChild(openBtn);
+  return row;
+}
+
+// ─── Speed-spike management ─────────────────────────────────────────────────
+let _spkLoaded = false;
+
+async function loadSpeedSpikes() {
+  const btn     = document.getElementById('spk-refresh-btn');
+  const summary = document.getElementById('spk-summary');
+  const list    = document.getElementById('spk-list');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="rs-spinner">↻</span> Scanning…'; }
+  summary.textContent = 'Scanning…';
+  list.innerHTML = '';
+  try {
+    const r = await fetch('/api/speed-spikes?t=' + Date.now(), { cache: 'no-store' });
+    const d = await r.json();
+    _spkLoaded = true;
+    renderSpeedSpikes(d);
+  } catch (e) {
+    summary.textContent = 'Failed to load.';
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = '↻ Refresh'; }
+  }
+}
+
+function renderSpeedSpikes(payload) {
+  const summary = document.getElementById('spk-summary');
+  const list    = document.getElementById('spk-list');
+  const acts = payload.activities || [];
+  if (!acts.length) {
+    summary.textContent = '';
+    list.innerHTML = '<div class="dup-empty">No GPS spikes flagged — every ride looks clean.</div>';
+    return;
+  }
+  summary.textContent = `${acts.length} flagged`;
+  list.innerHTML = '';
+  acts.forEach(a => list.appendChild(_renderSpkRow(a)));
+}
+
+function _renderSpkRow(a) {
+  // Reuse the .odd-row layout — same column rhythm fits this data.
+  const row = document.createElement('div');
+  row.className = 'odd-row';
+
+  const dateEl = document.createElement('div');
+  dateEl.className = 'odd-date';
+  dateEl.textContent = a.date || '—';
+
+  const peakEl = document.createElement('div');
+  peakEl.className = 'odd-time';
+  peakEl.textContent = `${a.max_implied} kph`;
+  peakEl.title = `Peak implied speed across ${a.n_spikes} flagged sample${a.n_spikes === 1 ? '' : 's'}`;
+
+  const nameWrap = document.createElement('div');
+  nameWrap.style.minWidth = '0';
+  const nameEl = document.createElement('div');
+  nameEl.className = 'odd-name';
+  nameEl.textContent = a.name;
+  nameEl.title = a.filename;
+  const subEl = document.createElement('div');
+  subEl.className = 'odd-tz';
+  subEl.textContent = `${a.type || '—'} · ${a.n_spikes} spike${a.n_spikes === 1 ? '' : 's'} · stored max ${a.max_speed_kmh ?? '—'} kph`;
+  nameWrap.appendChild(nameEl);
+  nameWrap.appendChild(subEl);
+
+  const metaEl = document.createElement('div');
+  metaEl.className = 'odd-meta';
+  const dist = a.distance_km != null ? `${a.distance_km.toFixed(1)} km` : '—';
+  metaEl.textContent = `${dist} · ${fmtDuration(a.duration_sec)}`;
+
+  const repairBtn = document.createElement('button');
+  repairBtn.className = 'r-btn';
+  repairBtn.textContent = 'Repair';
+  repairBtn.title = 'Apply spike repair to this activity';
+  repairBtn.onclick = async () => {
+    repairBtn.disabled = true;
+    repairBtn.textContent = '…';
+    try {
+      await fetch(`/api/activity/${encodeURIComponent(a.filename)}/metadata`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ spike_repair: true }),
+      });
+      // Drop this row — it's no longer flagged.
+      row.remove();
+      const summary = document.getElementById('spk-summary');
+      const remaining = document.querySelectorAll('#spk-list .odd-row').length;
+      summary.textContent = remaining ? `${remaining} flagged` : '';
+      if (!remaining) {
+        document.getElementById('spk-list').innerHTML =
+          '<div class="dup-empty">No GPS spikes flagged — every ride looks clean.</div>';
+      }
+    } catch (e) {
+      alert('Failed to repair: ' + e.message);
+      repairBtn.disabled = false;
+      repairBtn.textContent = 'Repair';
+    }
+  };
+
+  const openBtn = document.createElement('a');
+  openBtn.className = 'r-btn';
+  openBtn.textContent = 'Open';
+  openBtn.title = 'Open this activity in Logs (middle-click for new tab)';
+  openBtn.href = `/log/${encodeURIComponent(a.filename)}`;
+  openBtn.style.textDecoration = 'none';
+  openBtn.style.marginLeft = '6px';
+
+  const actions = document.createElement('div');
+  actions.style.display = 'flex';
+  actions.style.gap = '6px';
+  actions.appendChild(repairBtn);
+  actions.appendChild(openBtn);
+
+  row.appendChild(dateEl);
+  row.appendChild(peakEl);
+  row.appendChild(nameWrap);
+  row.appendChild(metaEl);
+  row.appendChild(actions);
   return row;
 }
 

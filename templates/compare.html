@@ -42,7 +42,7 @@
     .picker select { width: 100%; background: transparent; border: 1px solid var(--border-row); border-radius: 4px; color: var(--text-secondary); padding: 6px 8px; font-size: 0.82rem; font-family: inherit; }
     .picker select:focus { outline: none; border-color: var(--accent); }
     /* Type glyph next to picker label (MTB / SNO / SKI / HIK / OTH / FAT). */
-    .picker-glyph { display: inline-flex; align-items: center; justify-content: center; height: 16px; padding: 0 6px; border-radius: 3px; font-family: var(--font-mono); font-size: 9px; font-weight: 600; letter-spacing: 0.05em; color: #fff; }
+    .picker-glyph { display: inline-flex; align-items: center; justify-content: center; height: 16px; padding: 0 6px; border-radius: 3px; font-family: var(--font-mono); font-size: 9px; font-weight: 600; letter-spacing: 0.05em; }
     .picker-glyph:empty { display: none; }
 
     /* Map + chart column layout. Flex (not grid) — flex stretches its
@@ -804,10 +804,14 @@ function updatePickerGlyph(slot, data) {
   if (!t) {
     el.textContent = '';
     el.style.background = '';
+    el.style.color = '';
     return;
   }
   el.textContent = typeGlyph(t);
-  el.style.background = t.color;
+  // Match the canonical sidebar badge style used everywhere else: dark
+  // tinted background with the saturated colour as the text.
+  el.style.background = t.bg;
+  el.style.color      = t.color;
 }
 
 function deltaHtml(metric, aVal, bVal, fmt, higherIsBetter) {

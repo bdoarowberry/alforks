@@ -83,7 +83,7 @@
     .type-badge-row { display: inline-flex; align-items: center; justify-content: center;
                       height: 22px; padding: 0 8px; border-radius: 4px; flex-shrink: 0;
                       font-family: var(--font-mono); font-size: 10px; font-weight: 600;
-                      letter-spacing: 0.05em; color: #fff; }
+                      letter-spacing: 0.05em; }
     .region-chip { font-weight: 500; white-space: nowrap; color: #fff; }
     .region-chip:not(:last-child)::after { content: ' · '; color: var(--text-faint); font-weight: normal; }
     .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 8px 14px; }
@@ -407,11 +407,13 @@ function renderRow(item) {
   row.dataset.typeColor = _t ? _t.color : '#3b82f6';
 
   const t = TYPE_LOOKUP[item.type];
-  const badgeBg    = t ? t.color : 'var(--text-muted)';
+  const badgeBg    = t ? t.bg    : 'var(--text-muted)';
+  const badgeFg    = t ? t.color : '#fff';
   const badgeTitle = t ? t.label : 'Unknown type';
   // Pass the full type object so an explicit `glyph` field (set on the
-  // Setup page) wins over the id-based fallback.
-  const iconHtml = `<span class="type-badge-row" title="${escapeHtml(badgeTitle)}" style="background:${badgeBg}">${escapeHtml(typeGlyph(t || item.type))}</span>`;
+  // Setup page) wins over the id-based fallback. Style matches the
+  // canonical sidebar badge: dark tint background, saturated foreground.
+  const iconHtml = `<span class="type-badge-row" title="${escapeHtml(badgeTitle)}" style="background:${badgeBg};color:${badgeFg}">${escapeHtml(typeGlyph(t || item.type))}</span>`;
   const regionChips = item.regions.length
     ? item.regions.map(r => `<span class="region-chip">${escapeHtml(r.name)}</span>`).join('')
     : '';
