@@ -4705,6 +4705,52 @@ def api_missing_types():
     return jsonify({"activities": flagged})
 
 
+@app.route("/api/issues")
+def api_issues():
+    """Activities flagged by `_detect_issues` for anything *other than* a
+    speed_spike — spikes have their own dedicated /review tab with rich
+    map + chart preview, so we exclude them here to keep the two
+    surfaces non-redundant.
+
+    Skips excluded activities and any ride the user has already marked
+    `issues_approved = true`. Each row carries its per-issue message
+    list inline so the /review tab can show what's wrong without a
+    second round-trip.
+    """
+    flagged: list[dict] = []
+    for a in all_activities():
+        if a.get("excluded"):
+            continue
+        if (a.get("meta") or {}).get("issues_approved"):
+            continue
+        issues = a.get("issues") or []
+        non_spike = [i for i in issues if i.get("code") != "speed_spike"]
+        if not non_spike:
+            continue
+        s = a.get("stats") or {}
+        flagged.append({
+            "filename":     a["filename"],
+            "name":         a.get("name") or a["filename"],
+            "date":         (a.get("date") or "")[:10],
+            "type":         a.get("effective_type") or "",
+            "distance_km":  s.get("distance_km"),
+            "duration_sec": s.get("duration_sec"),
+            "issues":       non_spike,
+        })
+    # Newest-first overall; within a date, most-severe and most-issues
+    # bubble up so the worst rides are at the top of each cluster.
+    _sev_rank = {"high": 0, "med": 1, "low": 2}
+    def _key(r):
+        worst = min((_sev_rank.get(i.get("severity"), 3) for i in r["issues"]), default=3)
+        # date desc → invert by negating the lex order via a reverse-sort
+        # on the date field only.
+        return (worst, -len(r["issues"]))
+    # Stable sort: secondary key first (severity), then primary (date desc).
+    flagged.sort(key=_key)
+    flagged.sort(key=lambda x: x["date"], reverse=True)
+    return jsonify({"activities": flagged})
+
+
 _review_counts_cache: dict = {}
 _review_counts_cache_lock = threading.Lock()
 
@@ -4780,12 +4826,24 @@ def api_review_counts():
         if local_dt.hour in _ODD_TIME_NIGHT_HOURS:
             odd += 1
 
-    total = dup_groups + missing_types + spikes + odd
+    # Non-spike issues — match /api/issues. The cached `issues` field on
+    # each activity already excludes approved rides (it's set to [] when
+    # meta.issues_approved is true at build time), so we just check the
+    # non-spike subset directly.
+    issue_count = 0
+    for a in all_activities():
+        if a.get("excluded"):
+            continue
+        if any(i.get("code") != "speed_spike" for i in (a.get("issues") or [])):
+            issue_count += 1
+
+    total = dup_groups + missing_types + spikes + odd + issue_count
     payload = {
         "duplicates":    dup_groups,
         "odd_times":     odd,
         "speed_spikes":  spikes,
         "missing_types": missing_types,
+        "issues":        issue_count,
         "total":         total,
     }
     with _review_counts_cache_lock:

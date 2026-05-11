@@ -141,6 +141,25 @@
     .spk-pager .spacer { flex: 1; }
     .spk-pager .info { font-family: var(--font-mono); color: var(--text-tertiary); }
 
+    /* ── Issues: one card per flagged ride, severity dots on each item ── */
+    .iss-card { background: var(--bg-card); border: 1px solid var(--border-hair);
+                border-radius: 4px; margin-bottom: 8px; max-width: 980px;
+                padding: 10px 14px; display: flex; flex-direction: column; gap: 8px; }
+    .iss-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+    .iss-head .iss-date { font-family: var(--font-mono); font-size: 0.76rem; color: var(--text-secondary); }
+    .iss-head .iss-name { font-size: 0.86rem; color: var(--text-primary); flex: 1; min-width: 0;
+                          overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .iss-head .iss-meta { font-size: 0.7rem; color: var(--text-tertiary); font-family: var(--font-mono); white-space: nowrap; }
+    .iss-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 3px; }
+    .iss-item { display: flex; gap: 8px; align-items: baseline; font-size: 0.78rem; color: var(--text-secondary); }
+    .iss-sev-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+    .iss-item.sev-high .iss-sev-dot { background: #ef4444; }
+    .iss-item.sev-med  .iss-sev-dot { background: #f59e0b; }
+    .iss-item.sev-low  .iss-sev-dot { background: #9ca3af; }
+    .iss-msg { line-height: 1.4; }
+    .iss-actions { display: flex; align-items: center; gap: 6px; }
+    .iss-actions .spacer { flex: 1; }
+
     /* ── Missing-types: card layout with thumbnail map ────────────────── */
     .mt-card { display: grid; grid-template-columns: 240px 1fr; gap: 0;
                background: var(--bg-card); border: 1px solid var(--border-hair);
@@ -188,6 +207,9 @@
     <button class="rv-tab" data-tab="missing-types" onclick="rvShowTab('missing-types')">
       Missing Types <span class="rv-pill" id="rv-pill-missing-types">—</span>
     </button>
+    <button class="rv-tab" data-tab="issues" onclick="rvShowTab('issues')">
+      Issues <span class="rv-pill" id="rv-pill-issues">—</span>
+    </button>
     <button class="rv-tab" data-tab="speed-spikes" onclick="rvShowTab('speed-spikes')">
       GPS Spikes <span class="rv-pill" id="rv-pill-speed-spikes">—</span>
     </button>
@@ -232,6 +254,23 @@
       ride to set a more specific title / region first.
     </div>
     <div id="mt-list"></div>
+  </div>
+
+  <!-- Issues — every non-spike data-quality flag, gathered in one place. -->
+  <div id="rv-panel-issues" class="rv-panel">
+    <div class="rv-section-head">
+      <h2>Data Issues</h2>
+      <span id="iss-summary" class="rv-summary">—</span>
+      <button id="iss-refresh-btn" class="r-btn" onclick="loadIssues()" style="margin-left:auto;">↻ Refresh</button>
+    </div>
+    <div class="rv-section-blurb">
+      Activities flagged for things like impossibly fast top speeds, GPS teleports, jitter
+      that inflated the recorded distance, or implausible climb gradients. GPS Spikes have
+      their own tab and are excluded from this list. Use <strong>Approve</strong> to silence
+      a ride's flags, or <strong>Open in Logs</strong> to inspect and fix it
+      (Trim, Smooth GPS, exclude, etc.).
+    </div>
+    <div id="iss-list"></div>
   </div>
 
   <!-- GPS Spikes -->
@@ -280,6 +319,7 @@ function rvShowTab(name) {
   if (name === 'odd-times'     && !_oddLoaded) loadOddTimes();
   if (name === 'speed-spikes'  && !_spkLoaded) loadSpeedSpikes();
   if (name === 'missing-types' && !_mtLoaded)  loadMissingTypes();
+  if (name === 'issues'        && !_issLoaded) loadIssues();
 }
 
 // Update the per-tab pill counts. Called once on load and after any
@@ -296,6 +336,7 @@ async function rvRefreshPills() {
     };
     set('rv-pill-duplicates',    d.duplicates    ?? 0);
     set('rv-pill-missing-types', d.missing_types ?? 0);
+    set('rv-pill-issues',        d.issues        ?? 0);
     set('rv-pill-speed-spikes',  d.speed_spikes  ?? 0);
     set('rv-pill-odd-times',     d.odd_times     ?? 0);
   } catch (e) {}
@@ -1433,6 +1474,142 @@ function _renderMtRow(a) {
   else _mtInitMap(mapDiv);
 
   return card;
+}
+
+// ─── Data Issues ──────────────────────────────────────────────────────────
+let _issLoaded = false;
+
+async function loadIssues() {
+  const btn     = document.getElementById('iss-refresh-btn');
+  const summary = document.getElementById('iss-summary');
+  const list    = document.getElementById('iss-list');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="rs-spinner">↻</span> Scanning…'; }
+  summary.textContent = 'Scanning…';
+  list.innerHTML = '';
+  try {
+    const r = await fetch('/api/issues?t=' + Date.now(), { cache: 'no-store' });
+    const d = await r.json();
+    _issLoaded = true;
+    renderIssues(d);
+  } catch (e) {
+    summary.textContent = 'Failed to load.';
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = '↻ Refresh'; }
+  }
+}
+
+function renderIssues(payload) {
+  const summary = document.getElementById('iss-summary');
+  const list    = document.getElementById('iss-list');
+  const acts = payload.activities || [];
+  if (!acts.length) {
+    summary.textContent = '';
+    list.innerHTML = '<div class="dup-empty">No data issues — every ride is clean or approved.</div>';
+    return;
+  }
+  summary.textContent = `${acts.length} flagged`;
+  list.innerHTML = '';
+  acts.forEach(a => list.appendChild(_renderIssueRow(a)));
+}
+
+function _renderIssueRow(a) {
+  const row = document.createElement('div');
+  row.className = 'iss-card';
+
+  const head = document.createElement('div');
+  head.className = 'iss-head';
+  const dateEl = document.createElement('span');
+  dateEl.className = 'iss-date';
+  dateEl.textContent = a.date || '—';
+  const nameEl = document.createElement('span');
+  nameEl.className = 'iss-name';
+  nameEl.textContent = a.name;
+  nameEl.title = a.filename;
+  const metaEl = document.createElement('span');
+  metaEl.className = 'iss-meta';
+  const dist = a.distance_km != null ? `${a.distance_km.toFixed(1)} km` : '—';
+  metaEl.textContent = `${dist} · ${fmtDuration(a.duration_sec)}`;
+  head.appendChild(dateEl); head.appendChild(nameEl); head.appendChild(metaEl);
+  row.appendChild(head);
+
+  // Issue list — one row per flagged check with a severity dot up front.
+  const issuesEl = document.createElement('ul');
+  issuesEl.className = 'iss-list';
+  for (const it of (a.issues || [])) {
+    const li = document.createElement('li');
+    li.className = 'iss-item sev-' + (it.severity || 'low');
+    const sev = document.createElement('span');
+    sev.className = 'iss-sev-dot';
+    sev.title = `${it.severity || 'low'} severity`;
+    const msg = document.createElement('span');
+    msg.className = 'iss-msg';
+    msg.textContent = it.msg || it.code || '';
+    li.appendChild(sev); li.appendChild(msg);
+    issuesEl.appendChild(li);
+  }
+  row.appendChild(issuesEl);
+
+  // Actions: Approve + Open in Logs. Specific issue codes get a hint in
+  // the Open link's title so the user knows what tool to reach for.
+  const approveBtn = document.createElement('button');
+  approveBtn.className = 'r-btn';
+  approveBtn.textContent = 'Approve as-is';
+  approveBtn.title = 'Mark this ride reviewed — silence all of its issue flags';
+  approveBtn.onclick = async () => {
+    if (!confirm(`Approve ${a.filename}?\n\nAll issue flags for this ride will be silenced.`)) return;
+    approveBtn.disabled = true; approveBtn.textContent = '…';
+    try {
+      const r = await fetch(`/api/activity/${encodeURIComponent(a.filename)}/metadata`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ issues_approved: true }),
+      });
+      if (!r.ok) throw new Error('approve ' + r.status);
+      row.remove();
+      const remaining = document.querySelectorAll('#iss-list .iss-card').length;
+      document.getElementById('iss-summary').textContent = remaining ? `${remaining} flagged` : '';
+      if (!remaining) {
+        document.getElementById('iss-list').innerHTML =
+          '<div class="dup-empty">No data issues — every ride is clean or approved.</div>';
+      }
+      // Force a re-fetch on the next tab visit so any other rides whose
+      // issue list shifted as a side-effect (rare) get picked up.
+      _issLoaded = false;
+      rvRefreshPills();
+    } catch (e) {
+      alert('Failed to approve: ' + e.message);
+      approveBtn.disabled = false; approveBtn.textContent = 'Approve as-is';
+    }
+  };
+
+  // Pick the most relevant tool hint based on which issue codes are present.
+  // Smooth GPS fixes jitter; Trim fixes spatial/temporal anomalies; nothing
+  // actionable for the trivially-short cases.
+  const codes = new Set((a.issues || []).map(i => i.code));
+  let hint = 'Open this activity in Logs to inspect and fix.';
+  if (codes.has('jitter')) hint = 'Open in Logs → Edit menu → Smooth GPS to collapse the inflated distance.';
+  else if (codes.has('teleport') || codes.has('climb_rate') || codes.has('max_speed'))
+    hint = 'Open in Logs → use Trim to clip the bad section.';
+  else if (codes.has('tiny_distance') || codes.has('tiny_duration'))
+    hint = 'Open in Logs → consider deleting if this was an accidental recording.';
+
+  const openBtn = document.createElement('a');
+  openBtn.className = 'r-btn';
+  openBtn.textContent = 'Open in Logs';
+  openBtn.title = hint;
+  openBtn.href = `/log/${encodeURIComponent(a.filename)}`;
+  openBtn.target = '_blank';
+  openBtn.rel = 'noopener';
+  openBtn.style.textDecoration = 'none';
+
+  const actions = document.createElement('div');
+  actions.className = 'iss-actions';
+  actions.appendChild(approveBtn);
+  const sp = document.createElement('span'); sp.className = 'spacer';
+  actions.appendChild(sp);
+  actions.appendChild(openBtn);
+  row.appendChild(actions);
+
+  return row;
 }
 
 // Default tab: load duplicates eagerly since it's the active panel.
