@@ -30,6 +30,23 @@
     input[type="date"]:focus { outline: none; border-color: var(--accent); }
     #count-label { font-size: 0.74rem; color: var(--text-tertiary); margin-left: auto; font-family: var(--font-mono); }
 
+    /* Pagination strip — same affordance at top + bottom of the list. */
+    .pager { display: flex; align-items: center; gap: 4px; flex-wrap: wrap;
+             padding: 8px 0; font-family: var(--font-mono); font-size: 0.74rem; }
+    .pager[data-position="top"]    { margin-bottom: 4px; }
+    .pager[data-position="bottom"] { margin-top:    4px; }
+    .pager-btn { background: transparent; color: var(--text-secondary);
+                 border: 1px solid var(--border-row); padding: 3px 9px;
+                 border-radius: 3px; cursor: pointer; font-family: inherit;
+                 font-size: 0.72rem; min-width: 28px; transition: all 0.12s; }
+    .pager-btn:hover:not(:disabled):not(.current) {
+      color: var(--text-primary); border-color: var(--text-tertiary); }
+    .pager-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .pager-btn.current { background: var(--accent); color: #0b0d0c;
+                         border-color: var(--accent); font-weight: 600; cursor: default; }
+    .pager-gap { color: var(--text-muted); padding: 0 2px; }
+    .pager-info { color: var(--text-tertiary); margin-left: auto; }
+
     /* Activity rows */
     #rows { display: flex; flex-direction: column; }
     .day-gap { background: linear-gradient(to bottom, transparent, rgba(59,130,246,0.08), transparent); margin: 0; cursor: pointer; transition: height 0.2s, background 0.15s; position: relative; }
@@ -218,7 +235,7 @@
       <input type="date" id="date-end">
     </div>
     <label class="filter-group" style="cursor:pointer;color:#ccc;font-size:0.74rem;">
-      <input type="checkbox" id="issues-only" onchange="load()" style="margin:0;">
+      <input type="checkbox" id="issues-only" onchange="_page = 1; load();" style="margin:0;">
       <span>Show only flagged ⚠</span>
     </label>
     <span id="count-label"></span>
@@ -250,21 +267,28 @@ const TYPE_LOOKUP = Object.fromEntries(TYPES.map(t => [t.id, t]));
 let activeType = 'all';
 let dateStart = '';
 let dateEnd   = '';
+// True until the user touches a control or supplies ?start=/?end= via URL.
+// While set, the date inputs auto-hydrate from each response's min/max so
+// "all of history" is the default span.
+let _datesAreDefault = true;
 
-// Default range = last 90 days, or whatever the URL ?start= / ?end=
-// query params say (used by the Summary calendar click-through).
+// URL query params (used by the Summary calendar click-through) override
+// the auto-defaults. Anything else stays empty until the first response
+// populates the inputs with min_date / max_date.
 {
-  const today = new Date();
-  const past  = new Date(); past.setDate(today.getDate() - 90);
-  const iso = d => d.toISOString().slice(0, 10);
   const url  = new URL(location.href);
   const qs   = url.searchParams.get('start');
   const qe   = url.searchParams.get('end');
   const qt   = url.searchParams.get('type');
-  dateStart = (qs && /^\d{4}-\d{2}-\d{2}$/.test(qs)) ? qs : iso(past);
-  dateEnd   = (qe && /^\d{4}-\d{2}-\d{2}$/.test(qe)) ? qe : iso(today);
+  if (qs && /^\d{4}-\d{2}-\d{2}$/.test(qs)) { dateStart = qs; _datesAreDefault = false; }
+  if (qe && /^\d{4}-\d{2}-\d{2}$/.test(qe)) { dateEnd   = qe; _datesAreDefault = false; }
   if (qt) activeType = qt;
 }
+
+// ─── Pagination ─────────────────────────────────────────────────────────────
+const PAGE_SIZE = 20;
+let _allItems = [];      // full filtered list from the last fetch
+let _page = 1;           // 1-indexed
 
 function renderTypeChips() {
   const wrap = document.getElementById('type-chips');
@@ -273,7 +297,7 @@ function renderTypeChips() {
     const b = document.createElement('button');
     b.className = 'chip' + (id === activeType ? ' active' : '');
     b.textContent = label;
-    b.onclick = () => { activeType = id; load(); };
+    b.onclick = () => { activeType = id; _page = 1; load(); };
     wrap.appendChild(b);
   };
   mk('all', 'All');
@@ -283,8 +307,14 @@ function renderTypeChips() {
 function init() {
   document.getElementById('date-start').value = dateStart;
   document.getElementById('date-end').value   = dateEnd;
-  document.getElementById('date-start').onchange = e => { dateStart = e.target.value; load(); };
-  document.getElementById('date-end').onchange   = e => { dateEnd   = e.target.value; load(); };
+  // Any manual change opts out of the auto-min/max default — the inputs
+  // become user state from that point onward.
+  document.getElementById('date-start').onchange = e => {
+    dateStart = e.target.value; _datesAreDefault = false; _page = 1; load();
+  };
+  document.getElementById('date-end').onchange   = e => {
+    dateEnd   = e.target.value; _datesAreDefault = false; _page = 1; load();
+  };
   renderTypeChips();
   load();
 }
@@ -554,16 +584,34 @@ async function load() {
 
   const r = await fetch('/api/comparison?' + params.toString());
   const d = await r.json();
-  document.getElementById('count-label').textContent = `${d.items.length} ${d.items.length === 1 ? 'activity' : 'activities'}`;
 
-  if (!d.items.length) {
+  // Hydrate the date inputs from the response if the user hasn't touched
+  // them — default span is the full range of stored logs. Flip the flag
+  // off afterwards so a subsequent reactive reload doesn't clobber a
+  // partial edit if the user opens a picker while a fetch is in flight.
+  if (_datesAreDefault) {
+    if (d.min_date) { dateStart = d.min_date; document.getElementById('date-start').value = d.min_date; }
+    if (d.max_date) { dateEnd   = d.max_date; document.getElementById('date-end').value   = d.max_date; }
+    _datesAreDefault = false;
+  }
+  // Always set min/max attributes so the picker's calendar grays out
+  // dates outside the stored range.
+  if (d.min_date) document.getElementById('date-start').min = d.min_date;
+  if (d.max_date) document.getElementById('date-end').max   = d.max_date;
+
+  _allItems = d.items || [];
+  document.getElementById('count-label').textContent =
+    `${_allItems.length} ${_allItems.length === 1 ? 'activity' : 'activities'}`;
+
+  if (!_allItems.length) {
     wrap.innerHTML = '<div id="empty-msg">No activities in this range.</div>';
     return;
   }
 
-  // Compute per-metric maxes for sparkbars (so each metric's bar normalizes
-  // against the largest value in the currently-visible result set).
-  const maxOf = key => Math.max(0, ...d.items.map(i => i[key] || 0));
+  // Compute per-metric maxes against the *full* filtered list so sparkbars
+  // are stable as the user pages — a value's bar doesn't grow just because
+  // the per-page slice happens to exclude the global max.
+  const maxOf = key => Math.max(0, ..._allItems.map(i => i[key] || 0));
   metricMax = {
     'sb-distance':   maxOf('distance_km'),
     'sb-climb':      maxOf('elev_gain_m'),
@@ -577,10 +625,93 @@ async function load() {
     'sb-intensity':  maxOf('intensity'),
   };
 
-  // Sort newest→oldest already from server. Render with day-gap spacers between.
+  _renderCurrentPage();
+
+  // Update type chips' active style after potential changes
+  renderTypeChips();
+}
+
+// Build the "1 · 2 · 3 … last" strip for the given position. Returns a
+// fresh node — callers append it at the top and bottom of the list.
+function _renderPager(position) {
+  const total = _allItems.length;
+  const lastPage = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  if (lastPage < 2) return null;
+
+  const wrap = document.createElement('div');
+  wrap.className = 'pager';
+  wrap.dataset.position = position;
+
+  const prev = document.createElement('button');
+  prev.className = 'pager-btn'; prev.textContent = '← Prev';
+  prev.disabled = _page <= 1;
+  prev.onclick = () => _goToPage(_page - 1);
+  wrap.appendChild(prev);
+
+  // Compose the visible page-number set: first, last, current ±1, with
+  // ellipses where there's a gap. Standard middle-truncated pager.
+  const numbers = new Set([1, lastPage, _page - 1, _page, _page + 1]);
+  const visible = [...numbers].filter(n => n >= 1 && n <= lastPage).sort((a, b) => a - b);
+  let prevNum = 0;
+  for (const n of visible) {
+    if (n - prevNum > 1) {
+      const gap = document.createElement('span');
+      gap.className = 'pager-gap'; gap.textContent = '…';
+      wrap.appendChild(gap);
+    }
+    const b = document.createElement('button');
+    b.className = 'pager-btn pager-num' + (n === _page ? ' current' : '');
+    b.textContent = String(n);
+    b.onclick = () => _goToPage(n);
+    wrap.appendChild(b);
+    prevNum = n;
+  }
+
+  const next = document.createElement('button');
+  next.className = 'pager-btn'; next.textContent = 'Next →';
+  next.disabled = _page >= lastPage;
+  next.onclick = () => _goToPage(_page + 1);
+  wrap.appendChild(next);
+
+  const lo = (_page - 1) * PAGE_SIZE + 1;
+  const hi = Math.min(_page * PAGE_SIZE, total);
+  const info = document.createElement('span');
+  info.className = 'pager-info';
+  info.textContent = `${lo}–${hi} of ${total}`;
+  wrap.appendChild(info);
+  return wrap;
+}
+
+function _goToPage(n) {
+  const lastPage = Math.max(1, Math.ceil(_allItems.length / PAGE_SIZE));
+  _page = Math.max(1, Math.min(n, lastPage));
+  _renderCurrentPage();
+  // Scroll the top of the list into view after a page change so the user
+  // starts reading at row 1 of the new page.
+  document.getElementById('rows').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+// Slice _allItems into PAGE_SIZE rows starting at _page, render top+bottom
+// pagers, day-gap spacers, and per-row wiring. Pulled out of load() so
+// pager clicks can re-render without re-fetching.
+function _renderCurrentPage() {
+  const wrap = document.getElementById('rows');
+  // Tear down any existing maps before clobbering the DOM.
+  for (const [fn, m] of mapInstances) { m.remove(); }
+  mapInstances.clear(); mapAccess.clear();
   wrap.innerHTML = '';
+
+  // Clamp page if filters shrank the list below the current page.
+  const lastPage = Math.max(1, Math.ceil(_allItems.length / PAGE_SIZE));
+  if (_page > lastPage) _page = lastPage;
+
+  const top = _renderPager('top');
+  if (top) wrap.appendChild(top);
+
+  const start = (_page - 1) * PAGE_SIZE;
+  const slice = _allItems.slice(start, start + PAGE_SIZE);
   let prevDate = null;
-  for (const item of d.items) {
+  for (const item of slice) {
     if (prevDate) {
       const a = new Date(prevDate); const b = new Date(item.date);
       const days = Math.round((a - b) / 86400000);
@@ -589,7 +720,6 @@ async function load() {
     const row = renderRow(item);
     wrap.appendChild(row);
     observer.observe(row);
-    // Approve button on the issues block — stop the row's navigation handler
     const approveBtn = row.querySelector('.issues-approve');
     if (approveBtn) {
       approveBtn.addEventListener('click', async (ev) => {
@@ -604,8 +734,6 @@ async function load() {
         load();
       });
     }
-    // Exclude-from-stats toggle — flips the metadata flag, reloads the list so
-    // the row picks up its dimmed styling and max-value sparkbars re-normalize.
     const excludeBtn = row.querySelector('.exclude-btn');
     if (excludeBtn) {
       excludeBtn.addEventListener('click', async (ev) => {
@@ -621,7 +749,6 @@ async function load() {
         load();
       });
     }
-    // Pair-compare picker — toggles selection without navigating to detail.
     const pickBtn = row.querySelector('.cmp-pick');
     if (pickBtn) {
       pickBtn.addEventListener('click', (ev) => {
@@ -633,11 +760,11 @@ async function load() {
     prevDate = item.date;
   }
 
-  // Update type chips' active style after potential changes
-  renderTypeChips();
+  const bot = _renderPager('bottom');
+  if (bot) wrap.appendChild(bot);
 
-  // Re-apply pair-compare highlight classes to surviving rows so the user's
-  // current A/B selection persists across filter changes.
+  // Re-apply pair-compare highlight on surviving rows so the user's
+  // current A/B selection persists across page / filter changes.
   refreshCompareUI();
 }
 

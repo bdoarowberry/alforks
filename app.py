@@ -2465,8 +2465,9 @@ def api_comparison():
     max_hr    = _effective_max_hr()
     region_lookup = {r["id"]: r for r in load_regions()}
 
+    all_acts = all_activities()
     items = []
-    for act in all_activities():
+    for act in all_acts:
         date = (act.get("date") or "")[:10]
         if not date: continue
         if start_str and date < start_str: continue
@@ -2521,7 +2522,24 @@ def api_comparison():
             "excluded":     bool(act.get("excluded")),
         })
     items.sort(key=lambda x: x["date"] or "", reverse=True)
-    return jsonify({"items": items, "max_hr": max_hr})
+
+    # Min/max date across the *entire* activities list (not just the
+    # filtered subset) so the front-end can default the date-range inputs
+    # to the actual span of stored logs. Skips activities without a parsed
+    # date — those wouldn't render usefully anyway. Reuse `all_acts` from
+    # above so we don't re-snapshot the activities cache and risk reading
+    # min/max from a different version than `items`.
+    all_dates = [(a.get("date") or "")[:10] for a in all_acts]
+    all_dates = [d for d in all_dates if d]
+    min_date = min(all_dates) if all_dates else None
+    max_date = max(all_dates) if all_dates else None
+
+    return jsonify({
+        "items":    items,
+        "max_hr":   max_hr,
+        "min_date": min_date,
+        "max_date": max_date,
+    })
 
 
 _TYPE_METS = {
