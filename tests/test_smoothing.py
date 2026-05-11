@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 import sys
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -229,7 +230,12 @@ class TestStatsFromTrimmedBoundary(unittest.TestCase):
             {"type": "riding",   "start": 0, "end": 1},
             {"type": "assisted", "start": 1, "end": 3},
         ]
-        out = app._stats_from_trimmed(pts, segments, base_stats={})
+        # `_stats_from_trimmed` runs ma20 elevation smoothing now, which on a
+        # 4-point synthetic series collapses every delta to zero. This test
+        # is about boundary-index attribution, not smoothing — so bypass the
+        # smoother for the duration of the call.
+        with patch.object(app, '_smooth_elevations', side_effect=lambda eles, **kw: list(eles)):
+            out = app._stats_from_trimmed(pts, segments, base_stats={})
         # Only the 1→2 and 2→3 deltas are assisted: 50 + 5 = 55
         self.assertEqual(out["assisted_gain_m"], 55)
         # Riding gain is only the 0→1 delta: 5

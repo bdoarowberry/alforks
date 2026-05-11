@@ -122,6 +122,11 @@ class LRUCache:
             if len(self._data) > self._maxsize:
                 self._data.popitem(last=False)
 
+    def evict(self, key: str) -> None:
+        """Drop a key if present. Silent no-op when missing."""
+        with self._lock:
+            self._data.pop(key, None)
+
     def __contains__(self, key: str) -> bool:
         with self._lock:
             return key in self._data

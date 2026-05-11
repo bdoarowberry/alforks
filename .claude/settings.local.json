@@ -45,7 +45,17 @@
       "Bash(/tmp/stage_tz.sh)",
       "Bash(pkill -f \"summary/v2\")",
       "Bash(pkill -f \"app.test_client\")",
-      "Bash(taskkill //IM python.exe //F)"
+      "Bash(taskkill //IM python.exe //F)",
+      "Bash(git commit -m 'Rename browser-tab title from '\\\\''Summary V2'\\\\'' to '\\\\''Summary'\\\\'' *)",
+      "Bash(git rm *)",
+      "Bash(git reset *)",
+      "Bash(git restore *)",
+      "Bash(git mv *)",
+      "Bash(gh run *)",
+      "Bash(PYTHONIOENCODING=utf-8 python *)",
+      "Bash([ -f \"tracks/$f.gpx\" ])",
+      "Bash([ -f \"tracks/_archive_dedup/$f.gpx\" ])",
+      "Bash(git -C \"C:/Users/arowberry/OneDrive - BDO Canada LLP/Documents/Personal/Claude Code Projects/GPX Files\" diff HEAD -- \"templates/review.html\")"
     ]
   }
 }

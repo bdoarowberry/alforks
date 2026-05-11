@@ -4,6 +4,7 @@ metadata.json
 regions.json
 config.json
 weights.json
+dup_dismissals.json
 
 # Python & Flask
 __pycache__/

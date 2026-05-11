@@ -69,6 +69,23 @@ nav a {
 nav a:hover   { color: #fff; background: rgba(255,255,255,0.05); }
 nav a.active  { color: #3b82f6; background: #1a2a3a; }
 
+/* Pill badge attached to a nav link — used for the Review count. */
+nav a .nav-pill {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  font-size: 9px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: 0.04em;
+  border-radius: 8px;
+  background: #f59e0b;
+  color: #0b0d0c;
+  font-weight: 600;
+  vertical-align: middle;
+  transform: translateY(-1px);
+}
+nav a.active .nav-pill { background: #fbbf24; }
+
 /* Sync trigger — visually distinct from nav links so it reads as an
    action, not navigation. Sits at the far-right corner of the header
    via `margin-left: auto`. Subtle uppercase + monospace + hairline

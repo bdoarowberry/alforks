@@ -50,6 +50,7 @@ METADATA_FILE = _ROOT / "metadata.json"
 CONFIG_FILE   = _ROOT / "config.json"
 REGIONS_FILE  = _ROOT / "regions.json"
 TYPES_FILE    = _ROOT / "types.json"
+DUP_DISMISSALS_FILE = _ROOT / "dup_dismissals.json"
 WEIGHTS_FILE  = _ROOT / "weights.json"
 
 _DEFAULT_TYPES = [
@@ -705,6 +706,42 @@ def _effective_data(filename: str, data: dict, meta_type: str) -> dict:
     return {**data, 'segments': segments, 'stats': stats}
 
 
+# Elevation smoothing window — see scripts/elev_smoothing.py for the
+# calibration analysis that picked k=20.
+_ELE_SMOOTH_K = 20
+
+
+def _smooth_elevations(eles: list, k: int = _ELE_SMOOTH_K) -> list:
+    """Centred moving-average smoothing of an elevation series. None
+    values are excluded from each window but their output slot is
+    preserved (so callers can iterate index-aligned with the source).
+    A slot whose window contains no real readings stays None.
+
+    O(n) via prefix sums: each window's average is one subtraction in
+    the sum / count arrays, no inner loop. Matters because this runs
+    twice per trim or spike-repair request on multi-thousand-point tracks.
+    """
+    n = len(eles)
+    if n == 0:
+        return []
+    half = max(0, k // 2)
+    # Prefix sums of values + counts, indexed [0..n] so any window's
+    # totals are psum[hi] - psum[lo] / pcnt[hi] - pcnt[lo].
+    psum = [0.0] * (n + 1)
+    pcnt = [0]   * (n + 1)
+    for i, v in enumerate(eles):
+        psum[i+1] = psum[i] + (v if v is not None else 0.0)
+        pcnt[i+1] = pcnt[i] + (1 if v is not None else 0)
+    out: list = [None] * n
+    for i in range(n):
+        lo = max(0, i - half)
+        hi = min(n, i + half + 1)
+        cnt = pcnt[hi] - pcnt[lo]
+        if cnt > 0:
+            out[i] = (psum[hi] - psum[lo]) / cnt
+    return out
+
+
 def parse_gpx(path: Path) -> dict:
     with open(path, encoding="utf-8") as f:
         gpx = gpxpy.parse(f)
@@ -735,6 +772,13 @@ def parse_gpx(path: Path) -> dict:
     smooth = _median_filter([p['speed'] for p in per_pt], k=5)
     for i, s in enumerate(smooth):
         per_pt[i]['speed'] = s
+
+    # ma20-smoothed elevation series for gain/loss accumulation. We don't
+    # feed the smoothed values back into per_pt['ele_delta'] — lift
+    # detection (_algo_lift, called below) keys off raw deltas and changing
+    # that would shift segment boundaries; the per-point `ele` rendered on
+    # charts also stays raw. Only the headline gain numbers consume this.
+    _ele_smooth = _smooth_elevations([pt.elevation for pt in raw])
 
     latlons  = [(pt.latitude, pt.longitude) for pt in raw]
     lats_raw = [pt.latitude  for pt in raw]
@@ -798,16 +842,21 @@ def parse_gpx(path: Path) -> dict:
         if i > 0:
             p = per_pt[i]
             total_dist += p['dist']
+            # Use the smoothed elevation series for gain / loss / assisted_gain.
+            # Falls back to a 0 delta if either neighbour has no elevation.
+            sm_prev, sm_curr = _ele_smooth[i-1], _ele_smooth[i]
+            sm_delta = ((sm_curr - sm_prev)
+                        if sm_prev is not None and sm_curr is not None else 0.0)
             if is_assisted[i]:
-                if p['ele_delta'] > 0:
-                    assisted_gain += p['ele_delta']
+                if sm_delta > 0:
+                    assisted_gain += sm_delta
             else:
                 riding_dist += p['dist']
                 riding_dur_sec += p['dt']
-                if p['ele_delta'] > 0:
-                    elev_gain += p['ele_delta']
-                elif p['ele_delta'] < 0:
-                    elev_loss += abs(p['ele_delta'])
+                if sm_delta > 0:
+                    elev_gain += sm_delta
+                elif sm_delta < 0:
+                    elev_loss += abs(sm_delta)
             if p['speed'] is not None and p['speed'] > max_speed:
                 max_speed = p['speed']
 
@@ -1019,6 +1068,14 @@ def training_load():
     """Coach-view fitness page (per design/training-load). Data fetched from
     /api/training; template stays thin."""
     return render_template("training_load.html", types_json=json.dumps(load_types()))
+
+
+@app.route("/review")
+def review_page():
+    """Curation / data-quality dashboard — duplicate detection, odd-time
+    flagging, GPS speed-spike flagging, and missing-type flagging on one
+    page. Replaces the diagnostic tabs that previously lived under Setup."""
+    return render_template("review.html", types_json=json.dumps(load_types()))
 
 
 @app.route("/training-load")
@@ -1826,6 +1883,11 @@ def _archive_activity(filename: str) -> bool:
         src.rename(dest)
     except OSError:
         return False
+    # Evict the parsed-track LRU entry. Without this, get_activity() would
+    # keep returning the cached parse for a file that no longer lives in
+    # tracks/ — and _build_activity_entry would happily re-add the
+    # archived activity to the sidebar cache as if it were still active.
+    _mem_cache.evict(filename)
     # Hold the metadata lock across the read-mutate-write so a concurrent
     # PATCH on a different filename doesn't lose its update by racing
     # with our `del`. Same pattern in the other three callers below.
@@ -3226,9 +3288,14 @@ def _stats_from_trimmed(pts: list, segments: list, base_stats: dict) -> dict:
             parsed_times.append(None)
     riding_dist = riding_gain = riding_loss = assisted_gain = 0.0
     riding_dur_sec = 0.0
+    # Mirror parse_gpx: gain/loss accumulation runs on a ma20-smoothed
+    # elevation series so trim and spike-repair produce numbers consistent
+    # with the parse-time stat. The raw `ele` field on each point is
+    # untouched.
+    smooth_ele = _smooth_elevations([p.get("ele") for p in pts])
     for i in range(1, n):
         dd = pts[i]["dist_km"] - pts[i-1]["dist_km"]
-        e_prev, e_cur = pts[i-1].get("ele"), pts[i].get("ele")
+        e_prev, e_cur = smooth_ele[i-1], smooth_ele[i]
         de = (e_cur - e_prev) if (e_prev is not None and e_cur is not None) else 0
         if i in assisted:
             if de > 0: assisted_gain += de
@@ -3410,7 +3477,7 @@ def _find_speed_spikes(pts: list) -> tuple:
     return phantom, max_implied
 
 
-def _apply_spike_repair(data: dict) -> dict:
+def _apply_spike_repair(data: dict, phantom_mask: list | None = None) -> dict:
     """Repair a track by clamping the distance contribution of each phantom
     leg to the local-median leg length, and snapping the phantom point's
     lat/lon to the nearest non-phantom anchor so the map renders the warp
@@ -3423,12 +3490,19 @@ def _apply_spike_repair(data: dict) -> dict:
     reports 5 s elapsed for 150 m of trail, with the underlying positions
     on a smooth track). Interpolating between the surrounding anchors just
     redistributes the same impossible speed across more samples.
+
+    `phantom_mask`: optional precomputed result of `_find_speed_spikes(pts)`.
+    Callers (like /api/speed-spikes/<f>/preview) that have just computed it
+    pass it in to avoid the second redundant scan.
     """
     pts = data.get("points") or []
     n = len(pts)
     if n < 3:
         return data
-    phantom, _ = _find_speed_spikes(pts)
+    if phantom_mask is None:
+        phantom, _ = _find_speed_spikes(pts)
+    else:
+        phantom = phantom_mask
     if not any(phantom):
         return data
 
@@ -4242,41 +4316,42 @@ def _values_within_tol(a: float, b: float, tol: float) -> bool:
     return abs(a - b) / denom <= tol
 
 
-@app.route("/api/duplicates")
-def api_duplicates():
-    """Surface likely-duplicate activities so the user can clean up imports
-    that came in from multiple sources (e.g. the same ride synced from both
-    Strava and Garmin).
-
-    Heuristic per pair: same calendar date AND distance_km within
-    ±5% AND duration_sec within ±5%. Within a date, we form transitive
-    groups (if A~B and B~C then A,B,C are one group)."""
+def _compute_duplicate_groups(detail: bool = True) -> list[dict]:
+    """Return duplicate groups across all_activities(), already filtered for
+    user-dismissed signatures. `detail=True` includes every per-track field
+    the /review page needs; `detail=False` keeps only enough to count and
+    identify each group (used by /api/review-counts to keep the badge
+    snappy).
+    """
     by_date: dict[str, list[dict]] = {}
     for a in all_activities():
         d = (a.get("date") or "")[:10]
         if not d:
             continue
         s = a.get("stats") or {}
-        by_date.setdefault(d, []).append({
+        entry = {
             "filename":     a["filename"],
-            "name":         a.get("name") or a["filename"],
-            "date":         d,
-            "start_time":   a.get("start_time"),
-            "end_time":     a.get("end_time"),
             "distance_km":  s.get("distance_km"),
             "duration_sec": s.get("duration_sec"),
-            "elev_gain_m":  s.get("elev_gain_m"),
-            "type":         a.get("effective_type") or "",
-            "excluded":     bool(a.get("excluded")),
-            "regions":      [r.get("name") if isinstance(r, dict) else r
-                             for r in (a.get("regions") or [])],
-        })
+        }
+        if detail:
+            entry.update({
+                "name":         a.get("name") or a["filename"],
+                "date":         d,
+                "start_time":   a.get("start_time"),
+                "end_time":     a.get("end_time"),
+                "elev_gain_m":  s.get("elev_gain_m"),
+                "type":         a.get("effective_type") or "",
+                "excluded":     bool(a.get("excluded")),
+                "regions":      [r.get("name") if isinstance(r, dict) else r
+                                 for r in (a.get("regions") or [])],
+            })
+        by_date.setdefault(d, []).append(entry)
 
     groups: list[dict] = []
     for d, acts in by_date.items():
         if len(acts) < 2:
             continue
-        # Union-find by similarity
         parent = list(range(len(acts)))
         def find(i):
             while parent[i] != i:
@@ -4300,8 +4375,79 @@ def api_duplicates():
                 members.sort(key=lambda a: a["filename"])
                 groups.append({"date": d, "tracks": members})
 
+    # Hold the lock across the read so we don't witness a partial-write
+    # mid-flight from a concurrent /api/duplicates/dismiss POST. Path.write_text
+    # in `_save_dup_dismissals` is not atomic on Windows.
+    with _dup_dismissals_lock:
+        dismissed = _load_dup_dismissals()
+    groups = [g for g in groups
+              if tuple(sorted(t["filename"] for t in g["tracks"])) not in dismissed]
     groups.sort(key=lambda g: g["date"], reverse=True)
+    return groups
+
+
+@app.route("/api/duplicates")
+def api_duplicates():
+    """Surface likely-duplicate activities so the user can clean up imports
+    that came in from multiple sources (e.g. the same ride synced from both
+    Strava and Garmin). Heuristic per pair: same calendar date AND
+    distance_km within ±5% AND duration_sec within ±5%. Groups the user
+    has dismissed via "Not duplicates" are filtered out — see
+    `_compute_duplicate_groups`."""
+    groups = _compute_duplicate_groups(detail=True)
     return jsonify({"groups": groups, "total_pairs": sum(len(g["tracks"]) for g in groups)})
+
+
+_dup_dismissals_lock = threading.Lock()
+
+
+def _load_dup_dismissals() -> set:
+    """Persisted set of (sorted-filename) tuples the user has marked as
+    not-actually-duplicates. JSON file holds a list of lists for portability;
+    we keep it in memory as a set of tuples so membership checks are O(1)."""
+    try:
+        if not DUP_DISMISSALS_FILE.exists():
+            return set()
+        raw = json.loads(DUP_DISMISSALS_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return set()
+    out = set()
+    for entry in raw:
+        if isinstance(entry, list) and all(isinstance(x, str) for x in entry):
+            out.add(tuple(sorted(entry)))
+    return out
+
+
+def _save_dup_dismissals(s: set) -> None:
+    DUP_DISMISSALS_FILE.write_text(
+        json.dumps([list(t) for t in sorted(s)], indent=2),
+        encoding="utf-8",
+    )
+
+
+@app.route("/api/duplicates/dismiss", methods=["POST"])
+def api_dup_dismiss():
+    """Mark a duplicate group as 'not actually duplicates' so it stops
+    appearing on /review. Body: {"filenames": [list of strings]} — the
+    full set of activities currently in the group. We store the sorted
+    tuple so future scans can match by exact composition."""
+    body = request.get_json(force=True) or {}
+    filenames = body.get("filenames")
+    if not isinstance(filenames, list) or not all(isinstance(f, str) for f in filenames):
+        _bad("filenames must be a list of strings")
+    if len(filenames) < 2:
+        _bad("a duplicate group needs at least two filenames")
+    sig = tuple(sorted(filenames))
+    with _dup_dismissals_lock:
+        s = _load_dup_dismissals()
+        s.add(sig)
+        _save_dup_dismissals(s)
+    # Bust the review-counts cache so the badge reflects the new state on
+    # the next call (the activities cache key didn't change, so otherwise
+    # we'd serve a stale total).
+    with _review_counts_cache_lock:
+        _review_counts_cache.clear()
+    return jsonify({"ok": True, "dismissed": list(sig)})
 
 
 # Activities whose start time falls inside this hour window get flagged on
@@ -4429,6 +4575,205 @@ def api_speed_spikes():
         })
     flagged.sort(key=lambda a: (-a["max_implied"], -(a["n_spikes"] or 0)))
     return jsonify({"activities": flagged})
+
+
+@app.route("/api/speed-spikes/<path:filename>/preview")
+def api_speed_spike_preview(filename):
+    """Side-by-side preview of an activity's raw vs spike-repaired track,
+    used by the /review GPS Spikes card. Returns coords, cumulative
+    distances, elevations and the indices of phantom-warp samples so the
+    UI can paint both polylines, plot two elevation charts, and dot the
+    flagged points on the map.
+
+    `get_activity()` returns parsed-but-untransformed data — `spike_repair`
+    is applied at request time elsewhere — so we can synthesize both views
+    here regardless of the meta flag's current state.
+    """
+    if _safe_gpx_path(filename) is None:
+        abort(404)
+    data = get_activity(filename)
+    if not data:
+        abort(404)
+    pts = data.get("points") or []
+    if len(pts) < 2 * _SPIKE_WINDOW + 1:
+        return jsonify({"error": "track too short for spike detection",
+                        "raw_coords": [], "repaired_coords": []})
+
+    mask, max_implied = _find_speed_spikes(pts)
+    spike_indices = [i for i, m in enumerate(mask) if m]
+
+    # Reuse the mask we just computed — _apply_spike_repair would otherwise
+    # call _find_speed_spikes again on the same point list.
+    repaired = _apply_spike_repair(data, phantom_mask=mask)
+    rpts = repaired.get("points") or pts
+
+    # round() keeps the JSON small — the cards don't need nano-degree precision.
+    def _coords(arr): return [[round(p["lat"], 6), round(p["lon"], 6)] for p in arr]
+    def _dists(arr):  return [round(p.get("dist_km") or 0, 4) for p in arr]
+    def _eles(arr):
+        out = []
+        for p in arr:
+            e = p.get("ele")
+            out.append(round(e, 1) if isinstance(e, (int, float)) else None)
+        return out
+
+    # Per-point speed series for the chart pair. The raw series uses the
+    # same haversine / dt that powers `_find_speed_spikes` — the stored
+    # `speed` field is already median-filtered and would hide the very
+    # spikes we want the user to see. The repaired series uses the
+    # median-filtered post-repair `speed` (that's what feeds stats.max_speed_kmh)
+    # so the chart matches the projected reported max.
+    raw_speeds = [0.0] * len(pts)
+    for i in range(1, len(pts)):
+        t_prev = pts[i-1].get("time"); t_cur = pts[i].get("time")
+        if not t_prev or not t_cur:
+            continue
+        try:
+            dt = (datetime.fromisoformat(t_cur) - datetime.fromisoformat(t_prev)).total_seconds()
+        except Exception:
+            continue
+        if dt <= 0:
+            continue
+        d_m = haversine((pts[i-1]["lat"], pts[i-1]["lon"]),
+                        (pts[i]["lat"],   pts[i]["lon"]))
+        raw_speeds[i] = round((d_m / dt) * 3.6, 2)
+    repaired_speeds = [round(p.get("speed"), 2) if isinstance(p.get("speed"), (int, float))
+                       else None for p in rpts]
+
+    # `raw_speeds[0]` is always 0 (no incoming leg) and gaps with missing
+    # timestamps stay 0 too — guard on `> 0` so a track without any
+    # computable leg speed reports None instead of a misleading 0.0.
+    raw_max = round(max(raw_speeds), 1) if any(s > 0 for s in raw_speeds) else None
+    rep_speeds_clean = [s for s in repaired_speeds if s is not None]
+    repaired_max = round(max(rep_speeds_clean), 1) if rep_speeds_clean else None
+
+    return jsonify({
+        "raw_coords":         _coords(pts),
+        "raw_dists":          _dists(pts),
+        "raw_speeds":         raw_speeds,
+        "repaired_coords":    _coords(rpts),
+        "repaired_dists":     _dists(rpts),
+        "repaired_speeds":    repaired_speeds,
+        "spike_indices":      spike_indices,
+        "n_spikes":           len(spike_indices),
+        "raw_max_kmh":        raw_max,
+        "repaired_max_kmh":   repaired_max,
+    })
+
+
+@app.route("/api/missing-types")
+def api_missing_types():
+    """Activities with no resolvable type — neither an explicit `meta.type`
+    nor a matched-region `default_type` (or seasonal `winter_default_type`).
+    Sorted newest-first so recent imports surface for tagging.
+    """
+    flagged: list[dict] = []
+    for a in all_activities():
+        if a.get("excluded"):
+            continue
+        if a.get("effective_type"):
+            continue
+        s = a.get("stats") or {}
+        flagged.append({
+            "filename":     a["filename"],
+            "name":         a.get("name") or a["filename"],
+            "date":         (a.get("date") or "")[:10],
+            "regions":      [r.get("name") if isinstance(r, dict) else r
+                             for r in (a.get("regions") or [])],
+            "distance_km":  s.get("distance_km"),
+            "duration_sec": s.get("duration_sec"),
+        })
+    flagged.sort(key=lambda x: x["date"], reverse=True)
+    return jsonify({"activities": flagged})
+
+
+_review_counts_cache: dict = {}
+_review_counts_cache_lock = threading.Lock()
+
+
+@app.route("/api/review-counts")
+def api_review_counts():
+    """Cheap summary used by the nav badge. Each count is computed from the
+    same source the per-section endpoints use, so the badge stays in sync
+    with what the user actually sees on /review. Result is cached against
+    the activities-cache key so the spike scan (which reads every activity's
+    points) doesn't re-run on every page load — invalidates automatically
+    when metadata, regions, or types change.
+    """
+    cache_key = _activities_cache_key()
+    with _review_counts_cache_lock:
+        cached = _review_counts_cache.get("v")
+        cached_key = _review_counts_cache.get("k")
+        if cached and cached_key == cache_key:
+            return jsonify(cached)
+    # Duplicates — share the canonical grouping helper so the badge
+    # tracks /api/duplicates exactly (including user-dismissed groups).
+    dup_groups = len(_compute_duplicate_groups(detail=False))
+
+    # Missing types — same rule as /api/missing-types
+    missing_types = sum(
+        1 for a in all_activities()
+        if not a.get("excluded") and not a.get("effective_type")
+    )
+
+    # Speed spikes — match /api/speed-spikes' threshold (≥3 spikes or any
+    # single ≥80 km/h). Skips repaired and approved rides.
+    spikes = 0
+    for act in all_activities():
+        if act.get("excluded"):
+            continue
+        meta = act.get("meta") or {}
+        if meta.get("spike_repair") or meta.get("issues_approved"):
+            continue
+        data = get_activity(act["filename"])
+        if not data:
+            continue
+        pts = data.get("points") or []
+        if len(pts) < 2 * _SPIKE_WINDOW + 1:
+            continue
+        mask, max_implied = _find_speed_spikes(pts)
+        n = sum(mask)
+        if n >= 3 or (n >= 1 and max_implied >= 80.0):
+            spikes += 1
+
+    # Odd times — re-derive count from the existing endpoint's heuristic.
+    # Cheaper version: just count activities whose start hour falls in the
+    # night window using the cached tz_name (skip lazy lookups so the
+    # badge call stays fast).
+    odd = 0
+    for a in all_activities():
+        st = a.get("start_time")
+        if not st:
+            continue
+        try:
+            dt = datetime.fromisoformat(st)
+        except ValueError:
+            continue
+        tz_name = a.get("tz_name")
+        if tz_name:
+            try:
+                local_dt = dt.astimezone(ZoneInfo(tz_name)) if dt.tzinfo else dt.replace(tzinfo=ZoneInfo(tz_name))
+            except ZoneInfoNotFoundError:
+                continue
+        elif dt.tzinfo is None:
+            local_dt = dt
+        else:
+            continue
+        if local_dt.hour in _ODD_TIME_NIGHT_HOURS:
+            odd += 1
+
+    total = dup_groups + missing_types + spikes + odd
+    payload = {
+        "duplicates":    dup_groups,
+        "odd_times":     odd,
+        "speed_spikes":  spikes,
+        "missing_types": missing_types,
+        "total":         total,
+    }
+    with _review_counts_cache_lock:
+        _review_counts_cache["k"] = cache_key
+        _review_counts_cache["v"] = payload
+    return jsonify(payload)
 
 
 @app.route("/api/regions/<region_id>/usage")

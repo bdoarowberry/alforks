@@ -262,6 +262,13 @@ def gpx_path_for(activity_id: int) -> Path:
     return GPX_DIR / f"strava_{activity_id}.gpx"
 
 
+def archived_path_for(activity_id: int) -> Path:
+    """Where this activity would live if the user had archived it. The sync
+    skips re-downloading anything found here so a Review → Delete on a
+    duplicate doesn't get undone the next time Strava sync runs."""
+    return ARCHIVE_DIR / f"strava_{activity_id}.gpx"
+
+
 # Strava's sport_type taxonomy → AlForks meta.type. Anything not listed
 # (Ride, EBikeRide, Run, …) stays untagged so the user can decide; the
 # obvious mappings ride and run aren't necessarily MTB / hike.
@@ -375,7 +382,12 @@ def cmd_sync(only_new: bool = True) -> None:
     for a in acts:
         aid = a["id"]
         out = gpx_path_for(aid)
-        if out.exists() and only_new:
+        archived = archived_path_for(aid)
+        # `only_new` means "skip activities we've already pulled". Both the
+        # active tracks/ folder and the _archive_dedup/ tombstone count —
+        # otherwise activities the user explicitly deleted in /review get
+        # silently re-downloaded on the next sync.
+        if (out.exists() or archived.exists()) and only_new:
             skipped += 1
             try:
                 start_dt = datetime.fromisoformat(a["start_date"].rstrip("Z")).timestamp()
