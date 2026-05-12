@@ -828,11 +828,6 @@ function renderOddTimes(payload) {
   acts.forEach(a => list.appendChild(_renderOddRow(a)));
 }
 
-// _ODD_NIGHT_HOURS keeps the JS-side check in lockstep with the server's
-// _ODD_TIME_NIGHT_HOURS (21:00–06:59). Used for optimistic row removal
-// after a shift moves the start out of the night window.
-const _ODD_NIGHT_HOURS = new Set([21, 22, 23, 0, 1, 2, 3, 4, 5, 6]);
-
 // Parse an activity-local ISO timestamp (e.g. "2024-08-22T02:14:00-07:00")
 // into a Date object that *preserves* the wall-clock reading regardless of
 // the user's browser timezone. We do this by feeding the wall-clock
@@ -903,10 +898,11 @@ function _renderOddRow(a) {
   metaEl.className = 'odd-meta';
   metaEl.textContent = `${dist} · ${dur}`;
 
-  // PATCH the new shift, then either update the row in place (if still
-  // odd) or remove it (if the shifted hour falls back into daylight).
+  // PATCH the new shift, then re-fetch the whole Odd Times list. The
+  // earlier optimistic in-place update was prone to client/server
+  // classifier drift — re-fetching is one extra round-trip but the UI
+  // is guaranteed to reflect what the server actually decided.
   const applyShift = async (delta, btn) => {
-    if (!displayStart || isNaN(displayStart)) return;
     const cur = parseInt(row.dataset.shift || '0', 10);
     const next = cur + delta;
     if (next < -23 || next > 23) return;
@@ -918,33 +914,11 @@ function _renderOddRow(a) {
         body: JSON.stringify({ time_shift_hours: next || null }),
       });
       if (!r.ok) throw new Error('shift ' + r.status);
-      // Move the displayed time by `delta` hours and re-render the row.
-      // `displayStart` is UTC-encoded activity-local clock — adding ms
-      // shifts the wall-clock the same way the server's _apply_time_shift
-      // shifts the stored timestamps.
-      displayStart = new Date(displayStart.getTime() + delta * 3600 * 1000);
-      row.dataset.shift = String(next);
-      updateTime(); updateDate(); updateSub();
-      // Check against the activity-local hour (via getUTCHours on our
-      // wall-clock-as-UTC encoding), matching the server's classifier.
-      if (!_ODD_NIGHT_HOURS.has(displayStart.getUTCHours())) {
-        // No longer odd — drop the row optimistically.
-        row.remove();
-        const remaining = document.querySelectorAll('#odd-list .odd-row').length;
-        document.getElementById('odd-summary').textContent =
-          remaining ? `${remaining} flagged` : '';
-        if (!remaining) {
-          document.getElementById('odd-list').innerHTML =
-            '<div class="dup-empty">No activities flagged — every ride starts inside daylight hours.</div>';
-        }
-        rvRefreshPills();
-      }
+      await loadOddTimes();
+      rvRefreshPills();
     } catch (e) {
       alert('Failed to shift: ' + e.message);
       btns.forEach(b => b.disabled = false);
-    } finally {
-      // Re-enable if the row still exists (still odd).
-      if (row.isConnected) btns.forEach(b => b.disabled = false);
     }
   };
 
