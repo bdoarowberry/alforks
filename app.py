@@ -490,6 +490,11 @@ def _build_activity_entry(filename: str, meta: dict, regions: list[dict]) -> tup
         return None
     file_meta = meta.get(data["filename"], {})
     eff = _effective_data(data["filename"], data, file_meta.get('type', ''))
+    # Time-shift runs first — it only changes wall-clock and doesn't
+    # interact with the subsequent geometry / segmentation transforms,
+    # but it's logically the "data correctness" fix.
+    if file_meta.get("time_shift_hours"):
+        eff = _apply_time_shift(eff, file_meta["time_shift_hours"])
     trim = file_meta.get("trim") or {}
     if trim:
         eff = _apply_trim(eff, trim)
@@ -1762,6 +1767,12 @@ def api_activity(filename):
     eff_type = _effective_type_for(file_meta.get("type", ""), matched_regions, all_regions,
                                    data.get("date") or "")
     data      = _effective_data(filename, data, eff_type)
+    # Time-shift runs first so trim windows and HR merge see the corrected
+    # timeline. ?noshift=1 bypasses it for the trim-edit UI (which wants
+    # to see the raw clock) — mirrors the ?notrim / ?norepair pattern.
+    shift_h = (file_meta.get("time_shift_hours") or 0)
+    if shift_h and not request.args.get("noshift"):
+        data = _apply_time_shift(data, shift_h)
     # Apply user trim (start_km / end_km in original distances) before HR merge
     # so HR alignment respects the trimmed time window. ?notrim=1 in the URL
     # bypasses the trim — used by the trim-edit UI to see the full track.
@@ -1992,7 +2003,7 @@ def api_save_metadata(filename):
     body    = request.get_json(force=True) or {}
     allowed = {"type", "title", "location", "notes", "trim", "issues_approved",
                "smoothing", "excluded_from_stats", "regions_pinned", "assisted",
-               "spike_repair"}
+               "spike_repair", "time_shift_hours"}
     update  = {k: v for k, v in body.items() if k in allowed}
     # `assisted` is a tri-state override (True / False / null). Coerce to bool
     # when present so the JSON file holds a clean shape; null means "clear
@@ -2001,6 +2012,20 @@ def api_save_metadata(filename):
         update["assisted"] = bool(update["assisted"])
     if "spike_repair" in update and update["spike_repair"] is not None:
         update["spike_repair"] = bool(update["spike_repair"])
+    # time_shift_hours: integer in [-23, 23]; null or 0 clears the field
+    # (handled by the empty-value strip below since we replace 0 → None).
+    if "time_shift_hours" in update:
+        v = update["time_shift_hours"]
+        if v is None or v == 0:
+            update["time_shift_hours"] = None
+        else:
+            try:
+                h = int(v)
+            except (TypeError, ValueError):
+                _bad("time_shift_hours must be an integer")
+            if h < -23 or h > 23:
+                _bad("time_shift_hours must be between -23 and 23")
+            update["time_shift_hours"] = h
     # Shape-check structured fields so a bad payload doesn't corrupt metadata.
     if "trim" in update and update["trim"]:
         update["trim"] = _validate_trim(update["trim"])
@@ -3625,6 +3650,54 @@ def _apply_spike_repair(data: dict, phantom_mask: list | None = None) -> dict:
             "spike_repair_applied": {"count": sum(phantom)}}
 
 
+def _apply_time_shift(data: dict, hours) -> dict:
+    """Shift every timestamp on a track by `hours` hours. Original GPX is
+    untouched — at-request transform driven by `meta.time_shift_hours`.
+    Used to correct activities whose timestamps were mis-localized at
+    parse time (typically a 'fake UTC' producer not yet recognised in
+    `_FAKE_UTC_CREATORS`).
+
+    Per-point dt is preserved (every point shifts by the same amount),
+    so distance / speed / spike detection / repair are unaffected. Only
+    the displayed wall-clock changes. `date` may move across midnight
+    if the shift crosses 00:00 — intended, since a mis-localized 02:00
+    that should read 14:00 also belongs on the prior calendar day.
+    """
+    try:
+        h = int(hours or 0)
+    except (TypeError, ValueError):
+        return data
+    if not h:
+        return data
+    delta = timedelta(hours=h)
+
+    def _shift(iso):
+        if not iso:
+            return iso
+        try:
+            return (datetime.fromisoformat(iso) + delta).isoformat()
+        except Exception:
+            return iso
+
+    pts = data.get("points") or []
+    new_pts = [{**p, "time": _shift(p.get("time"))} if p.get("time") else p
+               for p in pts]
+    out = {**data, "points": new_pts, "time_shift_applied_hours": h}
+    for k in ("start_time", "end_time"):
+        v = data.get(k)
+        if v:
+            out[k] = _shift(v)
+    # Re-derive `date` from the (now shifted) start_time so sidebar
+    # filtering and grouping land on the corrected day.
+    new_start = out.get("start_time") or (new_pts[0].get("time") if new_pts else None)
+    if new_start:
+        try:
+            out["date"] = datetime.fromisoformat(new_start).strftime("%Y-%m-%d")
+        except Exception:
+            pass
+    return out
+
+
 def _apply_trim(data: dict, trim: dict) -> dict:
     """Slice an activity to [start_km, end_km] (in original distances).
     Re-bases dist_km so the trimmed track starts at 0, adjusts segment
@@ -4568,6 +4641,9 @@ def api_odd_times():
                              for r in (a.get("regions") or [])],
             "tz_name":      tz_name,
             "tz_offset":    local_dt.utcoffset().total_seconds() / 3600 if local_dt.utcoffset() is not None else None,
+            # Current persisted shift, so the frontend can render the
+            # actual offset and increment from it correctly.
+            "time_shift_hours": (a.get("meta") or {}).get("time_shift_hours") or 0,
         })
     flagged.sort(key=lambda a: a["_sort_key"], reverse=True)
     for a in flagged:

@@ -300,8 +300,9 @@
     </div>
     <div class="rv-section-blurb">
       Activities whose start time (in the ride's local timezone) falls between 21:00 and 07:00.
-      A diagnostic for the timezone-normalization fix — anything that lights up here is either a
-      genuine night ride or has a timestamp that didn't get correctly localized at parse time.
+      Either a genuine night ride or a timestamp that didn't get correctly localized at parse
+      time. Use <strong>−1h / +1h</strong> to shift the activity's clock when the timezone is
+      off, or <strong>Approve</strong> to accept the time as recorded.
     </div>
     <div id="odd-list"></div>
   </div>
@@ -827,10 +828,34 @@ function renderOddTimes(payload) {
   acts.forEach(a => list.appendChild(_renderOddRow(a)));
 }
 
+// _ODD_NIGHT_HOURS keeps the JS-side check in lockstep with the server's
+// _ODD_TIME_NIGHT_HOURS (21:00–06:59). Used for optimistic row removal
+// after a shift moves the start out of the night window.
+const _ODD_NIGHT_HOURS = new Set([21, 22, 23, 0, 1, 2, 3, 4, 5, 6]);
+
+// Parse an activity-local ISO timestamp (e.g. "2024-08-22T02:14:00-07:00")
+// into a Date object that *preserves* the wall-clock reading regardless of
+// the user's browser timezone. We do this by feeding the wall-clock
+// components into Date.UTC(...) — so subsequent reads via getUTCHours() etc.
+// give us the activity-local clock back, untranslated. `new Date(iso)`
+// converts to browser-local on read, which would give the wrong hour for
+// a user travelling away from the activity's region.
+function _parseLocalClock(iso) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})/.exec(iso || '');
+  if (!m) return null;
+  return new Date(Date.UTC(+m[1], +m[2]-1, +m[3], +m[4], +m[5], +m[6]));
+}
+
 function _renderOddRow(a) {
   const row = document.createElement('div');
   row.className = 'odd-row';
-  const time = _fmtTime(a.start_time) || '—';
+  // Track the current shift on the row so increment buttons can compute
+  // the next persisted value.
+  row.dataset.shift = String(a.time_shift_hours || 0);
+  // Carry the activity-local clock as a UTC-encoded Date so we can shift
+  // and re-render without browser-tz contamination.
+  let displayStart = _parseLocalClock(a.start_time);
+
   const dist = a.distance_km != null ? `${a.distance_km.toFixed(1)} km` : '—';
   const dur  = fmtDuration(a.duration_sec);
   const tz   = a.tz_offset != null ? `UTC${a.tz_offset >= 0 ? '+' : ''}${a.tz_offset}` : 'no offset';
@@ -838,11 +863,24 @@ function _renderOddRow(a) {
 
   const dateEl = document.createElement('div');
   dateEl.className = 'odd-date';
-  dateEl.textContent = a.date || '—';
+  const updateDate = () => {
+    if (!displayStart || isNaN(displayStart)) { dateEl.textContent = a.date || '—'; return; }
+    const y = displayStart.getUTCFullYear();
+    const m = String(displayStart.getUTCMonth() + 1).padStart(2, '0');
+    const d = String(displayStart.getUTCDate()).padStart(2, '0');
+    dateEl.textContent = `${y}-${m}-${d}`;
+  };
+  updateDate();
 
   const timeEl = document.createElement('div');
   timeEl.className = 'odd-time';
-  timeEl.textContent = time;
+  const updateTime = () => {
+    if (!displayStart || isNaN(displayStart)) { timeEl.textContent = '—'; return; }
+    const h = String(displayStart.getUTCHours()).padStart(2, '0');
+    const mi = String(displayStart.getUTCMinutes()).padStart(2, '0');
+    timeEl.textContent = `${h}:${mi}`;
+  };
+  updateTime();
 
   const nameWrap = document.createElement('div');
   nameWrap.style.minWidth = '0';
@@ -852,7 +890,12 @@ function _renderOddRow(a) {
   nameEl.title = a.filename;
   const subEl = document.createElement('div');
   subEl.className = 'odd-tz';
-  subEl.textContent = `${a.type || '—'}${regions ? ' · ' + regions : ''} · ${tz}`;
+  const updateSub = () => {
+    const shift = parseInt(row.dataset.shift || '0', 10);
+    const shiftLabel = shift ? ` · shift ${shift > 0 ? '+' : ''}${shift}h` : '';
+    subEl.textContent = `${a.type || '—'}${regions ? ' · ' + regions : ''} · ${tz}${shiftLabel}`;
+  };
+  updateSub();
   nameWrap.appendChild(nameEl);
   nameWrap.appendChild(subEl);
 
@@ -860,18 +903,111 @@ function _renderOddRow(a) {
   metaEl.className = 'odd-meta';
   metaEl.textContent = `${dist} · ${dur}`;
 
+  // PATCH the new shift, then either update the row in place (if still
+  // odd) or remove it (if the shifted hour falls back into daylight).
+  const applyShift = async (delta, btn) => {
+    if (!displayStart || isNaN(displayStart)) return;
+    const cur = parseInt(row.dataset.shift || '0', 10);
+    const next = cur + delta;
+    if (next < -23 || next > 23) return;
+    const btns = row.querySelectorAll('button');
+    btns.forEach(b => b.disabled = true);
+    try {
+      const r = await fetch(`/api/activity/${encodeURIComponent(a.filename)}/metadata`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ time_shift_hours: next || null }),
+      });
+      if (!r.ok) throw new Error('shift ' + r.status);
+      // Move the displayed time by `delta` hours and re-render the row.
+      // `displayStart` is UTC-encoded activity-local clock — adding ms
+      // shifts the wall-clock the same way the server's _apply_time_shift
+      // shifts the stored timestamps.
+      displayStart = new Date(displayStart.getTime() + delta * 3600 * 1000);
+      row.dataset.shift = String(next);
+      updateTime(); updateDate(); updateSub();
+      // Check against the activity-local hour (via getUTCHours on our
+      // wall-clock-as-UTC encoding), matching the server's classifier.
+      if (!_ODD_NIGHT_HOURS.has(displayStart.getUTCHours())) {
+        // No longer odd — drop the row optimistically.
+        row.remove();
+        const remaining = document.querySelectorAll('#odd-list .odd-row').length;
+        document.getElementById('odd-summary').textContent =
+          remaining ? `${remaining} flagged` : '';
+        if (!remaining) {
+          document.getElementById('odd-list').innerHTML =
+            '<div class="dup-empty">No activities flagged — every ride starts inside daylight hours.</div>';
+        }
+        rvRefreshPills();
+      }
+    } catch (e) {
+      alert('Failed to shift: ' + e.message);
+      btns.forEach(b => b.disabled = false);
+    } finally {
+      // Re-enable if the row still exists (still odd).
+      if (row.isConnected) btns.forEach(b => b.disabled = false);
+    }
+  };
+
+  const minusBtn = document.createElement('button');
+  minusBtn.className = 'r-btn'; minusBtn.textContent = '−1h';
+  minusBtn.title = 'Shift this activity\'s clock back 1 hour';
+  minusBtn.onclick = () => applyShift(-1, minusBtn);
+
+  const plusBtn = document.createElement('button');
+  plusBtn.className = 'r-btn'; plusBtn.textContent = '+1h';
+  plusBtn.title = 'Shift this activity\'s clock forward 1 hour';
+  plusBtn.onclick = () => applyShift(+1, plusBtn);
+
+  const approveBtn = document.createElement('button');
+  approveBtn.className = 'r-btn'; approveBtn.textContent = 'Approve';
+  approveBtn.title = 'Mark this ride reviewed — accept the time as recorded';
+  approveBtn.onclick = async () => {
+    if (!confirm(`Approve ${a.filename}?\n\nAccepts the start time as-is and stops flagging.`)) return;
+    const btns = row.querySelectorAll('button');
+    btns.forEach(b => b.disabled = true);
+    try {
+      const r = await fetch(`/api/activity/${encodeURIComponent(a.filename)}/metadata`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ issues_approved: true }),
+      });
+      if (!r.ok) throw new Error('approve ' + r.status);
+      row.remove();
+      const remaining = document.querySelectorAll('#odd-list .odd-row').length;
+      document.getElementById('odd-summary').textContent =
+        remaining ? `${remaining} flagged` : '';
+      if (!remaining) {
+        document.getElementById('odd-list').innerHTML =
+          '<div class="dup-empty">No activities flagged — every ride starts inside daylight hours.</div>';
+      }
+      rvRefreshPills();
+    } catch (e) {
+      alert('Failed to approve: ' + e.message);
+      btns.forEach(b => b.disabled = false);
+    }
+  };
+
   const openBtn = document.createElement('a');
   openBtn.className = 'r-btn';
   openBtn.textContent = 'Open';
   openBtn.title = 'Open this activity in Logs (middle-click for new tab)';
   openBtn.href = `/log/${encodeURIComponent(a.filename)}`;
+  openBtn.target = '_blank';
+  openBtn.rel = 'noopener';
   openBtn.style.textDecoration = 'none';
+
+  const actions = document.createElement('div');
+  actions.style.display = 'flex';
+  actions.style.gap = '4px';
+  actions.appendChild(minusBtn);
+  actions.appendChild(plusBtn);
+  actions.appendChild(approveBtn);
+  actions.appendChild(openBtn);
 
   row.appendChild(dateEl);
   row.appendChild(timeEl);
   row.appendChild(nameWrap);
   row.appendChild(metaEl);
-  row.appendChild(openBtn);
+  row.appendChild(actions);
   return row;
 }
 
