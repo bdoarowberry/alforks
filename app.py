@@ -2461,7 +2461,13 @@ def api_comparison():
     type_filter = {t for t in type_arg.split(",") if t and t != "all"}
     start_str = (request.args.get("start") or "").strip()
     end_str   = (request.args.get("end")   or "").strip()
-    issues_only = request.args.get("issues_only") in ("1", "true")
+    # `issues_only`: legacy narrow scope (only _detect_issues flags) —
+    # kept for old bookmarked URLs. `flagged_only`: union of every /review
+    # tab's flagged activities (duplicates, missing types, spikes, odd
+    # times, issues). The /logs UI uses the latter.
+    issues_only  = request.args.get("issues_only")  in ("1", "true")
+    flagged_only = request.args.get("flagged_only") in ("1", "true")
+    flagged_set  = _review_flagged_filenames() if flagged_only else None
     max_hr    = _effective_max_hr()
     region_lookup = {r["id"]: r for r in load_regions()}
 
@@ -2478,7 +2484,8 @@ def api_comparison():
         # under the right type chip on /logs.
         match_type = meta_type or act.get("effective_type") or ""
         if type_filter and match_type not in type_filter: continue
-        if issues_only and not (act.get("issues") or []): continue
+        if issues_only  and not (act.get("issues") or []): continue
+        if flagged_set is not None and act["filename"] not in flagged_set: continue
 
         # Stats (including hr_avg/hr_max) are pre-baked into the sidebar
         # entry by `_activity_payload`, so we read them straight from
@@ -3448,6 +3455,21 @@ _SPIKE_FLOOR_KMH = 40.0
 # (MTB / snowboard / hike / fat-bike) but below most phantom warps.
 _SPIKE_HARD_CAP_KMH = 80.0
 
+# Surface-threshold thresholds — when an activity is "spike-flagged" for
+# /review and /logs purposes. Three or more flagged samples in total OR a
+# single very-fast warp. Centralised here because four callers used to
+# copy-paste the same predicate.
+_SPIKE_FLAG_MIN_COUNT = 3
+_SPIKE_FLAG_PEAK_KMH = 80.0
+
+
+def _is_spike_flagged(n_spikes: int, max_implied_kmh: float) -> bool:
+    """Whether this activity's spike scan should surface on /review and
+    "flagged" filters. Single point of truth for the threshold."""
+    return n_spikes >= _SPIKE_FLAG_MIN_COUNT or (
+        n_spikes >= 1 and max_implied_kmh >= _SPIKE_FLAG_PEAK_KMH
+    )
+
 
 def _find_speed_spikes(pts: list) -> tuple:
     """Detect phantom-warp legs. Returns (mask, max_implied_kmh):
@@ -3746,7 +3768,7 @@ def _detect_issues(eff: dict) -> list[dict]:
     if pts and not eff.get("spike_repair_applied"):
         spikes, max_implied = _find_speed_spikes(pts)
         n_spikes = sum(spikes)
-        if n_spikes >= 3 or (n_spikes >= 1 and max_implied >= 80.0):
+        if _is_spike_flagged(n_spikes, max_implied):
             issues.append({"code": "speed_spike", "severity": "med",
                            "msg": f"{n_spikes} GPS sample{'' if n_spikes == 1 else 's'} with implausible inter-point speed (peak {max_implied:.0f} km/h)"})
 
@@ -4576,7 +4598,7 @@ def api_speed_spikes():
             continue
         spikes, max_implied = _find_speed_spikes(pts)
         n = sum(spikes)
-        if n < 3 and not (n >= 1 and max_implied >= 80.0):
+        if not _is_spike_flagged(n, max_implied):
             continue
         s = act.get("stats") or {}
         flagged.append({
@@ -4754,6 +4776,100 @@ def api_issues():
 _review_counts_cache: dict = {}
 _review_counts_cache_lock = threading.Lock()
 
+# Union of filenames currently flagged on *any* /review tab — duplicates,
+# missing types, GPS spikes, odd times, or data issues. Used by the
+# /logs "Show only flagged" filter and computed once per activities-cache
+# key so the spike scan (the expensive part) doesn't run repeatedly.
+_review_flagged_cache: dict = {}
+_review_flagged_cache_lock = threading.Lock()
+
+
+def _review_flagged_filenames() -> set:
+    """Set of activity filenames currently surfaced on any /review tab.
+    Cached against `_activities_cache_key()` — the same key that drives
+    `_review_counts_cache`, so any metadata edit (Approve, Repair, type
+    assignment) invalidates this naturally on the next call.
+    """
+    cache_key = _activities_cache_key()
+    with _review_flagged_cache_lock:
+        if _review_flagged_cache.get("k") == cache_key:
+            return _review_flagged_cache["v"]
+
+    flagged: set = set()
+
+    # Duplicates — every track in any non-dismissed group is "flagged".
+    for g in _compute_duplicate_groups(detail=False):
+        for t in g["tracks"]:
+            flagged.add(t["filename"])
+
+    # Missing types / non-spike issues / odd times — all from the cached
+    # activities list, so cheap.
+    #
+    # Odd-times consistency note: `/api/odd-times` does a lazy
+    # `_weather_timezone_name` lookup for activities missing a cached
+    # `tz_name`, capped at _ODD_TIMES_LAZY_LOOKUP_BUDGET. We deliberately
+    # skip that lookup here (matching `api_review_counts` for symmetry) —
+    # adding a network call to every cold cache miss would punish the
+    # /logs filter and the nav-badge update. The flagged set may diverge
+    # slightly from the Odd Times tab on a fresh install where tz_names
+    # haven't been resolved yet. Once tz_name caches fill in, the two
+    # converge.
+    for a in all_activities():
+        if a.get("excluded"):
+            continue
+        fn = a["filename"]
+        if not a.get("effective_type"):
+            flagged.add(fn)
+        if any(i.get("code") != "speed_spike" for i in (a.get("issues") or [])):
+            flagged.add(fn)
+        st = a.get("start_time")
+        if st:
+            try:
+                dt = datetime.fromisoformat(st)
+            except ValueError:
+                dt = None
+            if dt is not None:
+                tz_name = a.get("tz_name")
+                local_dt = None
+                if tz_name:
+                    try:
+                        local_dt = (dt.astimezone(ZoneInfo(tz_name)) if dt.tzinfo
+                                    else dt.replace(tzinfo=ZoneInfo(tz_name)))
+                    except ZoneInfoNotFoundError:
+                        local_dt = None
+                elif dt.tzinfo is None:
+                    local_dt = dt
+                if local_dt is not None and local_dt.hour in _ODD_TIME_NIGHT_HOURS:
+                    flagged.add(fn)
+
+    # GPS spikes — expensive (full point scan per non-repaired/approved
+    # activity). Skip activities that the user has already triaged.
+    for act in all_activities():
+        if act.get("excluded"):
+            continue
+        meta = act.get("meta") or {}
+        if meta.get("spike_repair") or meta.get("issues_approved"):
+            continue
+        data = get_activity(act["filename"])
+        if not data:
+            continue
+        pts = data.get("points") or []
+        if len(pts) < 2 * _SPIKE_WINDOW + 1:
+            continue
+        mask, max_implied = _find_speed_spikes(pts)
+        n = sum(mask)
+        if _is_spike_flagged(n, max_implied):
+            flagged.add(act["filename"])
+
+    # Cache a frozenset so a future caller can't mutate the shared state in
+    # place. (Callers only iterate / membership-check, but the safety belt
+    # is free.)
+    frozen = frozenset(flagged)
+    with _review_flagged_cache_lock:
+        _review_flagged_cache["k"] = cache_key
+        _review_flagged_cache["v"] = frozen
+    return frozen
+
 
 @app.route("/api/review-counts")
 def api_review_counts():
@@ -4797,7 +4913,7 @@ def api_review_counts():
             continue
         mask, max_implied = _find_speed_spikes(pts)
         n = sum(mask)
-        if n >= 3 or (n >= 1 and max_implied >= 80.0):
+        if _is_spike_flagged(n, max_implied):
             spikes += 1
 
     # Odd times — re-derive count from the existing endpoint's heuristic.

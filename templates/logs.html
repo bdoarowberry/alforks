@@ -234,6 +234,11 @@
       <span class="filter-label">To:</span>
       <input type="date" id="date-end">
     </div>
+    <label class="filter-group" style="cursor:pointer;color:#ccc;font-size:0.74rem;"
+           title="Only show activities that appear on any Review tab (duplicates, missing types, GPS spikes, odd times, or data issues)">
+      <input type="checkbox" id="flagged-only" onchange="_page = 1; load();" style="margin:0;">
+      <span>Show only flagged ⚠</span>
+    </label>
     <span id="count-label"></span>
   </div>
 
@@ -569,6 +574,7 @@ async function load() {
   if (activeType !== 'all') params.set('type', activeType);
   if (dateStart) params.set('start', dateStart);
   if (dateEnd)   params.set('end',   dateEnd);
+  if (document.getElementById('flagged-only')?.checked) params.set('flagged_only', '1');
 
   const wrap = document.getElementById('rows');
   wrap.innerHTML = '<div id="empty-msg">Loading…</div>';
