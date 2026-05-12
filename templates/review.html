@@ -96,6 +96,20 @@
     .odd-row { background: var(--bg-card); border: 1px solid var(--border-hair); border-radius: 4px; margin-bottom: 6px; max-width: 980px; padding: 10px 14px; display: grid; grid-template-columns: auto auto 1fr auto auto; gap: 12px; align-items: center; }
     .odd-row .odd-date { font-family: var(--font-mono); font-size: 0.76rem; color: var(--text-secondary); }
     .odd-row .odd-time { font-family: var(--font-mono); font-size: 0.86rem; color: #facc15; font-weight: 500; }
+    /* Side-by-side original / shifted time on Odd Times rows. Original
+       stays dim and static; the new (post-shift) time is bright so the
+       eye locks onto what will be reported once the shift is accepted. */
+    .odd-row .odd-time-pair { display: inline-flex; align-items: baseline; gap: 6px;
+                              font-family: var(--font-mono); white-space: nowrap; }
+    .odd-row .odd-time-orig-lbl,
+    .odd-row .odd-time-new-lbl  { font-size: 0.58rem; text-transform: uppercase;
+                                  letter-spacing: 0.08em; color: var(--text-muted); }
+    .odd-row .odd-time-orig     { font-size: 0.82rem; color: var(--text-tertiary); }
+    /* When there's no shift, the original time is the only thing shown —
+       give it the same prominence the row had before this feature. */
+    .odd-row .odd-time-orig.odd-time-orig-solo { font-size: 0.86rem; color: #facc15; font-weight: 500; }
+    .odd-row .odd-time-arrow    { color: var(--text-muted); font-size: 0.78rem; }
+    .odd-row .odd-time-new      { font-size: 0.86rem; color: #facc15; font-weight: 500; }
     .odd-row .odd-name { font-size: 0.82rem; color: var(--text-secondary); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .odd-row .odd-meta { font-size: 0.7rem; color: var(--text-tertiary); font-family: var(--font-mono); white-space: nowrap; }
     .odd-row .odd-tz   { font-size: 0.66rem; color: var(--text-muted); font-family: var(--font-mono); white-space: nowrap; }
@@ -841,41 +855,84 @@ function _parseLocalClock(iso) {
   return new Date(Date.UTC(+m[1], +m[2]-1, +m[3], +m[4], +m[5], +m[6]));
 }
 
+// Format a UTC-encoded Date back into its local-clock "HH:MM" string.
+function _fmtClock(d) {
+  if (!d || isNaN(d)) return '—';
+  const h = String(d.getUTCHours()).padStart(2, '0');
+  const mi = String(d.getUTCMinutes()).padStart(2, '0');
+  return `${h}:${mi}`;
+}
+
+function _fmtYmd(d) {
+  if (!d || isNaN(d)) return '—';
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const da = String(d.getUTCDate()).padStart(2, '0');
+  return `${y}-${m}-${da}`;
+}
+
 function _renderOddRow(a) {
   const row = document.createElement('div');
   row.className = 'odd-row';
-  // Track the current shift on the row so increment buttons can compute
-  // the next persisted value.
-  row.dataset.shift = String(a.time_shift_hours || 0);
-  // Carry the activity-local clock as a UTC-encoded Date so we can shift
-  // and re-render without browser-tz contamination.
-  let displayStart = _parseLocalClock(a.start_time);
+  const shift = parseInt(a.time_shift_hours || 0, 10);
+  row.dataset.shift = String(shift);
+
+  // `a.start_time` is the post-shift wall-clock from the server.
+  // `originalStart` is the unshifted wall-clock — derived by walking
+  // the shift back. Keeping the original visible is the whole point of
+  // this layout: the user wants to see what the activity was originally
+  // recorded as alongside what the shift will report.
+  const shiftedStart  = _parseLocalClock(a.start_time);
+  const originalStart = shiftedStart
+    ? new Date(shiftedStart.getTime() - shift * 3600 * 1000)
+    : null;
 
   const dist = a.distance_km != null ? `${a.distance_km.toFixed(1)} km` : '—';
   const dur  = fmtDuration(a.duration_sec);
   const tz   = a.tz_offset != null ? `UTC${a.tz_offset >= 0 ? '+' : ''}${a.tz_offset}` : 'no offset';
   const regions = (a.regions || []).join(', ');
 
+  // Date column shows the *original* recorded date; if shifting crosses
+  // midnight the new date is reflected via the new-time pill (which
+  // shows the post-shift day if it differs).
   const dateEl = document.createElement('div');
   dateEl.className = 'odd-date';
-  const updateDate = () => {
-    if (!displayStart || isNaN(displayStart)) { dateEl.textContent = a.date || '—'; return; }
-    const y = displayStart.getUTCFullYear();
-    const m = String(displayStart.getUTCMonth() + 1).padStart(2, '0');
-    const d = String(displayStart.getUTCDate()).padStart(2, '0');
-    dateEl.textContent = `${y}-${m}-${d}`;
-  };
-  updateDate();
+  dateEl.textContent = _fmtYmd(originalStart) || a.date || '—';
 
+  // Time column: original | → | new. The arrow + new-time only render
+  // when a shift is active; otherwise the original time stands alone.
   const timeEl = document.createElement('div');
-  timeEl.className = 'odd-time';
-  const updateTime = () => {
-    if (!displayStart || isNaN(displayStart)) { timeEl.textContent = '—'; return; }
-    const h = String(displayStart.getUTCHours()).padStart(2, '0');
-    const mi = String(displayStart.getUTCMinutes()).padStart(2, '0');
-    timeEl.textContent = `${h}:${mi}`;
-  };
-  updateTime();
+  timeEl.className = 'odd-time-pair';
+
+  const origVal = document.createElement('span');
+  origVal.className = shift !== 0 ? 'odd-time-orig' : 'odd-time-orig odd-time-orig-solo';
+  origVal.textContent = _fmtClock(originalStart);
+
+  if (shift !== 0 && shiftedStart) {
+    // Only attach the "original" label when a shift is active — without
+    // a shift the original time is the only time, so a "original" tag
+    // would be confusing noise.
+    const origLabel = document.createElement('span');
+    origLabel.className = 'odd-time-orig-lbl';
+    origLabel.textContent = 'original';
+    timeEl.appendChild(origLabel);
+  }
+  timeEl.appendChild(origVal);
+
+  if (shift !== 0 && shiftedStart) {
+    const arrow = document.createElement('span');
+    arrow.className = 'odd-time-arrow';
+    arrow.textContent = '→';
+    const newLabel = document.createElement('span');
+    newLabel.className = 'odd-time-new-lbl';
+    newLabel.textContent = `shift ${shift > 0 ? '+' : ''}${shift}h`;
+    const newVal = document.createElement('span');
+    newVal.className = 'odd-time-new';
+    newVal.textContent = _fmtClock(shiftedStart);
+    timeEl.appendChild(arrow);
+    timeEl.appendChild(newLabel);
+    timeEl.appendChild(newVal);
+  }
 
   const nameWrap = document.createElement('div');
   nameWrap.style.minWidth = '0';
@@ -885,12 +942,7 @@ function _renderOddRow(a) {
   nameEl.title = a.filename;
   const subEl = document.createElement('div');
   subEl.className = 'odd-tz';
-  const updateSub = () => {
-    const shift = parseInt(row.dataset.shift || '0', 10);
-    const shiftLabel = shift ? ` · shift ${shift > 0 ? '+' : ''}${shift}h` : '';
-    subEl.textContent = `${a.type || '—'}${regions ? ' · ' + regions : ''} · ${tz}${shiftLabel}`;
-  };
-  updateSub();
+  subEl.textContent = `${a.type || '—'}${regions ? ' · ' + regions : ''} · ${tz}`;
   nameWrap.appendChild(nameEl);
   nameWrap.appendChild(subEl);
 
