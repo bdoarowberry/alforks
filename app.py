@@ -2447,20 +2447,40 @@ def _downsample_polyline(points: list, n: int = 50) -> list:
 
 
 def _difficulty_score(distance_km: float | None, elev_gain_m: float | None) -> int | None:
-    """Cheap terrain-difficulty heuristic. Combines distance and elevation per km
-    so a flat ride scores by length and a hilly ride scores higher per km.
+    """Terrain-difficulty heuristic for MTB, hike, ski, snowboard. Two-step:
+      1. Base — distance plus climb-equivalent distance (every 55 m of climb
+         counts as one km), softly compressed so the high end doesn't run
+         away: `(dist + gain/55) ^ 0.83 / 3.2`.
+      2. Steepness multiplier — kicks in past 30 m/km gradient (~3%); below
+         that it's rolling terrain and the multiplier is 1.0. Climbs at
+         ~48 m/km hit ~1.3×, ~100 m/km hit ~2.2×. Without this, moderate-
+         climb MTB rides get under-rated vs flat rides of similar distance.
 
-    Rough calibration: a 10 km flat ride ≈ 3; 20 km flat ≈ 4; 10 km with 1000 m
-    gain ≈ 6; 20 km with 1500 m gain ≈ 8. The scale is arbitrary — good for
-    relative comparison between rides, not for reproducing any external
-    standard. Always rounds up to at least 1.
+    Sample values:
+      5 km / 50 m       → 1    (trivial)
+      10 km / 100 m     → 2    (short, flat)
+      19 km / 400 m     → 5    (medium, gentle)
+      18 km / 868 m     → 8    (medium, moderate climbing)
+      30 km / 1000 m    → 8    (solid)
+      50 km / 2000 m    → 14   (epic)
+      10 km / 1000 m    → 11   (short, brutal — heavy steepness boost)
+      80 km / 3000 m    → 20   (monster)
+
+    Scale is arbitrary — useful for relative comparison, not for matching
+    any external rating system. Always returns at least 1.
     """
     if not distance_km or distance_km <= 0:
         return None
     gain = elev_gain_m or 0
     gain_per_km = gain / distance_km
-    score = (distance_km * (1 + gain_per_km / 50)) ** 0.5
-    return max(1, round(score))
+    base = (distance_km + gain / 55) ** 0.83 / 3.2
+    # Steepness multiplier kicks in past ~30 m/km (3% grade) — anything
+    # more than rolling terrain. Original threshold of 50 m/km left
+    # moderate-climb MTB rides (~5% grade) under-rated vs flat rides of
+    # similar distance. Divisor 60 keeps the curve gentle: 1.3× at
+    # ~48 m/km, ~2.2× at 100 m/km.
+    steepness = 1 + max(0.0, gain_per_km - 30) / 60
+    return max(1, round(base * steepness))
 
 
 @app.route("/comparison")
