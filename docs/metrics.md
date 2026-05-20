@@ -111,15 +111,22 @@ file exists for the activity's date.
   not None, rounded to integer. `None` if every point lacks elevation
   (or the max is 0).
 
-### `difficulty` (sidebar only)
-- **Where:** `_difficulty_score` (app.py ~1569)
-- **Formula:** `round((distance_km * (1 + elev_gain_m/distance_km/50)) ** 0.5)`,
-  clamped to ≥ 1.
-- **Calibration:** 10 km flat ride ≈ 3; 20 km flat ≈ 4; 10 km with
-  1000 m gain ≈ 6; 20 km with 1500 m gain ≈ 8.
-- **Scope:** Arbitrary scale for relative comparison between rides;
-  does not match any external standard (Strava difficulty, route
-  difficulty grades, etc.).
+### `difficulty` (Logs list)
+- **Where:** `_difficulty_score` (app.py)
+- **Formula:** Two-step `base × steepness`, with two paths by activity type.
+  - **Climb-based** (MTB, hike): `base = (distance_km + elev_gain_m/55) ** 0.83
+    / 3.2`; `steepness = 1 + max(0, gain_per_km − 30) / 60`.
+  - **Descent-based** (ski, snowboard): `base = distance_km ** 0.83 / 3.2`
+    (descent does not add to the base); `steepness = 1 + max(0,
+    loss_per_km − 90) / 90`, where `loss_per_km` is `elev_loss_m` over
+    riding distance. Riding-segment `elev_gain_m` is ignored.
+  - Clamped to ≥ 1.
+- **Calibration:** climb — 30 km / 1000 m ≈ 8; 50 km / 2000 m ≈ 15.
+  Descent — 16 km / 1450 m loss ≈ 3; 44 km / 5650 m loss ≈ 10;
+  35 km / 6750 m loss ≈ 13.
+- **Scope:** Arbitrary scale for relative comparison between activities;
+  does not match any external standard (Strava difficulty, ski-run
+  grades, etc.).
 
 ---
 

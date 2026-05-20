@@ -2446,8 +2446,12 @@ def _downsample_polyline(points: list, n: int = 50) -> list:
     return out
 
 
-def _difficulty_score(distance_km: float | None, elev_gain_m: float | None) -> int | None:
-    """Terrain-difficulty heuristic for MTB, hike, ski, snowboard. Two-step:
+def _difficulty_score(distance_km: float | None, elev_gain_m: float | None,
+                      elev_loss_m: float | None = None,
+                      descent_sport: bool = False) -> int | None:
+    """Terrain-difficulty heuristic. Two-step base × steepness multiplier.
+
+    Climb-based path (MTB, hike — `descent_sport=False`):
       1. Base — distance plus climb-equivalent distance (every 55 m of climb
          counts as one km), softly compressed so the high end doesn't run
          away: `(dist + gain/55) ^ 0.83 / 3.2`.
@@ -2456,21 +2460,46 @@ def _difficulty_score(distance_km: float | None, elev_gain_m: float | None) -> i
          ~48 m/km hit ~1.3×, ~100 m/km hit ~2.2×. Without this, moderate-
          climb MTB rides get under-rated vs flat rides of similar distance.
 
-    Sample values:
-      5 km / 50 m       → 1    (trivial)
-      10 km / 100 m     → 2    (short, flat)
-      19 km / 400 m     → 5    (medium, gentle)
-      18 km / 868 m     → 8    (medium, moderate climbing)
-      30 km / 1000 m    → 8    (solid)
-      50 km / 2000 m    → 14   (epic)
-      10 km / 1000 m    → 11   (short, brutal — heavy steepness boost)
-      80 km / 3000 m    → 20   (monster)
+      Sample values:
+        5 km / 50 m       → 1    (trivial)
+        10 km / 100 m     → 2    (short, flat)
+        19 km / 400 m     → 5    (medium, gentle)
+        18 km / 868 m     → 8    (medium, moderate climbing)
+        30 km / 1000 m    → 8    (solid)
+        50 km / 2000 m    → 14   (epic)
+        10 km / 1000 m    → 11   (short, brutal — heavy steepness boost)
+        80 km / 3000 m    → 20   (monster)
+
+    Descent-based path (ski, snowboard — `descent_sport=True`):
+      A lift-assisted gravity sport: difficulty is steepness and volume, not
+      climbing effort. The climb formula breaks here (6000 m of descent through
+      `gain/55` would explode the base), so descent enters only as the
+      steepness ratio:
+      1. Base — riding distance alone: `dist ^ 0.83 / 3.2`. Descent is "cheap"
+         per metre, so it doesn't add to the base directly.
+      2. Steepness multiplier — descent gradient (loss per riding-km). Mellow
+         days average ~90 m/km (cat-tracks and runouts dragging the figure
+         down); past that each 90 m/km adds 1.0×. ~140 m/km → ~1.6×, ~190 m/km
+         → ~2.1×. Riding-segment climb (elev_gain_m) is ignored — it's mostly
+         GPS noise and the odd skate-uphill, not deliberate effort.
+
+      Sample values (from real activities):
+        16 km / 1450 m loss (90 m/km)   → 3    (short, mellow)
+        37 km / 4600 m loss (126 m/km)  → 9    (full day, moderate)
+        44 km / 5650 m loss (128 m/km)  → 10   (big day)
+        35 km / 6750 m loss (191 m/km)  → 13   (long and steep)
 
     Scale is arbitrary — useful for relative comparison, not for matching
     any external rating system. Always returns at least 1.
     """
     if not distance_km or distance_km <= 0:
         return None
+    if descent_sport:
+        loss = elev_loss_m or 0
+        loss_per_km = loss / distance_km
+        base = distance_km ** 0.83 / 3.2
+        steepness = 1 + max(0.0, loss_per_km - 90) / 90
+        return max(1, round(base * steepness))
     gain = elev_gain_m or 0
     gain_per_km = gain / distance_km
     base = (distance_km + gain / 55) ** 0.83 / 3.2
@@ -2567,7 +2596,10 @@ def api_comparison():
             "max_speed_kmh": s.get("max_speed_kmh"),
             "hr_avg":       hr_avg,
             "hr_max":       s.get("hr_max"),
-            "difficulty":   _difficulty_score(s.get("distance_km"), s.get("elev_gain_m")),
+            "difficulty":   _difficulty_score(
+                                s.get("distance_km"), s.get("elev_gain_m"),
+                                s.get("elev_loss_m"),
+                                descent_sport=match_type in ("ski", "snowboard")),
             "intensity":    intensity,
             "polyline":     _downsample_polyline(eff.get("points") or [], 50),
             "issues":       act.get("issues") or [],
