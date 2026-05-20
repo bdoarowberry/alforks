@@ -15,7 +15,7 @@
       "Bash(taskkill //PID 26768 //F)",
       "Bash(taskkill //PID 22152 //F)",
       "Bash(powershell *)",
-      "Bash(grep -n \"nav a \\\\|body { font-family\\\\|header h1\\\\|filter-btn\\\\|\\\\\\\\.sep \" \"/c/Users/arowberry/OneDrive - BDO Canada LLP/Documents/Personal/Claude Code Projects/GPX Files/templates/heatmap.html\")",
+      "Bash(grep -n \"nav a \\\\|body { font-family\\\\|header h1\\\\|filter-btn\\\\|\\\\\\\\.sep \" \"/c/Users/arowberry/OneDrive - BDO Canada LLP/Documents/Personal/Claude Code Projects/AlForks/templates/heatmap.html\")",
       "Bash(grep *)",
       "Bash(gh --version)",
       "Bash(gh auth *)",
@@ -26,11 +26,11 @@
       "Bash(git push *)",
       "Bash(sort -k5 -n -r)",
       "Bash(git worktree *)",
-      "Bash(cmd //c \"mklink /J tracks \\\\\"..\\\\\\\\GPX Files\\\\\\\\tracks\\\\\"\")",
+      "Bash(cmd //c \"mklink /J tracks \\\\\"..\\\\\\\\AlForks\\\\\\\\tracks\\\\\"\")",
       "Bash(cmd //c \"rmdir tracks\")",
-      "Bash(cmd //c \"mklink /J tracks \\\\\"C:\\\\\\\\Users\\\\\\\\arowberry\\\\\\\\OneDrive - BDO Canada LLP\\\\\\\\Documents\\\\\\\\Personal\\\\\\\\Claude Code Projects\\\\\\\\GPX Files\\\\\\\\tracks\\\\\"\")",
+      "Bash(cmd //c \"mklink /J tracks \\\\\"C:\\\\\\\\Users\\\\\\\\arowberry\\\\\\\\OneDrive - BDO Canada LLP\\\\\\\\Documents\\\\\\\\Personal\\\\\\\\Claude Code Projects\\\\\\\\AlForks\\\\\\\\tracks\\\\\"\")",
       "Bash(cmd *)",
-      "Bash(git -C \"C:\\\\Users\\\\arowberry\\\\OneDrive - BDO Canada LLP\\\\Documents\\\\Personal\\\\Claude Code Projects\\\\GPX Files\" log --oneline)",
+      "Bash(git -C \"C:\\\\Users\\\\arowberry\\\\OneDrive - BDO Canada LLP\\\\Documents\\\\Personal\\\\Claude Code Projects\\\\AlForks\" log --oneline)",
       "Bash(tasklist)",
       "PowerShell(Get-CimInstance *)",
       "Bash(where node *)",
@@ -55,14 +55,15 @@
       "Bash(PYTHONIOENCODING=utf-8 python *)",
       "Bash([ -f \"tracks/$f.gpx\" ])",
       "Bash([ -f \"tracks/_archive_dedup/$f.gpx\" ])",
-      "Bash(git -C \"C:/Users/arowberry/OneDrive - BDO Canada LLP/Documents/Personal/Claude Code Projects/GPX Files\" diff HEAD -- \"templates/review.html\")",
+      "Bash(git -C \"C:/Users/arowberry/OneDrive - BDO Canada LLP/Documents/Personal/Claude Code Projects/AlForks\" diff HEAD -- \"templates/review.html\")",
       "Bash(git commit *)",
       "Bash(pip install *)",
       "Bash(PYTHONIOENCODING=utf-8 grep *)",
       "Bash(node *)",
-      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\arowberry\\\\OneDrive - BDO Canada LLP\\\\Documents\\\\Personal\\\\Claude Code Projects\\\\GPX Files\" -Recurse -Include \"*.py\", \"*.js\", \"*.html\", \"*.jsx\", \"*.ts\", \"*.tsx\")",
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\arowberry\\\\OneDrive - BDO Canada LLP\\\\Documents\\\\Personal\\\\Claude Code Projects\\\\AlForks\" -Recurse -Include \"*.py\", \"*.js\", \"*.html\", \"*.jsx\", \"*.ts\", \"*.tsx\")",
       "Bash(Select-Object -ExpandProperty FullName)",
-      "Bash(Find C:\\\\Users\\\\arowberry\\\\OneDrive - BDO Canada LLP\\\\Documents\\\\Personal\\\\Claude Code Projects\\\\GPX Files\\\\templates *)"
+      "Bash(Find C:\\\\Users\\\\arowberry\\\\OneDrive - BDO Canada LLP\\\\Documents\\\\Personal\\\\Claude Code Projects\\\\AlForks\\\\templates *)",
+      "Bash(git checkout *)"
     ]
   }
 }
