@@ -55,7 +55,14 @@
       "Bash(PYTHONIOENCODING=utf-8 python *)",
       "Bash([ -f \"tracks/$f.gpx\" ])",
       "Bash([ -f \"tracks/_archive_dedup/$f.gpx\" ])",
-      "Bash(git -C \"C:/Users/arowberry/OneDrive - BDO Canada LLP/Documents/Personal/Claude Code Projects/GPX Files\" diff HEAD -- \"templates/review.html\")"
+      "Bash(git -C \"C:/Users/arowberry/OneDrive - BDO Canada LLP/Documents/Personal/Claude Code Projects/GPX Files\" diff HEAD -- \"templates/review.html\")",
+      "Bash(git commit *)",
+      "Bash(pip install *)",
+      "Bash(PYTHONIOENCODING=utf-8 grep *)",
+      "Bash(node *)",
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\arowberry\\\\OneDrive - BDO Canada LLP\\\\Documents\\\\Personal\\\\Claude Code Projects\\\\GPX Files\" -Recurse -Include \"*.py\", \"*.js\", \"*.html\", \"*.jsx\", \"*.ts\", \"*.tsx\")",
+      "Bash(Select-Object -ExpandProperty FullName)",
+      "Bash(Find C:\\\\Users\\\\arowberry\\\\OneDrive - BDO Canada LLP\\\\Documents\\\\Personal\\\\Claude Code Projects\\\\GPX Files\\\\templates *)"
     ]
   }
 }
