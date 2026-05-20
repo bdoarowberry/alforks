@@ -26,9 +26,43 @@
     .chip { padding: 4px 10px; font-size: 10px; font-family: var(--font-mono); letter-spacing: 0.04em; color: var(--text-tertiary); background: rgba(255,255,255,0.04); border: 1px solid var(--border-hair); border-radius: 3px; cursor: pointer; transition: color 0.12s, background 0.12s, border-color 0.12s; }
     .chip:hover:not(.active) { color: var(--text-secondary); }
     .chip.active { color: var(--text-primary); background: rgba(255,255,255,0.10); border-color: rgba(255,255,255,0.18); }
+    /* Type chips carry their own background colour from the activity type,
+       so the generic `.chip.active` border tint is too subtle. Replace
+       with a brighter ring + slight scale so the active type stands out
+       against its tinted neighbours. */
+    .chip.type-chip { font-weight: 600; opacity: 0.7; transition: opacity 0.12s, box-shadow 0.12s, border-color 0.12s; }
+    .chip.type-chip:hover { opacity: 1; }
+    .chip.type-chip.active { opacity: 1; border-color: currentColor; box-shadow: 0 0 0 1px currentColor inset; }
     input[type="date"] { background: transparent; border: 1px solid var(--border-row); border-radius: 3px; color: var(--text-secondary); font-size: 0.78rem; padding: 5px 8px; font-family: var(--font-mono); color-scheme: dark; }
     input[type="date"]:focus { outline: none; border-color: var(--accent); }
     #count-label { font-size: 0.74rem; color: var(--text-tertiary); margin-left: auto; font-family: var(--font-mono); }
+
+    /* Region combobox — text-input trigger with a searchable popover.
+       Single-select; the trigger label reflects the current pick. */
+    .combo { position: relative; }
+    .combo-trigger { background: transparent; border: 1px solid var(--border-row); border-radius: 3px; color: var(--text-secondary); font-size: 0.78rem; padding: 5px 28px 5px 10px; font-family: var(--font-mono); cursor: pointer; min-width: 180px; text-align: left; position: relative; }
+    .combo-trigger:hover { border-color: var(--text-tertiary); }
+    .combo-trigger.open { border-color: var(--accent); color: var(--text-primary); }
+    .combo-trigger::after { content: '▾'; position: absolute; right: 8px; top: 50%; transform: translateY(-50%); color: var(--text-tertiary); font-size: 0.7rem; }
+    .combo-pop { position: absolute; top: calc(100% + 4px); left: 0; min-width: 240px; max-width: 320px; background: var(--bg-card); border: 1px solid var(--border-row); border-radius: 4px; box-shadow: 0 8px 24px rgba(0,0,0,0.4); z-index: 50; display: none; }
+    .combo-pop.open { display: flex; flex-direction: column; }
+    .combo-search { background: transparent; border: none; border-bottom: 1px solid var(--border-hair); color: var(--text-primary); font-size: 0.78rem; padding: 8px 10px; font-family: var(--font-mono); outline: none; }
+    .combo-list { max-height: 280px; overflow-y: auto; padding: 4px 0; }
+    .combo-item { padding: 6px 12px; font-size: 0.78rem; color: var(--text-secondary); cursor: pointer; font-family: var(--font-mono); display: flex; align-items: center; gap: 8px; }
+    .combo-item:hover { background: rgba(255,255,255,0.05); color: var(--text-primary); }
+    .combo-item.selected { color: var(--text-primary); background: rgba(255,255,255,0.08); }
+    .combo-item .swatch { width: 8px; height: 8px; border-radius: 2px; flex-shrink: 0; }
+    .combo-empty { padding: 10px 12px; font-size: 0.74rem; color: var(--text-muted); font-family: var(--font-mono); }
+
+    /* Sort controls — native select + direction toggle. The select uses the
+       same neutral pill styling as the region combo trigger so the bar reads
+       as a single row of consistent controls. */
+    select.sort-select { background: transparent; border: 1px solid var(--border-row); border-radius: 3px; color: var(--text-secondary); font-size: 0.78rem; padding: 5px 10px; font-family: var(--font-mono); cursor: pointer; }
+    select.sort-select:hover { border-color: var(--text-tertiary); }
+    select.sort-select:focus { outline: none; border-color: var(--accent); }
+    select.sort-select option { background: var(--bg-card); color: var(--text-secondary); }
+    .sort-dir-btn { background: transparent; border: 1px solid var(--border-row); border-radius: 3px; color: var(--text-secondary); font-size: 0.85rem; padding: 3px 9px; font-family: var(--font-mono); cursor: pointer; line-height: 1; min-width: 28px; transition: color 0.12s, border-color 0.12s; }
+    .sort-dir-btn:hover { color: var(--text-primary); border-color: var(--text-tertiary); }
 
     /* Pagination strip — same affordance at top + bottom of the list. */
     .pager { display: flex; align-items: center; gap: 4px; flex-wrap: wrap;
@@ -229,10 +263,37 @@
       <div id="type-chips" style="display:flex;gap:6px;flex-wrap:wrap;"></div>
     </div>
     <div class="filter-group">
+      <span class="filter-label">Region:</span>
+      <div class="combo" id="region-combo">
+        <button type="button" class="combo-trigger" id="region-trigger">All regions</button>
+        <div class="combo-pop" id="region-pop">
+          <input type="text" class="combo-search" id="region-search" placeholder="Search regions…" autocomplete="off">
+          <div class="combo-list" id="region-list"></div>
+        </div>
+      </div>
+    </div>
+    <div class="filter-group">
       <span class="filter-label">From:</span>
       <input type="date" id="date-start">
       <span class="filter-label">To:</span>
       <input type="date" id="date-end">
+    </div>
+    <div class="filter-group">
+      <span class="filter-label">Sort:</span>
+      <select id="sort-field" class="sort-select">
+        <option value="date">Date</option>
+        <option value="distance_km">Distance</option>
+        <option value="duration_sec">Duration</option>
+        <option value="elev_gain_m">Elevation gain</option>
+        <option value="elev_loss_m">Elevation loss</option>
+        <option value="avg_speed_kmh">Avg speed</option>
+        <option value="max_speed_kmh">Max speed</option>
+        <option value="hr_avg">HR avg</option>
+        <option value="hr_max">HR max</option>
+        <option value="difficulty">Difficulty</option>
+        <option value="intensity">Intensity</option>
+      </select>
+      <button type="button" id="sort-dir" class="sort-dir-btn" title="Toggle direction">↓</button>
     </div>
     <label class="filter-group" style="cursor:pointer;color:#ccc;font-size:0.74rem;"
            title="Only show activities that appear on any Review tab (duplicates, missing types, GPS spikes, odd times, or data issues)">
@@ -264,8 +325,20 @@
 <script>
 const TYPES = {{ types_json | safe }};
 const TYPE_LOOKUP = Object.fromEntries(TYPES.map(t => [t.id, t]));
+const REGIONS = {{ regions_json | safe }};
+const REGION_LOOKUP = Object.fromEntries(REGIONS.map(r => [r.id, r]));
 
 let activeType = 'all';
+// Region filter value: '' / 'all' = no filter; 'unassigned' = no regions
+// assigned; otherwise a region id. Persists across pagination, mirrors
+// the type filter pattern.
+let activeRegion = 'all';
+// Sort state. Field is one of the keys returned by /api/comparison
+// (date / distance_km / etc.). Direction is 'asc' or 'desc'. Switching
+// fields resets direction to that field's "natural" default — newest
+// first for date, largest first for every numeric column.
+let sortField = 'date';
+let sortDir   = 'desc';
 let dateStart = '';
 let dateEnd   = '';
 // True until the user touches a control or supplies ?start=/?end= via URL.
@@ -284,6 +357,8 @@ let _datesAreDefault = true;
   if (qs && /^\d{4}-\d{2}-\d{2}$/.test(qs)) { dateStart = qs; _datesAreDefault = false; }
   if (qe && /^\d{4}-\d{2}-\d{2}$/.test(qe)) { dateEnd   = qe; _datesAreDefault = false; }
   if (qt) activeType = qt;
+  const qr = url.searchParams.get('region');
+  if (qr) activeRegion = qr;
 }
 
 // ─── Pagination ─────────────────────────────────────────────────────────────
@@ -294,15 +369,28 @@ let _page = 1;           // 1-indexed
 function renderTypeChips() {
   const wrap = document.getElementById('type-chips');
   wrap.innerHTML = '';
-  const mk = (id, label) => {
+  // "All" stays as a plain text chip — a label, not a type. Each real
+  // type renders as its short badge (MTB / SNO / SKI / …) with the type
+  // colour, so the filter bar reads as a row of tiny icons. Full names
+  // are kept on hover via title.
+  const allBtn = document.createElement('button');
+  allBtn.className = 'chip' + (activeType === 'all' ? ' active' : '');
+  allBtn.textContent = 'All';
+  allBtn.onclick = () => { activeType = 'all'; _page = 1; load(); };
+  wrap.appendChild(allBtn);
+  TYPES.forEach(t => {
     const b = document.createElement('button');
-    b.className = 'chip' + (id === activeType ? ' active' : '');
-    b.textContent = label;
-    b.onclick = () => { activeType = id; _page = 1; load(); };
+    b.className = 'chip type-chip' + (t.id === activeType ? ' active' : '');
+    b.textContent = typeGlyph(t);
+    b.title = t.label;
+    // Tint by the type's own colour so it reads as the same badge used
+    // in the row title — background is the type's bg tint, foreground
+    // the saturated colour.
+    b.style.background = t.bg || 'rgba(255,255,255,0.04)';
+    b.style.color      = t.color || 'var(--text-primary)';
+    b.onclick = () => { activeType = t.id; _page = 1; load(); };
     wrap.appendChild(b);
-  };
-  mk('all', 'All');
-  TYPES.forEach(t => mk(t.id, t.label));
+  });
 }
 
 function init() {
@@ -317,7 +405,149 @@ function init() {
     dateEnd   = e.target.value; _datesAreDefault = false; _page = 1; load();
   };
   renderTypeChips();
+  initRegionCombo();
+  initSortControls();
   load();
+}
+
+// ─── Sort controls ──────────────────────────────────────────────────────
+// Every numeric column gets a "descending = bigger first" default; date
+// gets "descending = newer first" (same convention). The toggle button
+// flips the current direction without changing the field.
+function _naturalSortDir(field) { return 'desc'; }
+
+function applySort() {
+  const f = sortField;
+  const mult = (sortDir === 'asc') ? 1 : -1;
+  _allItems.sort((a, b) => {
+    // Push nulls / missing values to the end regardless of direction —
+    // sorting "no HR data" rows to the top of an HR sort is never useful.
+    const av = a[f], bv = b[f];
+    const aMissing = (av == null || av === '');
+    const bMissing = (bv == null || bv === '');
+    if (aMissing && bMissing) return 0;
+    if (aMissing) return 1;
+    if (bMissing) return -1;
+    if (f === 'date') return mult * (av < bv ? -1 : av > bv ? 1 : 0);
+    return mult * (av - bv);
+  });
+}
+
+function _updateSortDirIcon() {
+  document.getElementById('sort-dir').textContent = (sortDir === 'asc') ? '↑' : '↓';
+}
+
+function initSortControls() {
+  const sel = document.getElementById('sort-field');
+  const btn = document.getElementById('sort-dir');
+  sel.value = sortField;
+  _updateSortDirIcon();
+  sel.onchange = () => {
+    sortField = sel.value;
+    sortDir   = _naturalSortDir(sortField);  // reset to field's natural direction
+    _updateSortDirIcon();
+    _page = 1;
+    applySort();
+    _renderCurrentPage();
+  };
+  btn.onclick = () => {
+    sortDir = (sortDir === 'asc') ? 'desc' : 'asc';
+    _updateSortDirIcon();
+    _page = 1;
+    applySort();
+    _renderCurrentPage();
+  };
+}
+
+// ─── Region combobox ────────────────────────────────────────────────────
+// Searchable single-select: All regions / Unassigned / one entry per
+// region (alphabetical). Selection writes to `activeRegion`, triggers a
+// reload, and updates the trigger label.
+function regionLabel(value) {
+  if (!value || value === 'all') return 'All regions';
+  if (value === 'unassigned')    return 'Unassigned';
+  return REGION_LOOKUP[value]?.name || value;
+}
+
+function renderRegionList(query) {
+  const list = document.getElementById('region-list');
+  const q = (query || '').trim().toLowerCase();
+  // Base options always include All + Unassigned; regions follow,
+  // sorted alphabetically. Filter the regions against the typed query
+  // — leave the two synthetic entries in unless the query is non-empty
+  // and excludes them.
+  const opts = [
+    { id: 'all',        label: 'All regions', synthetic: true },
+    { id: 'unassigned', label: 'Unassigned',  synthetic: true },
+    ...REGIONS.slice().sort((a, b) => (a.name || '').localeCompare(b.name || ''))
+              .map(r => ({ id: r.id, label: r.name, color: r.color })),
+  ];
+  const matches = q ? opts.filter(o => o.label.toLowerCase().includes(q)) : opts;
+  list.innerHTML = '';
+  if (!matches.length) {
+    const empty = document.createElement('div');
+    empty.className = 'combo-empty';
+    empty.textContent = 'No matches';
+    list.appendChild(empty);
+    return;
+  }
+  for (const o of matches) {
+    const row = document.createElement('div');
+    row.className = 'combo-item' + (o.id === activeRegion ? ' selected' : '');
+    if (o.color) {
+      const sw = document.createElement('span');
+      sw.className = 'swatch';
+      sw.style.background = o.color;
+      row.appendChild(sw);
+    }
+    const lbl = document.createElement('span');
+    lbl.textContent = o.label;
+    row.appendChild(lbl);
+    row.onclick = () => {
+      activeRegion = o.id;
+      document.getElementById('region-trigger').textContent = regionLabel(activeRegion);
+      closeRegionPop();
+      _page = 1;
+      load();
+    };
+    list.appendChild(row);
+  }
+}
+
+function openRegionPop() {
+  document.getElementById('region-pop').classList.add('open');
+  document.getElementById('region-trigger').classList.add('open');
+  const search = document.getElementById('region-search');
+  search.value = '';
+  renderRegionList('');
+  // Defer focus until after the popover is visible so the cursor lands
+  // in the search box.
+  requestAnimationFrame(() => search.focus());
+}
+
+function closeRegionPop() {
+  document.getElementById('region-pop').classList.remove('open');
+  document.getElementById('region-trigger').classList.remove('open');
+}
+
+function initRegionCombo() {
+  const trig   = document.getElementById('region-trigger');
+  const pop    = document.getElementById('region-pop');
+  const search = document.getElementById('region-search');
+  trig.textContent = regionLabel(activeRegion);
+  trig.onclick = (e) => {
+    e.stopPropagation();
+    if (pop.classList.contains('open')) closeRegionPop();
+    else openRegionPop();
+  };
+  search.oninput = () => renderRegionList(search.value);
+  search.onkeydown = (e) => { if (e.key === 'Escape') closeRegionPop(); };
+  // Click-outside dismiss.
+  document.addEventListener('click', (e) => {
+    if (!pop.classList.contains('open')) return;
+    if (e.target.closest('#region-combo')) return;
+    closeRegionPop();
+  });
 }
 
 // ─── Lazy maps ──────────────────────────────────────────────────────────────
@@ -572,6 +802,7 @@ function renderGap(daysBetween) {
 async function load() {
   const params = new URLSearchParams();
   if (activeType !== 'all') params.set('type', activeType);
+  if (activeRegion && activeRegion !== 'all') params.set('region', activeRegion);
   if (dateStart) params.set('start', dateStart);
   if (dateEnd)   params.set('end',   dateEnd);
   if (document.getElementById('flagged-only')?.checked) params.set('flagged_only', '1');
@@ -601,6 +832,7 @@ async function load() {
   if (d.max_date) document.getElementById('date-end').max   = d.max_date;
 
   _allItems = d.items || [];
+  applySort();
   document.getElementById('count-label').textContent =
     `${_allItems.length} ${_allItems.length === 1 ? 'activity' : 'activities'}`;
 
@@ -713,9 +945,13 @@ function _renderCurrentPage() {
 
   const start = (_page - 1) * PAGE_SIZE;
   const slice = _allItems.slice(start, start + PAGE_SIZE);
+  // Day-gap spacers only make sense when rows are in chronological
+  // order — under any other sort the gap between two adjacent rows is
+  // arbitrary, so suppress them.
+  const showGaps = (sortField === 'date');
   let prevDate = null;
   for (const item of slice) {
-    if (prevDate) {
+    if (showGaps && prevDate) {
       const a = new Date(prevDate); const b = new Date(item.date);
       const days = Math.round((a - b) / 86400000);
       if (days > 0) wrap.appendChild(renderGap(days));

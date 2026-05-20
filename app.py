@@ -74,6 +74,15 @@ _types_lock = threading.Lock()
 _FAKE_UTC_CREATORS = ("trailforks", "alforks strava sync")
 
 
+def _safe_json(obj) -> str:
+    """`json.dumps` for values that get injected raw into a `<script>` block
+    via `{{ x | safe }}`. Standard `json.dumps` doesn't escape the literal
+    `</script>` sequence, so a user-supplied string like a type or region
+    name containing it would break out of the script element. Escaping the
+    forward slash neutralizes that without affecting JSON correctness."""
+    return json.dumps(obj).replace("</", "<\\/")
+
+
 def load_types() -> list[dict]:
     global _types_cache
     if _types_cache is not None:
@@ -1021,7 +1030,7 @@ def home():
     the activity-detail page at its current canonical path."""
     if "file" in request.args:
         return redirect(f"/log/{request.args['file']}", code=301)
-    return render_template("summary.html", types_json=json.dumps(load_types()))
+    return render_template("summary.html", types_json=_safe_json(load_types()))
 
 
 @app.route("/logs")
@@ -1029,7 +1038,9 @@ def logs():
     """Logs landing — rich list of activities with mini-maps and stats.
     Click a row to open the detail view at /log/<filename>; pair-select
     two rows to overlay them at /compare."""
-    return render_template("logs.html", types_json=json.dumps(load_types()),
+    return render_template("logs.html",
+                           types_json=_safe_json(load_types()),
+                           regions_json=_safe_json(load_regions()),
                            mapbox_token=load_config().get("mapbox_token", ""))
 
 
@@ -1040,7 +1051,7 @@ def log_detail(filename):
     way in is via the Logs landing at /logs."""
     return render_template("index.html",
         mapbox_token=load_config().get("mapbox_token", ""),
-        types_json=json.dumps(load_types()),
+        types_json=_safe_json(load_types()),
         current_filename=filename)
 
 
@@ -1058,7 +1069,7 @@ def rides_redirect():
 @app.route("/summary")
 def summary_archived():
     """Archived. Linked from Setup → Archived; not in the main nav."""
-    return render_template("summary_archived.html", types_json=json.dumps(load_types()))
+    return render_template("summary_archived.html", types_json=_safe_json(load_types()))
 
 
 @app.route("/summary/v2")
@@ -1072,7 +1083,7 @@ def summary_v2_redirect():
 def training_load():
     """Coach-view fitness page (per design/training-load). Data fetched from
     /api/training; template stays thin."""
-    return render_template("training_load.html", types_json=json.dumps(load_types()))
+    return render_template("training_load.html", types_json=_safe_json(load_types()))
 
 
 @app.route("/review")
@@ -1080,7 +1091,7 @@ def review_page():
     """Curation / data-quality dashboard — duplicate detection, odd-time
     flagging, GPS speed-spike flagging, and missing-type flagging on one
     page. Replaces the diagnostic tabs that previously lived under Setup."""
-    return render_template("review.html", types_json=json.dumps(load_types()))
+    return render_template("review.html", types_json=_safe_json(load_types()))
 
 
 @app.route("/training-load")
@@ -2060,7 +2071,7 @@ def api_save_metadata(filename):
 def heatmap():
     return render_template("heatmap.html",
         mapbox_token=load_config().get("mapbox_token", ""),
-        types_json=json.dumps(load_types()))
+        types_json=_safe_json(load_types()))
 
 
 @app.route("/api/activity/<filename>/segments", methods=["PATCH", "DELETE"])
@@ -2525,7 +2536,7 @@ def compare_overlay_page():
     stats side-by-side. Filenames come in as ?a=<file>&b=<file>.
     """
     return render_template("compare.html",
-                           types_json=json.dumps(load_types()),
+                           types_json=_safe_json(load_types()),
                            mapbox_token=load_config().get("mapbox_token", ""))
 
 
@@ -2542,6 +2553,10 @@ def api_comparison():
     issues_only  = request.args.get("issues_only")  in ("1", "true")
     flagged_only = request.args.get("flagged_only") in ("1", "true")
     flagged_set  = _review_flagged_filenames() if flagged_only else None
+    # Region filter: "" / "all" = no filter; "unassigned" = activities
+    # with an empty regions list; any other value = region id that must
+    # appear in the activity's region list.
+    region_arg = (request.args.get("region") or "").strip()
     max_hr    = _effective_max_hr()
     region_lookup = {r["id"]: r for r in load_regions()}
 
@@ -2560,6 +2575,12 @@ def api_comparison():
         if type_filter and match_type not in type_filter: continue
         if issues_only  and not (act.get("issues") or []): continue
         if flagged_set is not None and act["filename"] not in flagged_set: continue
+        if region_arg and region_arg != "all":
+            act_regions = act.get("regions") or []
+            if region_arg == "unassigned":
+                if act_regions: continue
+            elif region_arg not in act_regions:
+                continue
 
         # Stats (including hr_avg/hr_max) are pre-baked into the sidebar
         # entry by `_activity_payload`, so we read them straight from
@@ -4209,7 +4230,7 @@ def _maybe_autosync_on_startup():
 
 @app.route("/setup")
 def setup_page():
-    return render_template("setup.html", types_json=json.dumps(load_types()))
+    return render_template("setup.html", types_json=_safe_json(load_types()))
 
 
 @app.route("/api/types", methods=["GET", "POST"])
