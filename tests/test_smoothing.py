@@ -557,5 +557,128 @@ class TestSafeGpxPath(unittest.TestCase):
         self.assertIsNone(app._safe_gpx_path(""))
 
 
+class TestSpikeDetectionAssistedAware(unittest.TestCase):
+    """_find_speed_spikes must skip legs touching an assisted (lift/shuttle)
+    point. Sustained real vehicle speeds otherwise either false-positive
+    individual high samples or contaminate the local-median window so real
+    riding spikes go undetected."""
+
+    def _pts(self, n: int, assisted_range: tuple | None = None,
+             phantom_at: int | None = None) -> list:
+        """Build a synthetic track of n points. dt=1s between samples,
+        positions advance at ~10 m/s riding pace. assisted_range marks a
+        [start, end) window as assisted=True (also at riding pace, so the
+        median is uniform — the assisted flag is what should suppress, not
+        the speed magnitude). phantom_at injects a 300 m teleport at that
+        index to simulate a phantom warp."""
+        pts = []
+        lat = 50.0
+        for i in range(n):
+            # 10 m/s ≈ 36 km/h advance per sample (~0.00009° lat per 10 m)
+            lat_step = 0.00009
+            if phantom_at is not None and i == phantom_at:
+                lat_step = 0.0027  # ~300 m jump → ~1080 km/h implied
+            lat += lat_step
+            is_assisted = (assisted_range is not None
+                           and assisted_range[0] <= i < assisted_range[1])
+            pts.append({
+                "lat":      lat,
+                "lon":      -116.0,
+                "ele":      1000.0,
+                "time":     f"2024-01-01T10:{i // 60:02d}:{i % 60:02d}",
+                "dist_km":  i * 0.010,
+                "speed":    20.0,
+                "assisted": is_assisted,
+            })
+        return pts
+
+    def test_phantom_in_riding_section_is_flagged(self):
+        """Baseline: a clear teleport on a non-assisted leg must trip rule 5."""
+        pts = self._pts(n=60, phantom_at=30)
+        mask, max_implied = app._find_speed_spikes(pts)
+        self.assertTrue(mask[30], "phantom leg in riding section should flag")
+        self.assertGreater(max_implied, 100)
+
+    def test_phantom_in_assisted_section_is_skipped(self):
+        """A phantom inside an assisted span must not flag — lift/shuttle
+        samples are real, not warps."""
+        pts = self._pts(n=60, assisted_range=(20, 40), phantom_at=30)
+        mask, max_implied = app._find_speed_spikes(pts)
+        self.assertFalse(mask[30],
+                         "phantom leg inside assisted span must not flag")
+        # No other legs should be flagged either (clean riding pace elsewhere)
+        self.assertEqual(sum(mask), 0)
+        self.assertEqual(max_implied, 0.0)
+
+    def test_leg_touching_assisted_boundary_is_skipped(self):
+        """The leg from the last riding sample into the first assisted
+        sample (and vice-versa) is also dropped — boundary legs straddle
+        the regime change and aren't comparable to either side's median."""
+        # Phantom at index 20 — same index as the start of an assisted span,
+        # so the leg pts[19]→pts[20] touches an assisted point.
+        pts = self._pts(n=60, assisted_range=(20, 40), phantom_at=20)
+        mask, _ = app._find_speed_spikes(pts)
+        self.assertFalse(mask[20], "leg touching assisted boundary must skip")
+
+    def test_short_tracks_return_empty(self):
+        """Sanity: the existing guard for tracks shorter than the window
+        still applies regardless of assisted flags."""
+        pts = self._pts(n=5, assisted_range=(0, 5))
+        mask, max_implied = app._find_speed_spikes(pts)
+        self.assertEqual(sum(mask), 0)
+        self.assertEqual(max_implied, 0.0)
+
+
+class TestStatsFromTrimmedRidingMaxSpeed(unittest.TestCase):
+    """_stats_from_trimmed must report max_speed_kmh_riding that excludes
+    samples falling inside an assisted segment. The Top Speed PR ranks on
+    this field so lift/shuttle telemetry doesn't appear as a riding PR."""
+
+    def _make_trimmed_args(self, speeds: list, assisted_span: tuple | None):
+        """Build (pts, segments, base_stats) for _stats_from_trimmed where
+        each point gets the given speed and assisted_span (start_idx, end_idx)
+        is wrapped as an 'assisted' segment."""
+        pts = []
+        for i, sp in enumerate(speeds):
+            pts.append({
+                "lat":     50.0 + i * 0.00009,
+                "lon":     -116.0,
+                "ele":     1000.0,
+                "time":    f"2024-01-01T10:{i // 60:02d}:{i % 60:02d}",
+                "dist_km": i * 0.010,
+                "speed":   sp,
+            })
+        segments = []
+        if assisted_span:
+            s, e = assisted_span
+            # A riding seg before, an assisted seg in the middle, riding after
+            if s > 0:
+                segments.append({"type": "riding",   "start": 0,     "end": s})
+            segments.append({"type":     "assisted", "start": s,     "end": e})
+            if e < len(speeds) - 1:
+                segments.append({"type": "riding",   "start": e,     "end": len(speeds) - 1})
+        else:
+            segments.append({"type": "riding", "start": 0, "end": len(speeds) - 1})
+        base_stats = {"distance_km": 1.0, "max_speed_kmh": max(speeds)}
+        return pts, segments, base_stats
+
+    def test_riding_max_excludes_assisted_samples(self):
+        """Riding speeds: 20, 25. Assisted (middle): 100. Riding max should
+        be 25, overall max should be 100."""
+        speeds = [20.0, 22.0, 100.0, 105.0, 102.0, 25.0, 24.0]
+        pts, segments, base = self._make_trimmed_args(speeds, assisted_span=(2, 4))
+        out = app._stats_from_trimmed(pts, segments, base)
+        self.assertEqual(out["max_speed_kmh"], 105.0)
+        self.assertEqual(out["max_speed_kmh_riding"], 25.0)
+
+    def test_all_riding_riding_max_matches_overall(self):
+        """No assisted segment: riding max == overall max."""
+        speeds = [10.0, 20.0, 30.0, 25.0, 15.0]
+        pts, segments, base = self._make_trimmed_args(speeds, assisted_span=None)
+        out = app._stats_from_trimmed(pts, segments, base)
+        self.assertEqual(out["max_speed_kmh"], 30.0)
+        self.assertEqual(out["max_speed_kmh_riding"], 30.0)
+
+
 if __name__ == "__main__":
     unittest.main()

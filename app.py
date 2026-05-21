@@ -848,7 +848,7 @@ def parse_gpx(path: Path) -> dict:
         return t.isoformat()
 
     total_dist = riding_dist = 0.0
-    elev_gain = elev_loss = assisted_gain = max_speed = 0.0
+    elev_gain = elev_loss = assisted_gain = max_speed = max_speed_riding = 0.0
     riding_dur_sec = 0.0
     points = []
 
@@ -871,8 +871,13 @@ def parse_gpx(path: Path) -> dict:
                     elev_gain += sm_delta
                 elif sm_delta < 0:
                     elev_loss += abs(sm_delta)
-            if p['speed'] is not None and p['speed'] > max_speed:
-                max_speed = p['speed']
+            if p['speed'] is not None:
+                if p['speed'] > max_speed:
+                    max_speed = p['speed']
+                # Riding-only max excludes lift/shuttle samples so vehicle/lift
+                # telemetry doesn't appear in Top Speed records.
+                if not is_assisted[i] and p['speed'] > max_speed_riding:
+                    max_speed_riding = p['speed']
 
         points.append({
             "lat":     pt.latitude,
@@ -881,6 +886,10 @@ def parse_gpx(path: Path) -> dict:
             "time":    _iso_localized(pt.time),
             "dist_km": round(total_dist / 1000, 3),
             "speed":   round(per_pt[i]['speed'], 1) if per_pt[i]['speed'] is not None else None,
+            # Persist the leg-arriving-here's assisted flag so downstream
+            # consumers (spike detection, trimmed-stats recompute) can be
+            # per-segment aware without re-running the lift algorithms.
+            "assisted": bool(is_assisted[i]),
         })
 
     start, end = raw[0].time, raw[-1].time
@@ -909,6 +918,7 @@ def parse_gpx(path: Path) -> dict:
             "assisted_gain_m": round(assisted_gain),
             "avg_speed_kmh":   round(avg_speed, 1) if avg_speed is not None else None,
             "max_speed_kmh":   round(max_speed, 1),
+            "max_speed_kmh_riding": round(max_speed_riding, 1) if max_speed_riding > 0 else None,
             "lift_count":      sum(1 for s in segments if s["type"] == "assisted"),
             "peak_ele_m":      round(max((p["ele"] for p in points if p["ele"] is not None), default=0)) or None,
         },
@@ -1284,11 +1294,15 @@ def _summary_data(days_back: int, units: str) -> dict:
         # frontend renders them side-by-side so the user can compare a
         # year's bests against their lifetime bests.
         def _build_prs(source):
-            # Distance and Duration records exclude lift/shuttle-assisted rides
-            # (bike park lap days, ski-hill rides) so they don't dominate
-            # rankings against point-to-point efforts. Climbing / Descent /
-            # Top speed are still legitimate so we keep assisted rides in
-            # those rankings.
+            # Distance and Duration records exclude lift/shuttle-assisted
+            # rides (bike park lap days, ski-hill rides) at the activity
+            # level so they don't dominate rankings against point-to-point
+            # efforts. Top speed uses a per-segment riding-only field
+            # (max_speed_kmh_riding) so mixed activities still contribute
+            # their actual riding/skiing top speed without lift/shuttle
+            # telemetry leaking in. Climbing / Descent / Vertical remain
+            # inclusive: a lift-assisted ski day's descent is still the
+            # athlete descending.
             unassisted = [a for a in source if not a.get("effective_assisted")]
 
             def _rank(key, top=1, src=None):
@@ -1312,16 +1326,16 @@ def _summary_data(days_back: int, units: str) -> dict:
             out = []
             # Snow types lead with descent ("vertical"), others with distance.
             if tid in ("snowboard", "ski"):
-                for top in _rank("elev_loss_m"):                 out.append(_entry(top, "Vertical",  "elev_loss_m",   "value_m",   "elev"))
-                for top in _rank("distance_km", src=unassisted): out.append(_entry(top, "Longest",   "distance_km",   "value_km",  "dist"))
-                for top in _rank("max_speed_kmh"):               out.append(_entry(top, "Top speed", "max_speed_kmh", "value_kmh", "speed"))
-                for top in _rank("duration_sec",  src=unassisted): out.append(_entry(top, "Duration", "duration_sec", "value_sec", "dur"))
+                for top in _rank("elev_loss_m"):                       out.append(_entry(top, "Vertical",  "elev_loss_m",          "value_m",   "elev"))
+                for top in _rank("distance_km",          src=unassisted): out.append(_entry(top, "Longest",   "distance_km",          "value_km",  "dist"))
+                for top in _rank("max_speed_kmh_riding"):              out.append(_entry(top, "Top speed", "max_speed_kmh_riding", "value_kmh", "speed"))
+                for top in _rank("duration_sec",         src=unassisted): out.append(_entry(top, "Duration",  "duration_sec",         "value_sec", "dur"))
             else:
-                for top in _rank("distance_km", src=unassisted): out.append(_entry(top, "Longest",   "distance_km",   "value_km",  "dist"))
-                for top in _rank("elev_gain_m"):                 out.append(_entry(top, "Climbing",  "elev_gain_m",   "value_m",   "elev"))
-                for top in _rank("elev_loss_m"):                 out.append(_entry(top, "Descent",   "elev_loss_m",   "value_m",   "elev"))
-                for top in _rank("max_speed_kmh"):               out.append(_entry(top, "Top speed", "max_speed_kmh", "value_kmh", "speed"))
-                for top in _rank("duration_sec",  src=unassisted): out.append(_entry(top, "Duration", "duration_sec", "value_sec", "dur"))
+                for top in _rank("distance_km",          src=unassisted): out.append(_entry(top, "Longest",   "distance_km",          "value_km",  "dist"))
+                for top in _rank("elev_gain_m"):                       out.append(_entry(top, "Climbing",  "elev_gain_m",          "value_m",   "elev"))
+                for top in _rank("elev_loss_m"):                       out.append(_entry(top, "Descent",   "elev_loss_m",          "value_m",   "elev"))
+                for top in _rank("max_speed_kmh_riding"):              out.append(_entry(top, "Top speed", "max_speed_kmh_riding", "value_kmh", "speed"))
+                for top in _rank("duration_sec",         src=unassisted): out.append(_entry(top, "Duration",  "duration_sec",         "value_sec", "dur"))
             return out
 
         prs = _build_prs(type_acts)   # all-time
@@ -3433,6 +3447,20 @@ def _stats_from_trimmed(pts: list, segments: list, base_stats: dict) -> dict:
                     riding_dur_sec += dt
     speeds    = [p["speed"] for p in pts if p.get("speed") is not None]
     max_speed = max(speeds) if speeds else base_stats.get("max_speed_kmh")
+    # Riding-only max: excludes any sample inside an assisted segment, INCLUDING
+    # the segment's start index. (`assisted` above skips start to keep elevation
+    # attribution matched to _compute_algo_stats; that boundary-share convention
+    # doesn't apply to speed — the segment-start sample is still lift telemetry,
+    # not a riding sample.)
+    assisted_for_speed = set()
+    for s in segments or []:
+        if s.get("type") == "assisted":
+            for k in range(s["start"], s["end"] + 1):
+                assisted_for_speed.add(k)
+    riding_speeds = [p["speed"] for i, p in enumerate(pts)
+                     if i not in assisted_for_speed and p.get("speed") is not None]
+    max_speed_riding = (max(riding_speeds) if riding_speeds
+                        else base_stats.get("max_speed_kmh_riding"))
     avg_speed = (riding_dist / (riding_dur_sec / 3600)) if riding_dur_sec > 0 else None
     return {
         **base_stats,
@@ -3443,6 +3471,7 @@ def _stats_from_trimmed(pts: list, segments: list, base_stats: dict) -> dict:
         "assisted_gain_m": round(assisted_gain),
         "avg_speed_kmh":   round(avg_speed, 1) if avg_speed is not None else None,
         "max_speed_kmh":   max_speed,
+        "max_speed_kmh_riding": max_speed_riding,
     }
 
 
@@ -3579,12 +3608,23 @@ def _find_speed_spikes(pts: list) -> tuple:
     The implied speed comes from raw haversine / dt, which is what made
     the warp anomalous in the first place — the per-point `speed` field
     has already been median-filtered and may hide it.
+
+    Legs touching an assisted (lift/shuttle) sample are ignored entirely:
+    real vehicle/lift speeds aren't phantom warps, and including them in
+    the local-median window contaminates the threshold for riding samples
+    near the boundary. Detection runs cleanly on the riding portions.
     """
     n = len(pts)
     if n < 2 * _SPIKE_WINDOW + 1:
         return [False] * n, 0.0
     speeds = [0.0] * n
     for i in range(1, n):
+        # Skip legs where either endpoint is on a lift/shuttle. Leaving
+        # speeds[i] = 0 makes the median-window filter (speeds[j] > 0) skip
+        # this leg naturally, and the spike-flagging loop's floor check
+        # ensures it can never be flagged.
+        if pts[i].get("assisted") or pts[i-1].get("assisted"):
+            continue
         t_prev, t_cur = pts[i-1].get("time"), pts[i].get("time")
         if not t_prev or not t_cur:
             continue
@@ -3833,7 +3873,10 @@ def _detect_issues_cached(eff: dict) -> list[dict]:
     except OSError:
         return _detect_issues(eff)
     stats = eff.get("stats") or {}
-    key = (filename, mtime, stats.get("distance_km"), stats.get("duration_sec"))
+    # CACHE_VERSION in the key so a code/threshold change that affects what
+    # _detect_issues flags (e.g. the per-segment spike skip introduced with
+    # ALGO_SIG v13) doesn't get masked by entries from a previous process.
+    key = (CACHE_VERSION, filename, mtime, stats.get("distance_km"), stats.get("duration_sec"))
     with _issues_cache_lock:
         cached = _issues_cache.get(key)
         if cached is not None:
