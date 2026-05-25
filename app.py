@@ -232,6 +232,13 @@ _AERIALWAY_TYPES = "gondola|chair_lift|cable_car|mixed_lift|drag_lift|t-bar|j-ba
 _osm_locks:    dict[str, threading.Lock] = {}
 _osm_locks_mu = threading.Lock()
 
+# In-memory mirror of `_lift_cache_path` files. Populated lazily on read
+# (and pre-warmed once before an ALGO_SIG-bump storm via
+# `_prewarm_disk_caches`). 554 GPX files in the same mountain area resolve
+# to the same bbox and therefore the same cache file — without this
+# every worker thread re-reads the same JSON. Map: file stem (md5) -> lifts.
+_OSM_LIFT_MEM_CACHE: dict[str, list[dict]] = {}
+
 
 def _osm_lock_for(cp: Path) -> threading.Lock:
     key = cp.name
@@ -249,12 +256,21 @@ def _lift_cache_path(bbox) -> Path:
 
 
 def _try_read_osm_cache(cp: Path) -> list[dict] | None:
+    # Memory hit short-circuits the disk read. The mem cache is dict-thread-
+    # safe under the GIL for simple get/set; we don't lock because the
+    # cache value is immutable (a list we hand out by reference) and a
+    # benign race that double-loads the same file is harmless.
+    mem = _OSM_LIFT_MEM_CACHE.get(cp.stem)
+    if mem is not None:
+        return mem
     if not cp.exists():
         return None
     try:
         entry = json.loads(cp.read_text(encoding="utf-8"))
         if time.time() - entry.get("fetched", 0) < _LIFT_CACHE_TTL_SEC:
-            return entry["lifts"]
+            lifts = entry["lifts"]
+            _OSM_LIFT_MEM_CACHE[cp.stem] = lifts
+            return lifts
     except Exception:
         pass
     return None
@@ -305,6 +321,7 @@ def _fetch_osm_lifts(bbox) -> list[dict]:
                 lifts.append({"name": el.get("tags", {}).get("name", ""), "a": a, "b": b})
 
             _atomic_write(cp, json.dumps({"fetched": time.time(), "lifts": lifts}, ensure_ascii=False))
+            _OSM_LIFT_MEM_CACHE[cp.stem] = lifts
             return lifts
 
         except Exception:
@@ -537,6 +554,58 @@ def _delete_sidebar_entry(filename: str) -> None:
     sidebar_cache.delete_sidebar_entry(SIDEBAR_CACHE_DIR, filename)
 
 
+# ─── Disk-cache prewarm (OSM lifts + TZ LRU) ─────────────────────────────────
+# When ALGO_SIG bumps invalidate the sidebar cache, all ~554 GPX files
+# re-parse. Each parse calls `_fetch_osm_lifts` (file read per bbox) and
+# `_weather_timezone_name` (file read per coord cluster). With 6 worker
+# threads hitting the same disk files repeatedly, network is no longer the
+# bottleneck — file I/O contention is. Pre-loading both disk caches into
+# their in-memory dicts before the worker pool starts converts those reads
+# into dict lookups.
+_DISK_CACHES_PREWARMED = False
+_disk_caches_prewarm_lock = threading.Lock()
+
+
+def _prewarm_disk_caches() -> None:
+    """Idempotent. Cheap to call (~10 ms on a few hundred cache files);
+    the first call does real work, subsequent calls short-circuit on the
+    flag. Failures are swallowed — the lazy disk-read path in each cache's
+    own resolver is the fallback."""
+    global _DISK_CACHES_PREWARMED
+    if _DISK_CACHES_PREWARMED:
+        return
+    with _disk_caches_prewarm_lock:
+        if _DISK_CACHES_PREWARMED:
+            return
+        _DISK_CACHES_PREWARMED = True
+
+        now = time.time()
+        lifts_dir = CACHE_DIR / "lifts"
+        if lifts_dir.exists():
+            for p in lifts_dir.glob("*.json"):
+                try:
+                    entry = json.loads(p.read_text(encoding="utf-8"))
+                    if now - entry.get("fetched", 0) < _LIFT_CACHE_TTL_SEC:
+                        _OSM_LIFT_MEM_CACHE[p.stem] = entry.get("lifts") or []
+                except (OSError, ValueError, KeyError):
+                    continue
+
+        weather_dir = CACHE_DIR / "weather"
+        if weather_dir.exists():
+            for p in weather_dir.glob("*.json"):
+                try:
+                    entry = json.loads(p.read_text(encoding="utf-8"))
+                except (OSError, ValueError):
+                    continue
+                tz_name = entry.get("timezone_name")
+                k = entry.get("tz_lru_key")
+                # Older entries don't carry tz_lru_key — they upgrade on
+                # next network refetch. Don't try to back-fill: writes
+                # under a prewarm hold would race with worker writes.
+                if tz_name and isinstance(k, list) and len(k) == 2:
+                    _TZ_LRU[(k[0], k[1])] = tz_name
+
+
 def _build_activity_entry(filename: str, meta: dict, regions: list[dict]) -> tuple[dict, dict] | None:
     """Compute the sidebar entry for one activity. Returns (entry, aux) where
     `aux` holds side-data `all_activities` uses (start-coord for geocode
@@ -689,6 +758,11 @@ def all_activities() -> list[dict]:
 
         rebuilt_builds: dict[str, tuple[dict, dict]] = {}
         if misses:
+            # Pre-load OSM lift + TZ disk caches into their in-memory
+            # mirrors before the worker pool spins up. Skipped when no
+            # misses (warm cache: nothing to parse, no I/O storm to
+            # mitigate). Idempotent across calls.
+            _prewarm_disk_caches()
             with ThreadPoolExecutor(max_workers=6) as pool:
                 builds = list(pool.map(_safe_build, [f for f, _ in misses]))
             for (f, gpx_mtime), built in zip(misses, builds):
@@ -3228,6 +3302,12 @@ def _weather_timezone_name(lat: float, lon: float, date_str: str) -> str | None:
         # in timezone_name now.
         if data.get("utc_offset_seconds") is not None:
             entry["utc_offset_sec"] = int(data["utc_offset_seconds"])
+        # Persist the rounded coords inside the entry so a startup prewarm
+        # can repopulate `_TZ_LRU` from existing cache files without parsing
+        # any GPX. Without this, the LRU stays empty after a restart and
+        # every worker thread on a storm pays a disk read for the same
+        # coord cluster.
+        entry["tz_lru_key"] = [round(lat, 2), round(lon, 2)]
         entry.setdefault("fetched", int(time.time()))
         _atomic_write(cp, json.dumps(entry, ensure_ascii=False))
         _TZ_LRU[key] = tz_name
