@@ -504,9 +504,14 @@ _stat_mtime       = sidebar_cache.stat_mtime
 
 def _sidebar_fingerprint(gpx_mtime: float, file_meta: dict,
                          regions_mtime: float, types_mtime: float) -> str:
-    # `_REGION_MATCH_VERSION` is defined later in the module; resolving at
-    # call time (not import time) keeps the helper placement local to the
-    # other cache code.
+    # `_REGION_MATCH_VERSION` (defined ~line 4163) is resolved at call
+    # time, not import time — Python's late binding makes the forward
+    # reference work despite the placement. Don't hoist this wrapper
+    # above the constant assuming a value capture: the wrapper would
+    # still resolve correctly, but a future reader who *did* assume
+    # value capture might also move the constant and trip over the
+    # actual NameError when this fires before line 4163 executes
+    # (e.g. during an early test import).
     return sidebar_cache.sidebar_fingerprint(
         gpx_mtime=gpx_mtime, file_meta=file_meta,
         regions_mtime=regions_mtime, types_mtime=types_mtime,
@@ -651,7 +656,7 @@ def all_activities() -> list[dict]:
         regions_mtime = _stat_mtime(REGIONS_FILE)
         types_mtime   = _stat_mtime(TYPES_FILE)
 
-        misses: list[Path] = []
+        misses: list[tuple[Path, float]] = []
         cached_builds: dict[str, tuple[dict, dict]] = {}
         for f in gpx_files:
             gpx_mtime = _stat_mtime(f)
@@ -661,7 +666,14 @@ def all_activities() -> list[dict]:
             fp = _sidebar_fingerprint(gpx_mtime, file_meta, regions_mtime, types_mtime)
             hit = _read_sidebar_entry(f.name, fp)
             if hit is None:
-                misses.append(f)
+                # Pair the file with the mtime we just stat'd so the
+                # post-build fingerprint matches the snapshot we built
+                # from. Re-stat'ing after the build would race with any
+                # in-flight write to the GPX (e.g. a still-flushing
+                # sync) and could persist a fingerprint that's stale
+                # the moment it's written — triggering a needless
+                # rebuild on the next cold start.
+                misses.append((f, gpx_mtime))
             else:
                 cached_builds[f.name] = hit
 
@@ -678,12 +690,12 @@ def all_activities() -> list[dict]:
         rebuilt_builds: dict[str, tuple[dict, dict]] = {}
         if misses:
             with ThreadPoolExecutor(max_workers=6) as pool:
-                builds = list(pool.map(_safe_build, misses))
-            for f, built in zip(misses, builds):
+                builds = list(pool.map(_safe_build, [f for f, _ in misses]))
+            for (f, gpx_mtime), built in zip(misses, builds):
                 if built is None:
                     continue
                 entry, aux = built
-                fp = _sidebar_fingerprint(_stat_mtime(f), meta.get(f.name, {}),
+                fp = _sidebar_fingerprint(gpx_mtime, meta.get(f.name, {}),
                                           regions_mtime, types_mtime)
                 _write_sidebar_entry(f.name, entry, fp)
                 rebuilt_builds[f.name] = (entry, aux)
@@ -718,6 +730,13 @@ def _update_activity_entry(filename: str) -> None:
     global _activities_cache, _activities_cache_dir_mtime
     meta    = load_metadata()
     regions = load_regions()
+    # Stat the GPX *before* building so the persisted fingerprint
+    # describes the snapshot the build actually saw. Stat'ing after the
+    # build would race with an in-flight write to the file (e.g. a
+    # still-flushing Strava sync) and could persist a fingerprint that's
+    # stale at write time, triggering a needless rebuild on next start.
+    path = _safe_gpx_path(filename)
+    gpx_mtime = _stat_mtime(path) if path is not None else -1.0
     built   = _build_activity_entry(filename, meta, regions)
 
     # Persist (or remove) the on-disk entry up front so that even a
@@ -727,8 +746,6 @@ def _update_activity_entry(filename: str) -> None:
         _delete_sidebar_entry(filename)
     else:
         entry, _ = built
-        path = _safe_gpx_path(filename)
-        gpx_mtime = _stat_mtime(path) if path is not None else -1.0
         fp = _sidebar_fingerprint(gpx_mtime, meta.get(filename, {}),
                                   _stat_mtime(REGIONS_FILE),
                                   _stat_mtime(TYPES_FILE))

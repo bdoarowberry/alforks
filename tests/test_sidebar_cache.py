@@ -156,6 +156,39 @@ class TestReadWriteRoundTrip(unittest.TestCase):
         # No write first — deleting a never-persisted entry must not raise.
         sidebar_cache.delete_sidebar_entry(self.sidebar_dir, "nope.gpx")
 
+    def test_overwrite_with_new_fingerprint(self):
+        # The mtime-race fix in `_update_activity_entry` relies on this:
+        # writing a fresh entry must replace the prior one, and reading
+        # with the *old* fingerprint must return None (cache miss) so
+        # the next caller rebuilds. If overwrite ever silently appended
+        # or kept the old fp readable, a stale entry could survive
+        # alongside a fresh one for the same filename.
+        self._write()  # fp = "deadbeefcafebabe"
+        new_entry = dict(self.entry); new_entry["name"] = "Updated rip"
+        sidebar_cache.write_sidebar_entry(
+            sidebar_cache_dir=self.sidebar_dir, hr_cache_dir=self.hr_dir,
+            filename=self.entry["filename"], entry=new_entry, fp="freshfp00000001",
+        )
+        self.assertIsNone(self._read(fp="deadbeefcafebabe"))
+        result = self._read(fp="freshfp00000001")
+        self.assertIsNotNone(result)
+        entry, _ = result
+        self.assertEqual(entry["name"], "Updated rip")
+
+    def test_overwrite_same_fingerprint_updates_content(self):
+        # Same fingerprint but newer build (e.g. _build_activity_entry
+        # was rerun for an unrelated reason): the latest write wins.
+        self._write()
+        rebuilt = dict(self.entry); rebuilt["name"] = "Rebuilt"
+        sidebar_cache.write_sidebar_entry(
+            sidebar_cache_dir=self.sidebar_dir, hr_cache_dir=self.hr_dir,
+            filename=self.entry["filename"], entry=rebuilt, fp=self.fp,
+        )
+        result = self._read()
+        self.assertIsNotNone(result)
+        entry, _ = result
+        self.assertEqual(entry["name"], "Rebuilt")
+
 
 class TestHrFileMtime(unittest.TestCase):
     def test_missing_date_returns_negative_one(self):
