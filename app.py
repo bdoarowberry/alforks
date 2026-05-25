@@ -486,6 +486,52 @@ def _hr_covers_window(date_str: str, start_ms: int, end_ms: int) -> bool:
        and last_ms  >= end_ms   - _HR_COVERAGE_TOL_MS
 
 
+# ─── Per-file sidebar cache ───────────────────────────────────────────────────
+# Each successful `_build_activity_entry` is persisted to disk with a
+# fingerprint of its inputs. On the next cold start (or after a sync of one
+# new file) we serve the entry directly when the fingerprint still matches,
+# turning the historical ~40 s rebuild of all sidebar rows into ~one-stat
+# per file plus the recompute of whatever's actually stale.
+# The pure helpers live in `sidebar_cache.py` so they can be unit-tested
+# without importing the Flask app.
+
+import sidebar_cache
+
+SIDEBAR_CACHE_DIR = CACHE_DIR / "sidebar"
+HR_CACHE_DIR      = CACHE_DIR / "hr"
+_stat_mtime       = sidebar_cache.stat_mtime
+
+
+def _sidebar_fingerprint(gpx_mtime: float, file_meta: dict,
+                         regions_mtime: float, types_mtime: float) -> str:
+    # `_REGION_MATCH_VERSION` is defined later in the module; resolving at
+    # call time (not import time) keeps the helper placement local to the
+    # other cache code.
+    return sidebar_cache.sidebar_fingerprint(
+        gpx_mtime=gpx_mtime, file_meta=file_meta,
+        regions_mtime=regions_mtime, types_mtime=types_mtime,
+        algo_sig=ALGO_SIG, region_match_version=_REGION_MATCH_VERSION,
+    )
+
+
+def _read_sidebar_entry(filename: str, expected_fp: str):
+    return sidebar_cache.read_sidebar_entry(
+        sidebar_cache_dir=SIDEBAR_CACHE_DIR, hr_cache_dir=HR_CACHE_DIR,
+        filename=filename, expected_fp=expected_fp,
+    )
+
+
+def _write_sidebar_entry(filename: str, entry: dict, fp: str) -> None:
+    sidebar_cache.write_sidebar_entry(
+        sidebar_cache_dir=SIDEBAR_CACHE_DIR, hr_cache_dir=HR_CACHE_DIR,
+        filename=filename, entry=entry, fp=fp,
+    )
+
+
+def _delete_sidebar_entry(filename: str) -> None:
+    sidebar_cache.delete_sidebar_entry(SIDEBAR_CACHE_DIR, filename)
+
+
 def _build_activity_entry(filename: str, meta: dict, regions: list[dict]) -> tuple[dict, dict] | None:
     """Compute the sidebar entry for one activity. Returns (entry, aux) where
     `aux` holds side-data `all_activities` uses (start-coord for geocode
@@ -591,14 +637,33 @@ def all_activities() -> list[dict]:
 
         meta    = load_metadata()
         regions = load_regions()
-        # Build all sidebar entries in parallel — the per-activity work is
-        # mostly I/O (HR cache reads, weather TZ lookups) so threading
-        # overlaps cleanly even under the GIL. Sort filenames first so the
-        # output ordering is stable, then submit, then collect via the
-        # original order so result list matches the pre-parallel layout.
+        # Two-phase build:
+        #   1. Try each file's persisted sidebar entry — when the
+        #      fingerprint matches, no parse/region-match/issue-detect
+        #      work is needed.
+        #   2. Whatever didn't hit is rebuilt in parallel through the
+        #      existing `_build_activity_entry` path, then persisted.
+        # Sort filenames first so the result ordering is stable.
         gpx_files = sorted(GPX_DIR.glob("*.gpx"))
         result  = []
         start_coords = []
+
+        regions_mtime = _stat_mtime(REGIONS_FILE)
+        types_mtime   = _stat_mtime(TYPES_FILE)
+
+        misses: list[Path] = []
+        cached_builds: dict[str, tuple[dict, dict]] = {}
+        for f in gpx_files:
+            gpx_mtime = _stat_mtime(f)
+            if gpx_mtime < 0:
+                continue
+            file_meta = meta.get(f.name, {})
+            fp = _sidebar_fingerprint(gpx_mtime, file_meta, regions_mtime, types_mtime)
+            hit = _read_sidebar_entry(f.name, fp)
+            if hit is None:
+                misses.append(f)
+            else:
+                cached_builds[f.name] = hit
 
         def _safe_build(f):
             # Wrap so an unexpected error in any single file doesn't blow
@@ -610,16 +675,27 @@ def all_activities() -> list[dict]:
                 logger.exception("sidebar build failed for %s", f.name)
                 return None
 
-        if gpx_files:
+        rebuilt_builds: dict[str, tuple[dict, dict]] = {}
+        if misses:
             with ThreadPoolExecutor(max_workers=6) as pool:
-                builds = list(pool.map(_safe_build, gpx_files))
-            for built in builds:
+                builds = list(pool.map(_safe_build, misses))
+            for f, built in zip(misses, builds):
                 if built is None:
                     continue
                 entry, aux = built
-                result.append(entry)
-                if aux.get("_start_latlon"):
-                    start_coords.append(aux)
+                fp = _sidebar_fingerprint(_stat_mtime(f), meta.get(f.name, {}),
+                                          regions_mtime, types_mtime)
+                _write_sidebar_entry(f.name, entry, fp)
+                rebuilt_builds[f.name] = (entry, aux)
+
+        for f in gpx_files:
+            built = cached_builds.get(f.name) or rebuilt_builds.get(f.name)
+            if built is None:
+                continue
+            entry, aux = built
+            result.append(entry)
+            if aux.get("_start_latlon"):
+                start_coords.append(aux)
 
         _activities_cache            = result
         _activities_cache_dir_mtime  = key
@@ -630,20 +706,37 @@ def all_activities() -> list[dict]:
 
 
 def _update_activity_entry(filename: str) -> None:
-    """Surgical cache update: recompute just one filename's entry in the
-    cached activities list. Called from metadata/segment save paths that
-    know exactly which file changed, avoiding a full 40 s rebuild.
+    """Surgical cache update: recompute one entry and refresh both the
+    in-memory list and the on-disk per-file sidebar cache.
 
-    No-op when the cache hasn't been built yet — the next full load picks up
-    the on-disk change via its mtime key.
+    Called from metadata/segment save paths and from the sync-completion
+    path, both of which know exactly which files changed and would
+    otherwise pay a ~40 s full rebuild. Safe to call before the in-memory
+    cache has been built — the disk persistence still applies, and the
+    next `all_activities()` picks the new entry up via a fingerprint hit.
     """
     global _activities_cache, _activities_cache_dir_mtime
+    meta    = load_metadata()
+    regions = load_regions()
+    built   = _build_activity_entry(filename, meta, regions)
+
+    # Persist (or remove) the on-disk entry up front so that even a
+    # cold-cache caller — e.g. a sync subprocess that finishes before
+    # any HTTP request hits all_activities — benefits next start.
+    if built is None:
+        _delete_sidebar_entry(filename)
+    else:
+        entry, _ = built
+        path = _safe_gpx_path(filename)
+        gpx_mtime = _stat_mtime(path) if path is not None else -1.0
+        fp = _sidebar_fingerprint(gpx_mtime, meta.get(filename, {}),
+                                  _stat_mtime(REGIONS_FILE),
+                                  _stat_mtime(TYPES_FILE))
+        _write_sidebar_entry(filename, entry, fp)
+
     with _activities_cache_lock:
         if _activities_cache is None:
             return
-        meta    = load_metadata()
-        regions = load_regions()
-        built   = _build_activity_entry(filename, meta, regions)
         # Locate the existing entry (if any) and replace or remove it
         idx = next((i for i, e in enumerate(_activities_cache)
                     if e["filename"] == filename), None)
@@ -1013,8 +1106,11 @@ def get_activity(filename: str) -> dict | None:
 
 
 def _prewarm():
-    """Parse every GPX file in parallel at startup, newest first so the
-    activity list populates with recent rides quickly."""
+    """Parse every GPX file in parallel, newest first. No longer launched
+    at startup — the per-file sidebar cache means `all_activities()` no
+    longer needs the full parsed payloads in `_mem_cache`. Kept available
+    for callers that explicitly want to warm the parsed-GPX cache (e.g.
+    a future "Warm cache now" admin action)."""
     def _mtime_or_zero(f):
         try:
             return f.stat().st_mtime
@@ -1024,12 +1120,6 @@ def _prewarm():
     with ThreadPoolExecutor(max_workers=6) as pool:
         list(pool.map(lambda f: get_activity(f.name), files))
     all_activities()
-
-
-# Skip prewarm when the module is imported by tooling (tests, scripts). The
-# real Flask entrypoint sets ALFORKS_PREWARM=1 below before serving.
-if os.environ.get("ALFORKS_PREWARM") == "1":
-    threading.Thread(target=_prewarm, daemon=True, name="cache-prewarm").start()
 
 
 # ─── Routes ───────────────────────────────────────────────────────────────────
@@ -4182,7 +4272,7 @@ def _run_sync_subprocess(source: str, script: str) -> None:
                                    finished_at=None, ok=None, message="syncing…", added=0)
     try:
         if source == "strava":
-            before = len(list((_ROOT / "tracks").glob("strava_*.gpx")))
+            before_files = {p.name for p in (_ROOT / "tracks").glob("strava_*.gpx")}
         else:
             before = len(list((CACHE_DIR / "hr").glob("*.json"))) if (CACHE_DIR / "hr").exists() else 0
 
@@ -4191,21 +4281,33 @@ def _run_sync_subprocess(source: str, script: str) -> None:
             capture_output=True, text=True, timeout=600,
         )
 
+        new_files: list[str] = []
         if source == "strava":
-            after = len(list((_ROOT / "tracks").glob("strava_*.gpx")))
+            after_files = {p.name for p in (_ROOT / "tracks").glob("strava_*.gpx")}
+            new_files = sorted(after_files - before_files)
+            added = len(new_files)
             unit = "files"
         else:
             after = len(list((CACHE_DIR / "hr").glob("*.json"))) if (CACHE_DIR / "hr").exists() else 0
+            added = max(0, after - before)
             unit = "dates"
-        added = max(0, after - before)
 
         ok = proc.returncode == 0
         msg = f"{added} new {unit}" if ok else (proc.stderr or proc.stdout).strip().splitlines()[-1] if (proc.stderr or proc.stdout).strip() else "sync failed"
         with _sync_state_lock:
             _sync_state[source].update(running=False, finished_at=int(time.time()),
                                        ok=ok, message=msg, added=added)
-        if source == "strava" and added > 0:
-            _invalidate_activities_cache()
+        # Surgical refresh: build (and persist) only the newly-synced
+        # entries instead of nuking the whole 554-entry sidebar cache.
+        # `_update_activity_entry` also writes the per-file sidebar
+        # cache, so the next request — or restart — sees the new files
+        # without rebuilding anything else.
+        if source == "strava" and new_files:
+            for fn in new_files:
+                try:
+                    _update_activity_entry(fn)
+                except Exception:
+                    logger.exception("sidebar update failed for %s", fn)
     except subprocess.TimeoutExpired:
         with _sync_state_lock:
             _sync_state[source].update(running=False, finished_at=int(time.time()),
@@ -5264,10 +5366,6 @@ if __name__ == "__main__":
         format="%(asctime)s %(levelname)-7s %(name)s: %(message)s",
         datefmt="%H:%M:%S",
     )
-    # Enable background prewarm only for the Flask entrypoint — not when
-    # app.py is imported by tests or tooling.
-    os.environ.setdefault("ALFORKS_PREWARM", "1")
-    threading.Thread(target=_prewarm, daemon=True, name="cache-prewarm").start()
     logger.info("Starting GPX viewer at http://localhost:5000")
     # Debug mode leaks tracebacks — opt in via ALFORKS_DEBUG=1 for local dev.
     app.run(debug=debug, threaded=True)
