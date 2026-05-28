@@ -477,6 +477,115 @@
     #map-wrap.has-runs:has(#runs-drawer.open) #map-controls,
     #map-wrap.has-runs:has(#runs-drawer.open) #map-legend,
     #map-wrap.has-runs:has(#runs-drawer.open) #speed-legend { right: 304px; }
+
+    /* Trails-ridden drawer (preview feature for MTB at gated regions —
+       Moose Mountain only for now). Mirrors the runs drawer geometry.
+       Reuses the runs-table / run-sum-* classes for visual parity.
+       Default width is wider than the runs drawer because the trails
+       table has 5 columns (time, name, dist, dur, cov). A custom drag
+       handle on the strip lets the user resize live — width persists
+       in localStorage. */
+    #trails-drawer { position: absolute; top: 0; right: 0; bottom: 0; width: 380px; background: #12151a; border-left: 1px solid #2a2d35; z-index: 1000; transform: translateX(100%); transition: transform 0.2s ease; overflow-y: auto; }
+    #trails-drawer.open { transform: translateX(0); }
+    #trails-drawer h3 { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.08em; color: #ccc; padding: 10px 14px; border-bottom: 1px solid #2a2d35; display: flex; align-items: center; justify-content: space-between; }
+    #trails-drawer h3 .preview-tag { font-size: 0.55rem; padding: 2px 6px; background: #2a2d35; color: #f59e0b; border-radius: 3px; letter-spacing: 0.05em; }
+    #trails-drawer .section-label { font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.07em; color: #888; padding: 10px 14px 4px; }
+    /* <details>/<summary> for the rollup section — strip the default
+       disclosure triangle position and make the summary look like our
+       other section labels but clearly clickable. */
+    #trails-summary-details > summary.section-label { cursor: pointer; list-style: none; user-select: none; }
+    #trails-summary-details > summary.section-label::-webkit-details-marker { display: none; }
+    #trails-summary-details > summary.section-label::before { content: '▸ '; color: #555; }
+    #trails-summary-details[open] > summary.section-label::before { content: '▾ '; }
+    /* Strip doubles as a drag handle: cursor switches to col-resize on
+       hover, and a JS handler on mousedown begins a width-resize
+       interaction. A short click without movement still toggles the
+       drawer (handled in toggleTrailsDrawer via the drag-distance check). */
+    #trails-strip { display: none; width: 14px; flex-shrink: 0; background: #12151a; border: none; border-left: 1px solid #2a2d35; border-right: 1px solid #2a2d35; color: #555; cursor: col-resize; font-size: 9px; padding: 14px 0 0; align-items: flex-start; justify-content: center; transition: background 0.12s, color 0.12s; font-family: inherit; user-select: none; }
+    #trails-strip:hover { background: #1e2128; color: #aaa; }
+    #map-wrap.trails-resizing { cursor: col-resize; }
+    #map-wrap.trails-resizing #map, #map-wrap.trails-resizing #map-3d { pointer-events: none; }
+    #trails-summary-cards { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; padding: 12px 14px; border-bottom: 1px solid #2a2d35; }
+    .trail-cov-pill { display: inline-block; min-width: 36px; padding: 1px 6px; border-radius: 3px; font-size: 0.6rem; font-weight: 600; text-align: center; white-space: nowrap; }
+    /* Two states only: did you ride the full trail or not. The completed
+       flag comes from the backend (raw coverage >= 85 %); coverage % is
+       capped at 100 because riding "more than the whole trail" is a GPS
+       path-length artefact, not a meaningful measurement. */
+    .trail-cov-pill.cov-full    { background: #18301a; color: #86efac; }
+    .trail-cov-pill.cov-partial { background: #3a2a18; color: #f59e0b; }
+    #trails-drawer .runs-table td.trail-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 140px; }
+    #trails-drawer .runs-table td.trail-link { color: #93c5fd; cursor: pointer; }
+    #trails-drawer .runs-table td.trail-link:hover { color: #bfdbfe; text-decoration: underline; }
+    #trails-drawer .runs-table td.t-rank { font-variant-numeric: tabular-nums; color: #ccc; }
+    #trails-drawer .timeline-row td { font-size: 0.68rem; }
+    #trails-drawer .timeline-row td.t-time { color: #888; }
+    #trails-drawer .empty-msg { padding: 18px 14px; font-size: 0.7rem; color: #888; line-height: 1.4; }
+
+    /* Leaderboard popup — floats over the map area immediately left of
+       the trails drawer. Shown when a trail name is clicked in the
+       timeline. Width is fixed for now; we tune after first use. */
+    #trails-leaderboard { position: absolute; top: 0; bottom: 0; width: 340px; background: #12151a; border-left: 1px solid #2a2d35; border-right: 1px solid #2a2d35; z-index: 999; overflow-y: auto; display: none; }
+    #trails-leaderboard.open { display: block; }
+    /* The right offset tracks the drawer width — same CSS variable used
+       by map overlays. Falls back to the default 380 px. */
+    #map-wrap.has-trails:has(#trails-drawer.open) #trails-leaderboard {
+      right: calc(var(--trails-drawer-w, 380px) + 0px);
+    }
+    /* When drawer is closed, dock against the right edge so the popup is
+       still visible to the user. */
+    #map-wrap.has-trails:not(:has(#trails-drawer.open)) #trails-leaderboard {
+      right: 14px;
+    }
+    #trails-leaderboard .lb-head { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; border-bottom: 1px solid #2a2d35; }
+    #trails-leaderboard .lb-title { font-size: 0.75rem; font-weight: 600; color: #fff; }
+    #trails-leaderboard .lb-sub { font-size: 0.6rem; color: #888; text-transform: uppercase; letter-spacing: 0.07em; margin-top: 2px; }
+    #trails-leaderboard .lb-close { background: transparent; border: none; color: #888; font-size: 1.1rem; cursor: pointer; padding: 0 4px; }
+    #trails-leaderboard .lb-close:hover { color: #fff; }
+    #trails-leaderboard .lb-empty { padding: 16px 14px; color: #888; font-size: 0.7rem; line-height: 1.4; }
+    .lb-table { width: 100%; border-collapse: collapse; font-size: 0.7rem; }
+    .lb-table th { font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.07em; color: #bbb; padding: 5px 10px; text-align: right; border-bottom: 1px solid #2a2d35; font-weight: 500; background: #0e1117; position: sticky; top: 0; }
+    .lb-table th:first-child, .lb-table th:nth-child(2) { text-align: left; }
+    .lb-table td { padding: 5px 10px; color: #ccc; text-align: right; border-bottom: 1px solid #1e2128; }
+    .lb-table td:first-child { color: #fff; font-weight: 600; }
+    .lb-table td:nth-child(2) { text-align: left; color: #ccc; }
+    .lb-table tbody tr { cursor: pointer; }
+    .lb-table tbody tr:hover td { background: #1e2128; }
+    .lb-table tbody tr.lb-current td { background: #1f2a1c; }
+    .lb-table tbody tr.lb-current td:first-child { color: #4ade80; }
+
+    /* Inline layout when trails are present — mirrors the .has-runs flex
+       row, but using trails-* slots. The runs drawer and trails drawer are
+       mutually exclusive in practice (ski vs MTB) so they share geometry. */
+    #map-wrap.has-trails { display: flex; }
+    #map-wrap.has-trails #map { flex: 1; height: 100%; min-width: 0; }
+    #map-wrap.has-trails #map-3d { position: relative; inset: auto; flex: 1; min-width: 0; height: 100%; }
+    #map-wrap.has-trails #trails-strip { display: flex; }
+    #map-wrap.has-trails #trails-drawer { position: relative; transform: none; transition: none; width: 0; box-shadow: none; flex: 0 0 0; height: 100%; overflow-x: hidden; }
+    #map-wrap.has-trails #trails-drawer.open { flex: 0 0 380px; width: 380px; }
+    #map-wrap.has-trails #view-toggle,
+    #map-wrap.has-trails #map-controls,
+    #map-wrap.has-trails #map-legend,
+    #map-wrap.has-trails #speed-legend { right: 24px; }
+    /* Map overlays clear of whatever's open on the right edge. Width
+       follows the drawer's CSS custom property if set by the resize
+       handle (default 380 px). The leaderboard adds another 340 px when
+       open. Selectors are written so all combinations get a single
+       resolved value rather than cascading overrides. */
+    /* Drawer open, leaderboard closed */
+    #map-wrap.has-trails:has(#trails-drawer.open):not(:has(#trails-leaderboard.open)) #view-toggle,
+    #map-wrap.has-trails:has(#trails-drawer.open):not(:has(#trails-leaderboard.open)) #map-controls,
+    #map-wrap.has-trails:has(#trails-drawer.open):not(:has(#trails-leaderboard.open)) #map-legend,
+    #map-wrap.has-trails:has(#trails-drawer.open):not(:has(#trails-leaderboard.open)) #speed-legend { right: calc(var(--trails-drawer-w, 380px) + 24px); }
+    /* Both drawer and leaderboard open */
+    #map-wrap.has-trails:has(#trails-drawer.open):has(#trails-leaderboard.open) #view-toggle,
+    #map-wrap.has-trails:has(#trails-drawer.open):has(#trails-leaderboard.open) #map-controls,
+    #map-wrap.has-trails:has(#trails-drawer.open):has(#trails-leaderboard.open) #map-legend,
+    #map-wrap.has-trails:has(#trails-drawer.open):has(#trails-leaderboard.open) #speed-legend { right: calc(var(--trails-drawer-w, 380px) + 340px + 24px); }
+    /* Leaderboard only (drawer closed) */
+    #map-wrap.has-trails:not(:has(#trails-drawer.open)):has(#trails-leaderboard.open) #view-toggle,
+    #map-wrap.has-trails:not(:has(#trails-drawer.open)):has(#trails-leaderboard.open) #map-controls,
+    #map-wrap.has-trails:not(:has(#trails-drawer.open)):has(#trails-leaderboard.open) #map-legend,
+    #map-wrap.has-trails:not(:has(#trails-drawer.open)):has(#trails-leaderboard.open) #speed-legend { right: calc(340px + 14px + 24px); }
   </style>
 </head>
 <body>
@@ -664,6 +773,28 @@
         <h3>Run Statistics</h3>
         <div id="runs-summary"></div>
         <div id="runs-table-wrap"></div>
+      </div>
+      <button id="trails-strip" onclick="toggleTrailsDrawer()" title="Toggle trails panel">▶</button>
+      <div id="trails-drawer">
+        <h3>Trails Ridden <span class="preview-tag">PREVIEW</span></h3>
+        <div id="trails-summary-cards"></div>
+        <div class="section-label">Timeline of attempts</div>
+        <div id="trails-timeline-wrap"></div>
+        <details id="trails-summary-details">
+          <summary class="section-label">Per-trail rollup</summary>
+          <div id="trails-summary-wrap"></div>
+        </details>
+      </div>
+      <!-- Leaderboard popup; rendered into when a trail name is clicked. -->
+      <div id="trails-leaderboard" role="dialog" aria-label="Trail leaderboard">
+        <div class="lb-head">
+          <div>
+            <div class="lb-title" id="lb-title"></div>
+            <div class="lb-sub" id="lb-sub"></div>
+          </div>
+          <button class="lb-close" onclick="closeTrailLeaderboard()" title="Close">×</button>
+        </div>
+        <div id="lb-body"></div>
       </div>
     </div>
 
@@ -2601,6 +2732,412 @@ function renderRunStats(meta) {
   if (strip) strip.textContent = drawer.classList.contains('open') ? '▶' : '◀';
 }
 
+// ─── Trails-ridden drawer (preview feature) ─────────────────────────────
+// Backend attaches a `trails` field only for MTB activities in gated
+// regions (Moose Mountain only at v1). The drawer stays hidden whenever
+// `trails` is null OR empty (no >= 5% coverage trails detected).
+
+// Default width if nothing is in localStorage. Kept in sync with the
+// CSS default — if you change one, change the other.
+const TRAILS_DRAWER_DEFAULT_W = 380;
+const TRAILS_DRAWER_MIN_W     = 260;
+const TRAILS_DRAWER_MAX_W     = 720;
+const TRAILS_DRAWER_LS_KEY    = 'trailsDrawerWidthPx';
+
+function _setTrailsDrawerWidth(px) {
+  const clamped = Math.max(TRAILS_DRAWER_MIN_W, Math.min(TRAILS_DRAWER_MAX_W, Math.round(px)));
+  const drawer  = document.getElementById('trails-drawer');
+  if (!drawer) return;
+  // When open, flex sizes the drawer; we override the flex-basis +
+  // width inline so the drag handle's continuous feedback works.
+  drawer.style.flex = `0 0 ${clamped}px`;
+  drawer.style.width = `${clamped}px`;
+  document.documentElement.style.setProperty('--trails-drawer-w', `${clamped}px`);
+}
+
+function _initialTrailsDrawerWidth() {
+  const raw = parseInt(localStorage.getItem(TRAILS_DRAWER_LS_KEY) || '', 10);
+  return Number.isFinite(raw) ? raw : TRAILS_DRAWER_DEFAULT_W;
+}
+
+function toggleTrailsDrawer() {
+  const drawer = document.getElementById('trails-drawer');
+  const open   = drawer.classList.toggle('open');
+  const strip  = document.getElementById('trails-strip');
+  if (strip) strip.textContent = open ? '▶' : '◀';
+  if (open) _setTrailsDrawerWidth(_initialTrailsDrawerWidth());
+  setTimeout(() => map.invalidateSize(), 0);
+}
+
+// Strip is BOTH a click toggle and a drag handle. We start a potential
+// resize on mousedown, watch movement, and only commit to "this was a
+// drag" once the pointer has moved past a few pixels — anything shorter
+// is treated as a click and falls through to toggleTrailsDrawer.
+(function _wireTrailsResize() {
+  const strip   = document.getElementById('trails-strip');
+  const mapWrap = document.getElementById('map-wrap');
+  if (!strip || !mapWrap) return;
+  let dragging = false, downX = 0, startW = 0, moved = false;
+
+  strip.addEventListener('mousedown', (ev) => {
+    // Capture the strip's current right-edge X so we can compute width
+    // from the mouse position. Drawer extends to the right of the strip.
+    const drawer = document.getElementById('trails-drawer');
+    if (!drawer || !drawer.classList.contains('open')) return;
+    dragging = true;
+    moved = false;
+    downX = ev.clientX;
+    startW = drawer.getBoundingClientRect().width;
+    mapWrap.classList.add('trails-resizing');
+    ev.preventDefault();
+  });
+
+  window.addEventListener('mousemove', (ev) => {
+    if (!dragging) return;
+    const dx = ev.clientX - downX;
+    if (!moved && Math.abs(dx) < 4) return;   // suppress until clearly a drag
+    moved = true;
+    // Pulling LEFT widens the drawer (drawer is anchored to the right).
+    _setTrailsDrawerWidth(startW - dx);
+    if (typeof map !== 'undefined' && map.invalidateSize) map.invalidateSize();
+  });
+
+  window.addEventListener('mouseup', () => {
+    if (!dragging) return;
+    dragging = false;
+    mapWrap.classList.remove('trails-resizing');
+    const drawer = document.getElementById('trails-drawer');
+    if (moved && drawer) {
+      localStorage.setItem(TRAILS_DRAWER_LS_KEY,
+        String(Math.round(drawer.getBoundingClientRect().width)));
+    }
+    // `moved` is consumed by the capture-phase click handler below to
+    // suppress the click that follows a real drag. Leaving it set
+    // between drags is harmless (click fires immediately after mouseup
+    // and resets it), but resetting here makes the state explicit.
+    if (!moved) return;
+  });
+
+  // Defeat the click that fires after mouseup when the user actually
+  // dragged — we don't want a drag to also toggle the drawer closed.
+  strip.addEventListener('click', (ev) => {
+    if (moved) {
+      ev.stopImmediatePropagation();
+      ev.preventDefault();
+      moved = false;
+    }
+  }, true);
+})();
+
+function _trailPill(row) {
+  // Backend caps coverage_pct at 100 and sets `completed` from raw
+  // coverage vs an 85 % threshold OR a separate endpoint-touch override
+  // (rider's GPS came within 30 m of both ends of the OSM way even when
+  // the mid-way snap was imperfect). `endpoint_completed` is True only
+  // in the override case; we distinguish it visually so a "✓ 74 %" pill
+  // doesn't look like a contradiction.
+  if (row.completed) {
+    if (row.endpoint_completed) {
+      return `<span class="trail-cov-pill cov-full"
+                title="End-to-end ride detected (snap coverage ${Math.round(row.coverage_pct)}%, GPS wandered off the OSM line)"
+              >✓ E2E</span>`;
+    }
+    return `<span class="trail-cov-pill cov-full">✓ ${Math.round(row.coverage_pct)}%</span>`;
+  }
+  return `<span class="trail-cov-pill cov-partial">${Math.round(row.coverage_pct)}%</span>`;
+}
+
+function _fmtDurHms(sec) {
+  // Always include seconds — the user wants the precise duration of each
+  // attempt visible. Hours appear only when > 0.
+  if (!sec || sec < 0) return '--';
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const s = Math.floor(sec % 60);
+  if (h) return `${h}h ${m}m ${s}s`;
+  if (m) return `${m}m ${s}s`;
+  return `${s}s`;
+}
+
+function _fmtHm(iso) {
+  // Lift the HH:MM out of an ISO string with offset — avoids new Date()
+  // re-interpreting the local clock against the browser's zone.
+  return (iso || '').slice(11, 16);
+}
+
+function renderTrailStats(trails) {
+  const drawer  = document.getElementById('trails-drawer');
+  const mapWrap = document.getElementById('map-wrap');
+  const wasOpen = drawer.classList.contains('open');
+  const closeAndExit = () => {
+    drawer.classList.remove('open');
+    mapWrap.classList.remove('has-trails');
+    if (wasOpen) setTimeout(() => map.invalidateSize(), 0);
+  };
+
+  if (!trails || !trails.timeline || trails.timeline.length === 0) {
+    closeAndExit();
+    return;
+  }
+
+  const summary  = trails.summary  || [];
+  const timeline = trails.timeline || [];
+
+  const totalSec = timeline.reduce((s, e) => s + (e.duration_sec || 0), 0);
+  const totalKm  = timeline.reduce((s, e) => s + (e.distance_km  || 0), 0);
+
+  document.getElementById('trails-summary-cards').innerHTML = `
+    <div class="run-sum-stat">
+      <div class="run-sum-val">${summary.length}</div>
+      <div class="run-sum-lbl">Trails</div>
+    </div>
+    <div class="run-sum-stat">
+      <div class="run-sum-val">${totalKm.toFixed(1)} km</div>
+      <div class="run-sum-lbl">On-trail</div>
+    </div>
+  `;
+
+  _wireSummaryClicks();
+  if (summary.length === 0) {
+    document.getElementById('trails-summary-wrap').innerHTML =
+      `<div class="empty-msg">No trails reached the 5% coverage threshold.</div>`;
+  } else {
+    const sumRows = summary.map(t => `
+        <tr data-trail-summary="${_escAttr(t.name)}">
+          <td class="trail-name" title="${_escAttr(t.name)}">${_escText(t.name)}</td>
+          <td>${t.visits}</td>
+          <td>${t.ridden_km.toFixed(2)}</td>
+          <td>${_trailPill(t)}</td>
+        </tr>`).join('');
+    document.getElementById('trails-summary-wrap').innerHTML = `
+      <table class="runs-table">
+        <thead><tr><th>Trail</th><th>×</th><th>km</th><th>Cov</th></tr></thead>
+        <tbody>${sumRows}</tbody>
+      </table>`;
+  }
+
+  const tlRows = timeline.map(e => {
+    const rankCell = (e.completed && e.rank && e.rank_total)
+      ? `${e.rank}/${e.rank_total}` : '';
+    // Stash trail name + span on data-* attrs; one delegated click
+    // handler on the table reads them. Inline onclick used to embed the
+    // name via JSON.stringify which broke on trail names with quotes.
+    return `
+      <tr class="timeline-row" data-hl="${e.start_idx}:${e.end_idx}">
+        <td class="t-time">${_escText(_fmtHm(e.start_time))}</td>
+        <td class="trail-name trail-link" data-trail="${_escAttr(e.name)}"
+            title="Show leaderboard for ${_escAttr(e.name)}">${_escText(e.name)}</td>
+        <td>${e.distance_km.toFixed(2)}k</td>
+        <td>${_fmtDurHms(e.duration_sec)}</td>
+        <td>${_trailPill(e)}</td>
+        <td class="t-rank">${rankCell}</td>
+      </tr>`;
+  }).join('');
+  document.getElementById('trails-timeline-wrap').innerHTML = `
+    <table class="runs-table">
+      <thead><tr><th>Time</th><th>Trail</th><th>Dist</th><th>Dur</th><th>Cov</th><th>Rank</th></tr></thead>
+      <tbody>${tlRows}</tbody>
+    </table>`;
+  // Re-bind delegated click on the timeline body so the row navigates
+  // (highlight on map) and the trail-link cell opens the leaderboard.
+  // Done after every render because the table is replaced wholesale.
+  _wireTimelineClicks();
+
+  mapWrap.classList.add('has-trails');
+  drawer.classList.add('open');
+  setTimeout(() => map.invalidateSize(), 0);
+  const strip = document.getElementById('trails-strip');
+  if (strip) strip.textContent = drawer.classList.contains('open') ? '▶' : '◀';
+}
+
+// ─── Trail leaderboard popup ────────────────────────────────────────────
+// Triggered by clicking a trail name in the timeline. Floats over the
+// map area immediately to the left of the trails drawer. Rows are
+// clickable: navigate to /log/<filename> for that attempt.
+
+async function openTrailLeaderboard(name) {
+  const pop = document.getElementById('trails-leaderboard');
+  const body = document.getElementById('lb-body');
+  document.getElementById('lb-title').textContent = name;
+  document.getElementById('lb-sub').textContent = 'Loading…';
+  body.innerHTML = '';
+  pop.classList.add('open');
+
+  let payload;
+  try {
+    const r = await fetch(`/api/trails/leaderboard/${encodeURIComponent(name)}`,
+                          { cache: 'no-store' });
+    payload = await r.json();
+  } catch (err) {
+    body.innerHTML = `<div class="lb-empty">Failed to load leaderboard: ${_escText(err.message)}</div>`;
+    document.getElementById('lb-sub').textContent = '';
+    return;
+  }
+
+  const rows = payload.rows || [];
+  document.getElementById('lb-sub').textContent =
+    rows.length ? `${rows.length} attempts · fastest first` : 'No completed attempts yet';
+  if (!rows.length) {
+    body.innerHTML = `<div class="lb-empty">No completed attempts of this trail are on record yet.
+      Trail-match prewarm runs in the background after startup and after
+      each sync; check back in a moment.</div>`;
+    return;
+  }
+
+  const curFn = trackData?.filename;
+  const tbody = rows.map(r => {
+    const isHere = r.filename === curFn;
+    const dateStr = r.date || (r.start_time || '').slice(0, 10);
+    // Carry the trail name + the clicked attempt's span across the
+    // navigation. The destination page reads these off `location.search`
+    // on load and (a) reopens this leaderboard, (b) highlights the
+    // matching run on the map.
+    const target = `/log/${encodeURIComponent(r.filename)}`
+      + `?lb=${encodeURIComponent(name)}`
+      + `&hl=${encodeURIComponent(`${r.start_idx}:${r.end_idx}`)}`;
+    // Stash target + title on data-* attrs (HTML-escaped) rather than
+    // inline onclick — title with a quote, or any trail name with one,
+    // would otherwise break the attribute and silently kill navigation.
+    // A single delegated click handler on #lb-body (installed once,
+    // below) reads `data-nav` and navigates.
+    return `
+      <tr class="${isHere ? 'lb-current' : ''}" data-nav="${_escAttr(target)}">
+        <td>${r.rank}</td>
+        <td title="${_escAttr(r.title || r.filename)}">${_escText(dateStr)}</td>
+        <td>${_fmtDurHms(r.duration_sec)}</td>
+        <td>${r.distance_km.toFixed(2)}k</td>
+        <td>${Math.round(r.coverage_pct)}%</td>
+      </tr>`;
+  }).join('');
+  body.innerHTML = `
+    <table class="lb-table">
+      <thead><tr><th>#</th><th>Date</th><th>Dur</th><th>Dist</th><th>Cov</th></tr></thead>
+      <tbody>${tbody}</tbody>
+    </table>`;
+}
+
+// HTML escapers for innerHTML interpolation. Inline onclick was fragile —
+// a single quote in a trail name (e.g. "A Stone's Throw") or a double
+// quote in a metadata title would terminate the attribute mid-string
+// and silently break navigation. _escAttr quotes for attribute values,
+// _escText for text content.
+function _escAttr(s) {
+  return String(s ?? '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;');
+}
+function _escText(s) {
+  return String(s ?? '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;');
+}
+
+// One-time wire-up of the delegated click handler on the leaderboard
+// body. Walks up from the click target to the nearest <tr data-nav> and
+// follows the embedded URL.
+(function _wireLeaderboardClicks() {
+  const body = document.getElementById('lb-body');
+  if (!body) return;
+  body.addEventListener('click', (ev) => {
+    const tr = ev.target.closest('tr[data-nav]');
+    if (!tr) return;
+    const nav = tr.getAttribute('data-nav');
+    if (nav) window.location = nav;
+  });
+})();
+
+// Timeline click delegation. Trail-link cell opens the leaderboard;
+// anywhere else on the row highlights the run span on the map. Called
+// after each `renderTrailStats` populates the timeline table.
+let _summaryWired = false;
+function _wireSummaryClicks() {
+  if (_summaryWired) return;
+  const wrap = document.getElementById('trails-summary-wrap');
+  if (!wrap) return;
+  wrap.addEventListener('click', (ev) => {
+    const tr = ev.target.closest('tr[data-trail-summary]');
+    if (!tr) return;
+    highlightTrailSummary(tr.getAttribute('data-trail-summary'));
+  });
+  _summaryWired = true;
+}
+
+let _timelineWired = false;
+function _wireTimelineClicks() {
+  if (_timelineWired) return;
+  const wrap = document.getElementById('trails-timeline-wrap');
+  if (!wrap) return;
+  wrap.addEventListener('click', (ev) => {
+    const trailCell = ev.target.closest('td.trail-link[data-trail]');
+    if (trailCell) {
+      openTrailLeaderboard(trailCell.getAttribute('data-trail'));
+      return;
+    }
+    const row = ev.target.closest('tr.timeline-row[data-hl]');
+    if (!row) return;
+    const hl = row.getAttribute('data-hl');
+    if (!hl) return;
+    const [s, e] = hl.split(':').map(n => parseInt(n, 10));
+    if (Number.isFinite(s) && Number.isFinite(e)) highlightRun(s, e);
+  });
+  _timelineWired = true;
+}
+
+function closeTrailLeaderboard() {
+  document.getElementById('trails-leaderboard').classList.remove('open');
+}
+
+function _maybeRestoreLeaderboardState() {
+  const p = new URLSearchParams(window.location.search);
+  const lbName = p.get('lb');
+  const hl = p.get('hl');
+  if (!lbName) return;
+  // Open the leaderboard first; it loads asynchronously but the
+  // highlight call below doesn't depend on it.
+  openTrailLeaderboard(lbName);
+  if (hl) {
+    const [s, e] = hl.split(':').map(n => parseInt(n, 10));
+    if (Number.isFinite(s) && Number.isFinite(e)) {
+      highlightRun(s, e);
+    }
+  }
+}
+
+// Close popup on Escape.
+document.addEventListener('keydown', (ev) => {
+  if (ev.key === 'Escape') closeTrailLeaderboard();
+});
+
+// Click a per-trail summary row → highlight every attempt of that trail
+// in the timeline as one combined polyline.
+function highlightTrailSummary(name) {
+  if (!trackData || !trackData.trails) return;
+  const tl = trackData.trails.timeline || [];
+  const matches = tl.filter(e => e.name === name);
+  if (!matches.length) return;
+  // First-attempt highlight reuses runs' yellow polyline. For a multi-
+  // attempt trail, fall back to highlighting the union of attempts via
+  // the same highlightRun helper (good enough for v1).
+  clearRunHighlight();
+  const latlngs = [];
+  matches.forEach(e => {
+    const segPts = trackData.points.slice(e.start_idx, e.end_idx + 1)
+      .map(p => [p.lat, p.lon]);
+    latlngs.push(segPts);
+  });
+  _runHighlight = L.polyline(latlngs, {
+    color: '#facc15', weight: 9, opacity: 0.85, interactive: false,
+    lineCap: 'round', lineJoin: 'round',
+  }).addTo(map);
+  _runHighlight.bringToBack();
+  const flat = latlngs.flat();
+  if (flat.length) map.fitBounds(L.latLngBounds(flat), { padding: [40, 40] });
+}
+
 let _runHighlight = null;
 
 function clearRunHighlight() {
@@ -2820,6 +3357,12 @@ async function loadActivity(filename) {
 
   renderTrackLayers(activeSegments);
   renderRunStats(trackData.meta);
+  renderTrailStats(trackData.trails);
+  // Cross-track navigation hook: if we arrived via a leaderboard click on
+  // another activity page, reopen the leaderboard and highlight the span
+  // of the attempt that was clicked. URL shape:
+  //   /log/<filename>?lb=<trail-name>&hl=<start_idx>:<end_idx>
+  _maybeRestoreLeaderboardState();
 
   const hasAssisted = activeSegments.some(s => s.type === 'assisted');
   document.getElementById('map-legend').classList.toggle('visible', colorMode === 'default' && hasAssisted);

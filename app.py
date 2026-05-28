@@ -24,6 +24,7 @@ import gpxpy
 from flask import Flask, Response, abort, jsonify, redirect, render_template, request
 
 from cache_utils import LRUCache, _atomic_write, init_backup_tracking
+import trail_match
 from detection import (
     ALGO_SIG,
     DETECTION_ALGORITHMS,
@@ -1744,7 +1745,219 @@ def _make_etag(*parts) -> str:
 
 # Bump when changing the shape/contents of /api/activity responses so clients
 # refetch even if all input files are unchanged.
-_ACTIVITY_RESPONSE_VERSION = 11
+_ACTIVITY_RESPONSE_VERSION = 13
+
+# Trail-matching is now applied to every MTB activity, regardless of
+# region. (Originally gated to Moose Mountain while the snap algorithm
+# was being validated — see git history for that scope evolution.) Ski
+# and snowboard activities are still excluded because OSM doesn't map
+# ski runs reliably.
+TRAIL_MATCH_CACHE_DIR    = CACHE_DIR / "trail_match"
+OSM_PATHS_CACHE_DIR      = CACHE_DIR / "osm_paths"
+
+
+# ─── Trail leaderboard cache ─────────────────────────────────────────────────
+# `build_leaderboards()` scans the trail_match cache directory, which is
+# fast (small JSON files) but still O(rides). We memoise the result and
+# only rebuild when the directory's mtime or metadata.json changes — both
+# bump when a new ride is processed (atomic file rename touches dir
+# mtime; metadata edits bump that file directly).
+
+_trail_leaderboard_cache: dict[str, list[dict]] | None = None
+_trail_leaderboard_key:   tuple | None = None
+_trail_leaderboard_lock                = threading.Lock()
+
+
+def _trail_leaderboard_cache_key() -> tuple:
+    def _m(p):
+        try:
+            return p.stat().st_mtime
+        except OSError:
+            return -1.0
+    return (_m(TRAIL_MATCH_CACHE_DIR), _m(METADATA_FILE),
+            trail_match.TRAIL_MATCH_VERSION)
+
+
+def _get_leaderboards() -> dict[str, list[dict]]:
+    global _trail_leaderboard_cache, _trail_leaderboard_key
+    key = _trail_leaderboard_cache_key()
+    with _trail_leaderboard_lock:
+        if _trail_leaderboard_cache is not None and _trail_leaderboard_key == key:
+            return _trail_leaderboard_cache
+        boards = trail_match.build_leaderboards(TRAIL_MATCH_CACHE_DIR,
+                                                activity_meta=load_metadata())
+        _trail_leaderboard_cache = boards
+        _trail_leaderboard_key   = key
+        return boards
+
+
+def _invalidate_trail_leaderboards() -> None:
+    """Called after a trail_match cache file is written by the prewarm or
+    the activity API. Forces the next `_get_leaderboards()` call to rebuild."""
+    global _trail_leaderboard_cache, _trail_leaderboard_key
+    with _trail_leaderboard_lock:
+        _trail_leaderboard_cache = None
+        _trail_leaderboard_key   = None
+
+
+# ─── Background prewarm of missing trail-match results ──────────────────────
+# At startup we scan all MTB+Moose-Mountain rides and queue background
+# compute for any without a current-version trail_match cache. This is
+# what populates the leaderboard before the user clicks anything.
+# Runs in a daemon thread so it doesn't block app.run(). Idempotent —
+# repeat calls early-return immediately if the queue is empty.
+#
+# Triggered both at startup and after a sync (so new rides land on the
+# leaderboard without a Flask restart). The thread serially walks the
+# queue: trail-match is CPU-bound per file and parallelism would just
+# starve the request handlers.
+
+_TRAIL_PREWARM_RUNNING = False
+_TRAIL_PREWARM_RESCAN  = False   # set when a trigger arrives mid-run
+_trail_prewarm_lock    = threading.Lock()
+
+
+def _prewarm_trail_matches_async() -> None:
+    """Idempotent with rescan-on-trigger semantics. If a worker is already
+    running, set the rescan flag so the worker loops again after it
+    finishes its current pass — otherwise a sync that lands mid-scan
+    would silently drop the new ride."""
+    global _TRAIL_PREWARM_RUNNING, _TRAIL_PREWARM_RESCAN
+    with _trail_prewarm_lock:
+        if _TRAIL_PREWARM_RUNNING:
+            _TRAIL_PREWARM_RESCAN = True
+            return
+        _TRAIL_PREWARM_RUNNING = True
+        _TRAIL_PREWARM_RESCAN  = False
+    t = threading.Thread(target=_trail_prewarm_worker,
+                         name="trail-prewarm", daemon=True)
+    t.start()
+
+
+def _trail_prewarm_worker() -> None:
+    global _TRAIL_PREWARM_RUNNING, _TRAIL_PREWARM_RESCAN
+    try:
+        # Loop on rescan: if a trigger arrived while we were processing
+        # the previous batch, do another pass. New files added during
+        # that batch will surface in the next scan.
+        while True:
+            _trail_prewarm_worker_inner()
+            with _trail_prewarm_lock:
+                if not _TRAIL_PREWARM_RESCAN:
+                    break
+                _TRAIL_PREWARM_RESCAN = False
+    finally:
+        # Done in finally so an exception in the inner doesn't leave the
+        # running flag stuck and block future triggers.
+        with _trail_prewarm_lock:
+            _TRAIL_PREWARM_RUNNING = False
+
+
+def _trail_prewarm_worker_inner() -> None:
+    try:
+        # Defer the imports/reads until the thread is alive so module
+        # load isn't blocked by metadata.json/regions.json I/O.
+        activities = all_activities()
+    except Exception:
+        logger.exception("trail prewarm: failed to enumerate activities")
+        return
+
+    meta = load_metadata()
+    todo: list[str] = []
+    for a in activities:
+        if a.get("effective_type") != "mtb":
+            continue
+        fn = a.get("filename")
+        if not fn:
+            continue
+        # Mirror the fingerprint logic from cached_match so the prewarm
+        # queue is in sync with what cached_match would consider valid.
+        # Without this, a trim edit would silently skip prewarm and
+        # leave the leaderboard stale until the user opened the page.
+        file_meta = meta.get(fn, {})
+        meta_fp_src = {
+            "trim": file_meta.get("trim"),
+            "smoothing": file_meta.get("smoothing"),
+            "time_shift_hours": file_meta.get("time_shift_hours"),
+            "spike_repair": file_meta.get("spike_repair"),
+        }
+        expected_fp = hashlib.md5(
+            json.dumps(meta_fp_src, sort_keys=True).encode()
+        ).hexdigest()[:12]
+        disk = TRAIL_MATCH_CACHE_DIR / f"{fn}.json"
+        if disk.exists():
+            try:
+                entry = json.loads(disk.read_text(encoding="utf-8"))
+                if (entry.get("version") == trail_match.TRAIL_MATCH_VERSION
+                        and entry.get("mtime") is not None
+                        and (entry.get("meta_fp") or "") == expected_fp):
+                    continue
+            except Exception:
+                pass
+        todo.append(fn)
+
+    if not todo:
+        logger.info("trail prewarm: nothing to do (%d MTB activities, all cached)",
+                    len(activities))
+        return
+
+    logger.info("trail prewarm: %d/%d MTB activities need compute",
+                len(todo), len(activities))
+    meta = load_metadata()
+    done = 0
+    for fn in todo:
+        try:
+            p = _safe_gpx_path(fn)
+            if p is None or not p.exists():
+                continue
+            data = get_activity(fn)
+            if data is None:
+                continue
+            # Same metadata fingerprint logic as the live route — keeps
+            # cache keys in sync so prewarm and request paths don't
+            # accidentally produce two different cache entries for the
+            # same activity.
+            file_meta = meta.get(fn, {})
+            meta_fp_src = {
+                "trim": file_meta.get("trim"),
+                "smoothing": file_meta.get("smoothing"),
+                "time_shift_hours": file_meta.get("time_shift_hours"),
+                "spike_repair": file_meta.get("spike_repair"),
+            }
+            meta_fp = hashlib.md5(
+                json.dumps(meta_fp_src, sort_keys=True).encode()
+            ).hexdigest()[:12]
+            trail_match.cached_match(
+                fn, p.stat().st_mtime, data,
+                cache_dir_osm=OSM_PATHS_CACHE_DIR,
+                cache_dir_results=TRAIL_MATCH_CACHE_DIR,
+                meta_fp=meta_fp,
+            )
+            done += 1
+            # Each successful compute invalidates the leaderboard so the
+            # next /api/trails/leaderboard or /api/activity request sees
+            # the new ride.
+            _invalidate_trail_leaderboards()
+        except Exception:
+            logger.exception("trail prewarm: cached_match failed for %s", fn)
+    logger.info("trail prewarm: processed %d/%d", done, len(todo))
+
+
+@app.route("/api/trails/leaderboard/<path:name>")
+def api_trail_leaderboard(name):
+    """Per-trail leaderboard: every completed attempt across all cached
+    MTB+Moose-Mountain rides, sorted fastest first. Used by the popup
+    that appears when a trail name is clicked in the activity drawer."""
+    boards = _get_leaderboards()
+    rows = boards.get(name)
+    if not rows:
+        return jsonify({"name": name, "rows": [], "count": 0})
+    # Stamp the 1-based rank in the response so the client doesn't have
+    # to re-derive it from list position.
+    decorated = []
+    for i, r in enumerate(rows, start=1):
+        decorated.append({**r, "rank": i})
+    return jsonify({"name": name, "rows": decorated, "count": len(rows)})
 
 
 @app.route("/api/activities")
@@ -1960,6 +2173,10 @@ def api_activity(filename):
         _m(METADATA_FILE), _m(REGIONS_FILE), _m(_GEOCODE_CACHE_FILE),
         _m(CONFIG_FILE), _m(TYPES_FILE),
         _m(hr_file) if hr_file else 0,
+        # Bumping TRAIL_MATCH_VERSION changes the trails payload shape;
+        # baking it into the etag means the client revalidates without
+        # needing a parallel _ACTIVITY_RESPONSE_VERSION bump.
+        trail_match.TRAIL_MATCH_VERSION,
     )
     if request.if_none_match.contains(etag):
         return Response(status=304)
@@ -2002,10 +2219,67 @@ def api_activity(filename):
     if pts:
         place = reverse_geocode(pts[0]["lat"], pts[0]["lon"])
     issues = [] if file_meta.get("issues_approved") else _detect_issues_cached(data)
+    # Preview feature: per-trail attempt timeline for MTB activities in
+    # gated regions (Moose Mountain only, for now). Cached per-file by
+    # GPX mtime — the snap loop is too slow to run on every request.
+    trails = None
+    if eff_type == "mtb":
+        try:
+            # Per-file metadata that affects the snapped data (trim,
+            # smoothing, time-shift, spike-repair) needs to invalidate
+            # the trail_match cache. The raw GPX mtime alone isn't
+            # enough — these edits live in metadata.json. Fingerprint
+            # them into a short hash and pass through.
+            meta_fp_src = {
+                "trim": file_meta.get("trim"),
+                "smoothing": file_meta.get("smoothing"),
+                "time_shift_hours": file_meta.get("time_shift_hours"),
+                "spike_repair": file_meta.get("spike_repair"),
+            }
+            meta_fp = hashlib.md5(
+                json.dumps(meta_fp_src, sort_keys=True).encode()
+            ).hexdigest()[:12]
+            disk_before = TRAIL_MATCH_CACHE_DIR / f"{filename}.json"
+            existed_before = disk_before.exists()
+            trails = trail_match.cached_match(
+                filename, _m(p), data,
+                cache_dir_osm=OSM_PATHS_CACHE_DIR,
+                cache_dir_results=TRAIL_MATCH_CACHE_DIR,
+                meta_fp=meta_fp,
+            )
+            # If cached_match wrote a fresh file for this activity (first
+            # request or invalidated cache), the leaderboard built before
+            # this call doesn't include the current attempts — meaning
+            # rank lookups below would return None. Force-invalidate so
+            # the next _get_leaderboards rebuilds with this file present.
+            if not existed_before:
+                _invalidate_trail_leaderboards()
+            if trails is not None:
+                # Decorate completed timeline entries with their rank
+                # against the cross-activity leaderboard. Partials get
+                # rank=None so the UI can show a blank.
+                boards = _get_leaderboards()
+                for entry in (trails.get("timeline") or []):
+                    if not entry.get("completed"):
+                        entry["rank"] = None
+                        entry["rank_total"] = None
+                        continue
+                    rt = trail_match.rank_for_attempt(
+                        boards, entry["name"], filename, entry.get("start_idx", 0)
+                    )
+                    if rt is None:
+                        entry["rank"] = None
+                        entry["rank_total"] = None
+                    else:
+                        entry["rank"], entry["rank_total"] = rt
+        except Exception as exc:
+            logger.warning("trail_match failed for %s: %s", filename, exc)
+            trails = None
     resp = jsonify({**data, "meta": file_meta, "regions": regions, "place": place,
                     "effective_type": eff_type, "issues": issues,
                     "excluded": bool(file_meta.get("excluded_from_stats")),
-                    "effective_assisted": _is_effectively_assisted(file_meta, regions, all_regions)})
+                    "effective_assisted": _is_effectively_assisted(file_meta, regions, all_regions),
+                    "trails": trails})
     resp.set_etag(etag)
     resp.headers["Cache-Control"] = "no-cache"
     return resp
@@ -4414,6 +4688,11 @@ def _run_sync_subprocess(source: str, script: str) -> None:
                     _update_activity_entry(fn)
                 except Exception:
                     logger.exception("sidebar update failed for %s", fn)
+            # New rides may include MTB+Moose-Mountain activities — kick
+            # the trail prewarm so they land on the leaderboard without
+            # waiting for the user to open them. The worker idempotently
+            # scans for new uncached entries, so this is cheap.
+            _prewarm_trail_matches_async()
     except subprocess.TimeoutExpired:
         with _sync_state_lock:
             _sync_state[source].update(running=False, finished_at=int(time.time()),
@@ -5473,5 +5752,11 @@ if __name__ == "__main__":
         datefmt="%H:%M:%S",
     )
     logger.info("Starting GPX viewer at http://localhost:5000")
+    # Trail-match prewarm: in a daemon thread so startup isn't blocked.
+    # The worker iterates MTB+Moose-Mountain rides and computes any
+    # missing trail-match results so the leaderboard is populated by the
+    # time the user clicks a trail name. Idempotent + cheap when the
+    # cache is already warm.
+    _prewarm_trail_matches_async()
     # Debug mode leaks tracebacks — opt in via ALFORKS_DEBUG=1 for local dev.
     app.run(debug=debug, threaded=True)
