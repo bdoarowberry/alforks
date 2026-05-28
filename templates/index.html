@@ -1111,20 +1111,33 @@ function recomputeStats(segments) {
       for (let k = seg.start; k <= seg.end; k++) assisted[k] = true;
     }
   }
-  let ridingDist = 0, elevGain = 0, elevLoss = 0, assistedGain = 0;
+  let ridingDist = 0, elevGain = 0, elevLoss = 0, assistedGain = 0, ridingDurSec = 0;
   for (let i = 1; i < n; i++) {
     const dd = pts[i].dist_km - pts[i - 1].dist_km;
-    const de = (pts[i].ele != null && pts[i - 1].ele != null) ? pts[i].ele - pts[i - 1].ele : 0;
+    // Prefer the persisted smoothed ele so this matches the cached stat;
+    // raw ele deltas inflate gain via GPS noise (~10-20%).
+    const ePrev = pts[i - 1].ele_sm ?? pts[i - 1].ele;
+    const eCur  = pts[i].ele_sm     ?? pts[i].ele;
+    const de = (eCur != null && ePrev != null) ? eCur - ePrev : 0;
     if (assisted[i]) {
       if (de > 0) assistedGain += de;
     } else {
       ridingDist += dd;
       if (de > 0)      elevGain += de;
       else if (de < 0) elevLoss -= de;
+      // avg_speed uses riding time only — matches parse_gpx and
+      // _stats_from_trimmed convention. Sampling rate jitter makes raw
+      // wall-clock denominators noticeably understate pace on rides with
+      // assisted segments.
+      const tPrev = Date.parse(pts[i - 1].time);
+      const tCur  = Date.parse(pts[i].time);
+      if (Number.isFinite(tPrev) && Number.isFinite(tCur) && tCur > tPrev) {
+        ridingDurSec += (tCur - tPrev) / 1000;
+      }
     }
   }
   const base = trackData.stats;
-  const avgSpeed = base.duration_sec ? ridingDist / (base.duration_sec / 3600) : null;
+  const avgSpeed = ridingDurSec > 0 ? ridingDist / (ridingDurSec / 3600) : null;
   return {
     distance_km:     Math.round(ridingDist * 100) / 100,
     duration_sec:    base.duration_sec,

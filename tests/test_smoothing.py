@@ -389,6 +389,41 @@ class TestParseGpxEdgeCases(unittest.TestCase):
         finally:
             fpath.unlink(missing_ok=True)
 
+    def test_points_carry_smoothed_elevation(self):
+        # The detail-view JS (templates/index.html recomputeStats) reads
+        # `ele_sm` so its recomputed gain matches the cached stat. If a
+        # future refactor drops the field, the JS silently falls back to
+        # raw `ele` and gain inflates by ~10-20% from GPS noise.
+        # Drive smoothing with an alternating 1-metre saw-tooth: raw deltas
+        # sum to ~10 m, smoothed should be near 0.
+        eles = [1000, 1001] * 30
+        body = "".join(
+            f'<trkpt lat="{50 + i * 0.0001}" lon="-116.0"><ele>{eles[i]}</ele>'
+            f'<time>2024-01-01T10:00:{i:02d}Z</time></trkpt>'
+            for i in range(len(eles))
+        )
+        fpath = self._write_gpx(body)
+        try:
+            data = app.parse_gpx(fpath)
+            self.assertIsNotNone(data)
+            pts = data["points"]
+            # Every point exposes the field
+            for p in pts:
+                self.assertIn("ele_sm", p, "ele_sm missing from points schema")
+            # And the smoothed series actually smooths
+            raw_gain = sum(max(0, pts[i]["ele"] - pts[i - 1]["ele"])
+                           for i in range(1, len(pts)))
+            sm_gain = sum(max(0, pts[i]["ele_sm"] - pts[i - 1]["ele_sm"])
+                          for i in range(1, len(pts)))
+            self.assertGreater(raw_gain, 5, "saw-tooth should yield raw gain >5m")
+            self.assertLess(sm_gain, raw_gain / 2,
+                            "smoothed gain should be < half of raw on saw-tooth noise")
+            # Smoothed gain equals the cached stat (within rounding)
+            self.assertAlmostEqual(round(sm_gain), data["stats"]["elev_gain_m"],
+                                   delta=1)
+        finally:
+            fpath.unlink(missing_ok=True)
+
 
 class TestApplyTrimBoundaries(unittest.TestCase):
     """Regression: _apply_trim had several edge-case paths that were

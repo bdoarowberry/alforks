@@ -237,14 +237,18 @@ def _compute_algo_stats(is_assisted: list[bool], per_pt: list) -> dict:
             in_lift = True
         elif not flag:
             in_lift = False
+        # Prefer smoothed delta when present (re-segmentation path via
+        # _per_pt_from_points). Falls back to raw so synthetic per_pt fixtures
+        # in tests and any parse-time caller still work.
+        delta = p.get('ele_delta_sm', p['ele_delta'])
         if flag:
-            if p['ele_delta'] > 0:
-                assisted_gain += p['ele_delta']
+            if delta > 0:
+                assisted_gain += delta
         else:
             riding_dist += p['dist']
             riding_dur_sec += p['dt']
-            if   p['ele_delta'] > 0: elev_gain += p['ele_delta']
-            elif p['ele_delta'] < 0: elev_loss -= p['ele_delta']
+            if   delta > 0: elev_gain += delta
+            elif delta < 0: elev_loss -= delta
     return {
         "distance_km":     round(riding_dist / 1000, 2),
         "elev_gain_m":     round(elev_gain),
@@ -297,11 +301,19 @@ def _per_pt_from_points(points: list) -> tuple[list, list]:
         ele_delta = 0.0
         if prev.get("ele") is not None and curr.get("ele") is not None:
             ele_delta = curr["ele"] - prev["ele"]
+        # Smoothed delta drives gain/loss accumulation in _compute_algo_stats
+        # so MTB re-segmentation (and algorithm-review) match the parse-time
+        # convention. Raw ele_delta is preserved for lift detection thresholds
+        # — see parse_gpx note at app.py ~974.
+        ele_delta_sm = 0.0
+        if prev.get("ele_sm") is not None and curr.get("ele_sm") is not None:
+            ele_delta_sm = curr["ele_sm"] - prev["ele_sm"]
         per_pt.append({
-            'dt':        dt,
-            'dist':      haversine(latlons[i - 1], latlons[i]),
-            'speed':     curr.get("speed"),
-            'ele_delta': ele_delta,
+            'dt':           dt,
+            'dist':         haversine(latlons[i - 1], latlons[i]),
+            'speed':        curr.get("speed"),
+            'ele_delta':    ele_delta,
+            'ele_delta_sm': ele_delta_sm,
         })
     return per_pt, latlons
 
@@ -640,7 +652,7 @@ DETECTION_ALGORITHMS: list[tuple] = [
 # Signature string for cache invalidation. Consumed by app.py to compute the
 # CACHE_VERSION hash — bump when threshold values or algorithm logic changes.
 ALGO_SIG = (
-    f"v13-riding-max-speed,{_STATION_THRESH_M},{_LIFT_MIN_RIDE_SEC},{_LIFT_MAX_RIDE_SEC},{_LIFT_MIN_NET_GAIN},"
+    f"v14-ele-sm-persisted,{_STATION_THRESH_M},{_LIFT_MIN_RIDE_SEC},{_LIFT_MAX_RIDE_SEC},{_LIFT_MIN_NET_GAIN},"
     f"{_ASSISTED_MIN_DT_SEC},{_ASSISTED_MIN_GAIN_M},"
     f"{_LIFT_SPEED_MIN},{_LIFT_SPEED_MAX},{_LIFT_SPEED_STD},"
     f"{_LIFT_SINUOSITY},{_LIFT_WIN_GAIN},{_LIFT_MIN_GAIN},{_LIFT_MIN_DUR},"

@@ -1063,10 +1063,14 @@ def parse_gpx(path: Path) -> dict:
                 if not is_assisted[i] and p['speed'] > max_speed_riding:
                     max_speed_riding = p['speed']
 
+        sm_i = _ele_smooth[i]
         points.append({
             "lat":     pt.latitude,
             "lon":     pt.longitude,
             "ele":     round(pt.elevation, 1) if pt.elevation is not None else None,
+            # Smoothed ele used by client-side recomputeStats so detail-view
+            # gain matches the cached stat (raw deltas inflate gain by GPS noise).
+            "ele_sm":  round(sm_i, 1) if sm_i is not None else None,
             "time":    _iso_localized(pt.time),
             "dist_km": round(total_dist / 1000, 3),
             "speed":   round(per_pt[i]['speed'], 1) if per_pt[i]['speed'] is not None else None,
@@ -3615,8 +3619,13 @@ def _stats_from_trimmed(pts: list, segments: list, base_stats: dict) -> dict:
     # Mirror parse_gpx: gain/loss accumulation runs on a ma20-smoothed
     # elevation series so trim and spike-repair produce numbers consistent
     # with the parse-time stat. The raw `ele` field on each point is
-    # untouched.
+    # untouched. Write the re-smoothed series back onto each point's
+    # `ele_sm` so JS recomputeStats stays consistent at trim/repair
+    # boundaries (where parse-time `ele_sm` was smoothed against now-absent
+    # neighbours).
     smooth_ele = _smooth_elevations([p.get("ele") for p in pts])
+    for p, sm in zip(pts, smooth_ele):
+        p["ele_sm"] = round(sm, 1) if sm is not None else None
     for i in range(1, n):
         dd = pts[i]["dist_km"] - pts[i-1]["dist_km"]
         e_prev, e_cur = smooth_ele[i-1], smooth_ele[i]
