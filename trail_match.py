@@ -41,7 +41,7 @@ except ImportError:
 # snap threshold or run-collapsing logic changes). The /api/activity
 # response version in app.py should bump alongside this so clients
 # pick up the new shape.
-TRAIL_MATCH_VERSION = 9
+TRAIL_MATCH_VERSION = 12
 
 SNAP_THRESHOLD_M = 8.0   # tightened from 12 m: roads parallel to mapped
                          # trails (e.g. Moose Mountain Road alongside
@@ -67,7 +67,18 @@ VISIT_GAP_SEC = 600         # merge same-name runs separated by < this gap
 #       briefly isn't an attempt of it. The summary's by-name aggregation
 #       independently filters tiny crossings, so the dropped B's
 #       contribution doesn't leak into ridden_km anyway.
-COALESCE_MAX_SPLIT_SEC = 60
+# Two thresholds (used to be one, but they have different cost profiles):
+#   - COALESCE_MAX_GAP_SEC: time gap between two adjacent same-name runs
+#     where the rider was likely just briefly off the snap line (GPS
+#     drift, OSM gaps, etc.). A real "re-lap" requires climbing back up
+#     via a different route, which takes minutes, so we can afford a
+#     generous 2-minute window without false-merging laps.
+#   - COALESCE_MAX_CROSSING_SEC: duration of a *different-name* trail B
+#     sandwiched between two A runs. A short B is a crossing and should
+#     be dropped; a long B is a real attempt of B and should be preserved.
+#     Kept tighter so genuine multi-trail rides don't lose B's.
+COALESCE_MAX_GAP_SEC      = 120
+COALESCE_MAX_CROSSING_SEC = 60
 BBOX_PAD_DEG = 0.0002       # cheap point-in-bbox prune slop
 OSM_FETCH_PAD_DEG = 0.002   # pad bbox before Overpass query
 OSM_CACHE_TTL_SEC = 90 * 24 * 3600   # 90 days — trails change slowly
@@ -102,6 +113,26 @@ ENDPOINT_TOUCH_RADIUS_M = 30.0
 # while comfortably above the false-positive zone (40-50 %) we saw on
 # the 7-27 leaderboard.
 ENDPOINT_MIN_COVERAGE_PCT = 60.0
+
+# Traversal-splitting + direction parameters.
+#
+# Topology drives the split rule:
+#   linear/messy — split at progress reversals (start→end XOR end→start).
+#                  Direction: 'up'/'down' from elevation delta, else
+#                  'forward'/'reverse' from progress sign.
+#   loop         — split ONLY on full 2π revolutions around the centroid.
+#                  Internal climb/descent waves are intrinsic to the trail
+#                  shape (Merlin View climbs then descends within a single
+#                  loop) and don't constitute separate attempts.
+#                  Direction: 'forward'/'reverse' from angular sign.
+# 'mixed' is now a last-resort label for runs that can't be classified at
+# all (no elevation signal, no clear progress) — rare with this scheme.
+TRAVERSAL_MIN_PROGRESS_DELTA = 0.20   # linear: progress reversal must span
+                                       # this much of the trail to flip direction
+TRAVERSAL_MIN_ELE_DELTA_M    = 10.0   # below this, elevation isn't decisive
+                                       # → fall through to progress-direction
+TRAVERSAL_PROGRESS_SMOOTH_WINDOW = 9  # median-window points to filter GPS jitter
+TRAVERSAL_MIN_POINTS         = 8     # below this, fold into adjacent traversal
 
 # Timeline filters — only show entries (a) whose trail name passes the
 # summary coverage gate (so we don't show attempts of "trails" we don't
@@ -315,6 +346,521 @@ def _trail_termini(ways: list[dict], name: str) -> tuple[tuple, tuple] | None:
     return best
 
 
+# ─── Trail topology + progress projection ────────────────────────────────────
+# Each trail name maps to one of three topologies:
+#   ('linear', chain_coords)     — chainable single or multi-fragment trail
+#   ('loop',   (clat, clon))     — cyclic; track angular position around centroid
+#   ('messy',  longest_coords)   — Y/T junctions, unchainable; fall back to longest
+# The progress series for a run gives us a 1-D position-on-trail signal that
+# we can scan for direction reversals (= laps).
+
+_ENDPOINT_SHARE_M = 5.0  # endpoints within this radius are considered shared
+
+
+def _trail_topology(ways: list[dict], name: str):
+    """Return (kind, data) for the named trail. See module-level doc above."""
+    frags = [w for w in ways if w["name"] == name and len(w.get("coords", [])) >= 2]
+    if not frags:
+        return ("messy", [])
+    if len(frags) == 1:
+        return ("linear", list(frags[0]["coords"]))
+
+    coords_list = [list(f["coords"]) for f in frags]
+    endpoints   = [(c[0], c[-1]) for c in coords_list]
+
+    def _near(a, b):
+        return _haversine_m(a[0], a[1], b[0], b[1]) <= _ENDPOINT_SHARE_M
+
+    # Endpoint "degree": how many *other* fragment endpoints sit on top of it.
+    n = len(coords_list)
+    start_deg = [0] * n
+    end_deg   = [0] * n
+    for i in range(n):
+        for j in range(n):
+            if i == j:
+                continue
+            if _near(endpoints[i][0], endpoints[j][0]) or _near(endpoints[i][0], endpoints[j][1]):
+                start_deg[i] += 1
+            if _near(endpoints[i][1], endpoints[j][0]) or _near(endpoints[i][1], endpoints[j][1]):
+                end_deg[i]   += 1
+
+    termini = [(i, side) for i in range(n) for side in (0, 1)
+               if (start_deg[i] if side == 0 else end_deg[i]) == 0]
+
+    if len(termini) == 2:
+        start_idx, start_side = termini[0]
+        chain = _walk_chain(coords_list, endpoints, start_idx, start_side)
+        if chain and len(chain) >= 2:
+            return ("linear", chain)
+
+    if len(termini) == 0 and n >= 2:
+        # No free endpoints — every endpoint shares with another. Treat as loop.
+        all_pts = [c for cl in coords_list for c in cl]
+        clat = sum(p[0] for p in all_pts) / len(all_pts)
+        clon = sum(p[1] for p in all_pts) / len(all_pts)
+        return ("loop", (clat, clon))
+
+    # Y-junction, T, or other multi-terminus mess. Use the longest fragment as
+    # a best-effort linear backbone — most laps register on the main backbone.
+    longest = max(coords_list, key=_way_length_km)
+    return ("messy", longest)
+
+
+def _walk_chain(coords_list, endpoints, start_idx: int, start_side: int):
+    """Greedy walk through connected fragments, building one ordered coord list."""
+    n = len(coords_list)
+    used = {start_idx}
+    chain: list = []
+
+    def _near(a, b):
+        return _haversine_m(a[0], a[1], b[0], b[1]) <= _ENDPOINT_SHARE_M
+
+    if start_side == 0:
+        chain.extend(coords_list[start_idx])
+        cur_exit = endpoints[start_idx][1]
+    else:
+        chain.extend(reversed(coords_list[start_idx]))
+        cur_exit = endpoints[start_idx][0]
+
+    while True:
+        nxt_idx = None
+        nxt_reverse = False
+        for j in range(n):
+            if j in used:
+                continue
+            if _near(cur_exit, endpoints[j][0]):
+                nxt_idx = j
+                nxt_reverse = False
+                break
+            if _near(cur_exit, endpoints[j][1]):
+                nxt_idx = j
+                nxt_reverse = True
+                break
+        if nxt_idx is None:
+            break
+        # Skip the shared endpoint when appending (avoids dup).
+        if nxt_reverse:
+            chain.extend(reversed(coords_list[nxt_idx][:-1]))
+            cur_exit = endpoints[nxt_idx][0]
+        else:
+            chain.extend(coords_list[nxt_idx][1:])
+            cur_exit = endpoints[nxt_idx][1]
+        used.add(nxt_idx)
+    return chain
+
+
+def _chain_cumlen_m(chain: list) -> list[float]:
+    """Cumulative length in metres at each chain coordinate. cum[0]=0."""
+    cum = [0.0]
+    for i in range(1, len(chain)):
+        cum.append(cum[-1] + _haversine_m(chain[i - 1][0], chain[i - 1][1],
+                                          chain[i][0], chain[i][1]))
+    return cum
+
+
+def _project_to_chain(plat: float, plon: float, chain: list,
+                       cumlen: list[float]) -> float:
+    """Return the rider point's fractional progress (0..1) along the chain.
+
+    Scalar fallback used only when numpy is unavailable or chain is tiny
+    (< 2 points). The hot path goes through _project_all_to_chain instead.
+    """
+    if len(chain) < 2 or cumlen[-1] <= 0:
+        return 0.0
+    best_d = float("inf")
+    best_pos_m = 0.0
+    for i in range(1, len(chain)):
+        ax, ay = chain[i - 1]
+        bx, by = chain[i]
+        seg_lat = bx - ax
+        seg_lon = by - ay
+        seg_sq = seg_lat * seg_lat + seg_lon * seg_lon
+        if seg_sq <= 0:
+            t = 0.0
+        else:
+            t = max(0.0, min(1.0,
+                ((plat - ax) * seg_lat + (plon - ay) * seg_lon) / seg_sq))
+        proj_lat = ax + t * seg_lat
+        proj_lon = ay + t * seg_lon
+        d = _haversine_m(plat, plon, proj_lat, proj_lon)
+        if d < best_d:
+            best_d = d
+            seg_len_m = cumlen[i] - cumlen[i - 1]
+            best_pos_m = cumlen[i - 1] + t * seg_len_m
+    return best_pos_m / cumlen[-1]
+
+
+def _build_chain_np(chain: list, cumlen: list[float]):
+    """Pre-compute numpy segment arrays for a chain.
+
+    Returns a tuple (ax, ay, dx, dy, seg_sq_m, cum_arr, seg_len, total_m,
+    ax0, ay0, lat_scale, lon_scale) where coordinates are in metres relative
+    to the first chain node, using a local flat-Earth projection.
+    Returns None if chain has fewer than 2 points or total_m <= 0.
+    """
+    if not _NUMPY_AVAILABLE or len(chain) < 2 or cumlen[-1] <= 0:
+        return None
+    lats = np.array([c[0] for c in chain], dtype=np.float64)
+    lons = np.array([c[1] for c in chain], dtype=np.float64)
+    ax0 = lats[0]
+    ay0 = lons[0]
+    R = 6371000.0
+    lat_scale = R * math.pi / 180.0
+    lon_scale = R * math.cos(math.radians(ax0)) * math.pi / 180.0
+    ax_m = (lats[:-1] - ax0) * lat_scale
+    ay_m = (lons[:-1] - ay0) * lon_scale
+    dx_m = (lats[1:] - lats[:-1]) * lat_scale
+    dy_m = (lons[1:] - lons[:-1]) * lon_scale
+    seg_sq_m = dx_m * dx_m + dy_m * dy_m
+    cum_arr = np.array(cumlen[:-1], dtype=np.float64)
+    seg_len = np.diff(np.array(cumlen, dtype=np.float64))
+    return (ax_m, ay_m, dx_m, dy_m, seg_sq_m,
+            cum_arr, seg_len, cumlen[-1],
+            ax0, ay0, lat_scale, lon_scale)
+
+
+def _project_all_to_chain(plats: list[float], plons: list[float],
+                           chain_np) -> list[float]:
+    """Vectorised batch projection: all rider points against all chain segments.
+
+    Replaces N sequential calls to _project_to_chain with one numpy broadcast
+    of shape (N_points, M_segments). Typically 10-20x faster than the scalar
+    loop for run sizes of 100-700 points and chain sizes of 50-500 segments.
+
+    chain_np is the tuple returned by _build_chain_np.
+    Distances use the local flat-Earth approximation built into chain_np —
+    accurate to < 0.1 % over the < 5 km chains seen in practice. Progress
+    rank-ordering is what matters, not absolute distance values.
+    """
+    (ax_m, ay_m, dx_m, dy_m, seg_sq_m,
+     cum_arr, seg_len, total_m,
+     ax0, ay0, lat_scale, lon_scale) = chain_np
+
+    px_m = (np.array(plats, dtype=np.float64) - ax0) * lat_scale  # (N,)
+    py_m = (np.array(plons, dtype=np.float64) - ay0) * lon_scale  # (N,)
+
+    # t = clamp( dot(p-a, seg) / seg_sq, 0, 1 )  shape: (N, M)
+    dot = ((px_m[:, None] - ax_m[None, :]) * dx_m[None, :] +
+           (py_m[:, None] - ay_m[None, :]) * dy_m[None, :])
+    safe_sq = np.where(seg_sq_m == 0, 1.0, seg_sq_m)
+    t = np.clip(dot / safe_sq, 0.0, 1.0)
+    t = np.where(seg_sq_m[None, :] == 0, 0.0, t)
+
+    proj_x = ax_m[None, :] + t * dx_m[None, :]
+    proj_y = ay_m[None, :] + t * dy_m[None, :]
+    dist2 = (px_m[:, None] - proj_x) ** 2 + (py_m[:, None] - proj_y) ** 2
+
+    best_seg = np.argmin(dist2, axis=1)                              # (N,)
+    best_t   = t[np.arange(len(plats)), best_seg]                   # (N,)
+    pos_m    = cum_arr[best_seg] + best_t * seg_len[best_seg]        # (N,)
+    return (pos_m / total_m).tolist()
+
+
+def _angle_unwrapped(plat: float, plon: float, prev_angle: float | None,
+                      clat: float, clon: float) -> float:
+    """Angle (rad) from centroid to point, unwrapped against prev so a full loop
+    yields a continuously growing/shrinking value rather than wrapping at ±π.
+
+    `prev_angle` is the *accumulated* unwrapped value (can be > 2π after
+    multiple revolutions). We compare against its wrapped equivalent in
+    (-π, π] — atan2(sin(prev), cos(prev)) — rather than `prev % 2π` which
+    lives in [0, 2π) and would mis-compare across the seam.
+    """
+    a = math.atan2(plat - clat, plon - clon)
+    if prev_angle is None:
+        return a
+    prev_wrapped = math.atan2(math.sin(prev_angle), math.cos(prev_angle))
+    delta = a - prev_wrapped
+    if delta > math.pi:
+        delta -= 2 * math.pi
+    elif delta < -math.pi:
+        delta += 2 * math.pi
+    return prev_angle + delta
+
+
+def _compute_progress_series(points, s: int, e: int, topology) -> list[float] | None:
+    """Compute progress (0..1 for linear/messy, unbounded radians for loop)
+    for each point in points[s:e]. Returns None when the topology can't
+    yield meaningful progress (empty chain, etc.)."""
+    kind, data = topology
+    if kind in ("linear", "messy"):
+        chain = data
+        if not chain or len(chain) < 2:
+            return None
+        cumlen = _chain_cumlen_m(chain)
+        if cumlen[-1] <= 0:
+            return None
+
+        # Vectorised path: collect all valid (lat, lon) in one pass, project
+        # all at once, then stitch holes back in. Falls back to the scalar
+        # loop when numpy is unavailable.
+        if _NUMPY_AVAILABLE:
+            chain_np = _build_chain_np(chain, cumlen)
+            if chain_np is not None:
+                # First pass: identify which indices have valid coords and
+                # collect them. Holes carry the previous value forward.
+                valid_idx: list[int] = []   # position within [s, e)
+                plats: list[float] = []
+                plons: list[float] = []
+                hole_fill: float = 0.0
+                out: list[float] = [0.0] * (e - s)
+                for i in range(s, e):
+                    rel = i - s
+                    try:
+                        plats.append(points[i]["lat"])
+                        plons.append(points[i]["lon"])
+                        valid_idx.append(rel)
+                    except (KeyError, IndexError):
+                        out[rel] = hole_fill  # will be overwritten below
+                if not plats:
+                    return [0.0] * (e - s)
+                progress = _project_all_to_chain(plats, plons, chain_np)
+                for vi, prog in zip(valid_idx, progress):
+                    out[vi] = prog
+                # Fill holes with nearest valid neighbour (carry-forward then
+                # carry-backward for leading holes).
+                valid_set = set(valid_idx)
+                last = 0.0
+                for i in range(e - s):
+                    if i in valid_set:
+                        last = out[i]
+                    else:
+                        out[i] = last
+                return out
+
+        # Scalar fallback (numpy unavailable)
+        out_scalar: list[float] = []
+        for i in range(s, e):
+            try:
+                plat = points[i]["lat"]
+                plon = points[i]["lon"]
+            except (KeyError, IndexError):
+                # Carry the previous value forward so smoothing/diff math
+                # doesn't get fooled by a hole.
+                out_scalar.append(out_scalar[-1] if out_scalar else 0.0)
+                continue
+            out_scalar.append(_project_to_chain(plat, plon, chain, cumlen))
+        return out_scalar
+    if kind == "loop":
+        clat, clon = data
+        out_a: list[float] = []
+        prev: float | None = None
+        for i in range(s, e):
+            try:
+                plat = points[i]["lat"]
+                plon = points[i]["lon"]
+            except (KeyError, IndexError):
+                out_a.append(prev if prev is not None else 0.0)
+                continue
+            ang = _angle_unwrapped(plat, plon, prev, clat, clon)
+            out_a.append(ang)
+            prev = ang
+        return out_a
+    return None
+
+
+def _median_smooth(series: list[float], window: int) -> list[float]:
+    """Sliding-window median. Edges fall back to centered partial windows.
+    Pure Python — series here is at most a few thousand points per run."""
+    if window <= 1 or len(series) < 3:
+        return list(series)
+    half = window // 2
+    out = []
+    n = len(series)
+    for i in range(n):
+        lo = max(0, i - half)
+        hi = min(n, i + half + 1)
+        chunk = sorted(series[lo:hi])
+        out.append(chunk[len(chunk) // 2])
+    return out
+
+
+def _split_traversals_linear(progress: list[float], min_delta: float) -> list[tuple[int, int, str]]:
+    """Walk the smoothed progress series and emit (sub_s, sub_e, direction)
+    segments where direction in {'+', '-'}. A direction flip is only
+    recognised once a min_delta swing has accumulated against the running
+    direction — that filters noise while still catching real laps.
+    """
+    n = len(progress)
+    if n < 4:
+        return [(0, n, "+")]
+
+    # Find first non-trivial direction.
+    start = 0
+    direction = None
+    extremum = progress[0]
+    for i in range(1, n):
+        d = progress[i] - extremum
+        if d >= min_delta:
+            direction = "+"
+            break
+        if d <= -min_delta:
+            direction = "-"
+            break
+        if progress[i] < extremum and direction is None:
+            extremum = progress[i]
+    if direction is None:
+        # Whole run is monotone-ish or too small to flip. One traversal.
+        return [(0, n, "+" if progress[-1] >= progress[0] else "-")]
+
+    out: list[tuple[int, int, str]] = []
+    seg_start = 0
+    extremum = progress[0]
+    for i in range(1, n):
+        v = progress[i]
+        if direction == "+":
+            if v > extremum:
+                extremum = v
+                continue
+            if extremum - v >= min_delta:
+                # Direction flipped. Close current traversal at the local max.
+                # Walk back from i with STRICT inequality so a plateau leaves
+                # the peak at the first plateau index, not at seg_start.
+                peak_idx = i - 1
+                while peak_idx > seg_start and progress[peak_idx - 1] > progress[peak_idx]:
+                    peak_idx -= 1
+                out.append((seg_start, peak_idx + 1, "+"))
+                seg_start = peak_idx
+                direction = "-"
+                extremum = v
+        else:  # direction == "-"
+            if v < extremum:
+                extremum = v
+                continue
+            if v - extremum >= min_delta:
+                trough_idx = i - 1
+                while trough_idx > seg_start and progress[trough_idx - 1] < progress[trough_idx]:
+                    trough_idx -= 1
+                out.append((seg_start, trough_idx + 1, "-"))
+                seg_start = trough_idx
+                direction = "+"
+                extremum = v
+    out.append((seg_start, n, direction))
+    return out
+
+
+def _split_traversals_loop(angles: list[float]) -> list[tuple[int, int, str]]:
+    """Loop trails: split on full 2π revolutions. Each ±2π span = one lap."""
+    import math as _m
+    n = len(angles)
+    if n < 4:
+        return [(0, n, "+")]
+    twopi = 2 * _m.pi
+    out: list[tuple[int, int, str]] = []
+    seg_start = 0
+    seg_origin = angles[0]
+    for i in range(1, n):
+        delta = angles[i] - seg_origin
+        if delta >= twopi:
+            out.append((seg_start, i + 1, "+"))
+            seg_start = i
+            seg_origin = angles[i]
+        elif delta <= -twopi:
+            out.append((seg_start, i + 1, "-"))
+            seg_start = i
+            seg_origin = angles[i]
+    # Trailing partial revolution
+    final_delta = angles[-1] - seg_origin
+    if abs(final_delta) > _m.pi * 0.25 or not out:
+        out.append((seg_start, n, "+" if final_delta >= 0 else "-"))
+    return out
+
+
+def _classify_direction(points, abs_s: int, abs_e: int,
+                         progress_dir: str, kind: str) -> str:
+    """Direction label for a traversal.
+
+    Loop trails always use 'forward' / 'reverse' regardless of elevation
+    delta — net climb per loop is ~0 so up/down would always be 'mixed'.
+    Linear and messy trails prefer up/down when elevation is decisive
+    (>= TRAVERSAL_MIN_ELE_DELTA_M) and fall through to forward/reverse
+    when it isn't. 'mixed' is only emitted when the run is too short to
+    classify at all.
+    """
+    if abs_e - abs_s < 2:
+        return "mixed"
+
+    if kind == "loop":
+        return "forward" if progress_dir == "+" else "reverse"
+
+    def _ele(i):
+        return (points[i].get("ele_sm")
+                if points[i].get("ele_sm") is not None
+                else points[i].get("ele")) or 0.0
+    delta = _ele(abs_e - 1) - _ele(abs_s)
+    if delta >= TRAVERSAL_MIN_ELE_DELTA_M:
+        return "up"
+    if delta <= -TRAVERSAL_MIN_ELE_DELTA_M:
+        return "down"
+    # Elevation ambiguous — surface as forward/reverse along the OSM way's
+    # canonical direction so the leaderboard still separates "same trail,
+    # opposite direction" attempts.
+    return "forward" if progress_dir == "+" else "reverse"
+
+
+def _split_run_into_traversals(points, run, topology):
+    """Top-level: take a kept run (name, span_start, span_end, ridden_km)
+    and split it into one-or-more (sub_s, sub_e, direction_label) entries.
+    Each entry is a traversal of the trail.
+    """
+    name, s, e, _d_km = run
+    kind, _data = topology
+    series = _compute_progress_series(points, s, e, topology)
+    if not series:
+        # No topology / too short. One traversal, direction from elevation only.
+        return [(s, e, _classify_direction(points, s, e, "+", kind))]
+
+    smooth = _median_smooth(series, TRAVERSAL_PROGRESS_SMOOTH_WINDOW)
+    if kind == "loop":
+        chunks = _split_traversals_loop(smooth)
+    else:
+        chunks = _split_traversals_linear(smooth, TRAVERSAL_MIN_PROGRESS_DELTA)
+
+    # Drop very short chunks (snap noise) by folding into the neighbour.
+    chunks = _fold_short_chunks(chunks, TRAVERSAL_MIN_POINTS)
+
+    out = []
+    for sub_s, sub_e, prog_dir in chunks:
+        abs_s = s + sub_s
+        abs_e = s + sub_e
+        direction = _classify_direction(points, abs_s, abs_e, prog_dir, kind)
+        out.append((abs_s, abs_e, direction))
+    return out
+
+
+def _fold_short_chunks(chunks: list[tuple[int, int, str]],
+                       min_pts: int) -> list[tuple[int, int, str]]:
+    """Merge sub-min-point chunks into an adjacent one to suppress GPS jitter
+    that the progress smoothing didn't fully erase."""
+    if len(chunks) <= 1:
+        return chunks
+    changed = True
+    while changed and len(chunks) > 1:
+        changed = False
+        for i, (s, e, d) in enumerate(chunks):
+            if e - s >= min_pts:
+                continue
+            # Fold into longer neighbour
+            if i == 0:
+                # merge into next
+                nxt = chunks[i + 1]
+                chunks = [(s, nxt[1], nxt[2])] + chunks[i + 2:]
+            elif i == len(chunks) - 1:
+                prev = chunks[i - 1]
+                chunks = chunks[:i - 1] + [(prev[0], e, prev[2])]
+            else:
+                prev = chunks[i - 1]
+                nxt = chunks[i + 1]
+                # Merge with whichever is longer
+                if (prev[1] - prev[0]) >= (nxt[1] - nxt[0]):
+                    chunks = chunks[:i - 1] + [(prev[0], e, prev[2])] + chunks[i + 1:]
+                else:
+                    chunks = chunks[:i] + [(s, nxt[1], nxt[2])] + chunks[i + 2:]
+            changed = True
+            break
+    return chunks
+
+
 def _run_touches_both(points, s: int, e: int,
                       term_a: tuple, term_b: tuple,
                       radius_m: float = ENDPOINT_TOUCH_RADIUS_M) -> bool:
@@ -456,7 +1002,8 @@ def _runs_by_name(matches, points):
 
 
 def _coalesce_runs(runs, points,
-                   max_split_sec: float = COALESCE_MAX_SPLIT_SEC):
+                   max_gap_sec: float = COALESCE_MAX_GAP_SEC,
+                   max_crossing_sec: float = COALESCE_MAX_CROSSING_SEC):
     """Merge same-name runs that the grouping incorrectly split.
 
     See COALESCE_* docs above for rule rationale.
@@ -502,7 +1049,7 @@ def _coalesce_runs(runs, points,
         # rather than recomputing across the span — the seam between
         # them holds the dropped tiny B, which we don't want to credit.
         if (nxt[0] == out[-1][0]
-                and _gap_sec(out[-1], nxt) <= max_split_sec):
+                and _gap_sec(out[-1], nxt) <= max_gap_sec):
             out[-1] = (out[-1][0], out[-1][1], nxt[2], out[-1][3] + nxt[3])
             i += 1
             continue
@@ -512,7 +1059,7 @@ def _coalesce_runs(runs, points,
         if (i + 1 < len(runs)
                 and runs[i + 1][0] == out[-1][0]
                 and nxt[0] != out[-1][0]
-                and _dur_sec(nxt) <= max_split_sec):
+                and _dur_sec(nxt) <= max_crossing_sec):
             a2 = runs[i + 1]
             out[-1] = (out[-1][0], out[-1][1], a2[2], out[-1][3] + a2[3])
             i += 2
@@ -605,61 +1152,71 @@ def match_trails(data: dict, cache_dir: Path) -> dict:
     # ENDPOINT_TOUCH_RADIUS_M of both termini during that run.
     # Computed once per name and reused across runs / summary aggregation.
     termini_by_name: dict[str, tuple[tuple, tuple] | None] = {}
+    topology_by_name: dict[str, tuple] = {}
     for nm in name_length_km:
         termini_by_name[nm] = _trail_termini(ways, nm)
+        topology_by_name[nm] = _trail_topology(ways, nm)
 
     timeline_raw: list = []
     by_name: dict[str, dict] = {}
-    for name, s, e, d_km in runs:
-        s_pt = points[s]
-        e_pt = points[e - 1]
-        try:
-            duration_sec = (_parse_iso(e_pt["time"]) - _parse_iso(s_pt["time"])).total_seconds()
-        except (KeyError, ValueError):
-            duration_sec = 0.0
-        # Average snap distance — useful diagnostic for "how confident is
-        # this match" but not surfaced in the UI yet.
-        dists = [m[1] for m in matches[s:e] if m[1] is not None]
-        avg_dist_m = sum(dists) / len(dists) if dists else None
+    for run in runs:
+        name, s, e, d_km = run
+        topology = topology_by_name.get(name) or ("messy", [])
+        # Split the run into one or more traversals based on progress-along-
+        # trail reversals. Single-direction climbs/descents produce one
+        # entry; lapping a trail (most acutely on loops like Merlin View)
+        # produces N entries, one per traversal.
+        traversals = _split_run_into_traversals(points, run, topology)
 
-        entry = {
-            "name": name,
-            "start_idx": s, "end_idx": e - 1,
-            "start_time": s_pt.get("time", ""),
-            "end_time": e_pt.get("time", ""),
-            "duration_sec": round(duration_sec),
-            "distance_km": round(d_km, 3),
-            "points": e - s,
-            "avg_dist_m": round(avg_dist_m, 1) if avg_dist_m is not None else None,
-        }
-        timeline_raw.append(entry)
-
-        # Don't credit a name with a crossing — a sub-50 m run is below
-        # the floor for "I rode this trail". The user-visible summary AND
-        # the timeline filter both depend on `qualifying` (= summary
-        # names), so excluding the crossing here propagates everywhere.
-        if d_km < TIMELINE_MIN_DISTANCE_KM:
-            continue
-        rec = by_name.setdefault(name, {"ridden_km": 0.0, "runs": [], "first_time": s_pt.get("time", "")})
-        rec["ridden_km"] += max(d_km, 0.0)
-        rec["runs"].append((s, e))
-
-    # Merge runs of the same name into "visits" when they're close in time
-    # (mostly fixes OSM coverage gaps that split a single descent into two).
-    summary = []
-    for name, rec in by_name.items():
-        rec["runs"].sort()
-        visits = 1
-        for i in range(1, len(rec["runs"])):
-            prev_end_idx = rec["runs"][i - 1][1] - 1
-            cur_start_idx = rec["runs"][i][0]
+        for sub_s, sub_e, direction in traversals:
+            if sub_e <= sub_s:
+                continue
+            ss_pt = points[sub_s]
+            ee_pt = points[sub_e - 1]
             try:
-                gap = (_parse_iso(points[cur_start_idx]["time"])
-                       - _parse_iso(points[prev_end_idx]["time"])).total_seconds()
+                sub_dur = (_parse_iso(ee_pt["time"]) - _parse_iso(ss_pt["time"])).total_seconds()
             except (KeyError, ValueError):
-                gap = 0.0
-            if gap > VISIT_GAP_SEC:
-                visits += 1
+                sub_dur = 0.0
+            sub_d_km = (ee_pt.get("dist_km") or 0.0) - (ss_pt.get("dist_km") or 0.0)
+            dists = [m[1] for m in matches[sub_s:sub_e] if m[1] is not None]
+            avg_dist_m = sum(dists) / len(dists) if dists else None
+            entry = {
+                "name": name,
+                "direction": direction,
+                "start_idx": sub_s, "end_idx": sub_e - 1,
+                "start_time": ss_pt.get("time", ""),
+                "end_time": ee_pt.get("time", ""),
+                "duration_sec": round(sub_dur),
+                "distance_km": round(sub_d_km, 3),
+                "points": sub_e - sub_s,
+                "avg_dist_m": round(avg_dist_m, 1) if avg_dist_m is not None else None,
+            }
+            timeline_raw.append(entry)
+            # Aggregate into the by-name+direction bucket so the summary
+            # rollup and leaderboard see direction-split totals.
+            if sub_d_km < TIMELINE_MIN_DISTANCE_KM:
+                continue
+            key = (name, direction)
+            rec = by_name.setdefault(key, {
+                "ridden_km": 0.0, "runs": [],
+                "first_time": ss_pt.get("time", ""),
+            })
+            rec["ridden_km"] += max(sub_d_km, 0.0)
+            rec["runs"].append((sub_s, sub_e))
+
+    # Merge runs of the same name+direction into "visits" when they're close
+    # in time. Same-name, opposite-direction runs are by definition different
+    # traversals so they each count as a separate visit; the splitter has
+    # already separated them.
+    summary = []
+    for key, rec in by_name.items():
+        name, direction = key
+        rec["runs"].sort()
+        visits = len(rec["runs"])  # each traversal = a visit now
+        # Optional: merge consecutive runs that the visit-gap rule would have
+        # collapsed (e.g. same-direction same-trail back-to-back, no real
+        # break). Keeping the raw count is more honest since the splitter
+        # already operates on continuous progress signals.
         osm_len = name_length_km.get(name, 0.0)
         raw_cov = 100.0 * rec["ridden_km"] / osm_len if osm_len > 0 else 0.0
         # Filter on the raw figure so a slightly-noisy 6 % run still
@@ -688,6 +1245,7 @@ def match_trails(data: dict, cache_dir: Path) -> dict:
                         break
         summary.append({
             "name": name,
+            "direction": direction,
             "visits": visits,
             "ridden_km": round(rec["ridden_km"], 3),
             "osm_length_km": round(osm_len, 3),
@@ -705,12 +1263,18 @@ def match_trails(data: dict, cache_dir: Path) -> dict:
     # Decorate each survivor with its per-attempt coverage of the trail
     # (capped at 100 — same as the summary). The timeline is the primary
     # surface in the UI, so the coverage pill lives here per row.
-    qualifying = {t["name"]: t["osm_length_km"] for t in summary}
+    # `qualifying` keys on (name, direction) — but for name-only fallback
+    # (e.g. a timeline traversal that didn't independently qualify because
+    # its sub-distance was small) we let any direction of the same name
+    # pass through via name-only check too.
+    qualifying = {(t["name"], t["direction"]): t["osm_length_km"] for t in summary}
+    qualifying_names = {t["name"] for t in summary}
     timeline = []
     for e in timeline_raw:
-        if e["name"] not in qualifying or e["distance_km"] < TIMELINE_MIN_DISTANCE_KM:
+        if e["name"] not in qualifying_names or e["distance_km"] < TIMELINE_MIN_DISTANCE_KM:
             continue
-        osm_len = qualifying[e["name"]]
+        key = (e["name"], e.get("direction", "mixed"))
+        osm_len = qualifying.get(key) or name_length_km.get(e["name"], 0.0)
         raw_cov = 100.0 * e["distance_km"] / osm_len if osm_len > 0 else 0.0
         e["coverage_pct"] = round(min(raw_cov, 100.0), 1)
         completed = raw_cov >= COMPLETE_COVERAGE_PCT
@@ -857,19 +1421,16 @@ def scan_cached_results(cache_dir_results: Path) -> list[tuple[str, float, dict]
 
 def build_leaderboards(cache_dir_results: Path,
                        activity_meta: dict[str, dict] | None = None
-                       ) -> dict[str, list[dict]]:
-    """Aggregate cached results into per-trail-name leaderboards.
+                       ) -> dict[tuple[str, str], list[dict]]:
+    """Aggregate cached results into per-(trail, direction) leaderboards.
 
-    Each leaderboard entry includes the originating filename, date,
-    duration, distance, coverage, and span indices — enough for the UI
-    popup to render rows and link back to the source activity.
-
-    `activity_meta`: optional `{filename: {title, type, ...}}` from the
-    main metadata.json. Used to enrich each row with a display title.
-    Missing entries fall back to the filename.
+    Keys are `(trail_name, direction)` where direction ∈ {'up', 'down',
+    'mixed'}. A trail ridden in both directions therefore has two
+    leaderboards (and a mixed one if the rider did out-and-back loops).
+    Each leaderboard is sorted fastest first.
     """
     cached = scan_cached_results(cache_dir_results)
-    boards: dict[str, list[dict]] = {}
+    boards: dict[tuple[str, str], list[dict]] = {}
     for filename, _mtime, result in cached:
         timeline = (result or {}).get("timeline") or []
         for entry in timeline:
@@ -878,6 +1439,7 @@ def build_leaderboards(cache_dir_results: Path,
             name = entry.get("name")
             if not name:
                 continue
+            direction = entry.get("direction") or "mixed"
             row = {
                 "filename": filename,
                 "title":     (activity_meta or {}).get(filename, {}).get("title") or filename,
@@ -886,29 +1448,100 @@ def build_leaderboards(cache_dir_results: Path,
                 "duration_sec": int(entry.get("duration_sec") or 0),
                 "distance_km":  float(entry.get("distance_km") or 0.0),
                 "coverage_pct": float(entry.get("coverage_pct") or 0.0),
+                "direction":    direction,
                 "start_idx":    int(entry.get("start_idx") or 0),
                 "end_idx":      int(entry.get("end_idx")   or 0),
             }
-            boards.setdefault(name, []).append(row)
+            boards.setdefault((name, direction), []).append(row)
 
-    for name, rows in boards.items():
+    for key, rows in boards.items():
         rows.sort(key=lambda r: (r["duration_sec"], r["filename"]))
     return boards
 
 
-def rank_for_attempt(boards: dict[str, list[dict]], name: str,
-                     filename: str, start_idx: int) -> tuple[int, int] | None:
-    """Find a specific attempt's 1-based rank within its trail's leaderboard.
+def build_region_trail_index(cache_dir_results: Path,
+                             activity_meta: dict[str, dict] | None,
+                             activity_regions: dict[str, list[str]],
+                             ) -> dict[str, dict[str, dict]]:
+    """Group completed trail attempts by the region(s) the source ride is in.
 
-    Identity is `(filename, start_idx)` — same activity can contribute
-    multiple completed attempts of the same trail (multi-lap rides), and
-    each gets its own rank.
+    Returns `{region_id: {trail_name: {attempts, best_duration_sec,
+    best_filename, best_date, best_start_idx, best_end_idx}}}`.
 
-    Returns `(rank, total)` or `None` if the attempt isn't on the board
-    (most commonly because the activity's trail_match cache hasn't been
-    rebuilt yet to mark the attempt completed, or the attempt is a partial).
+    A trail that appears in rides across multiple regions is recorded
+    under each region — e.g. a generic "Connector" trail that exists in
+    both Moose Mountain rides and Bragg Creek rides shows up in both.
+    The "attempts" + "best" stats are then scoped to that region (only
+    rides matching that region count toward its leaderboard for the
+    trail). This matches how a rider thinks: "what's my best Pneuma at
+    Moose Mountain?" is a different question from "best Pneuma anywhere".
+
+    Args:
+        cache_dir_results: per-file trail_match cache directory.
+        activity_meta: optional `{filename: {title, ...}}` from metadata.json.
+        activity_regions: `{filename: [region_id, ...]}` from the
+            sidebar / activity index — needed because the trail_match
+            cache itself doesn't know about regions.
+
+    Completed runs only — partials are not meaningful for "best time".
     """
-    rows = boards.get(name)
+    cached = scan_cached_results(cache_dir_results)
+    out: dict[str, dict[str, dict]] = {}
+    activity_meta = activity_meta or {}
+    for filename, _mtime, result in cached:
+        regions = activity_regions.get(filename) or []
+        if not regions:
+            continue
+        timeline = (result or {}).get("timeline") or []
+        for entry in timeline:
+            if not entry.get("completed"):
+                continue
+            name = entry.get("name")
+            if not name:
+                continue
+            direction = entry.get("direction") or "mixed"
+            # Bucket key is name + direction so "Cutoff up" and "Cutoff
+            # down" rank against each other separately. Display name in
+            # the UI is the same; the direction field carries the badge.
+            bucket_name = name
+            dur = int(entry.get("duration_sec") or 0)
+            date = (entry.get("start_time") or "")[:10]
+            start_idx = int(entry.get("start_idx") or 0)
+            end_idx   = int(entry.get("end_idx")   or 0)
+            for region_id in regions:
+                region_dict = out.setdefault(region_id, {})
+                trail_key = (bucket_name, direction)
+                trail = region_dict.get(trail_key)
+                if trail is None:
+                    region_dict[trail_key] = {
+                        "name":      bucket_name,
+                        "direction": direction,
+                        "attempts": 1,
+                        "best_duration_sec": dur,
+                        "best_filename": filename,
+                        "best_title": activity_meta.get(filename, {}).get("title") or filename,
+                        "best_date": date,
+                        "best_start_idx": start_idx,
+                        "best_end_idx":   end_idx,
+                    }
+                else:
+                    trail["attempts"] += 1
+                    if dur < trail["best_duration_sec"]:
+                        trail["best_duration_sec"] = dur
+                        trail["best_filename"]    = filename
+                        trail["best_title"]       = activity_meta.get(filename, {}).get("title") or filename
+                        trail["best_date"]        = date
+                        trail["best_start_idx"]   = start_idx
+                        trail["best_end_idx"]     = end_idx
+    return out
+
+
+def rank_for_attempt(boards: dict[tuple[str, str], list[dict]],
+                     name: str, direction: str,
+                     filename: str, start_idx: int) -> tuple[int, int] | None:
+    """Find a specific attempt's 1-based rank within its (trail, direction)
+    leaderboard. Identity is `(filename, start_idx)`."""
+    rows = boards.get((name, direction))
     if not rows:
         return None
     for i, row in enumerate(rows, start=1):

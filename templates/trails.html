@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AlForks – Trails</title>
+  <script src="/static/utils.js"></script>
+  <script src="/static/sync_toast.js" defer></script>
+  <script src="/static/review_nav.js" defer></script>
+  <link rel="stylesheet" href="/static/base.css">
+  <style>
+    body { display: flex; flex-direction: column; min-height: 100vh; }
+    main { padding: 18px 22px 32px; max-width: 1680px; margin: 0 auto; width: 100%; }
+    .num, .num * { font-variant-numeric: tabular-nums; }
+
+    h1.page-title { font-size: 1.4rem; font-weight: 500; letter-spacing: -0.02em; color: var(--text-primary); margin: 0 0 6px; }
+    .page-sub { font-size: 0.78rem; color: var(--text-tertiary); margin: 0 0 18px; }
+    .preview-tag { display: inline-block; font-size: 0.55rem; padding: 2px 6px; background: var(--bg-card); color: #f59e0b; border-radius: 3px; letter-spacing: 0.05em; margin-left: 8px; vertical-align: middle; }
+
+    /* Filter bar */
+    #filters { background: var(--bg-card); border: 1px solid var(--border-hair); border-radius: 4px; padding: 12px 16px; margin-bottom: 18px; display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+    .filter-label { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.18em; color: var(--text-tertiary); font-weight: 500; }
+    #trail-search { background: transparent; border: 1px solid var(--border-row); border-radius: 3px; color: var(--text-primary); font-size: 0.78rem; padding: 5px 10px; font-family: var(--font-mono); outline: none; min-width: 220px; }
+    #trail-search:focus { border-color: var(--accent); }
+    #stats-summary { font-size: 0.74rem; color: var(--text-tertiary); margin-left: auto; font-family: var(--font-mono); }
+
+    /* Region cards */
+    .region-card { background: var(--bg-card); border: 1px solid var(--border-hair); border-radius: 4px; margin-bottom: 12px; overflow: hidden; }
+    .region-head { padding: 12px 16px; display: flex; align-items: center; gap: 12px; cursor: pointer; user-select: none; transition: background 0.12s; }
+    .region-head:hover { background: rgba(255,255,255,0.03); }
+    .region-swatch { width: 12px; height: 12px; border-radius: 2px; flex-shrink: 0; }
+    .region-name { font-size: 0.95rem; font-weight: 500; color: var(--text-primary); }
+    .region-meta { font-size: 0.72rem; color: var(--text-tertiary); font-family: var(--font-mono); margin-left: auto; }
+    .region-chevron { color: var(--text-muted); font-size: 0.8rem; transition: transform 0.15s; }
+    .region-card.open .region-chevron { transform: rotate(90deg); }
+    .region-body { display: none; border-top: 1px solid var(--border-hair); }
+    .region-card.open .region-body { display: block; }
+
+    /* Trails table */
+    .trails-table { width: 100%; border-collapse: collapse; font-size: 0.78rem; }
+    .trails-table th { font-size: 0.62rem; text-transform: uppercase; letter-spacing: 0.10em; color: var(--text-tertiary); padding: 8px 14px; text-align: right; border-bottom: 1px solid var(--border-hair); font-weight: 500; background: rgba(0,0,0,0.15); position: sticky; top: 0; }
+    .trails-table th:first-child { text-align: left; }
+    .trails-table td { padding: 7px 14px; color: var(--text-secondary); text-align: right; border-bottom: 1px solid var(--border-row); font-variant-numeric: tabular-nums; }
+    .trails-table td:first-child { color: var(--text-primary); text-align: left; font-variant-numeric: normal; }
+    .trails-table tbody tr { cursor: pointer; transition: background 0.08s; }
+    .trails-table tbody tr:hover td { background: rgba(255,255,255,0.04); }
+    .trails-table tbody tr:last-child td { border-bottom: none; }
+
+    .trail-name { color: #93c5fd; }
+    .trail-name:hover { color: #bfdbfe; text-decoration: underline; }
+    .best-link { color: var(--text-tertiary); }
+    .best-link:hover { color: var(--text-primary); text-decoration: underline; }
+    /* Direction badge — matches the activity-detail timeline pill. */
+    .dir-pill { display: inline-block; min-width: 18px; padding: 1px 5px; border-radius: 3px; font-size: 0.65rem; font-weight: 700; text-align: center; line-height: 1; margin-right: 6px; vertical-align: middle; }
+    .dir-pill.dir-up    { background: #1d2d3a; color: #93c5fd; }
+    .dir-pill.dir-down  { background: #2d1d3a; color: #c4b5fd; }
+    .dir-pill.dir-fwd   { background: #1d3a2c; color: #6ee7b7; }
+    .dir-pill.dir-rev   { background: #3a2c1d; color: #fbbf24; }
+    .dir-pill.dir-mixed { background: #2a2d35; color: #aaa; }
+
+    .empty-state { padding: 60px 20px; text-align: center; color: var(--text-tertiary); font-size: 0.8rem; line-height: 1.5; }
+    .empty-state code { background: var(--bg-card); padding: 2px 6px; border-radius: 3px; color: var(--text-primary); }
+
+    /* Split layout: left = region cards, right = leaderboard detail panel.
+       Detail panel is sticky so it stays visible while scrolling the
+       region list. Hidden until a trail row is clicked. */
+    #split { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; align-items: flex-start; }
+    #split.with-detail { grid-template-columns: minmax(0, 1fr) 460px; }
+    #content { min-width: 0; }
+    #detail { display: none; position: sticky; top: 16px; max-height: calc(100vh - 80px); overflow-y: auto; background: var(--bg-card); border: 1px solid var(--border-hair); border-radius: 4px; }
+    #split.with-detail #detail { display: block; }
+    .detail-head { padding: 14px 16px; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid var(--border-hair); }
+    .detail-title { font-size: 0.95rem; font-weight: 600; color: var(--text-primary); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .detail-sub { font-size: 0.65rem; color: var(--text-tertiary); text-transform: uppercase; letter-spacing: 0.07em; margin-top: 2px; }
+    .detail-close { background: transparent; border: none; color: var(--text-tertiary); font-size: 1.2rem; cursor: pointer; padding: 0 4px; }
+    .detail-close:hover { color: var(--text-primary); }
+    .detail-empty { padding: 24px 16px; color: var(--text-tertiary); font-size: 0.78rem; line-height: 1.5; text-align: center; }
+    .detail-loading { padding: 24px 16px; color: var(--text-tertiary); font-size: 0.78rem; text-align: center; }
+    /* Leaderboard table (mirrors the activity-detail popup style). */
+    .lb-table { width: 100%; border-collapse: collapse; font-size: 0.74rem; }
+    .lb-table th { font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-tertiary); padding: 6px 10px; text-align: right; border-bottom: 1px solid var(--border-hair); font-weight: 500; background: rgba(0,0,0,0.15); position: sticky; top: 0; z-index: 1; }
+    .lb-table th:first-child, .lb-table th:nth-child(2) { text-align: left; }
+    .lb-table td { padding: 5px 10px; color: var(--text-secondary); text-align: right; border-bottom: 1px solid var(--border-row); font-variant-numeric: tabular-nums; }
+    .lb-table td:first-child { color: var(--text-primary); font-weight: 600; font-variant-numeric: tabular-nums; }
+    .lb-table td:nth-child(2) { text-align: left; color: var(--text-secondary); }
+    .lb-table tbody tr { cursor: pointer; transition: background 0.08s; }
+    .lb-table tbody tr:hover td { background: rgba(255,255,255,0.04); }
+    /* Active trail row highlight in the region tables — shows which one's
+       leaderboard is currently in the detail panel. */
+    .trails-table tbody tr.active-trail td { background: rgba(147, 197, 253, 0.08); }
+    .trails-table tbody tr.active-trail td:first-child { box-shadow: inset 2px 0 0 #93c5fd; }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>AlForks</h1>
+  <nav>
+    <a href="/">Summary</a>
+    <a href="/logs">Logs</a>
+    <a href="/heatmap">Heat Map</a>
+    <a href="/training">Training</a>
+    <a href="/trails" class="active">Trails</a>
+    <a href="/review">Review<span id="nav-review-badge" class="nav-pill" style="display:none;">0</span></a>
+    <a href="/setup">Setup</a>
+  </nav>
+  <button class="nav-sync-btn" onclick="triggerSyncAll()" title="Sync Strava + Garmin now">Sync</button>
+</header>
+
+<main>
+  <h1 class="page-title">Trails Ridden <span class="preview-tag">PREVIEW</span></h1>
+  <p class="page-sub">Completed trail attempts across all your MTB rides, grouped by region.
+    Click a trail row to load its leaderboard on the right. Click the best date to jump straight to that ride.</p>
+
+  <div id="filters">
+    <span class="filter-label">Search</span>
+    <input id="trail-search" type="text" placeholder="trail or region name…" />
+    <div id="stats-summary"></div>
+  </div>
+
+  <div id="split">
+    <div id="content"></div>
+    <aside id="detail" role="complementary" aria-label="Trail leaderboard">
+      <div class="detail-head">
+        <div style="flex:1; min-width:0;">
+          <div class="detail-title" id="detail-title"></div>
+          <div class="detail-sub" id="detail-sub"></div>
+        </div>
+        <button class="detail-close" onclick="closeDetail()" title="Close">×</button>
+      </div>
+      <div id="detail-body"></div>
+    </aside>
+  </div>
+</main>
+
+<script>
+const STORAGE_KEY = 'trailsExpandedRegions';
+
+function _escAttr(s) {
+  return String(s ?? '').replaceAll('&', '&amp;').replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
+}
+function _escText(s) {
+  return String(s ?? '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
+}
+function _fmtDurHms(sec) {
+  if (!sec || sec < 0) return '--';
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const s = Math.floor(sec % 60);
+  if (h) return `${h}h ${m}m ${s}s`;
+  if (m) return `${m}m ${s}s`;
+  return `${s}s`;
+}
+
+function _expandedSet() {
+  try { return new Set(JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]')); }
+  catch { return new Set(); }
+}
+function _saveExpanded(set) {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify([...set]));
+}
+
+let _data = { regions: [] };
+
+async function loadData() {
+  const r = await fetch('/api/trails/regions', { cache: 'no-store' });
+  _data = await r.json();
+  render();
+}
+
+function render() {
+  const filter = (document.getElementById('trail-search').value || '').toLowerCase().trim();
+  const content = document.getElementById('content');
+  const expanded = _expandedSet();
+
+  let totalRegions = 0, totalTrails = 0, totalAttempts = 0;
+
+  const regions = _data.regions
+    .map(reg => {
+      // If a filter is set, narrow the trails to matches AND auto-expand
+      // the region. A region whose name itself matches keeps all trails.
+      let trails = reg.trails;
+      let regionMatch = false;
+      if (filter) {
+        regionMatch = (reg.name || '').toLowerCase().includes(filter);
+        if (!regionMatch) {
+          trails = trails.filter(t => (t.name || '').toLowerCase().includes(filter));
+        }
+      }
+      return { reg, trails, regionMatch };
+    })
+    .filter(({ reg, trails, regionMatch }) => !filter || regionMatch || trails.length > 0);
+
+  if (regions.length === 0) {
+    content.innerHTML = `<div class="empty-state">
+      No trails to show.<br>
+      Make sure you have MTB activities with the trail-match cache populated
+      (the background prewarm runs at Flask startup).
+    </div>`;
+    document.getElementById('stats-summary').textContent = '';
+    return;
+  }
+
+  const html = regions.map(({ reg, trails, regionMatch }) => {
+    totalRegions++;
+    totalTrails += trails.length;
+    const localAttempts = trails.reduce((s, t) => s + t.attempts, 0);
+    totalAttempts += localAttempts;
+    // Auto-open when filtering (so matches are immediately visible).
+    const isOpen = filter ? true : expanded.has(reg.id);
+    const swatch = reg.color
+      ? `<div class="region-swatch" style="background:${_escAttr(reg.color)}"></div>` : '';
+    const rows = trails.map(t => {
+      const dir = t.direction || 'mixed';
+      const dirIcon = ({up:'↑',down:'↓',forward:'→',reverse:'←'})[dir] || '↔';
+      const dirTitle = ({up:'Climb',down:'Descent',forward:'Forward',reverse:'Reverse'})[dir] || 'Mixed';
+      const dirCls = ({up:'dir-up',down:'dir-down',forward:'dir-fwd',reverse:'dir-rev'})[dir] || 'dir-mixed';
+      const dirPill = `<span class="dir-pill ${dirCls}" title="${_escAttr(dirTitle)}">${dirIcon}</span>`;
+      // Row click opens the detail panel for THIS (trail, direction).
+      // The "Best Date" cell remains a quick shortcut to that ride's log.
+      const bestNav = `/log/${encodeURIComponent(t.best_filename)}`
+        + `?lb=${encodeURIComponent(t.name)}`
+        + `&dir=${encodeURIComponent(dir)}`
+        + `&hl=${encodeURIComponent(`${t.best_start_idx}:${t.best_end_idx}`)}`;
+      const trailKey = `${t.name}|${dir}`;
+      return `
+        <tr data-trail="${_escAttr(t.name)}" data-dir="${_escAttr(dir)}" data-key="${_escAttr(trailKey)}">
+          <td>${dirPill}<span class="trail-name">${_escText(t.name)}</span></td>
+          <td>${t.attempts}</td>
+          <td>${_fmtDurHms(t.best_duration_sec)}</td>
+          <td><a class="best-link" href="${_escAttr(bestNav)}" title="Open best ride directly" onclick="event.stopPropagation();">${_escText(t.best_date)}</a></td>
+        </tr>`;
+    }).join('');
+    return `
+      <div class="region-card ${isOpen ? 'open' : ''}" data-region-id="${_escAttr(reg.id)}">
+        <div class="region-head">
+          ${swatch}
+          <span class="region-name">${_escText(reg.name)}</span>
+          <span class="region-meta">${trails.length} trails · ${localAttempts} attempts</span>
+          <span class="region-chevron">▶</span>
+        </div>
+        <div class="region-body">
+          <table class="trails-table">
+            <thead><tr><th>Trail</th><th>Attempts</th><th>Best</th><th>Best Date</th></tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+      </div>`;
+  }).join('');
+
+  content.innerHTML = html;
+  document.getElementById('stats-summary').textContent =
+    `${totalRegions} regions · ${totalTrails} trails · ${totalAttempts} completed attempts`;
+
+  // Wire collapse + navigation via delegation.
+  content.addEventListener('click', _onContentClick, { once: false });
+}
+
+// Delegated click on the content area:
+//   - region header → toggle expand
+//   - trail row → load its leaderboard into the detail panel (NO nav)
+//   - the "Best Date" cell has its own onclick that stops propagation
+//     and lets the native link navigate to the best ride
+function _onContentClick(ev) {
+  const head = ev.target.closest('.region-head');
+  if (head) {
+    const card = head.parentElement;
+    card.classList.toggle('open');
+    const set = _expandedSet();
+    const id = card.dataset.regionId;
+    if (card.classList.contains('open')) set.add(id); else set.delete(id);
+    _saveExpanded(set);
+    return;
+  }
+  const row = ev.target.closest('tr[data-trail]');
+  if (row) {
+    const name = row.getAttribute('data-trail');
+    const dir  = row.getAttribute('data-dir') || 'mixed';
+    const key  = row.getAttribute('data-key');
+    _markActiveRow(key);
+    openDetailFor(name, dir);
+  }
+}
+
+function _markActiveRow(key) {
+  document.querySelectorAll('.trails-table tbody tr.active-trail')
+    .forEach(r => r.classList.remove('active-trail'));
+  if (!key) return;
+  document.querySelectorAll(`.trails-table tbody tr[data-key="${CSS.escape(key)}"]`)
+    .forEach(r => r.classList.add('active-trail'));
+}
+
+// ── Detail panel: per-(trail, direction) leaderboard ──────────────────
+async function openDetailFor(name, direction) {
+  const split = document.getElementById('split');
+  split.classList.add('with-detail');
+  const titleEl = document.getElementById('detail-title');
+  const subEl   = document.getElementById('detail-sub');
+  const bodyEl  = document.getElementById('detail-body');
+  const dirIcon = ({up:'↑',down:'↓',forward:'→',reverse:'←'})[direction] || '↔';
+  const dirCls  = ({up:'dir-up',down:'dir-down',forward:'dir-fwd',reverse:'dir-rev'})[direction] || 'dir-mixed';
+  titleEl.innerHTML = `<span class="dir-pill ${dirCls}">${dirIcon}</span> ${_escText(name)}`;
+  subEl.textContent = 'Loading…';
+  bodyEl.innerHTML = '<div class="detail-loading">Loading attempts…</div>';
+
+  let payload;
+  try {
+    const url = `/api/trails/leaderboard/${encodeURIComponent(name)}`
+              + `?direction=${encodeURIComponent(direction)}`;
+    const r = await fetch(url, { cache: 'no-store' });
+    payload = await r.json();
+  } catch (err) {
+    bodyEl.innerHTML = `<div class="detail-empty">Failed to load: ${_escText(err.message)}</div>`;
+    subEl.textContent = '';
+    return;
+  }
+
+  const rows = payload.rows || [];
+  subEl.textContent = rows.length
+    ? `${rows.length} attempts · fastest first`
+    : 'No completed attempts on record yet';
+  if (!rows.length) {
+    bodyEl.innerHTML = `<div class="detail-empty">No completed attempts of this trail are on record yet.</div>`;
+    return;
+  }
+
+  const tbody = rows.map(r => {
+    const target = `/log/${encodeURIComponent(r.filename)}`
+      + `?lb=${encodeURIComponent(name)}`
+      + `&dir=${encodeURIComponent(r.direction || direction || 'all')}`
+      + `&hl=${encodeURIComponent(`${r.start_idx}:${r.end_idx}`)}`;
+    const dateStr = r.date || (r.start_time || '').slice(0, 10);
+    return `
+      <tr data-nav="${_escAttr(target)}">
+        <td>${r.rank}</td>
+        <td title="${_escAttr(r.title || r.filename)}">${_escText(dateStr)}</td>
+        <td>${_fmtDurHms(r.duration_sec)}</td>
+        <td>${(+r.distance_km || 0).toFixed(2)}k</td>
+        <td>${Math.round(+r.coverage_pct || 0)}%</td>
+      </tr>`;
+  }).join('');
+  bodyEl.innerHTML = `
+    <table class="lb-table">
+      <thead><tr><th>#</th><th>Date</th><th>Dur</th><th>Dist</th><th>Cov</th></tr></thead>
+      <tbody>${tbody}</tbody>
+    </table>`;
+}
+
+function closeDetail() {
+  document.getElementById('split').classList.remove('with-detail');
+  _markActiveRow(null);
+}
+
+// One-time delegated click on the detail body for leaderboard-row navigation.
+document.getElementById('detail-body').addEventListener('click', (ev) => {
+  const tr = ev.target.closest('tr[data-nav]');
+  if (!tr) return;
+  window.location = tr.getAttribute('data-nav');
+});
+
+document.getElementById('trail-search').addEventListener('input', () => render());
+
+loadData().catch(err => {
+  document.getElementById('content').innerHTML =
+    `<div class="empty-state">Failed to load: ${_escText(err.message)}</div>`;
+});
+</script>
+
+</body>
+</html>

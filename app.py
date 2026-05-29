@@ -1767,6 +1767,11 @@ _trail_leaderboard_cache: dict[str, list[dict]] | None = None
 _trail_leaderboard_key:   tuple | None = None
 _trail_leaderboard_lock                = threading.Lock()
 
+# Same invalidation pattern as the leaderboards — share the dir-mtime key
+# so a single file write invalidates both caches consistently.
+_trail_region_index_cache: dict | None = None
+_trail_region_index_key:   tuple | None = None
+
 
 def _trail_leaderboard_cache_key() -> tuple:
     def _m(p):
@@ -1791,13 +1796,40 @@ def _get_leaderboards() -> dict[str, list[dict]]:
         return boards
 
 
+def _get_region_trail_index(activity_regions: dict[str, list[str]]) -> dict:
+    """Cached wrapper around build_region_trail_index. Uses the same
+    invalidation key as the leaderboard cache plus the regions-file mtime
+    (so a region rename invalidates the cached index). Shares the
+    leaderboard lock — both caches are read together and the write path
+    is dominated by the build call so contention is negligible."""
+    global _trail_region_index_cache, _trail_region_index_key
+    region_files_key = (_trail_leaderboard_cache_key(),
+                        _stat_mtime(REGIONS_FILE))
+    with _trail_leaderboard_lock:
+        if (_trail_region_index_cache is not None
+                and _trail_region_index_key == region_files_key):
+            return _trail_region_index_cache
+        index = trail_match.build_region_trail_index(
+            TRAIL_MATCH_CACHE_DIR,
+            activity_meta=load_metadata(),
+            activity_regions=activity_regions,
+        )
+        _trail_region_index_cache = index
+        _trail_region_index_key   = region_files_key
+        return index
+
+
 def _invalidate_trail_leaderboards() -> None:
     """Called after a trail_match cache file is written by the prewarm or
-    the activity API. Forces the next `_get_leaderboards()` call to rebuild."""
+    the activity API. Forces both leaderboard and region-index caches to
+    rebuild on next read."""
     global _trail_leaderboard_cache, _trail_leaderboard_key
+    global _trail_region_index_cache, _trail_region_index_key
     with _trail_leaderboard_lock:
         _trail_leaderboard_cache = None
         _trail_leaderboard_key   = None
+        _trail_region_index_cache = None
+        _trail_region_index_key   = None
 
 
 # ─── Background prewarm of missing trail-match results ──────────────────────
@@ -1943,21 +1975,93 @@ def _trail_prewarm_worker_inner() -> None:
     logger.info("trail prewarm: processed %d/%d", done, len(todo))
 
 
+@app.route("/api/trails/regions")
+def api_trail_regions():
+    """All completed trail attempts grouped by region.
+
+    Returns a list of region cards, each containing the region's name +
+    polygon-derived metadata + the trails ridden in that region with
+    their per-region attempt count and best time. Powers the /trails
+    page.
+
+    Trails appearing in rides across multiple regions show up under each
+    region with that region's local stats — see build_region_trail_index.
+    """
+    regions = load_regions()
+    region_by_id = {r["id"]: r for r in regions}
+    # Build {filename: [region_id, ...]} from the activities list so the
+    # aggregator doesn't need to recompute centroids.
+    acts = all_activities()
+    activity_regions = {
+        (a.get("filename") or ""): (a.get("regions") or [])
+        for a in acts
+    }
+    index = _get_region_trail_index(activity_regions)
+    out = []
+    for region_id, trails_dict in index.items():
+        region = region_by_id.get(region_id)
+        if region is None:
+            continue   # stale region id from a deleted polygon
+        # trails_dict is keyed on (name, direction). Each value already
+        # carries its own `name` and `direction` fields from the
+        # aggregator. Sort by attempts desc, then by name, then direction.
+        trails = sorted(
+            (v for v in trails_dict.values()),
+            key=lambda t: (-t["attempts"], t["name"], t.get("direction", "")),
+        )
+        out.append({
+            "id":     region_id,
+            "name":   region.get("name") or region_id,
+            "color":  region.get("color"),
+            "trails": trails,
+            "total_attempts": sum(t["attempts"] for t in trails),
+            "trail_count":    len(trails),
+        })
+    # Sort regions by total attempts desc — the regions you ride most
+    # appear at the top.
+    out.sort(key=lambda r: (-r["total_attempts"], r["name"]))
+    return jsonify({"regions": out})
+
+
+@app.route("/trails")
+def trails_page():
+    """Region-grouped trail leaderboard view. Lists every region you've
+    ridden, the trails in that region, attempts per trail, and your best
+    time per trail (with a link to that ride)."""
+    return render_template("trails.html",
+        types_json=_safe_json(load_types()))
+
+
 @app.route("/api/trails/leaderboard/<path:name>")
 def api_trail_leaderboard(name):
-    """Per-trail leaderboard: every completed attempt across all cached
-    MTB+Moose-Mountain rides, sorted fastest first. Used by the popup
-    that appears when a trail name is clicked in the activity drawer."""
+    """Per-(trail, direction) leaderboard: every completed attempt across
+    all cached MTB rides, sorted fastest first.
+
+    Query params:
+      direction: 'up' | 'down' | 'mixed' | 'all' (default = 'all', which
+        returns every direction's rows interleaved-then-resorted).
+    """
     boards = _get_leaderboards()
-    rows = boards.get(name)
-    if not rows:
-        return jsonify({"name": name, "rows": [], "count": 0})
-    # Stamp the 1-based rank in the response so the client doesn't have
-    # to re-derive it from list position.
-    decorated = []
-    for i, r in enumerate(rows, start=1):
-        decorated.append({**r, "rank": i})
-    return jsonify({"name": name, "rows": decorated, "count": len(rows)})
+    direction = (request.args.get("direction") or "all").lower()
+    if direction == "all":
+        # Combine all directions for the legacy callers / overview view.
+        all_rows = []
+        for (n, d), rows in boards.items():
+            if n != name:
+                continue
+            all_rows.extend(rows)
+        all_rows.sort(key=lambda r: (r["duration_sec"], r["filename"]))
+        rows = all_rows
+    else:
+        rows = boards.get((name, direction)) or []
+    decorated = [{**r, "rank": i} for i, r in enumerate(rows, start=1)]
+    return jsonify({
+        "name": name, "direction": direction,
+        "rows": decorated, "count": len(rows),
+        # Also surface which directions are available for this trail so
+        # the UI can let the user toggle.
+        "available_directions": sorted({d for (n, d) in boards.keys() if n == name}),
+    })
 
 
 @app.route("/api/activities")
@@ -2265,7 +2369,8 @@ def api_activity(filename):
                         entry["rank_total"] = None
                         continue
                     rt = trail_match.rank_for_attempt(
-                        boards, entry["name"], filename, entry.get("start_idx", 0)
+                        boards, entry["name"], entry.get("direction") or "mixed",
+                        filename, entry.get("start_idx", 0),
                     )
                     if rt is None:
                         entry["rank"] = None

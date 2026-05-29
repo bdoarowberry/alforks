@@ -513,6 +513,15 @@
        path-length artefact, not a meaningful measurement. */
     .trail-cov-pill.cov-full    { background: #18301a; color: #86efac; }
     .trail-cov-pill.cov-partial { background: #3a2a18; color: #f59e0b; }
+    /* Direction badge — small inline pill next to / preceding the trail
+       name. Colours match the climb/descent visual vocab used elsewhere. */
+    .dir-pill { display: inline-block; min-width: 18px; padding: 1px 5px; border-radius: 3px; font-size: 0.65rem; font-weight: 700; text-align: center; line-height: 1; }
+    .dir-pill.dir-up    { background: #1d2d3a; color: #93c5fd; }
+    .dir-pill.dir-down  { background: #2d1d3a; color: #c4b5fd; }
+    .dir-pill.dir-fwd   { background: #1d3a2c; color: #6ee7b7; }
+    .dir-pill.dir-rev   { background: #3a2c1d; color: #fbbf24; }
+    .dir-pill.dir-mixed { background: #2a2d35; color: #aaa; }
+    #trails-drawer .runs-table td.t-dir { padding: 5px 4px; text-align: center; }
     #trails-drawer .runs-table td.trail-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 140px; }
     #trails-drawer .runs-table td.trail-link { color: #93c5fd; cursor: pointer; }
     #trails-drawer .runs-table td.trail-link:hover { color: #bfdbfe; text-decoration: underline; }
@@ -597,6 +606,7 @@
     <a href="/logs" class="active">Logs</a>
     <a href="/heatmap">Heat Map</a>
     <a href="/training">Training</a>
+    <a href="/trails">Trails</a>
     <a href="/review">Review<span id="nav-review-badge" class="nav-pill" style="display:none;">0</span></a>
     <a href="/setup">Setup</a>
   </nav>
@@ -2859,6 +2869,24 @@ function _fmtDurHms(sec) {
   return `${s}s`;
 }
 
+// Direction badge — backend tags each traversal as up/down (linear with
+// decisive elevation) or forward/reverse (loops, and linear with
+// ambiguous elevation). 'mixed' is now rare and means "couldn't decide".
+function _directionBadge(dir) {
+  if (dir === 'up')      return '<span class="dir-pill dir-up">↑</span>';
+  if (dir === 'down')    return '<span class="dir-pill dir-down">↓</span>';
+  if (dir === 'forward') return '<span class="dir-pill dir-fwd">→</span>';
+  if (dir === 'reverse') return '<span class="dir-pill dir-rev">←</span>';
+  return '<span class="dir-pill dir-mixed">↔</span>';
+}
+function _directionTitle(dir) {
+  if (dir === 'up')      return 'Climb';
+  if (dir === 'down')    return 'Descent';
+  if (dir === 'forward') return 'Forward (loop or unsigned linear)';
+  if (dir === 'reverse') return 'Reverse (loop or unsigned linear)';
+  return 'Mixed';
+}
+
 function _fmtHm(iso) {
   // Lift the HH:MM out of an ISO string with offset — avoids new Date()
   // re-interpreting the local clock against the browser's zone.
@@ -2919,13 +2947,13 @@ function renderTrailStats(trails) {
   const tlRows = timeline.map(e => {
     const rankCell = (e.completed && e.rank && e.rank_total)
       ? `${e.rank}/${e.rank_total}` : '';
-    // Stash trail name + span on data-* attrs; one delegated click
-    // handler on the table reads them. Inline onclick used to embed the
-    // name via JSON.stringify which broke on trail names with quotes.
+    const dirBadge = _directionBadge(e.direction);
     return `
       <tr class="timeline-row" data-hl="${e.start_idx}:${e.end_idx}">
         <td class="t-time">${_escText(_fmtHm(e.start_time))}</td>
+        <td class="t-dir" title="${_escAttr(_directionTitle(e.direction))}">${dirBadge}</td>
         <td class="trail-name trail-link" data-trail="${_escAttr(e.name)}"
+            data-dir="${_escAttr(e.direction || 'mixed')}"
             title="Show leaderboard for ${_escAttr(e.name)}">${_escText(e.name)}</td>
         <td>${e.distance_km.toFixed(2)}k</td>
         <td>${_fmtDurHms(e.duration_sec)}</td>
@@ -2935,7 +2963,7 @@ function renderTrailStats(trails) {
   }).join('');
   document.getElementById('trails-timeline-wrap').innerHTML = `
     <table class="runs-table">
-      <thead><tr><th>Time</th><th>Trail</th><th>Dist</th><th>Dur</th><th>Cov</th><th>Rank</th></tr></thead>
+      <thead><tr><th>Time</th><th>Dir</th><th>Trail</th><th>Dist</th><th>Dur</th><th>Cov</th><th>Rank</th></tr></thead>
       <tbody>${tlRows}</tbody>
     </table>`;
   // Re-bind delegated click on the timeline body so the row navigates
@@ -2955,18 +2983,21 @@ function renderTrailStats(trails) {
 // map area immediately to the left of the trails drawer. Rows are
 // clickable: navigate to /log/<filename> for that attempt.
 
-async function openTrailLeaderboard(name) {
+async function openTrailLeaderboard(name, direction) {
   const pop = document.getElementById('trails-leaderboard');
   const body = document.getElementById('lb-body');
-  document.getElementById('lb-title').textContent = name;
+  const dir = direction || 'all';
+  const dirSuffix = (dir !== 'all') ? ` ${_directionBadge(dir)}` : '';
+  document.getElementById('lb-title').innerHTML = _escText(name) + dirSuffix;
   document.getElementById('lb-sub').textContent = 'Loading…';
   body.innerHTML = '';
   pop.classList.add('open');
 
   let payload;
   try {
-    const r = await fetch(`/api/trails/leaderboard/${encodeURIComponent(name)}`,
-                          { cache: 'no-store' });
+    const url = `/api/trails/leaderboard/${encodeURIComponent(name)}`
+      + `?direction=${encodeURIComponent(dir)}`;
+    const r = await fetch(url, { cache: 'no-store' });
     payload = await r.json();
   } catch (err) {
     body.innerHTML = `<div class="lb-empty">Failed to load leaderboard: ${_escText(err.message)}</div>`;
@@ -2992,8 +3023,11 @@ async function openTrailLeaderboard(name) {
     // navigation. The destination page reads these off `location.search`
     // on load and (a) reopens this leaderboard, (b) highlights the
     // matching run on the map.
+    // Preserve the direction filter when navigating so the destination
+    // page opens the leaderboard for the same direction-scoped list.
     const target = `/log/${encodeURIComponent(r.filename)}`
       + `?lb=${encodeURIComponent(name)}`
+      + `&dir=${encodeURIComponent(r.direction || dir || 'all')}`
       + `&hl=${encodeURIComponent(`${r.start_idx}:${r.end_idx}`)}`;
     // Stash target + title on data-* attrs (HTML-escaped) rather than
     // inline onclick — title with a quote, or any trail name with one,
@@ -3074,7 +3108,10 @@ function _wireTimelineClicks() {
   wrap.addEventListener('click', (ev) => {
     const trailCell = ev.target.closest('td.trail-link[data-trail]');
     if (trailCell) {
-      openTrailLeaderboard(trailCell.getAttribute('data-trail'));
+      openTrailLeaderboard(
+        trailCell.getAttribute('data-trail'),
+        trailCell.getAttribute('data-dir') || 'all',
+      );
       return;
     }
     const row = ev.target.closest('tr.timeline-row[data-hl]');
@@ -3094,11 +3131,10 @@ function closeTrailLeaderboard() {
 function _maybeRestoreLeaderboardState() {
   const p = new URLSearchParams(window.location.search);
   const lbName = p.get('lb');
+  const lbDir = p.get('dir') || 'all';
   const hl = p.get('hl');
   if (!lbName) return;
-  // Open the leaderboard first; it loads asynchronously but the
-  // highlight call below doesn't depend on it.
-  openTrailLeaderboard(lbName);
+  openTrailLeaderboard(lbName, lbDir);
   if (hl) {
     const [s, e] = hl.split(':').map(n => parseInt(n, 10));
     if (Number.isFinite(s) && Number.isFinite(e)) {
