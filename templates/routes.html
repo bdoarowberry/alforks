@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AlForks – Trails &amp; Routes</title>
+  <script src="/static/utils.js"></script>
+  <script src="/static/sync_toast.js" defer></script>
+  <script src="/static/review_nav.js" defer></script>
+  <link rel="stylesheet" href="/static/base.css">
+  <style>
+    body { display: flex; flex-direction: column; min-height: 100vh; }
+    main { padding: 18px 22px 32px; max-width: 1480px; margin: 0 auto; width: 100%; }
+    .num, .num * { font-variant-numeric: tabular-nums; }
+
+    h1.page-title { font-size: 1.4rem; font-weight: 500; letter-spacing: -0.02em; color: var(--text-primary); margin: 0 0 6px; }
+    .page-sub { font-size: 0.78rem; color: var(--text-tertiary); margin: 0 0 18px; }
+
+    /* Action bar — region filter + new route + rescan-all */
+    #actions {
+      display: flex; gap: 12px; align-items: center; margin-bottom: 14px;
+    }
+    #region-filter {
+      background: transparent; border: 1px solid var(--border-row);
+      border-radius: 3px; color: var(--text-primary); font-family: var(--font-sans);
+      font-size: 0.78rem; padding: 5px 10px; outline: none;
+    }
+    #region-filter:focus { border-color: var(--accent); }
+    #actions .spacer { flex: 1; }
+    .btn {
+      background: transparent; border: 1px solid var(--border-row);
+      color: var(--text-primary); padding: 6px 14px; border-radius: 3px;
+      font-size: 0.78rem; cursor: pointer; transition: all 0.12s;
+      font-family: var(--font-sans); text-decoration: none; display: inline-block;
+    }
+    .btn:hover  { border-color: var(--accent); color: #fff; }
+    .btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+    .btn-primary:hover { background: #2563eb; }
+    .btn:disabled { opacity: 0.5; cursor: wait; }
+    .btn-mono {
+      font-family: var(--font-mono); font-size: 0.7rem;
+      letter-spacing: 0.08em; text-transform: uppercase; padding: 5px 12px;
+    }
+
+    /* Routes table */
+    .routes-table { width: 100%; border-collapse: collapse; font-size: 0.82rem;
+                     background: var(--bg-card); border: 1px solid var(--border-hair);
+                     border-radius: 4px; overflow: hidden; }
+    .routes-table th { font-size: 0.62rem; text-transform: uppercase;
+                        letter-spacing: 0.10em; color: var(--text-tertiary);
+                        padding: 10px 14px; text-align: right; font-weight: 500;
+                        background: rgba(0,0,0,0.15); border-bottom: 1px solid var(--border-hair); }
+    .routes-table th:first-child { text-align: left; }
+    .routes-table th.actions-h { width: 1%; white-space: nowrap; text-align: right; }
+    .routes-table td { padding: 9px 14px; color: var(--text-secondary);
+                        text-align: right; border-bottom: 1px solid var(--border-row);
+                        font-variant-numeric: tabular-nums; }
+    .routes-table td:first-child { color: var(--text-primary); text-align: left;
+                                    font-variant-numeric: normal; }
+    .routes-table tbody tr { transition: background 0.08s; }
+    .routes-table tbody tr:hover td { background: rgba(255,255,255,0.04); }
+    .routes-table tbody tr:last-child td { border-bottom: none; }
+    .route-name { color: #93c5fd; cursor: pointer; }
+    .route-name:hover { color: #bfdbfe; text-decoration: underline; }
+    .region-pill {
+      display: inline-block; padding: 1px 7px; border-radius: 2px;
+      font-size: 0.65rem; font-family: var(--font-mono);
+      background: rgba(255,255,255,0.06); color: var(--text-tertiary);
+      border: 1px solid rgba(255,255,255,0.10); margin-left: 6px;
+      vertical-align: 1px;
+    }
+    .pending { color: var(--text-muted); font-family: var(--font-mono); }
+
+    .row-actions { display: flex; gap: 6px; justify-content: flex-end; white-space: nowrap; }
+    .row-actions button, .row-actions a {
+      background: transparent; border: 1px solid var(--border-row);
+      color: var(--text-secondary); border-radius: 3px;
+      font-size: 0.7rem; padding: 3px 8px; cursor: pointer; transition: all 0.12s;
+      font-family: var(--font-sans); text-decoration: none; display: inline-block;
+    }
+    .row-actions a:hover, .row-actions button:hover { color: #fff; border-color: var(--accent); }
+    .row-actions .del:hover { color: #ef4444; border-color: #ef4444; }
+
+    .empty {
+      padding: 36px 18px; text-align: center; color: var(--text-tertiary);
+      background: var(--bg-card); border: 1px solid var(--border-hair); border-radius: 4px;
+      font-size: 0.85rem;
+    }
+    .empty .empty-cta { display: inline-block; margin-top: 14px; }
+
+    #toast {
+      position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%);
+      background: var(--bg-elev); border: 1px solid var(--border-row);
+      color: var(--text-primary); padding: 8px 16px; border-radius: 4px;
+      font-size: 0.78rem; opacity: 0; transition: opacity 0.18s;
+      pointer-events: none; z-index: 1000;
+    }
+    #toast.show  { opacity: 1; }
+    #toast.error { border-color: #ef4444; color: #fecaca; }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>AlForks</h1>
+  <nav>
+    <a href="/">Summary</a>
+    <a href="/logs">Logs</a>
+    <a href="/heatmap">Heat Map</a>
+    <a href="/training">Training</a>
+    <a href="/trails" class="active">Trails</a>
+    <a href="/review">Review<span id="nav-review-badge" class="nav-pill" style="display:none;">0</span></a>
+    <a href="/setup">Setup</a>
+  </nav>
+  <button class="nav-sync-btn" onclick="triggerSyncAll()" title="Sync Strava + Garmin now">Sync</button>
+</header>
+
+<main>
+  <h1 class="page-title">Trails &amp; Routes</h1>
+  <p class="page-sub">Routes are ordered sequences of trail and road edges within a region.
+    Attempts and best times appear here once the matcher detects them in your rides.</p>
+
+  <nav class="subnav-tabs">
+    <a href="/trails">Trails</a>
+    <a href="/routes" class="active">Routes</a>
+  </nav>
+
+  <div id="actions">
+    <label for="region-filter" style="font-size:0.7rem;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:0.14em;">Region</label>
+    <select id="region-filter">
+      <option value="">All regions</option>
+    </select>
+    <div class="spacer"></div>
+    <button id="rescan-btn" class="btn btn-mono" title="Re-snap every ride against the latest matcher (background)">Rescan all logs</button>
+    <a href="/routes/edit" class="btn btn-primary">+ New Route</a>
+  </div>
+
+  <div id="list-wrap"></div>
+</main>
+
+<div id="toast"></div>
+
+<script>
+const REGIONS = {{ regions_json|safe }};
+const regionById = Object.fromEntries(REGIONS.map(r => [r.id, r]));
+
+const $ = (id) => document.getElementById(id);
+function _esc(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;",
+  }[c]));
+}
+function fmtDurHms(sec) {
+  sec = Math.max(0, Math.round(sec || 0));
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const s = sec % 60;
+  return h > 0
+    ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+    : `${m}:${String(s).padStart(2, '0')}`;
+}
+
+function toast(msg, isErr) {
+  const t = $("toast");
+  t.textContent = msg;
+  t.classList.toggle("error", !!isErr);
+  t.classList.add("show");
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => t.classList.remove("show"), 2400);
+}
+
+function populateRegionFilter() {
+  const sel = $("region-filter");
+  for (const r of REGIONS) {
+    const opt = document.createElement("option");
+    opt.value = r.id; opt.textContent = r.name;
+    sel.appendChild(opt);
+  }
+}
+populateRegionFilter();
+
+let routes = [];
+let regionFilter = "";
+// region_id → Map<edge_id, length_m>. Populated lazily as routes for that
+// region are first rendered, so we never fetch a region artifact we
+// don't need. Multiple routes in the same region share one fetch. Only
+// successful fetches are cached — a transient failure should not poison
+// the cache forever (a later render gets to retry).
+const edgeLengthCache = new Map();
+
+async function getEdgeLengths(regionId) {
+  if (edgeLengthCache.has(regionId)) return edgeLengthCache.get(regionId);
+  try {
+    const r = await fetch(`/api/regions/${encodeURIComponent(regionId)}/edges-summary`);
+    if (!r.ok) return new Map();   // don't cache failure
+    const d = await r.json();
+    const out = new Map();
+    for (const e of d.edges || []) out.set(e.id, e.length_m);
+    edgeLengthCache.set(regionId, out);
+    return out;
+  } catch (_e) {
+    return new Map();
+  }
+}
+
+// Render race guard. Multiple async render() calls can interleave (a
+// region-filter change while a delete-triggered render is mid-flight).
+// Stamp each call with a monotonic id and bail if a later one has started.
+let renderSeq = 0;
+
+function routeDistance_m(route, edgeLengths) {
+  let total = 0;
+  for (const seg of route.segments || []) {
+    total += edgeLengths.get(seg.edge_id) || 0;
+  }
+  return total;
+}
+
+async function loadRoutes() {
+  $("list-wrap").innerHTML = `<div class="empty">Loading routes…</div>`;
+  try {
+    const r = await fetch("/api/routes");
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const payload = await r.json();
+    routes = payload.routes || [];
+  } catch (e) {
+    $("list-wrap").innerHTML = `<div class="empty">Failed to load routes: ${_esc(e.message)}</div>`;
+    return;
+  }
+  render();
+}
+
+async function render() {
+  const mySeq = ++renderSeq;
+  const wrap = $("list-wrap");
+  let view = routes;
+  if (regionFilter) view = view.filter(r => r.region_id === regionFilter);
+
+  if (view.length === 0) {
+    if (renderSeq !== mySeq) return;
+    const note = regionFilter
+      ? `No routes saved in ${_esc(regionById[regionFilter]?.name || regionFilter)} yet.`
+      : "No routes saved yet.";
+    wrap.innerHTML = `
+      <div class="empty">
+        ${note}
+        <div><a class="btn btn-primary empty-cta" href="/routes/edit">+ Build your first route</a></div>
+      </div>`;
+    return;
+  }
+
+  // Fetch edge-length maps for every region the visible routes use.
+  // Single fetch per region; shared via edgeLengthCache.
+  const regionsNeeded = [...new Set(view.map(r => r.region_id))];
+  const lengthMaps = new Map();
+  await Promise.all(regionsNeeded.map(async (rid) => {
+    lengthMaps.set(rid, await getEdgeLengths(rid));
+  }));
+  if (renderSeq !== mySeq) return;   // a newer render started while we awaited
+
+  const rows = view.map(r => {
+    const region = regionById[r.region_id];
+    const regionLbl = region ? region.name : r.region_id;
+    const segCount  = (r.segments || []).length;
+    const detailUrl = `/routes/${encodeURIComponent(r.id)}`;
+    const editUrl   = `/routes/edit?id=${encodeURIComponent(r.id)}`;
+    const dist_km   = routeDistance_m(r, lengthMaps.get(r.region_id) || new Map()) / 1000;
+    const distCell  = dist_km > 0
+      ? `${dist_km.toFixed(2)} km`
+      : `<span class="pending" title="Distance unavailable — region artifact may be unreachable or saved edge ids are stale.">—</span>`;
+    // Attempts + best are placeholders until Stage C lands the matcher.
+    const attemptsCell = (r.attempts > 0)
+      ? `${r.attempts}` : `<span class="pending" title="No matching attempts detected yet">—</span>`;
+    const bestCell = (r.best_duration_sec != null && r.best_duration_sec > 0)
+      ? `<span title="Set on ${_esc(r.best_date || '')}">${fmtDurHms(r.best_duration_sec)}</span>`
+      : `<span class="pending">—</span>`;
+    return `
+      <tr data-rid="${_esc(r.id)}">
+        <td><a class="route-name" href="${detailUrl}">${_esc(r.name)}</a>
+            <span class="region-pill">${_esc(regionLbl)}</span></td>
+        <td>${segCount}</td>
+        <td>${distCell}</td>
+        <td>${attemptsCell}</td>
+        <td>${bestCell}</td>
+        <td class="actions-h">
+          <div class="row-actions">
+            <a href="${editUrl}" title="Open builder">Edit</a>
+            <button data-act="dup" title="Duplicate">Duplicate</button>
+            <button class="del" data-act="del" title="Delete">Delete</button>
+          </div>
+        </td>
+      </tr>`;
+  }).join("");
+
+  wrap.innerHTML = `
+    <table class="routes-table">
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Segments</th>
+          <th>Distance</th>
+          <th>Attempts</th>
+          <th>Best</th>
+          <th class="actions-h">Actions</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+
+  // Delegate action buttons.
+  wrap.querySelectorAll("tr[data-rid]").forEach(tr => {
+    const rid = tr.dataset.rid;
+    tr.querySelector("[data-act='dup']")?.addEventListener("click",
+      () => duplicateRoute(rid));
+    tr.querySelector("[data-act='del']")?.addEventListener("click",
+      () => deleteRoute(rid));
+  });
+}
+
+$("region-filter").addEventListener("change", (e) => {
+  regionFilter = e.target.value;
+  render();
+});
+
+async function deleteRoute(rid) {
+  const r = routes.find(x => x.id === rid);
+  if (!r) return;
+  if (!confirm(`Delete "${r.name}"? This can't be undone.`)) return;
+  try {
+    const resp = await fetch(`/api/routes/${encodeURIComponent(rid)}`,
+                              { method: "DELETE" });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    toast(`Deleted "${r.name}"`);
+    await loadRoutes();
+  } catch (e) {
+    toast(`Delete failed: ${e.message}`, true);
+  }
+}
+
+async function duplicateRoute(rid) {
+  const src = routes.find(x => x.id === rid);
+  if (!src) return;
+  const payload = {
+    name:      `${src.name} (copy)`,
+    region_id: src.region_id,
+    segments:  src.segments,
+  };
+  try {
+    const resp = await fetch("/api/routes",
+      { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload) });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.error || `HTTP ${resp.status}`);
+    }
+    toast(`Duplicated "${src.name}"`);
+    await loadRoutes();
+  } catch (e) {
+    toast(`Duplicate failed: ${e.message}`, true);
+  }
+}
+
+$("rescan-btn").addEventListener("click", async () => {
+  if (!confirm("Re-snap every ride against the latest matcher? Takes a few minutes in the background.")) return;
+  const btn = $("rescan-btn");
+  btn.disabled = true; btn.textContent = "Started…";
+  try {
+    const resp = await fetch("/api/trail-match/rescan-all", { method: "POST" });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const payload = await resp.json();
+    toast(payload.message || "Rescan started");
+  } catch (e) {
+    toast(`Rescan failed: ${e.message}`, true);
+  } finally {
+    btn.disabled = false; btn.textContent = "Rescan all logs";
+  }
+});
+
+loadRoutes();
+</script>
+</body>
+</html>

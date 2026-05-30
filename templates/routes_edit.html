@@ -1,0 +1,589 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AlForks – Route Builder</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="/static/utils.js"></script>
+  <script src="/static/sync_toast.js" defer></script>
+  <link rel="stylesheet" href="/static/base.css">
+  <style>
+    body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+    main {
+      flex: 1; display: grid; grid-template-columns: 1fr 360px;
+      min-height: 0; background: var(--bg-page);
+    }
+    #map { background: #050708; }
+    #sidebar {
+      background: var(--bg-card);
+      border-left: 1px solid var(--border-hair);
+      display: flex; flex-direction: column; min-height: 0;
+    }
+    #sidebar-head { padding: 14px 16px 10px; border-bottom: 1px solid var(--border-hair); }
+    #sidebar-head .back-link {
+      display: inline-block; margin-bottom: 10px;
+      font-size: 0.7rem; color: var(--text-tertiary); text-decoration: none;
+      letter-spacing: 0.04em;
+    }
+    #sidebar-head .back-link:hover { color: #fff; }
+    #sidebar-body { flex: 1; overflow: auto; padding: 12px 16px; }
+    #sidebar-foot { padding: 12px 16px; border-top: 1px solid var(--border-hair);
+                     display: flex; gap: 8px; align-items: center; }
+
+    label.field { display: block; margin-bottom: 10px; font-size: 0.7rem;
+                   text-transform: uppercase; letter-spacing: 0.14em;
+                   color: var(--text-tertiary); }
+    label.field input, label.field select {
+      display: block; width: 100%; margin-top: 5px;
+      background: transparent; border: 1px solid var(--border-row);
+      border-radius: 3px; color: var(--text-primary);
+      padding: 7px 10px; font-size: 0.82rem; font-family: var(--font-sans);
+      outline: none; letter-spacing: normal; text-transform: none;
+    }
+    label.field input:focus, label.field select:focus { border-color: var(--accent); }
+
+    .empty-state {
+      color: var(--text-muted); font-size: 0.78rem; padding: 18px 4px;
+      text-align: center; line-height: 1.5;
+    }
+
+    .seg-list { list-style: none; padding: 0; margin: 0; }
+    .seg-row {
+      display: flex; align-items: center; gap: 8px;
+      background: var(--bg-elev); border: 1px solid var(--border-hair);
+      border-radius: 4px; padding: 8px 10px; margin-bottom: 6px;
+      font-size: 0.8rem; color: var(--text-primary);
+    }
+    .seg-row .idx { color: var(--text-muted); font-family: var(--font-mono); font-size: 0.7rem; min-width: 18px; }
+    .seg-row .name { flex: 1; }
+    .seg-row .km   { color: var(--text-tertiary); font-family: var(--font-mono); font-size: 0.7rem; }
+    .seg-row button {
+      background: transparent; border: 1px solid var(--border-row);
+      color: var(--text-secondary); border-radius: 3px;
+      font-size: 0.7rem; padding: 3px 7px; cursor: pointer; transition: all 0.12s;
+    }
+    .seg-row button:hover { color: #fff; border-color: var(--accent); }
+    .seg-row .dir-toggle { min-width: 36px; font-family: var(--font-mono); }
+    .seg-row .rm:hover { color: #ef4444; border-color: #ef4444; }
+    .seg-row .kind-tag {
+      font-size: 0.6rem; font-family: var(--font-mono);
+      letter-spacing: 0.08em; text-transform: uppercase;
+      padding: 1px 5px; border-radius: 2px; margin-left: 4px;
+      vertical-align: 1px;
+    }
+    .seg-row .kind-road {
+      background: rgba(136, 136, 136, 0.20); color: #cbd5e1;
+      border: 1px solid rgba(255,255,255,0.15);
+    }
+    .seg-row.stale { border-color: #ef4444; }
+    .seg-row .stale-note {
+      display: block; flex-basis: 100%; font-size: 0.7rem;
+      color: #fca5a5; font-family: var(--font-mono); margin-top: 4px;
+    }
+
+    #totals {
+      font-family: var(--font-mono); color: var(--text-tertiary);
+      font-size: 0.74rem; margin-right: auto;
+    }
+    #totals strong { color: var(--text-primary); }
+
+    .btn {
+      background: transparent; border: 1px solid var(--border-row);
+      color: var(--text-primary); padding: 7px 14px; border-radius: 3px;
+      font-size: 0.78rem; cursor: pointer; transition: all 0.12s;
+      font-family: var(--font-sans);
+    }
+    .btn:hover  { border-color: var(--accent); }
+    .btn:disabled { opacity: 0.5; cursor: default; }
+    .btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+    .btn-primary:hover { background: #2563eb; }
+    .btn-danger:hover { color: #ef4444; border-color: #ef4444; }
+
+    #toast {
+      position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%);
+      background: var(--bg-elev); border: 1px solid var(--border-row);
+      color: var(--text-primary); padding: 8px 16px; border-radius: 4px;
+      font-size: 0.78rem; opacity: 0; transition: opacity 0.18s;
+      pointer-events: none; z-index: 1000;
+    }
+    #toast.show { opacity: 1; }
+    #toast.error { border-color: #ef4444; color: #fecaca; }
+
+    /* Leaflet tweaks for dark theme */
+    .leaflet-container { background: #050708; }
+    .leaflet-popup-content-wrapper, .leaflet-popup-tip {
+      background: var(--bg-elev); color: var(--text-primary);
+      border: 1px solid var(--border-row);
+    }
+    /* Persistent trail labels — small, low-contrast, no background pill
+       so the map stays readable with 40+ trails on screen. Hidden below
+       a zoom threshold (set in JS) to avoid clutter when zoomed out. */
+    .trail-label {
+      background: transparent; border: none; box-shadow: none;
+      color: #e5e7eb; font-size: 11px; font-weight: 500;
+      text-shadow: 0 0 3px #000, 0 0 6px #000, 0 0 3px #000;
+      padding: 0; margin: 0; pointer-events: none;
+      font-family: var(--font-sans);
+    }
+    .trail-label::before { display: none; }   /* kill leaflet tooltip arrow */
+    .trail-label.active  { color: #fbbf24; text-shadow: 0 0 4px #000, 0 0 8px #000; }
+    .trail-label.road-label { color: #9ca3af; font-style: italic; font-size: 10px; }
+    /* Segment ordinal badge — small pill at edge midpoint showing which
+       sidebar entries reference this edge. Lets the user see at a glance
+       when the same edge is in the route more than once (e.g. an
+       out-and-back: "1·3" means segments 1 and 3 ride this edge). */
+    .seg-badge {
+      background: #fbbf24; color: #0a0c0c;
+      font-family: var(--font-mono); font-size: 11px; font-weight: 700;
+      padding: 1px 6px; border-radius: 10px; line-height: 1.4;
+      box-shadow: 0 0 0 2px #0a0c0c;
+      pointer-events: none; white-space: nowrap;
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>AlForks</h1>
+  <nav>
+    <a href="/">Summary</a>
+    <a href="/logs">Logs</a>
+    <a href="/heatmap">Heat Map</a>
+    <a href="/training">Training</a>
+    <a href="/trails" class="active">Trails</a>
+    <a href="/review">Review<span id="nav-review-badge" class="nav-pill" style="display:none;">0</span></a>
+    <a href="/setup">Setup</a>
+  </nav>
+  <button class="nav-sync-btn" onclick="triggerSyncAll()" title="Sync Strava + Garmin now">Sync</button>
+</header>
+
+<main>
+  <div id="map"></div>
+  <aside id="sidebar">
+    <div id="sidebar-head">
+      <a href="/routes" class="back-link" id="back-link" title="Back to routes list">← All routes</a>
+      <label class="field">
+        Route name
+        <input id="route-name" type="text" placeholder="e.g. Moose Mountain Classic" autocomplete="off">
+      </label>
+      <label class="field">
+        Region
+        <select id="region-select"></select>
+      </label>
+    </div>
+    <div id="sidebar-body">
+      <ul id="seg-list" class="seg-list"></ul>
+      <div id="empty-state" class="empty-state">
+        Click any trail on the map to add a full traversal.
+      </div>
+    </div>
+    <div id="sidebar-foot">
+      <div id="totals"><strong>0.00</strong> km · <span id="seg-count">0</span> segments</div>
+      <button id="cancel-btn" class="btn">Cancel</button>
+      <button id="save-btn" class="btn btn-primary">Save</button>
+    </div>
+  </aside>
+</main>
+
+<div id="toast"></div>
+
+<script>
+const REGIONS  = {{ regions_json|safe }};
+const ROUTE_ID = {{ route_id|tojson }};
+
+// ─── State ─────────────────────────────────────────────────────────────────
+const state = {
+  routeId:  ROUTE_ID || null,
+  name:     "",
+  regionId: null,
+  // Each segment is one edge (junction-to-junction sub-segment of a trail).
+  // Shape: {edge_id, trail_name, direction, start_junction, end_junction}
+  segments: [],
+  artifact: null,     // current region trails artifact
+};
+
+const LABEL_MIN_ZOOM = 13;   // labels visible at/above this zoom
+
+// edge_id → {polyline (L.Polyline), trail (artifact trail), edge (artifact edge)}
+const edgeById   = new Map();
+// trailName → array of permanent label tooltips (one per component, midpoint)
+const trailLabels = new Map();
+let trailLayerGroup;     // every clickable edge polyline
+let roadLayerGroup;      // dim dashed roads (legacy — empty now; roads are in trailLayerGroup as edges)
+let labelLayerGroup;     // permanent trail-name labels
+let junctionLayer;       // always-on small junction dots
+let badgeLayer;          // segment-ordinal badges at edge midpoints (rebuilt on segment change)
+
+// ─── Map ───────────────────────────────────────────────────────────────────
+const map = L.map("map", { preferCanvas: true, zoomControl: true });
+L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png", {
+  maxZoom: 19, attribution: "© CartoDB",
+}).addTo(map);
+
+// Default view — will be replaced when artifact loads.
+map.setView([51, -114], 9);
+
+// ─── DOM helpers ───────────────────────────────────────────────────────────
+const $ = (id) => document.getElementById(id);
+const fmtKm = (m) => (m / 1000).toFixed(2);
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;",
+  }[c]));
+}
+function toast(msg, isErr) {
+  const t = $("toast");
+  t.textContent = msg;
+  t.classList.toggle("error", !!isErr);
+  t.classList.add("show");
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => t.classList.remove("show"), 2400);
+}
+
+// ─── Region select ─────────────────────────────────────────────────────────
+function populateRegionSelect() {
+  const sel = $("region-select");
+  sel.innerHTML = "";
+  if (!REGIONS.length) {
+    const opt = document.createElement("option");
+    opt.textContent = "(no regions defined)"; opt.disabled = true;
+    sel.appendChild(opt); return;
+  }
+  for (const r of REGIONS) {
+    const opt = document.createElement("option");
+    opt.value = r.id; opt.textContent = r.name;
+    sel.appendChild(opt);
+  }
+}
+populateRegionSelect();
+
+$("region-select").addEventListener("change", async (e) => {
+  if (state.segments.length) {
+    if (!confirm("Switching regions clears the current segments. Continue?")) {
+      e.target.value = state.regionId; return;
+    }
+    state.segments = [];
+  }
+  await setRegion(e.target.value);
+});
+
+// ─── Region artifact loading ───────────────────────────────────────────────
+async function setRegion(regionId) {
+  state.regionId = regionId;
+  $("region-select").value = regionId;
+
+  // Clear existing layers
+  if (trailLayerGroup) map.removeLayer(trailLayerGroup);
+  if (roadLayerGroup)  map.removeLayer(roadLayerGroup);
+  if (labelLayerGroup) map.removeLayer(labelLayerGroup);
+  if (junctionLayer)   map.removeLayer(junctionLayer);
+  if (badgeLayer)      map.removeLayer(badgeLayer);
+  edgeById.clear();
+  trailLabels.clear();
+  trailLayerGroup = L.layerGroup().addTo(map);
+  roadLayerGroup  = L.layerGroup().addTo(map);
+  labelLayerGroup = L.layerGroup().addTo(map);
+  junctionLayer   = L.layerGroup().addTo(map);
+  badgeLayer      = L.layerGroup().addTo(map);
+
+  toast(`Loading ${REGIONS.find(r => r.id === regionId)?.name || regionId}…`);
+  let artifact;
+  try {
+    const resp = await fetch(`/api/regions/${regionId}/trails-geometry`);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    artifact = await resp.json();
+  } catch (e) {
+    toast(`Failed to load region: ${e.message}`, true);
+    return;
+  }
+  state.artifact = artifact;
+
+  // Render every edge — trails AND roads — as its own clickable polyline.
+  // Roads are styled differently (dashed, dimmer) but interact the same.
+  // Drawn in order [roads first, trails second] so trails sit on top.
+  const renderEdgesFor = (entries, kind) => {
+    const isRoad = kind === "road";
+    for (const entry of entries) {
+      for (const edge of (entry.edges || [])) {
+        const baseStyle = isRoad
+          ? { color: "#888", weight: 2, opacity: 0.55, dashArray: "4 4" }
+          : { color: "#22d3ee", weight: 3, opacity: 0.85 };
+        const pl = L.polyline(edge.polyline, baseStyle).addTo(trailLayerGroup);
+        pl.bindTooltip(
+          `${entry.name}${isRoad ? " (road)" : ""} · ${fmtKm(edge.length_m)} km`,
+          { sticky: true, direction: "top", offset: [0, -4] },
+        );
+        pl.on("click", () => onEdgeClick(edge.id));
+        pl.on("mouseover", () => { if (!isEdgeInRoute(edge.id)) {
+          pl.setStyle({ color: "#fde047", weight: isRoad ? 4 : 5 });
+        }});
+        pl.on("mouseout",  () => paintEdge(edge.id));
+        edgeById.set(edge.id, { polyline: pl, trail: entry, edge, kind });
+      }
+      // Persistent name label at midpoint of the longest component.
+      const labels = [];
+      const longest = (entry.components || []).reduce((a, b) =>
+          (b.length_m > (a?.length_m || 0) ? b : a), null);
+      if (longest && longest.polyline.length) {
+        const mid = longest.polyline[Math.floor(longest.polyline.length / 2)];
+        const lbl = L.tooltip({
+          permanent: true, direction: "center",
+          className: isRoad ? "trail-label road-label" : "trail-label",
+          opacity: 1, interactive: false,
+        }).setLatLng(mid).setContent(entry.name).addTo(labelLayerGroup);
+        labels.push(lbl);
+      }
+      trailLabels.set(entry.name, labels);
+    }
+  };
+  renderEdgesFor(artifact.roads  || [], "road");
+  renderEdgesFor(artifact.trails || [], "trail");
+
+  // Junction dots — always on, small, low-contrast. Visual reference for
+  // where you can pick between edges, but not clickable themselves.
+  for (const j of artifact.junctions || []) {
+    L.circleMarker([j.lat, j.lon], {
+      radius: 3, weight: 1, color: "#fff",
+      fillColor: "#fff", fillOpacity: 0.55,
+      interactive: false,
+    }).addTo(junctionLayer);
+  }
+
+  // Fit to bbox
+  const bbox = artifact.bbox;
+  if (bbox && bbox.length === 4) {
+    map.fitBounds([[bbox[0], bbox[1]], [bbox[2], bbox[3]]], { padding: [20, 20] });
+  }
+  const totalEdges = (artifact.trails || []).reduce((n, t) => n + (t.edges?.length || 0), 0);
+  toast(`${artifact.trails.length} trails · ${totalEdges} edges`);
+
+  paintAllEdges();
+  rebuildBadges();
+  updateLabelVisibility();
+  renderSegList();
+}
+
+// Edge midpoint, used for badge placement.
+function edgeMidpoint(edge) {
+  const pts = edge.polyline;
+  if (!pts || !pts.length) return null;
+  return pts[Math.floor(pts.length / 2)];
+}
+
+// Rebuild the segment-ordinal badges on every active edge. Called any
+// time the segments list changes (add, remove, reorder). Cheap — O(segs).
+function rebuildBadges() {
+  if (!badgeLayer) return;
+  badgeLayer.clearLayers();
+  const byEdge = new Map();   // edge_id → [ordinal, ordinal, ...]
+  state.segments.forEach((seg, i) => {
+    if (!byEdge.has(seg.edge_id)) byEdge.set(seg.edge_id, []);
+    byEdge.get(seg.edge_id).push(i + 1);
+  });
+  for (const [edgeId, ordinals] of byEdge) {
+    const rec = edgeById.get(edgeId);
+    if (!rec) continue;
+    const mid = edgeMidpoint(rec.edge);
+    if (!mid) continue;
+    const html = `<div class="seg-badge">${ordinals.join("·")}</div>`;
+    L.marker(mid, {
+      icon: L.divIcon({ html, className: "", iconSize: null }),
+      interactive: false, keyboard: false,
+    }).addTo(badgeLayer);
+  }
+}
+
+map.on("zoomend", updateLabelVisibility);
+function updateLabelVisibility() {
+  const show = map.getZoom() >= LABEL_MIN_ZOOM;
+  if (!labelLayerGroup) return;
+  if (show) map.addLayer(labelLayerGroup);
+  else      map.removeLayer(labelLayerGroup);
+}
+
+// ─── Segments (edges) ──────────────────────────────────────────────────────
+function trailObj(trailName) {
+  return state.artifact?.trails.find(x => x.name === trailName);
+}
+
+function isEdgeInRoute(edgeId) {
+  return state.segments.some(s => s.edge_id === edgeId);
+}
+
+function isStaleSegment(seg) {
+  return !edgeById.has(seg.edge_id);
+}
+
+function segmentLength_m(seg) {
+  const rec = edgeById.get(seg.edge_id);
+  return rec ? rec.edge.length_m : 0;
+}
+
+function onEdgeClick(edgeId) {
+  // Duplicate edges are allowed — loops + out-and-backs need them.
+  const rec = edgeById.get(edgeId);
+  if (!rec) return;
+  state.segments.push({
+    edge_id:        edgeId,
+    trail_name:     rec.trail.name,
+    kind:           rec.kind,
+    direction:      "forward",
+    start_junction: rec.edge.start_node,
+    end_junction:   rec.edge.end_node,
+  });
+  paintEdge(edgeId);
+  rebuildBadges();
+  renderSegList();
+}
+
+function removeSegment(idx) {
+  const [removed] = state.segments.splice(idx, 1);
+  if (removed) paintEdge(removed.edge_id);
+  rebuildBadges();
+  renderSegList();
+}
+
+function flipDirection(idx) {
+  const seg = state.segments[idx];
+  seg.direction = seg.direction === "forward" ? "reverse" : "forward";
+  renderSegList();
+}
+
+function paintEdge(edgeId) {
+  const rec = edgeById.get(edgeId);
+  if (!rec) return;
+  const active = isEdgeInRoute(edgeId);
+  const isRoad = rec.kind === "road";
+  if (active) {
+    rec.polyline.setStyle({
+      color: "#fbbf24", weight: isRoad ? 4 : 5, opacity: 1.0,
+      dashArray: isRoad ? "4 4" : null,
+    });
+  } else {
+    rec.polyline.setStyle(isRoad
+      ? { color: "#888", weight: 2, opacity: 0.55, dashArray: "4 4" }
+      : { color: "#22d3ee", weight: 3, opacity: 0.85, dashArray: null });
+  }
+  // Mark the name label active if any of the entry's edges are in route.
+  const anyActive = state.segments.some(s => s.trail_name === rec.trail.name);
+  for (const lbl of (trailLabels.get(rec.trail.name) || [])) {
+    const el = lbl.getElement();
+    if (el) el.classList.toggle("active", !!anyActive);
+  }
+}
+
+function paintAllEdges() {
+  for (const id of edgeById.keys()) paintEdge(id);
+}
+
+function renderSegList() {
+  const list = $("seg-list");
+  const empty = $("empty-state");
+  list.innerHTML = "";
+
+  if (state.segments.length === 0) {
+    empty.style.display = "";
+  } else {
+    empty.style.display = "none";
+    state.segments.forEach((seg, i) => {
+      const km    = fmtKm(segmentLength_m(seg));
+      const dir   = seg.direction === "reverse" ? "←" : "→";
+      const stale = isStaleSegment(seg);
+      const li = document.createElement("li");
+      li.className = "seg-row" + (stale ? " stale" : "");
+      const tag = seg.kind === "road"
+        ? ' <span class="kind-tag kind-road">road</span>' : "";
+      li.innerHTML = `
+        <span class="idx">${i + 1}</span>
+        <span class="name">${escapeHtml(seg.trail_name)}${tag}</span>
+        <span class="km">${km} km</span>
+        <button class="dir-toggle" title="Direction">${dir}</button>
+        <button class="rm" title="Remove">×</button>
+        ${stale ? `<span class="stale-note">Edge no longer in artifact (OSM data changed). Remove and re-pick.</span>` : ""}
+      `;
+      li.querySelector(".dir-toggle").addEventListener("click", () => flipDirection(i));
+      li.querySelector(".rm").addEventListener("click", () => removeSegment(i));
+      list.appendChild(li);
+    });
+  }
+  const total_m = state.segments.reduce((s, seg) => s + segmentLength_m(seg), 0);
+  $("totals").innerHTML = `<strong>${fmtKm(total_m)}</strong> km · `
+                        + `<span id="seg-count">${state.segments.length}</span> segments`;
+}
+
+// ─── Save / cancel ─────────────────────────────────────────────────────────
+$("save-btn").addEventListener("click", saveRoute);
+$("cancel-btn").addEventListener("click", () => {
+  if (state.segments.length === 0 || confirm("Discard unsaved changes?")) {
+    location.href = "/routes";
+  }
+});
+// Back link mirrors the same guard — clicking it shouldn't quietly throw
+// away a half-built route just because it's a regular anchor.
+$("back-link").addEventListener("click", (e) => {
+  if (state.segments.length > 0 && !confirm("Discard unsaved changes?")) {
+    e.preventDefault();
+  }
+});
+$("route-name").addEventListener("input", (e) => { state.name = e.target.value; });
+
+async function saveRoute() {
+  const name = $("route-name").value.trim();
+  if (!name) { toast("Name is required", true); return; }
+  if (!state.regionId) { toast("Pick a region", true); return; }
+  if (state.segments.length === 0) { toast("Add at least one segment", true); return; }
+
+  const payload = {
+    name, region_id: state.regionId, segments: state.segments,
+  };
+  const saveBtn = $("save-btn");
+  saveBtn.disabled = true;
+  try {
+    const url    = state.routeId ? `/api/routes/${state.routeId}` : "/api/routes";
+    const method = state.routeId ? "PUT" : "POST";
+    const resp = await fetch(url, {
+      method, headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.error || `HTTP ${resp.status}`);
+    }
+    const saved = await resp.json();
+    state.routeId = saved.id;
+    history.replaceState(null, "", `/routes/edit?id=${saved.id}`);
+    toast(`Saved "${saved.name}"`);
+  } catch (e) {
+    toast(`Save failed: ${e.message}`, true);
+  } finally {
+    saveBtn.disabled = false;
+  }
+}
+
+// ─── Load existing route, or pick a default region ─────────────────────────
+async function init() {
+  if (state.routeId) {
+    try {
+      const resp = await fetch(`/api/routes/${state.routeId}`);
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const route = await resp.json();
+      state.name     = route.name;
+      state.regionId = route.region_id;
+      state.segments = route.segments;
+      $("route-name").value = route.name;
+      await setRegion(route.region_id);
+    } catch (e) {
+      toast(`Failed to load route: ${e.message}`, true);
+    }
+  } else if (REGIONS.length) {
+    // Prefer Moose Mountain if present (the validated region); else first.
+    const moose = REGIONS.find(r => /moose/i.test(r.name));
+    await setRegion((moose || REGIONS[0]).id);
+  }
+}
+init();
+</script>
+</body>
+</html>

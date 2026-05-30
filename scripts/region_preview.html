@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Region preview</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+  html, body { margin: 0; height: 100%; font: 13px system-ui, sans-serif; }
+  #map { position: absolute; inset: 0 320px 0 0; }
+  #panel {
+    position: absolute; top: 0; right: 0; bottom: 0; width: 320px;
+    background: #111; color: #eee; padding: 12px 14px; overflow: auto;
+    box-shadow: -1px 0 0 #333;
+  }
+  #panel h1 { font-size: 14px; margin: 0 0 8px; color: #fff; }
+  #panel .stat { margin: 2px 0; color: #bbb; }
+  #panel label { display: flex; align-items: center; gap: 6px; margin: 6px 0; }
+  #panel .legend { display: inline-block; width: 14px; height: 3px; vertical-align: middle; }
+  #panel #hover {
+    margin-top: 10px; padding-top: 8px; border-top: 1px solid #333;
+    color: #ddd; min-height: 40px;
+  }
+  #panel #hover .name { color: #fff; font-weight: 600; font-size: 13px; }
+  #panel #hover .meta { color: #999; font-size: 12px; }
+</style>
+</head>
+<body>
+<div id="map"></div>
+<div id="panel">
+  <h1 id="title">Region preview</h1>
+  <div id="stats"></div>
+  <label><input type="checkbox" id="show-trails" checked>
+    <span class="legend" style="background:#22d3ee"></span> Trails</label>
+  <label><input type="checkbox" id="show-roads" checked>
+    <span class="legend" style="background:#888"></span> Roads</label>
+  <label><input type="checkbox" id="show-junctions" checked>
+    <span class="legend" style="background:#fff;border:1px solid #555;border-radius:50%;height:8px;width:8px"></span> Junctions</label>
+  <div id="hover"></div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+const params  = new URLSearchParams(location.search);
+const region  = params.get("r") || "d5662439";   // default: Moose Mountain
+const artifactUrl = `../cache/region_trails/${region}.json`;
+
+const map = L.map("map", { preferCanvas: true });
+L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png",
+            { maxZoom: 19, attribution: "© CartoDB" }).addTo(map);
+
+const trailLayer    = L.layerGroup().addTo(map);
+const roadLayer     = L.layerGroup().addTo(map);
+const junctionLayer = L.layerGroup().addTo(map);
+
+document.getElementById("show-trails")
+  .addEventListener("change", e => e.target.checked
+    ? map.addLayer(trailLayer) : map.removeLayer(trailLayer));
+document.getElementById("show-roads")
+  .addEventListener("change", e => e.target.checked
+    ? map.addLayer(roadLayer) : map.removeLayer(roadLayer));
+document.getElementById("show-junctions")
+  .addEventListener("change", e => e.target.checked
+    ? map.addLayer(junctionLayer) : map.removeLayer(junctionLayer));
+
+const hover = document.getElementById("hover");
+
+async function load() {
+  const r = await fetch(artifactUrl);
+  if (!r.ok) {
+    document.getElementById("title").textContent = `Failed to load ${artifactUrl}`;
+    return;
+  }
+  const art = await r.json();
+  document.getElementById("title").textContent =
+    `${art.region_name} — ${art.region_id}`;
+  document.getElementById("stats").innerHTML = `
+    <div class="stat">${art.trails.length} trails</div>
+    <div class="stat">${art.roads.length} roads</div>
+    <div class="stat">${art.junctions.length} junctions</div>
+  `;
+
+  const bounds = L.latLngBounds([]);
+
+  for (const t of art.trails) {
+    for (const comp of t.components) {
+      const pl = L.polyline(comp.polyline, {
+        color: "#22d3ee", weight: 3, opacity: 0.85,
+      }).addTo(trailLayer);
+      pl.on("mouseover", () => {
+        pl.setStyle({ color: "#fde047", weight: 5 });
+        hover.innerHTML =
+          `<div class="name">${t.name}</div>` +
+          `<div class="meta">${(t.total_length_m/1000).toFixed(2)} km · ` +
+          `highway=${t.highway}${t.mtb_scale ? ` · mtb:scale=${t.mtb_scale}` : ""}</div>`;
+      });
+      pl.on("mouseout", () => {
+        pl.setStyle({ color: "#22d3ee", weight: 3 });
+      });
+      comp.polyline.forEach(p => bounds.extend(p));
+    }
+  }
+
+  for (const r of art.roads) {
+    for (const comp of r.components) {
+      const pl = L.polyline(comp.polyline, {
+        color: "#888", weight: 2, opacity: 0.55, dashArray: "4 4",
+      }).addTo(roadLayer);
+      pl.on("mouseover", () => {
+        pl.setStyle({ color: "#fff", weight: 3, opacity: 1 });
+        hover.innerHTML =
+          `<div class="name">${r.name}</div>` +
+          `<div class="meta">${(r.total_length_m/1000).toFixed(2)} km · ` +
+          `highway=${r.highway}${r.oneway ? " · oneway" : ""}</div>`;
+      });
+      pl.on("mouseout", () => {
+        pl.setStyle({ color: "#888", weight: 2, opacity: 0.55 });
+      });
+    }
+  }
+
+  for (const j of art.junctions) {
+    const dot = L.circleMarker([j.lat, j.lon], {
+      radius: 4, weight: 1, color: "#fff",
+      fillColor: "#fff", fillOpacity: 0.8,
+    }).addTo(junctionLayer);
+    dot.on("mouseover", () => {
+      dot.setStyle({ radius: 7, fillColor: "#fde047" });
+      hover.innerHTML =
+        `<div class="name">Junction ${j.id}</div>` +
+        `<div class="meta">${j.trails.join(" · ")}</div>`;
+    });
+    dot.on("mouseout", () => {
+      dot.setStyle({ radius: 4, fillColor: "#fff" });
+    });
+  }
+
+  if (bounds.isValid()) map.fitBounds(bounds, { padding: [20, 20] });
+}
+load();
+</script>
+</body>
+</html>
