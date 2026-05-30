@@ -723,16 +723,23 @@ def _angle_unwrapped(plat: float, plon: float, prev_angle: float | None,
     return prev_angle + delta
 
 
-def _compute_progress_series(points, s: int, e: int, topology) -> list[float] | None:
+def _compute_progress_series(points, s: int, e: int, topology,
+                              cumlen: list[float] | None = None) -> list[float] | None:
     """Compute progress (0..1 for linear/messy, unbounded radians for loop)
     for each point in points[s:e]. Returns None when the topology can't
-    yield meaningful progress (empty chain, etc.)."""
+    yield meaningful progress (empty chain, etc.).
+
+    `cumlen`, if supplied, is the precomputed chain cumulative-length
+    series. Pass it when calling repeatedly for the same trail to skip
+    the per-call rebuild.
+    """
     kind, data = topology
     if kind in ("linear", "messy"):
         chain = data
         if not chain or len(chain) < 2:
             return None
-        cumlen = _chain_cumlen_m(chain)
+        if cumlen is None:
+            cumlen = _chain_cumlen_m(chain)
         if cumlen[-1] <= 0:
             return None
 
@@ -943,14 +950,19 @@ def _classify_direction(points, abs_s: int, abs_e: int,
     return "forward" if progress_dir == "+" else "reverse"
 
 
-def _split_run_into_traversals(points, run, topology):
+def _split_run_into_traversals(points, run, topology, cumlen=None):
     """Top-level: take a kept run (name, span_start, span_end, ridden_km)
     and split it into one-or-more (sub_s, sub_e, direction_label) entries.
     Each entry is a traversal of the trail.
+
+    `cumlen`, if supplied, is the pre-built chain cumulative-length series
+    for `topology` (linear/messy only). Caller can compute it once per
+    trail name and reuse across this run's traversals — saves a chain
+    re-walk per call.
     """
     name, s, e, _d_km = run
     kind, _data = topology
-    series = _compute_progress_series(points, s, e, topology)
+    series = _compute_progress_series(points, s, e, topology, cumlen)
     if not series:
         # No topology / too short. One traversal, direction from elevation only.
         return [(s, e, _classify_direction(points, s, e, "+", kind))]
@@ -1324,9 +1336,18 @@ def match_trails(data: dict, cache_dir: Path,
     # Computed once per name and reused across runs / summary aggregation.
     termini_by_name: dict[str, tuple[tuple, tuple] | None] = {}
     topology_by_name: dict[str, tuple] = {}
+    # Cumulative chain lengths per trail name. Built once here and reused
+    # for every traversal of that trail in this ride — laps on the same
+    # trail (e.g. Merlin View) would otherwise rebuild this each call.
+    cumlen_by_name: dict[str, list[float]] = {}
     for nm in name_length_km:
         termini_by_name[nm] = _trail_termini(ways, nm)
-        topology_by_name[nm] = _trail_topology(ways, nm)
+        topo = _trail_topology(ways, nm)
+        topology_by_name[nm] = topo
+        if topo[0] in ("linear", "messy"):
+            chain = topo[1]
+            if chain and len(chain) >= 2:
+                cumlen_by_name[nm] = _chain_cumlen_m(chain)
 
     timeline_raw: list = []
     by_name: dict[str, dict] = {}
@@ -1337,7 +1358,8 @@ def match_trails(data: dict, cache_dir: Path,
         # trail reversals. Single-direction climbs/descents produce one
         # entry; lapping a trail (most acutely on loops like Merlin View)
         # produces N entries, one per traversal.
-        traversals = _split_run_into_traversals(points, run, topology)
+        traversals = _split_run_into_traversals(points, run, topology,
+                                                cumlen_by_name.get(name))
 
         for sub_s, sub_e, direction in traversals:
             if sub_e <= sub_s:
