@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AlForks – Trails &amp; Routes</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="/static/utils.js"></script>
+  <script src="/static/sync_toast.js" defer></script>
+  <script src="/static/review_nav.js" defer></script>
+  <link rel="stylesheet" href="/static/base.css">
+  <style>
+    body { display: flex; flex-direction: column; min-height: 100vh; }
+    main { padding: 18px 22px 32px; max-width: 1480px; margin: 0 auto; width: 100%; flex: 1; }
+    .num, .num * { font-variant-numeric: tabular-nums; }
+
+    h1.page-title { font-size: 1.4rem; font-weight: 500; letter-spacing: -0.02em; color: var(--text-primary); margin: 0 0 6px; }
+    .page-sub { font-size: 0.78rem; color: var(--text-tertiary); margin: 0 0 18px; }
+
+    .route-head {
+      display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap;
+      margin: 6px 0 12px;
+    }
+    .route-head h2 { font-size: 1.15rem; font-weight: 500; color: var(--text-primary); margin: 0; }
+    .route-head .region-pill {
+      display: inline-block; padding: 2px 9px; border-radius: 3px;
+      font-size: 0.7rem; font-family: var(--font-mono);
+      background: rgba(255,255,255,0.06); color: var(--text-tertiary);
+      border: 1px solid rgba(255,255,255,0.10);
+    }
+    .route-head .stat {
+      font-size: 0.74rem; color: var(--text-tertiary); font-family: var(--font-mono);
+    }
+    .route-head .stat strong { color: var(--text-primary); }
+    .route-head .actions { margin-left: auto; display: flex; gap: 6px; }
+    .btn {
+      background: transparent; border: 1px solid var(--border-row);
+      color: var(--text-primary); padding: 5px 11px; border-radius: 3px;
+      font-size: 0.74rem; cursor: pointer; transition: all 0.12s;
+      font-family: var(--font-sans); text-decoration: none; display: inline-block;
+    }
+    .btn:hover { border-color: var(--accent); color: #fff; }
+    .btn-danger:hover { color: #ef4444; border-color: #ef4444; }
+
+    #map {
+      height: 52vh; min-height: 360px;
+      background: #050708;
+      border: 1px solid var(--border-hair); border-radius: 4px;
+      margin-bottom: 16px;
+    }
+    .leaflet-container { background: #050708; }
+
+    .lb-head {
+      display: flex; justify-content: space-between; align-items: baseline;
+      margin: 0 0 8px;
+    }
+    .lb-head h3 {
+      font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.10em;
+      color: var(--text-tertiary); margin: 0; font-weight: 500;
+    }
+    .lb-head .meta { font-size: 0.72rem; color: var(--text-muted); font-family: var(--font-mono); }
+
+    .lb-table {
+      width: 100%; border-collapse: collapse; font-size: 0.82rem;
+      background: var(--bg-card); border: 1px solid var(--border-hair);
+      border-radius: 4px; overflow: hidden;
+    }
+    .lb-table th {
+      font-size: 0.62rem; text-transform: uppercase; letter-spacing: 0.10em;
+      color: var(--text-tertiary); padding: 10px 14px; font-weight: 500;
+      text-align: right; background: rgba(0,0,0,0.15);
+      border-bottom: 1px solid var(--border-hair);
+    }
+    .lb-table th:first-child, .lb-table th.t-l { text-align: left; }
+    .lb-table td {
+      padding: 9px 14px; color: var(--text-secondary);
+      text-align: right; border-bottom: 1px solid var(--border-row);
+      font-variant-numeric: tabular-nums;
+    }
+    .lb-table td:first-child, .lb-table td.t-l { text-align: left; }
+    .lb-table tbody tr { cursor: pointer; transition: background 0.08s; }
+    .lb-table tbody tr:hover td { background: rgba(255,255,255,0.04); }
+    .lb-table tbody tr:last-child td { border-bottom: none; }
+    .lb-table .rank-best { color: #fbbf24; font-weight: 600; }
+    .lb-table .title-cell { color: #93c5fd; }
+    .lb-empty {
+      padding: 36px 18px; text-align: center; color: var(--text-tertiary);
+      background: var(--bg-card); border: 1px solid var(--border-hair); border-radius: 4px;
+      font-size: 0.85rem;
+    }
+    .seg-summary {
+      display: flex; flex-wrap: wrap; gap: 4px; margin: 8px 0 12px;
+      font-size: 0.72rem; font-family: var(--font-mono);
+    }
+    .seg-summary .seg-chip {
+      background: rgba(34, 211, 238, 0.10); color: #67e8f9;
+      border: 1px solid rgba(34, 211, 238, 0.25);
+      padding: 2px 7px; border-radius: 2px;
+    }
+    .seg-summary .seg-chip.kind-road {
+      background: rgba(136, 136, 136, 0.10); color: #cbd5e1;
+      border-color: rgba(255,255,255,0.15);
+    }
+    .seg-summary .seg-chip .ord {
+      color: var(--text-muted); margin-right: 4px;
+    }
+
+    #toast {
+      position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%);
+      background: var(--bg-elev); border: 1px solid var(--border-row);
+      color: var(--text-primary); padding: 8px 16px; border-radius: 4px;
+      font-size: 0.78rem; opacity: 0; transition: opacity 0.18s;
+      pointer-events: none; z-index: 1000;
+    }
+    #toast.show { opacity: 1; }
+    #toast.error { border-color: #ef4444; color: #fecaca; }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>AlForks</h1>
+  <nav>
+    <a href="/">Summary</a>
+    <a href="/logs">Logs</a>
+    <a href="/heatmap">Heat Map</a>
+    <a href="/training">Training</a>
+    <a href="/trails" class="active">Trails</a>
+    <a href="/review">Review<span id="nav-review-badge" class="nav-pill" style="display:none;">0</span></a>
+    <a href="/setup">Setup</a>
+  </nav>
+  <button class="nav-sync-btn" onclick="triggerSyncAll()" title="Sync Strava + Garmin now">Sync</button>
+</header>
+
+<main>
+  <h1 class="page-title">Trails &amp; Routes</h1>
+  <nav class="subnav-tabs">
+    <a href="/trails">Trails</a>
+    <a href="/routes" class="active">Routes</a>
+  </nav>
+
+  <div class="route-head">
+    <h2 id="route-name">Loading…</h2>
+    <span class="region-pill" id="region-pill"></span>
+    <span class="stat"><strong id="seg-count">—</strong> segments</span>
+    <span class="stat"><strong id="dist-km">—</strong> km</span>
+    <span class="stat"><strong id="attempts-count">—</strong> attempts</span>
+    <span class="stat" id="best-time-wrap" style="display:none;">best <strong id="best-time">—</strong></span>
+    <span class="actions">
+      <a href="#" id="edit-btn" class="btn">Edit</a>
+      <button id="dup-btn" class="btn" type="button">Duplicate</button>
+      <button id="del-btn" class="btn btn-danger" type="button">Delete</button>
+    </span>
+  </div>
+
+  <div class="seg-summary" id="seg-summary"></div>
+
+  <div id="map"></div>
+
+  <div class="lb-head">
+    <h3>Attempts <span style="text-transform:none;letter-spacing:0;color:var(--text-muted);">— fastest first</span></h3>
+    <span class="meta" id="lb-meta"></span>
+  </div>
+  <div id="lb-wrap"><div class="lb-empty">Loading…</div></div>
+</main>
+
+<div id="toast"></div>
+
+<script>
+const ROUTE  = {{ route_json  | safe }};
+const REGION = {{ region_json | safe }};
+
+const $ = (id) => document.getElementById(id);
+const _esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+function fmtDurHms(sec) {
+  sec = Math.max(0, Math.round(sec || 0));
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const s = sec % 60;
+  return h > 0
+    ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+    : `${m}:${String(s).padStart(2, '0')}`;
+}
+function toast(msg, isErr) {
+  const t = $("toast");
+  t.textContent = msg;
+  t.classList.toggle("error", !!isErr);
+  t.classList.add("show");
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => t.classList.remove("show"), 2400);
+}
+
+// ─── Header / segment summary ───────────────────────────────────────────────
+$("route-name").textContent = ROUTE.name;
+$("region-pill").textContent = REGION ? REGION.name : ROUTE.region_id;
+$("seg-count").textContent = (ROUTE.segments || []).length;
+$("edit-btn").href = `/routes/edit?id=${encodeURIComponent(ROUTE.id)}`;
+
+const segSummary = $("seg-summary");
+const macroSegs = [];
+for (const s of ROUTE.segments || []) {
+  const last = macroSegs[macroSegs.length - 1];
+  if (last && last.name === s.trail_name && last.kind === s.kind) {
+    last.count += 1;
+  } else {
+    macroSegs.push({ name: s.trail_name, kind: s.kind, count: 1 });
+  }
+}
+segSummary.innerHTML = macroSegs.map((m, i) => `
+  <span class="seg-chip ${m.kind === 'road' ? 'kind-road' : ''}">
+    <span class="ord">${i + 1}</span>${_esc(m.name)}${m.count > 1 ? ` ×${m.count}` : ''}
+  </span>`).join("");
+
+// ─── Map ────────────────────────────────────────────────────────────────────
+const map = L.map("map", { preferCanvas: true });
+L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png",
+            { maxZoom: 19, attribution: "© CartoDB" }).addTo(map);
+if (REGION) map.setView([51, -114], 11);
+else map.setView([51, -114], 9);
+
+const contextLayer = L.layerGroup().addTo(map);
+const routeLayer   = L.layerGroup().addTo(map);
+
+async function loadMap() {
+  if (!REGION) return;
+  let art;
+  try {
+    const r = await fetch(`/api/regions/${encodeURIComponent(REGION.id)}/trails-geometry`);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    art = await r.json();
+  } catch (e) {
+    toast(`Failed to load region: ${e.message}`, true);
+    return;
+  }
+
+  // Background context: all trails dim, all roads dimmer + dashed.
+  for (const trail of art.trails || []) {
+    for (const edge of trail.edges || []) {
+      L.polyline(edge.polyline, {
+        color: "#22d3ee", weight: 2, opacity: 0.25, interactive: false,
+      }).addTo(contextLayer);
+    }
+  }
+  for (const road of art.roads || []) {
+    for (const edge of road.edges || []) {
+      L.polyline(edge.polyline, {
+        color: "#888", weight: 1.5, opacity: 0.20,
+        dashArray: "3 3", interactive: false,
+      }).addTo(contextLayer);
+    }
+  }
+
+  // Build a flat edge_id -> polyline map and total distance accumulator.
+  const edgeById = new Map();
+  let totalLen_m = 0;
+  const addEntries = (entries, kind) => {
+    for (const ent of entries || []) {
+      for (const edge of ent.edges || []) {
+        edgeById.set(edge.id, { polyline: edge.polyline, length_m: edge.length_m, kind });
+      }
+    }
+  };
+  addEntries(art.trails, "trail");
+  addEntries(art.roads,  "road");
+
+  const bounds = L.latLngBounds([]);
+  for (const seg of ROUTE.segments || []) {
+    const rec = edgeById.get(seg.edge_id);
+    if (!rec) continue;
+    const isRoad = seg.kind === 'road';
+    L.polyline(rec.polyline, {
+      color: "#fbbf24", weight: isRoad ? 4 : 5, opacity: 1.0,
+      dashArray: isRoad ? "4 4" : null,
+    }).addTo(routeLayer);
+    rec.polyline.forEach(p => bounds.extend(p));
+    totalLen_m += rec.length_m || 0;
+  }
+
+  if (bounds.isValid()) map.fitBounds(bounds, { padding: [40, 40] });
+  if (totalLen_m > 0) $("dist-km").textContent = (totalLen_m / 1000).toFixed(2);
+}
+loadMap();
+
+// ─── Leaderboard ────────────────────────────────────────────────────────────
+async function loadAttempts() {
+  const wrap = $("lb-wrap");
+  try {
+    const r = await fetch(`/api/routes/${encodeURIComponent(ROUTE.id)}/attempts`);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const d = await r.json();
+    renderAttempts(d.attempts || []);
+    $("attempts-count").textContent = d.attempt_count ?? 0;
+    if (d.best_duration_sec && d.best_duration_sec > 0) {
+      $("best-time").textContent = fmtDurHms(d.best_duration_sec);
+      $("best-time-wrap").style.display = "";
+    }
+  } catch (e) {
+    wrap.innerHTML = `<div class="lb-empty">Failed to load attempts: ${_esc(e.message)}</div>`;
+  }
+}
+
+function renderAttempts(attempts) {
+  const wrap = $("lb-wrap");
+  const metaEl = $("lb-meta");
+  if (!attempts.length) {
+    wrap.innerHTML = `<div class="lb-empty">No matching attempts detected yet.<br>
+      Once the matcher has snapped this route's trails+roads against your rides,
+      attempts will appear here.</div>`;
+    metaEl.textContent = "";
+    return;
+  }
+  metaEl.textContent = `${attempts.length} attempt${attempts.length === 1 ? '' : 's'}`;
+  // Use the first segment's trail name as the `?lb=` param — the activity
+  // detail page's existing trail-leaderboard restore hook reads `?lb=`
+  // and `?hl=` together to highlight the matched span on the map. A
+  // `?route=` param would be silently ignored until the destination
+  // learns about routes (planned with the Routes Ridden panel).
+  const firstSeg = (ROUTE.segments || [])[0];
+  const lbName = firstSeg ? firstSeg.trail_name : '';
+  const rows = attempts.map((a, i) => {
+    const rankCell = (i === 0)
+      ? `<span class="rank-best">${i + 1}</span>` : `${i + 1}`;
+    const target = `/log/${encodeURIComponent(a.filename)}`
+      + `?lb=${encodeURIComponent(lbName)}`
+      + `&hl=${encodeURIComponent(`${a.first_idx}:${a.last_idx}`)}`;
+    return `
+      <tr data-nav="${_esc(target)}">
+        <td>${rankCell}</td>
+        <td class="t-l">${_esc(a.date)}</td>
+        <td class="t-l title-cell" title="${_esc(a.filename)}">${_esc(a.title || a.filename)}</td>
+        <td>${fmtDurHms(a.duration_sec)}</td>
+      </tr>`;
+  }).join("");
+  wrap.innerHTML = `
+    <table class="lb-table">
+      <thead><tr><th class="t-l">#</th><th class="t-l">Date</th><th class="t-l">Ride</th><th>Duration</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+  wrap.querySelectorAll("tr[data-nav]").forEach(tr => {
+    tr.addEventListener("click", () => { location.href = tr.dataset.nav; });
+  });
+}
+loadAttempts();
+
+// ─── Actions ────────────────────────────────────────────────────────────────
+$("dup-btn").addEventListener("click", async () => {
+  const payload = { name: `${ROUTE.name} (copy)`,
+                    region_id: ROUTE.region_id, segments: ROUTE.segments };
+  try {
+    const r = await fetch("/api/routes",
+      { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload) });
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({}));
+      throw new Error(err.error || `HTTP ${r.status}`);
+    }
+    const dup = await r.json();
+    toast(`Duplicated as "${dup.name}"`);
+    setTimeout(() => { location.href = `/routes/${dup.id}`; }, 700);
+  } catch (e) {
+    toast(`Duplicate failed: ${e.message}`, true);
+  }
+});
+
+$("del-btn").addEventListener("click", async () => {
+  if (!confirm(`Delete "${ROUTE.name}"? This can't be undone.`)) return;
+  try {
+    const r = await fetch(`/api/routes/${encodeURIComponent(ROUTE.id)}`,
+                          { method: "DELETE" });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    toast(`Deleted "${ROUTE.name}"`);
+    setTimeout(() => { location.href = "/routes"; }, 700);
+  } catch (e) {
+    toast(`Delete failed: ${e.message}`, true);
+  }
+});
+</script>
+</body>
+</html>
