@@ -24,6 +24,7 @@ import gpxpy
 from flask import Flask, Response, abort, jsonify, redirect, render_template, request
 
 from cache_utils import LRUCache, _atomic_write, init_backup_tracking
+import osm_breaker
 import trail_match
 import route_builder
 import route_attempts
@@ -280,9 +281,26 @@ def _try_read_osm_cache(cp: Path) -> list[dict] | None:
     return None
 
 
+def _read_osm_cache_stale(cp: Path) -> list[dict] | None:
+    """Read the lifts cache ignoring TTL. Used as a fallback when Overpass
+    is unreachable — stale data is correct OSM data, just old, and ski-lift
+    geometry barely changes. Returns None only when the file is missing or
+    corrupt."""
+    if not cp.exists():
+        return None
+    try:
+        entry = json.loads(cp.read_text(encoding="utf-8"))
+        return entry.get("lifts")
+    except Exception:
+        return None
+
+
 def _fetch_osm_lifts(bbox) -> list[dict]:
     """Return aerialway segments for bbox, cached to disk for 30 days.
     Per-bbox locking prevents duplicate Overpass requests during parallel prewarm.
+
+    When Overpass is unreachable (timeout, breaker open, network error),
+    falls back to the on-disk cache ignoring TTL before returning [].
     """
     cp = _lift_cache_path(bbox)
 
@@ -296,6 +314,12 @@ def _fetch_osm_lifts(bbox) -> list[dict]:
         cached = _try_read_osm_cache(cp)
         if cached is not None:
             return cached
+
+        # Breaker open: don't even try Overpass. Serve stale cache if we have
+        # one for this bbox. New bboxes seen during an outage still return [].
+        if osm_breaker.should_skip():
+            stale = _read_osm_cache_stale(cp)
+            return stale if stale is not None else []
 
         s, w, n, e = bbox
         pad = 0.01
@@ -326,10 +350,13 @@ def _fetch_osm_lifts(bbox) -> list[dict]:
 
             _atomic_write(cp, json.dumps({"fetched": time.time(), "lifts": lifts}, ensure_ascii=False))
             _OSM_LIFT_MEM_CACHE[cp.stem] = lifts
+            osm_breaker.record_success()
             return lifts
 
         except Exception:
-            return []
+            osm_breaker.record_failure()
+            stale = _read_osm_cache_stale(cp)
+            return stale if stale is not None else []
 
 
 # ─── Metadata ─────────────────────────────────────────────────────────────────
