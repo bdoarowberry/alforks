@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AlForks – Trails</title>
+  <title>AlForks – Trails &amp; Routes</title>
   <script src="/static/utils.js"></script>
   <script src="/static/sync_toast.js" defer></script>
   <script src="/static/review_nav.js" defer></script>
@@ -57,6 +57,14 @@
     .dir-pill.dir-fwd   { background: #1d3a2c; color: #6ee7b7; }
     .dir-pill.dir-rev   { background: #3a2c1d; color: #fbbf24; }
     .dir-pill.dir-mixed { background: #2a2d35; color: #aaa; }
+    /* Kind chip — distinguishes road segments from trail segments in the
+       same leaderboard. Sits next to the direction pill. */
+    .kind-chip { display: inline-block; padding: 1px 5px; border-radius: 3px;
+                  font-size: 0.6rem; font-weight: 700; letter-spacing: 0.06em;
+                  line-height: 1; margin-right: 6px; vertical-align: middle;
+                  text-transform: uppercase; font-family: var(--font-mono);
+                  background: rgba(255,255,255,0.08); color: var(--text-tertiary);
+                  border: 1px solid rgba(255,255,255,0.10); }
 
     .empty-state { padding: 60px 20px; text-align: center; color: var(--text-tertiary); font-size: 0.8rem; line-height: 1.5; }
     .empty-state code { background: var(--bg-card); padding: 2px 6px; border-radius: 3px; color: var(--text-primary); }
@@ -108,9 +116,14 @@
 </header>
 
 <main>
-  <h1 class="page-title">Trails Ridden <span class="preview-tag">PREVIEW</span></h1>
-  <p class="page-sub">Completed trail attempts across all your MTB rides, grouped by region.
+  <h1 class="page-title">Trails &amp; Routes</h1>
+  <p class="page-sub">Completed trail and road attempts across all your MTB rides, grouped by region.
     Click a trail row to load its leaderboard on the right. Click the best date to jump straight to that ride.</p>
+
+  <nav class="subnav-tabs">
+    <a href="/trails" class="active">Trails</a>
+    <a href="/routes">Routes</a>
+  </nav>
 
   <div id="filters">
     <span class="filter-label">Search</span>
@@ -217,6 +230,8 @@ function render() {
       const dirTitle = ({up:'Climb',down:'Descent',forward:'Forward',reverse:'Reverse'})[dir] || 'Mixed';
       const dirCls = ({up:'dir-up',down:'dir-down',forward:'dir-fwd',reverse:'dir-rev'})[dir] || 'dir-mixed';
       const dirPill = `<span class="dir-pill ${dirCls}" title="${_escAttr(dirTitle)}">${dirIcon}</span>`;
+      const kindChip = t.kind === 'road'
+        ? `<span class="kind-chip" title="OSM highway type: road">road</span>` : '';
       // Row click opens the detail panel for THIS (trail, direction).
       // The "Best Date" cell remains a quick shortcut to that ride's log.
       const bestNav = `/log/${encodeURIComponent(t.best_filename)}`
@@ -226,7 +241,7 @@ function render() {
       const trailKey = `${t.name}|${dir}`;
       return `
         <tr data-trail="${_escAttr(t.name)}" data-dir="${_escAttr(dir)}" data-key="${_escAttr(trailKey)}">
-          <td>${dirPill}<span class="trail-name">${_escText(t.name)}</span></td>
+          <td>${dirPill}${kindChip}<span class="trail-name">${_escText(t.name)}</span></td>
           <td>${t.attempts}</td>
           <td>${_fmtDurHms(t.best_duration_sec)}</td>
           <td><a class="best-link" href="${_escAttr(bestNav)}" title="Open best ride directly" onclick="event.stopPropagation();">${_escText(t.best_date)}</a></td>

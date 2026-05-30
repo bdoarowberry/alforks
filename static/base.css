@@ -126,3 +126,26 @@ nav a.active .nav-pill { background: #fbbf24; }
 }
 .filter-btn:hover { border-color: #aaa; color: #fff; }
 .filter-btn.active { background: #1a2a3a; color: #3b82f6; border-color: #3b82f6; }
+
+
+/* Sub-navigation tabs — sits inside a page that has its own sibling pages
+   sharing a top-level nav entry (e.g. Trails ⇄ Routes). Anchored beneath
+   the page title. Two visual modes: idle (hairline border, muted text)
+   and active (underlined accent). */
+.subnav-tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--border-hair);
+  margin: 0 0 14px;
+}
+.subnav-tabs a {
+  font-size: 0.78rem;
+  color: var(--text-tertiary);
+  text-decoration: none;
+  padding: 6px 14px 8px;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;     /* sit on top of the parent's bottom border */
+  transition: color 0.12s, border-color 0.12s;
+}
+.subnav-tabs a:hover   { color: var(--text-primary); }
+.subnav-tabs a.active  { color: var(--text-primary); border-bottom-color: var(--accent); }

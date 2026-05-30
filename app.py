@@ -25,6 +25,9 @@ from flask import Flask, Response, abort, jsonify, redirect, render_template, re
 
 from cache_utils import LRUCache, _atomic_write, init_backup_tracking
 import trail_match
+import route_builder
+import route_attempts
+import secrets
 from detection import (
     ALGO_SIG,
     DETECTION_ALGORITHMS,
@@ -1290,6 +1293,46 @@ def review_page():
     return render_template("review.html", types_json=_safe_json(load_types()))
 
 
+@app.route("/routes")
+def routes_list_page():
+    """List of saved routes. Shares a sub-nav with /trails so the two
+    pages feel like one Trails-and-Routes view."""
+    return render_template(
+        "routes.html",
+        regions_json=_safe_json(load_regions()),
+    )
+
+
+@app.route("/routes/<route_id>")
+def route_detail_page(route_id: str):
+    """Read-only route page: map of the highlighted segments + attempts
+    leaderboard below. The builder lives at /routes/edit?id=... — this
+    page is meant for showing off a saved route, not editing it."""
+    route = _load_route(route_id)
+    if route is None:
+        abort(404)
+    region = next((r for r in load_regions() if r["id"] == route["region_id"]), None)
+    return render_template(
+        "route_detail.html",
+        route_json=_safe_json(route),
+        region_json=_safe_json(region) if region else "null",
+    )
+
+
+@app.route("/routes/edit")
+def routes_edit_page():
+    """Builder: pick trails from a region's map, ordered into a route.
+
+    `?id=<route_id>` loads an existing route; without it, a fresh blank
+    builder. See route_builder.py for the underlying region artifact.
+    """
+    return render_template(
+        "routes_edit.html",
+        regions_json=_safe_json(load_regions()),
+        route_id=request.args.get("id") or "",
+    )
+
+
 @app.route("/training-load")
 def training_load_redirect():
     """Old route — `/training-load` shortened to `/training`. 301 so any
@@ -1754,6 +1797,11 @@ _ACTIVITY_RESPONSE_VERSION = 13
 # ski runs reliably.
 TRAIL_MATCH_CACHE_DIR    = CACHE_DIR / "trail_match"
 OSM_PATHS_CACHE_DIR      = CACHE_DIR / "osm_paths"
+# v13: trail_match also snaps GPS against named OSM road ways. Roads have
+# their own bbox cache (matches the route_builder pattern) so the trail
+# fetch and road fetch can invalidate independently. Kept adjacent to
+# OSM_PATHS_CACHE_DIR so a future "third kind of OSM cache" lands here too.
+OSM_ROADS_CACHE_DIR      = CACHE_DIR / "osm_roads"
 
 
 # ─── Trail leaderboard cache ─────────────────────────────────────────────────
@@ -1821,8 +1869,15 @@ def _get_region_trail_index(activity_regions: dict[str, list[str]]) -> dict:
 
 def _invalidate_trail_leaderboards() -> None:
     """Called after a trail_match cache file is written by the prewarm or
-    the activity API. Forces both leaderboard and region-index caches to
-    rebuild on next read."""
+    the activity API. Forces trail leaderboard and region-index caches to
+    rebuild on next read.
+
+    Route-attempt cache invalidation is NOT cascaded from here. Cascading
+    would clear the route_attempts mem cache 554 times during prewarm
+    (once per ride), guaranteeing the /routes page hits a cold cache for
+    every request during the prewarm window. Instead, the rescan
+    endpoints and the prewarm tail call `_invalidate_route_attempts()`
+    explicitly — exactly once per logical operation."""
     global _trail_leaderboard_cache, _trail_leaderboard_key
     global _trail_region_index_cache, _trail_region_index_key
     with _trail_leaderboard_lock:
@@ -1830,6 +1885,167 @@ def _invalidate_trail_leaderboards() -> None:
         _trail_leaderboard_key   = None
         _trail_region_index_cache = None
         _trail_region_index_key   = None
+
+
+# ─── Route attempts cache (Stage C) ─────────────────────────────────────────
+# Per-route leaderboard data derived from the per-file trail_match cache.
+# Disk-persisted at ROUTE_ATTEMPTS_CACHE_DIR/<route_id>.json with a key
+# tuple covering everything that could change the result: route shape,
+# trail_match output, region-artifact geometry, the matcher version, and
+# the user's metadata (titles surface in the rows).
+
+_route_attempts_mem_cache: dict[str, dict] = {}
+_route_attempts_keys:      dict[str, tuple] = {}
+_route_attempts_locks:     dict[str, threading.Lock] = {}
+_route_attempts_locks_mu = threading.Lock()
+
+
+def _route_attempts_lock_for(route_id: str) -> threading.Lock:
+    with _route_attempts_locks_mu:
+        lk = _route_attempts_locks.get(route_id)
+        if lk is None:
+            lk = threading.Lock()
+            _route_attempts_locks[route_id] = lk
+        return lk
+
+
+def _route_attempts_cache_key(route: dict,
+                                trail_match_fp: tuple | None = None) -> tuple:
+    """Anything in this tuple that changes triggers a fresh compute.
+
+    Windows note: in-place file replacement (`tmp.replace(dst)`) does NOT
+    bump the parent directory's mtime, so a directory-mtime key would
+    serve stale data after every trail_match rewrite. Use (file_count,
+    max_file_mtime) of the trail_match cache contents — both update
+    reliably on overwrite.
+
+    `trail_match_fp` lets the caller hoist the directory-scan cost out
+    of a per-route loop — see `api_activity_routes_ridden`, which
+    iterates every saved route on every request.
+    """
+    def _m(p):
+        try:
+            return p.stat().st_mtime
+        except OSError:
+            return -1.0
+    region_artifact_p = REGION_TRAILS_CACHE_DIR / f"{route['region_id']}.json"
+    return (
+        route_attempts.ROUTE_ATTEMPTS_VERSION,
+        trail_match.TRAIL_MATCH_VERSION,
+        route.get("modified") or route.get("created") or "",
+        trail_match_fp if trail_match_fp is not None else _trail_match_dir_fingerprint(),
+        _m(METADATA_FILE),
+        _m(region_artifact_p),
+    )
+
+
+def _trail_match_dir_fingerprint() -> tuple[int, float]:
+    """`(file_count, max_mtime)` of the trail_match cache directory.
+    Both move on every new write — Windows-safe versus a directory-mtime
+    check which doesn't tick on in-place file replacement."""
+    if not TRAIL_MATCH_CACHE_DIR.exists():
+        return (0, -1.0)
+    count = 0
+    max_mtime = -1.0
+    for p in TRAIL_MATCH_CACHE_DIR.iterdir():
+        if p.suffix != ".json":
+            continue
+        count += 1
+        try:
+            mt = p.stat().st_mtime
+            if mt > max_mtime:
+                max_mtime = mt
+        except OSError:
+            pass
+    return (count, max_mtime)
+
+
+def _get_route_attempts(route_id: str, route: dict | None = None,
+                         trail_match_fp: tuple | None = None) -> dict | None:
+    """Return {attempts, attempt_count, best_*} for `route_id`, building
+    it if absent or stale. Returns None if the route doesn't exist.
+
+    `trail_match_fp` is forwarded to `_route_attempts_cache_key` — pass
+    a pre-computed fingerprint when calling this in a per-route loop
+    (e.g. the routes-ridden endpoint) to avoid rescanning the
+    trail_match cache directory once per saved route.
+    """
+    route = route or _load_route(route_id)
+    if route is None:
+        return None
+    key = _route_attempts_cache_key(route, trail_match_fp=trail_match_fp)
+    cached = _route_attempts_mem_cache.get(route_id)
+    if cached is not None and _route_attempts_keys.get(route_id) == key:
+        return cached
+
+    with _route_attempts_lock_for(route_id):
+        cached = _route_attempts_mem_cache.get(route_id)
+        if cached is not None and _route_attempts_keys.get(route_id) == key:
+            return cached
+
+        # Try disk cache before recomputing.
+        ROUTE_ATTEMPTS_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        disk = ROUTE_ATTEMPTS_CACHE_DIR / f"{route_id}.json"
+        if disk.exists():
+            try:
+                entry = json.loads(disk.read_text(encoding="utf-8"))
+                if tuple(entry.get("key") or ()) == key:
+                    payload = entry.get("payload") or {}
+                    _route_attempts_mem_cache[route_id] = payload
+                    _route_attempts_keys[route_id]      = key
+                    return payload
+            except Exception:
+                pass
+
+        # Recompute. Region artifact is loaded via route_builder so we
+        # get the same cached shape the /api/regions/... endpoint serves.
+        region = next((r for r in load_regions() if r["id"] == route["region_id"]), None)
+        if region is None:
+            logger.warning("route %s references unknown region %s",
+                            route_id, route.get("region_id"))
+            empty = {"version": route_attempts.ROUTE_ATTEMPTS_VERSION,
+                      "attempts": [], "attempt_count": 0,
+                      "best_duration_sec": None, "best_filename": None,
+                      "best_date": None}
+            _route_attempts_mem_cache[route_id] = empty
+            _route_attempts_keys[route_id]      = key
+            return empty
+        artifact = route_builder.get_region_artifact(
+            region,
+            artifacts_dir=REGION_TRAILS_CACHE_DIR,
+            osm_paths_dir=OSM_PATHS_CACHE_DIR,
+            osm_roads_dir=OSM_ROADS_CACHE_DIR,
+        )
+        payload = route_attempts.build_route_leaderboard(
+            route, artifact, TRAIL_MATCH_CACHE_DIR,
+            activity_loader=get_activity,
+            activity_meta=load_metadata() or {},
+        )
+        try:
+            tmp = disk.with_suffix(disk.suffix + ".tmp")
+            tmp.write_text(
+                json.dumps({"key": list(key), "payload": payload},
+                            ensure_ascii=False),
+                encoding="utf-8",
+            )
+            tmp.replace(disk)
+        except OSError as exc:
+            logger.warning("Failed to persist route_attempts %s: %s", disk, exc)
+        _route_attempts_mem_cache[route_id] = payload
+        _route_attempts_keys[route_id]      = key
+        return payload
+
+
+def _invalidate_route_attempts(route_id: str | None = None) -> None:
+    """Drop the in-memory route_attempts cache. If `route_id` is given,
+    only that route's entry is dropped (used after PUT/DELETE on a single
+    route). Otherwise clear everything (after rescan-all)."""
+    if route_id is None:
+        _route_attempts_mem_cache.clear()
+        _route_attempts_keys.clear()
+    else:
+        _route_attempts_mem_cache.pop(route_id, None)
+        _route_attempts_keys.pop(route_id, None)
 
 
 # ─── Background prewarm of missing trail-match results ──────────────────────
@@ -1963,6 +2179,7 @@ def _trail_prewarm_worker_inner() -> None:
                 fn, p.stat().st_mtime, data,
                 cache_dir_osm=OSM_PATHS_CACHE_DIR,
                 cache_dir_results=TRAIL_MATCH_CACHE_DIR,
+                cache_dir_roads=OSM_ROADS_CACHE_DIR,
                 meta_fp=meta_fp,
             )
             done += 1
@@ -1972,6 +2189,9 @@ def _trail_prewarm_worker_inner() -> None:
             _invalidate_trail_leaderboards()
         except Exception:
             logger.exception("trail prewarm: cached_match failed for %s", fn)
+    # Once at the end so the /routes page can hit a warm cache during
+    # prewarm windows. Individual rescans still invalidate explicitly.
+    _invalidate_route_attempts()
     logger.info("trail prewarm: processed %d/%d", done, len(todo))
 
 
@@ -2021,6 +2241,373 @@ def api_trail_regions():
     # appear at the top.
     out.sort(key=lambda r: (-r["total_attempts"], r["name"]))
     return jsonify({"regions": out})
+
+
+@app.route("/api/activity/<path:filename>/rescan-trails", methods=["POST"])
+def api_activity_rescan_trails(filename: str):
+    """Recompute the trail_match result for a single activity, inline.
+
+    Deletes the per-file cache + recomputes (so a fresh result is
+    returned synchronously). Used by the rescan button on the activity
+    detail page after a route is saved or the matcher changes.
+    """
+    p = GPX_DIR / filename
+    if not p.exists():
+        abort(404)
+    disk = TRAIL_MATCH_CACHE_DIR / f"{filename}.json"
+    if disk.exists():
+        try:
+            disk.unlink()
+        except OSError as exc:
+            logger.warning("Failed to delete trail_match cache %s: %s", disk, exc)
+    # Force-evict from the in-memory result cache too.
+    with trail_match._RESULT_MEM_LOCK:
+        for k in list(trail_match._RESULT_MEM_CACHE):
+            if k[0] == filename:
+                trail_match._RESULT_MEM_CACHE.pop(k, None)
+    data = parse_gpx(filename)
+    if data is None:
+        return jsonify({"error": "could not parse GPX"}), 500
+    file_meta = (load_metadata() or {}).get(filename) or {}
+    # KEEP IN SYNC with the prewarm + activity-detail call sites — using
+    # different keys here would produce a different MD5 and the next
+    # request would silently recompute against the matching-shape entry.
+    meta_fp_src = {
+        "trim":             file_meta.get("trim"),
+        "smoothing":        file_meta.get("smoothing"),
+        "time_shift_hours": file_meta.get("time_shift_hours"),
+        "spike_repair":     file_meta.get("spike_repair"),
+    }
+    meta_fp = hashlib.md5(
+        json.dumps(meta_fp_src, sort_keys=True).encode()
+    ).hexdigest()[:12]
+    result = trail_match.cached_match(
+        filename, p.stat().st_mtime, data,
+        cache_dir_osm=OSM_PATHS_CACHE_DIR,
+        cache_dir_results=TRAIL_MATCH_CACHE_DIR,
+        cache_dir_roads=OSM_ROADS_CACHE_DIR,
+        meta_fp=meta_fp,
+    )
+    _invalidate_trail_leaderboards()
+    _invalidate_route_attempts()   # one ride's match changed → any route attempt may have changed
+    return jsonify({"ok": True, "result": result})
+
+
+@app.route("/api/trail-match/rescan-all", methods=["POST"])
+def api_trail_match_rescan_all():
+    """Wipe every per-file trail_match cache + kick off a background
+    prewarm. Returns immediately; status is observable via the existing
+    prewarm log lines and the trail leaderboards refreshing.
+
+    Use after bumping the matcher (a TRAIL_MATCH_VERSION bump already
+    forces recompute via cache-version checks, but this endpoint is the
+    explicit user-triggered "redo everything" path)."""
+    removed = 0
+    if TRAIL_MATCH_CACHE_DIR.exists():
+        for p in TRAIL_MATCH_CACHE_DIR.glob("*.json"):
+            try:
+                p.unlink()
+                removed += 1
+            except OSError as exc:
+                logger.warning("Failed to delete %s during rescan-all: %s", p, exc)
+    with trail_match._RESULT_MEM_LOCK:
+        trail_match._RESULT_MEM_CACHE.clear()
+    _invalidate_trail_leaderboards()
+    _invalidate_route_attempts()   # blanket wipe; prewarm-tail will re-warm
+    _prewarm_trail_matches_async()
+    return jsonify({"ok": True, "removed": removed,
+                     "message": "Rescan started — prewarm runs in background."})
+
+
+# ─── Route builder ──────────────────────────────────────────────────────────
+# Saved routes are user-defined orderings of trail segments within a region
+# (see route_builder.py for the upstream artifact that powers selection).
+# Bump ROUTES_API_VERSION alongside route_builder.ROUTE_BUILDER_VERSION
+# whenever the wire shape changes — clients use it to invalidate caches.
+ROUTES_API_VERSION       = 5
+REGION_TRAILS_CACHE_DIR  = CACHE_DIR / "region_trails"
+# OSM_ROADS_CACHE_DIR moved up next to OSM_PATHS_CACHE_DIR — see there.
+ROUTES_DIR               = CACHE_DIR / "routes"
+ROUTE_ATTEMPTS_CACHE_DIR = CACHE_DIR / "route_attempts"
+
+
+def _route_path(route_id: str) -> Path:
+    # Allow only the id charset we generate ourselves — defends against
+    # path traversal if a client supplies a crafted id.
+    if not re.fullmatch(r"[a-f0-9]{12}", route_id or ""):
+        return None
+    return ROUTES_DIR / f"{route_id}.json"
+
+
+def _load_route(route_id: str) -> dict | None:
+    p = _route_path(route_id)
+    if p is None or not p.exists():
+        return None
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+
+def _all_routes() -> list[dict]:
+    ROUTES_DIR.mkdir(parents=True, exist_ok=True)
+    out = []
+    for p in ROUTES_DIR.glob("*.json"):
+        try:
+            out.append(json.loads(p.read_text(encoding="utf-8")))
+        except Exception:
+            continue
+    out.sort(key=lambda r: r.get("modified") or r.get("created") or "", reverse=True)
+    return out
+
+
+def _validate_route_payload(payload) -> tuple[dict | None, str | None]:
+    """Return (cleaned_payload, error_message)."""
+    if not isinstance(payload, dict):
+        return None, "payload must be a JSON object"
+    name = (payload.get("name") or "").strip()
+    if not name:
+        return None, "name is required"
+    region_id = (payload.get("region_id") or "").strip()
+    if not region_id:
+        return None, "region_id is required"
+    if not any(r["id"] == region_id for r in load_regions()):
+        return None, f"unknown region_id {region_id!r}"
+    segments = payload.get("segments")
+    if not isinstance(segments, list) or not segments:
+        return None, "segments must be a non-empty list"
+    clean_segments = []
+    for i, seg in enumerate(segments):
+        if not isinstance(seg, dict):
+            return None, f"segments[{i}] must be an object"
+        trail_name = (seg.get("trail_name") or "").strip()
+        if not trail_name:
+            return None, f"segments[{i}].trail_name is required"
+        direction = seg.get("direction") or "forward"
+        # Accept the full trail_match direction taxonomy (forward/reverse
+        # for linear-untagged + loops; up/down for sloped linears). The
+        # builder writes forward/reverse today; the wider set future-proofs
+        # routes saved after a builder upgrade.
+        if direction not in ("forward", "reverse", "up", "down"):
+            return None, f"segments[{i}].direction must be one of forward/reverse/up/down"
+        cleaned = {"trail_name": trail_name, "direction": direction}
+        kind = seg.get("kind")
+        if kind in ("trail", "road"):
+            cleaned["kind"] = kind
+        # Carry edge/junction bounds through. In the edge-based model the
+        # client always supplies edge_id + the two junctions; older route
+        # docs from before this migration may only have the junctions.
+        eid = seg.get("edge_id")
+        sj  = seg.get("start_junction"); ej = seg.get("end_junction")
+        if eid:
+            cleaned["edge_id"] = eid
+        if sj and ej:
+            cleaned["start_junction"] = sj
+            cleaned["end_junction"]   = ej
+        clean_segments.append(cleaned)
+    return {"name": name, "region_id": region_id, "segments": clean_segments}, None
+
+
+@app.route("/api/regions/<region_id>/trails-geometry")
+def api_region_trails_geometry(region_id: str):
+    """Return the cached trails + roads + junctions artifact for `region_id`.
+
+    ETag-tagged with the on-disk artifact mtime so back-to-back navigations
+    to different routes in the same region hit the browser cache (304)
+    instead of re-downloading ~600 KB. Cache-Control: no-cache forces a
+    revalidation each request — cheap, since the server-side artifact read
+    is from memory after first build."""
+    region = next((r for r in load_regions() if r["id"] == region_id), None)
+    if region is None:
+        abort(404)
+    force = request.args.get("force") == "1"
+    artifact = route_builder.get_region_artifact(
+        region,
+        artifacts_dir=REGION_TRAILS_CACHE_DIR,
+        osm_paths_dir=OSM_PATHS_CACHE_DIR,
+        osm_roads_dir=OSM_ROADS_CACHE_DIR,
+        force_rebuild=force,
+    )
+    ap = REGION_TRAILS_CACHE_DIR / f"{region_id}.json"
+    try:
+        etag = f"{ap.stat().st_mtime:.3f}-{artifact.get('version', 0)}"
+    except OSError:
+        etag = str(artifact.get("version", "0"))
+    if request.if_none_match.contains(etag):
+        return Response(status=304)
+    resp = jsonify({"version": ROUTES_API_VERSION, **artifact})
+    resp.set_etag(etag)
+    resp.headers["Cache-Control"] = "no-cache"
+    return resp
+
+
+@app.route("/api/regions/<region_id>/edges-summary")
+def api_region_edges_summary(region_id: str):
+    """Return just the edge id + length list for `region_id`.
+
+    The full artifact is ~600 KB (polylines dominate). The /routes list
+    page only needs edge_id -> length_m to compute per-route distance
+    totals, so this slim endpoint cuts the payload ~40x. Still builds the
+    artifact server-side (so the cache stays warm), then strips."""
+    region = next((r for r in load_regions() if r["id"] == region_id), None)
+    if region is None:
+        abort(404)
+    artifact = route_builder.get_region_artifact(
+        region,
+        artifacts_dir=REGION_TRAILS_CACHE_DIR,
+        osm_paths_dir=OSM_PATHS_CACHE_DIR,
+        osm_roads_dir=OSM_ROADS_CACHE_DIR,
+    )
+    edges = []
+    for collection in (artifact.get("trails") or [], artifact.get("roads") or []):
+        for entry in collection:
+            for e in (entry.get("edges") or []):
+                edges.append({"id": e["id"], "length_m": e["length_m"]})
+    return jsonify({"version": ROUTES_API_VERSION,
+                     "region_id": region_id, "edges": edges})
+
+
+@app.route("/api/routes", methods=["GET"])
+def api_routes_list():
+    """List routes, enriched with attempt count + best time per route.
+
+    Stats come from `_get_route_attempts` which is cached on disk + in
+    memory; a warm list page fires no trail_match recomputes."""
+    routes = _all_routes()
+    out = []
+    for r in routes:
+        rid = r["id"]
+        stats = _get_route_attempts(rid, route=r) or {}
+        out.append({
+            **r,
+            "attempts":          stats.get("attempt_count", 0),
+            "best_duration_sec": stats.get("best_duration_sec"),
+            "best_filename":     stats.get("best_filename"),
+            "best_date":         stats.get("best_date"),
+        })
+    return jsonify({"version": ROUTES_API_VERSION, "routes": out})
+
+
+@app.route("/api/routes", methods=["POST"])
+def api_routes_create():
+    cleaned, err = _validate_route_payload(request.get_json(silent=True))
+    if err:
+        return jsonify({"error": err}), 400
+    ROUTES_DIR.mkdir(parents=True, exist_ok=True)
+    rid = secrets.token_hex(6)
+    while (ROUTES_DIR / f"{rid}.json").exists():
+        rid = secrets.token_hex(6)
+    now = datetime.now(timezone.utc).isoformat()
+    route = {"id": rid, "created": now, "modified": now, **cleaned}
+    _atomic_write(ROUTES_DIR / f"{rid}.json", json.dumps(route, ensure_ascii=False))
+    _invalidate_route_attempts(rid)
+    return jsonify(route), 201
+
+
+@app.route("/api/routes/<route_id>", methods=["GET"])
+def api_routes_get(route_id: str):
+    route = _load_route(route_id)
+    if route is None:
+        abort(404)
+    return jsonify(route)
+
+
+@app.route("/api/routes/<route_id>", methods=["PUT"])
+def api_routes_update(route_id: str):
+    existing = _load_route(route_id)
+    if existing is None:
+        abort(404)
+    cleaned, err = _validate_route_payload(request.get_json(silent=True))
+    if err:
+        return jsonify({"error": err}), 400
+    route = {
+        "id":       route_id,
+        "created":  existing.get("created"),
+        "modified": datetime.now(timezone.utc).isoformat(),
+        **cleaned,
+    }
+    _atomic_write(ROUTES_DIR / f"{route_id}.json", json.dumps(route, ensure_ascii=False))
+    _invalidate_route_attempts(route_id)
+    return jsonify(route)
+
+
+@app.route("/api/routes/<route_id>", methods=["DELETE"])
+def api_routes_delete(route_id: str):
+    p = _route_path(route_id)
+    if p is None or not p.exists():
+        abort(404)
+    try:
+        p.unlink()
+    except OSError as exc:
+        logger.warning("Failed to delete route %s: %s", route_id, exc)
+        return jsonify({"error": "delete failed"}), 500
+    _invalidate_route_attempts(route_id)
+    # Tidy: remove the orphan attempts file too, if it exists. The cache
+    # key check would never re-hit it (route is gone), so it's just dead
+    # bytes — but tidy is cheap.
+    disk = ROUTE_ATTEMPTS_CACHE_DIR / f"{route_id}.json"
+    if disk.exists():
+        try: disk.unlink()
+        except OSError: pass
+    return jsonify({"ok": True})
+
+
+@app.route("/api/routes/<route_id>/attempts", methods=["GET"])
+def api_routes_attempts(route_id: str):
+    """Full attempts list for one route — same data the list endpoint
+    aggregates, but with the per-attempt rows kept intact for the
+    detail page leaderboard."""
+    route = _load_route(route_id)
+    if route is None:
+        abort(404)
+    payload = _get_route_attempts(route_id, route=route) or {}
+    return jsonify({"version": ROUTES_API_VERSION, "route_id": route_id, **payload})
+
+
+@app.route("/api/activity/<path:filename>/routes-ridden")
+def api_activity_routes_ridden(filename: str):
+    """Which saved routes did the rider complete in this activity?
+
+    Derived from the cached per-route attempts data — no fresh scan.
+    Each match gets a `rank` and `rank_total` so the panel can show
+    "best ever / 2 of 9" style stats inline. Multiple attempts of the
+    same route in one ride each get their own row, sorted by start_time.
+    """
+    # Path-traversal guard — `<path:filename>` accepts slashes, so a
+    # naive existence check would resolve `../app.py` against GPX_DIR
+    # and pass.  _safe_gpx_path bounds the lookup to the tracks dir.
+    if _safe_gpx_path(filename) is None:
+        abort(404)
+    routes = _all_routes()
+    # Hoist the trail_match dir scan once per request — every route's
+    # cache key would otherwise rescan ~500 files independently.
+    trail_match_fp = _trail_match_dir_fingerprint()
+    matches = []
+    for r in routes:
+        payload = _get_route_attempts(r["id"], route=r,
+                                        trail_match_fp=trail_match_fp) or {}
+        attempts = payload.get("attempts") or []
+        total = len(attempts)
+        for idx, att in enumerate(attempts):
+            if att.get("filename") != filename:
+                continue
+            matches.append({
+                "route_id":      r["id"],
+                "route_name":    r["name"],
+                "region_id":     r.get("region_id"),
+                "rank":          idx + 1,
+                "rank_total":    total,
+                "duration_sec":  att.get("duration_sec"),
+                "start_time":    att.get("start_time"),
+                "end_time":      att.get("end_time"),
+                "first_idx":     att.get("first_idx"),
+                "last_idx":      att.get("last_idx"),
+                "is_best":       idx == 0,
+            })
+    matches.sort(key=lambda m: (m.get("start_time") or "", m.get("rank") or 0))
+    return jsonify({"version": ROUTES_API_VERSION,
+                     "filename": filename,
+                     "routes": matches})
 
 
 @app.route("/trails")
@@ -2349,6 +2936,7 @@ def api_activity(filename):
                 filename, _m(p), data,
                 cache_dir_osm=OSM_PATHS_CACHE_DIR,
                 cache_dir_results=TRAIL_MATCH_CACHE_DIR,
+                cache_dir_roads=OSM_ROADS_CACHE_DIR,
                 meta_fp=meta_fp,
             )
             # If cached_match wrote a fresh file for this activity (first

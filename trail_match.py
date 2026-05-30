@@ -41,7 +41,7 @@ except ImportError:
 # snap threshold or run-collapsing logic changes). The /api/activity
 # response version in app.py should bump alongside this so clients
 # pick up the new shape.
-TRAIL_MATCH_VERSION = 12
+TRAIL_MATCH_VERSION = 13
 
 SNAP_THRESHOLD_M = 8.0   # tightened from 12 m: roads parallel to mapped
                          # trails (e.g. Moose Mountain Road alongside
@@ -147,6 +147,10 @@ TIMELINE_MIN_DISTANCE_KM = 0.05
 
 _OVERPASS_URL = "https://overpass-api.de/api/interpreter"
 _HIGHWAY_TYPES = "path|track|footway|cycleway|bridleway"
+# Roads are matched alongside trails as of v13 — a road climb (Moose
+# Mountain Road) is a thing you rode and deserves the same leaderboard
+# treatment. Naming kept as `trail_match` for legacy callers.
+_ROAD_HIGHWAY_TYPES = "residential|service|unclassified|tertiary|secondary|primary"
 
 logger = logging.getLogger(__name__)
 
@@ -270,6 +274,147 @@ def _parse_overpass_ways(osm_json) -> list[dict]:
             "coords": coords,
         })
     return ways
+
+
+# ─── Road OSM fetch ─────────────────────────────────────────────────────────
+# Mirror of fetch_osm_trails, scoped to the road highway types. Lives here
+# (not route_builder.py) so trail_match can match against roads without a
+# circular import. Caches at cache/osm_roads/ separately from cache/osm_paths/
+# — keeping the two queries split makes invalidation per-set straightforward.
+
+_road_locks: dict[str, threading.Lock] = {}
+_road_locks_mu = threading.Lock()
+_OSM_ROAD_MEM_CACHE: dict[str, list[dict]] = {}
+
+
+def _road_lock_for(cp: Path) -> threading.Lock:
+    key = cp.name
+    with _road_locks_mu:
+        if key not in _road_locks:
+            _road_locks[key] = threading.Lock()
+        return _road_locks[key]
+
+
+def _try_read_road_cache(cp: Path) -> list[dict] | None:
+    mem = _OSM_ROAD_MEM_CACHE.get(cp.stem)
+    if mem is not None:
+        return mem
+    if not cp.exists():
+        return None
+    try:
+        entry = json.loads(cp.read_text(encoding="utf-8"))
+        if time.time() - entry.get("fetched", 0) < OSM_CACHE_TTL_SEC:
+            ways = entry["ways"]
+            _OSM_ROAD_MEM_CACHE[cp.stem] = ways
+            return ways
+    except Exception:
+        pass
+    return None
+
+
+def fetch_osm_roads(bbox, cache_dir: Path) -> list[dict]:
+    """Return named OSM road ways for `bbox`, cached for OSM_CACHE_TTL_SEC.
+
+    Each way: {id, name, highway, oneway, coords: [(lat,lon), ...]}.
+    Returns [] on Overpass error so the caller never 500s on a network blip.
+    """
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    cp = _osm_cache_path(cache_dir, bbox)   # same hash scheme as trails
+
+    cached = _try_read_road_cache(cp)
+    if cached is not None:
+        return cached
+
+    with _road_lock_for(cp):
+        cached = _try_read_road_cache(cp)
+        if cached is not None:
+            return cached
+
+        s, w, n, e = bbox
+        pad = OSM_FETCH_PAD_DEG
+        query = (
+            f"[out:json][timeout:{OVERPASS_TIMEOUT_SEC}];"
+            f'(way["highway"~"^({_ROAD_HIGHWAY_TYPES})$"]["name"]'
+            f"({s - pad},{w - pad},{n + pad},{e + pad}););"
+            f"(._;>;);out body;"
+        )
+        try:
+            data = urllib.parse.urlencode({"data": query}).encode()
+            req = urllib.request.Request(
+                _OVERPASS_URL, data=data,
+                headers={"User-Agent": "AlanForks-GPX-Viewer/1.0"},
+            )
+            with urllib.request.urlopen(req, timeout=OVERPASS_TIMEOUT_SEC + 20) as resp:
+                result = json.loads(resp.read().decode("utf-8"))
+        except Exception as exc:
+            logger.warning("Overpass road fetch failed for bbox %s: %s", bbox, exc)
+            return []
+
+        ways = _parse_overpass_road_ways(result)
+        try:
+            tmp = cp.with_suffix(cp.suffix + ".tmp")
+            tmp.write_text(
+                json.dumps({"fetched": time.time(), "ways": ways}, ensure_ascii=False),
+                encoding="utf-8",
+            )
+            tmp.replace(cp)
+        except OSError as exc:
+            logger.warning("Failed to persist road cache %s: %s", cp, exc)
+        _OSM_ROAD_MEM_CACHE[cp.stem] = ways
+        return ways
+
+
+def _parse_overpass_road_ways(osm_json) -> list[dict]:
+    nodes = {
+        e["id"]: (e["lat"], e["lon"])
+        for e in osm_json.get("elements", []) if e.get("type") == "node"
+    }
+    ways: list[dict] = []
+    for e in osm_json.get("elements", []):
+        if e.get("type") != "way":
+            continue
+        tags = e.get("tags", {})
+        name = tags.get("name")
+        if not name:
+            continue
+        coords = [nodes[nid] for nid in e.get("nodes", []) if nid in nodes]
+        if len(coords) < 2:
+            continue
+        ways.append({
+            "id":      e["id"],
+            "name":    name,
+            "highway": tags.get("highway"),
+            "oneway":  tags.get("oneway") == "yes",
+            "coords":  coords,
+        })
+    return ways
+
+
+# ─── Combined trails+roads fetch ────────────────────────────────────────────
+
+def fetch_osm_ways(bbox, paths_cache_dir: Path,
+                   roads_cache_dir: Path | None) -> list[dict]:
+    """Return named OSM ways (trails AND roads) for `bbox`. Each way carries
+    a `kind` field of "trail" or "road" so downstream code can chip the
+    leaderboard rows and (later) score routes against road segments.
+
+    `roads_cache_dir=None` falls back to trails-only, preserving the
+    pre-v13 behaviour for callers that haven't migrated yet.
+    """
+    trail_ways = fetch_osm_trails(bbox, paths_cache_dir)
+    # Sentinel: the mem-cache returns the same list object on every call,
+    # so once it's been tagged we don't need to rewrite the field. Cuts
+    # an O(ways) dict-write loop per activity once the cache is warm.
+    if trail_ways and "kind" not in trail_ways[0]:
+        for w in trail_ways:
+            w["kind"] = "trail"
+    if roads_cache_dir is None:
+        return trail_ways
+    road_ways = fetch_osm_roads(bbox, roads_cache_dir)
+    if road_ways and "kind" not in road_ways[0]:
+        for w in road_ways:
+            w["kind"] = "road"
+    return trail_ways + road_ways
 
 
 # ─── Geometry helpers ────────────────────────────────────────────────────────
@@ -898,6 +1043,7 @@ def _project_ways(ways: list[dict], lat0: float, lon0: float) -> list[dict]:
         entry: dict = {
             "id": w["id"], "name": w["name"], "highway": w.get("highway"),
             "mtb_scale": w.get("mtb_scale"),
+            "kind": w.get("kind", "trail"),
             "local": local,
             "bb": (min(lats), min(lons), max(lats), max(lons)),
             "length_km": _way_length_km(w["coords"]),
@@ -919,8 +1065,13 @@ def _project_ways(ways: list[dict], lat0: float, lon0: float) -> list[dict]:
 
 
 def _snap_points(points, ways_proj, lat0, lon0):
-    """Return (best_name, best_dist) per point. Assisted points get (None, None)
-    so they break visit runs naturally.
+    """Return (best_name, best_dist, best_kind) per point. Assisted points
+    get (None, None, None) so they break visit runs naturally.
+
+    Tracking `best_kind` per snap (not by post-hoc longest-fragment lookup)
+    is required: a trail and road named "Connector" would otherwise be
+    chip-labelled by whichever fragment is geometrically longer instead
+    of by the one this GPS point actually snapped to.
 
     When numpy is available (nearly always), each way's segments are evaluated
     as a vectorised array broadcast — one numpy call replaces the inner Python
@@ -931,11 +1082,11 @@ def _snap_points(points, ways_proj, lat0, lon0):
     matches = []
     for p in points:
         if p.get("assisted"):
-            matches.append((None, None))
+            matches.append((None, None, None))
             continue
         plat, plon = p["lat"], p["lon"]
         px, py = _to_local(plat, plon, lat0, lon0)
-        best_name, best_dist = None, SNAP_THRESHOLD_M
+        best_name, best_dist, best_kind = None, SNAP_THRESHOLD_M, None
         for w in ways_proj:
             wb = w["bb"]
             if (plat < wb[0] - BBOX_PAD_DEG or plat > wb[2] + BBOX_PAD_DEG
@@ -961,7 +1112,9 @@ def _snap_points(points, ways_proj, lat0, lon0):
             if d < best_dist:
                 best_dist = d
                 best_name = w["name"]
-        matches.append((best_name, best_dist if best_name else None))
+                best_kind = w.get("kind", "trail")
+        matches.append((best_name, best_dist if best_name else None,
+                        best_kind if best_name else None))
     return matches
 
 
@@ -1077,15 +1230,18 @@ def _parse_iso(ts: str):
     return datetime.fromisoformat(ts)
 
 
-def match_trails(data: dict, cache_dir: Path) -> dict:
-    """Match a parsed GPX activity to named OSM trails.
+def match_trails(data: dict, cache_dir: Path,
+                  roads_cache_dir: Path | None = None) -> dict:
+    """Match a parsed GPX activity to named OSM trails + roads.
 
     `data` must look like the dict returned by `get_activity`: has `points`
     (list of {lat, lon, time, dist_km, assisted, ...}) and `bbox`
     ([south, west, north, east]).
 
-    `cache_dir`: directory for the bbox -> OSM ways disk cache
+    `cache_dir`: directory for the bbox -> trail OSM ways disk cache
     (`cache/osm_paths/` in production).
+    `roads_cache_dir`: directory for the bbox -> road OSM ways cache
+    (`cache/osm_roads/`). When None, trails-only mode (pre-v13 behaviour).
 
     Returns:
         {
@@ -1107,7 +1263,7 @@ def match_trails(data: dict, cache_dir: Path) -> dict:
     if not points or not bbox or len(bbox) != 4:
         return _empty_result()
 
-    ways = fetch_osm_trails(bbox, cache_dir)
+    ways = fetch_osm_ways(bbox, cache_dir, roads_cache_dir)
     if not ways:
         return _empty_result(named_ways_in_bbox=0)
 
@@ -1139,11 +1295,26 @@ def match_trails(data: dict, cache_dir: Path) -> dict:
             longest_frag[w["name"]] = w
     name_highway: dict[str, str] = {}
     name_mtb_scale: dict[str, str] = {}
+    name_kind: dict[str, str] = {}
     for nm, w in longest_frag.items():
         if w.get("highway"):
             name_highway[nm] = w["highway"]
         if w.get("mtb_scale"):
             name_mtb_scale[nm] = w["mtb_scale"]
+        name_kind[nm] = w.get("kind", "trail")
+    # Override name_kind with snap-derived majority when a name has
+    # contradictory kinds (an OSM "Connector" exists as both a trail and a
+    # road). The longest-fragment lookup would pick whichever has more
+    # mapped length, which isn't necessarily what was ridden. Counting
+    # actual snap hits picks the kind the rider was on.
+    snap_kind_votes: dict[str, dict[str, int]] = {}
+    for nm, dist, kd in matches:
+        if not nm or not kd:
+            continue
+        snap_kind_votes.setdefault(nm, {})
+        snap_kind_votes[nm][kd] = snap_kind_votes[nm].get(kd, 0) + 1
+    for nm, votes in snap_kind_votes.items():
+        name_kind[nm] = max(votes.items(), key=lambda kv: kv[1])[0]
 
     # Compute outer termini for each trail name from the RAW (unprojected)
     # ways. Used by the endpoint-touch completion override below — a run
@@ -1182,6 +1353,7 @@ def match_trails(data: dict, cache_dir: Path) -> dict:
             avg_dist_m = sum(dists) / len(dists) if dists else None
             entry = {
                 "name": name,
+                "kind": name_kind.get(name, "trail"),
                 "direction": direction,
                 "start_idx": sub_s, "end_idx": sub_e - 1,
                 "start_time": ss_pt.get("time", ""),
@@ -1245,6 +1417,7 @@ def match_trails(data: dict, cache_dir: Path) -> dict:
                         break
         summary.append({
             "name": name,
+            "kind": name_kind.get(name, "trail"),
             "direction": direction,
             "visits": visits,
             "ridden_km": round(rec["ridden_km"], 3),
@@ -1327,7 +1500,8 @@ _RESULT_MEM_LOCK = threading.Lock()
 
 def cached_match(filename: str, gpx_mtime: float, data: dict,
                  cache_dir_osm: Path, cache_dir_results: Path,
-                 meta_fp: str = "") -> dict:
+                 meta_fp: str = "",
+                 cache_dir_roads: Path | None = None) -> dict:
     """Memoised wrapper around `match_trails`. Disk + memory.
 
     Disk cache file: `{cache_dir_results}/{filename}.json`, payload
@@ -1364,7 +1538,7 @@ def cached_match(filename: str, gpx_mtime: float, data: dict,
         except Exception:
             pass
 
-    result = match_trails(data, cache_dir_osm)
+    result = match_trails(data, cache_dir_osm, roads_cache_dir=cache_dir_roads)
     try:
         tmp = disk.with_suffix(disk.suffix + ".tmp")
         tmp.write_text(
@@ -1449,6 +1623,7 @@ def build_leaderboards(cache_dir_results: Path,
                 "distance_km":  float(entry.get("distance_km") or 0.0),
                 "coverage_pct": float(entry.get("coverage_pct") or 0.0),
                 "direction":    direction,
+                "kind":         entry.get("kind", "trail"),
                 "start_idx":    int(entry.get("start_idx") or 0),
                 "end_idx":      int(entry.get("end_idx")   or 0),
             }
@@ -1516,6 +1691,7 @@ def build_region_trail_index(cache_dir_results: Path,
                     region_dict[trail_key] = {
                         "name":      bucket_name,
                         "direction": direction,
+                        "kind":      entry.get("kind", "trail"),
                         "attempts": 1,
                         "best_duration_sec": dur,
                         "best_filename": filename,

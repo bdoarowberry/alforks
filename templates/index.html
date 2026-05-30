@@ -529,6 +529,50 @@
     #trails-drawer .timeline-row td { font-size: 0.68rem; }
     #trails-drawer .timeline-row td.t-time { color: #888; }
     #trails-drawer .empty-msg { padding: 18px 14px; font-size: 0.7rem; color: #888; line-height: 1.4; }
+    .kind-chip-sm { display: inline-block; padding: 1px 4px; border-radius: 2px;
+                     font-size: 0.55rem; font-weight: 700; letter-spacing: 0.05em;
+                     line-height: 1; text-transform: uppercase;
+                     background: rgba(255,255,255,0.08); color: rgba(255,255,255,0.65);
+                     border: 1px solid rgba(255,255,255,0.10);
+                     vertical-align: 1px; margin-right: 2px; }
+    #trails-rescan-btn {
+      margin-left: auto; background: transparent; border: 1px solid rgba(255,255,255,0.18);
+      color: rgba(255,255,255,0.75); font-size: 0.6rem; padding: 3px 8px;
+      border-radius: 2px; letter-spacing: 0.08em; text-transform: uppercase;
+      cursor: pointer; font-family: 'JetBrains Mono', ui-monospace, monospace;
+      transition: all 0.12s;
+    }
+    #trails-rescan-btn:hover { color: #fff; border-color: #3b82f6; }
+    #trails-rescan-btn:disabled { opacity: 0.5; cursor: wait; }
+    /* Routes Ridden section — sits above Trails Ridden in the same drawer.
+       Empty state hides the whole block so the drawer isn't a deadspace
+       when no saved routes were matched. */
+    #trails-drawer h3.section-divider { margin-top: 10px; border-top: 1px solid #2a2d35; padding-top: 14px; }
+    #routes-ridden-wrap { padding: 8px 14px; }
+    #routes-ridden-wrap.empty { display: none; }
+    .route-row {
+      display: flex; align-items: center; gap: 10px;
+      padding: 9px 0; font-size: 0.78rem;
+      border-top: 1px solid #1f2228;
+    }
+    .route-row:first-child { border-top: none; }
+    .route-row .r-name {
+      flex: 1; color: #93c5fd; cursor: pointer; min-width: 0;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .route-row .r-name:hover { color: #bfdbfe; text-decoration: underline; }
+    .route-row .r-dur { color: #ddd; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 0.74rem; }
+    .route-row .r-rank {
+      font-size: 0.62rem; padding: 1px 6px; border-radius: 2px;
+      font-family: 'JetBrains Mono', ui-monospace, monospace; letter-spacing: 0.04em;
+      background: rgba(255,255,255,0.06); color: #aaa;
+      border: 1px solid rgba(255,255,255,0.10);
+      min-width: 36px; text-align: center;
+    }
+    .route-row .r-rank.best { background: #3a2c1d; color: #fbbf24; border-color: #fbbf24; }
+    #routes-ridden-empty {
+      padding: 10px 14px 4px; font-size: 0.7rem; color: #888;
+    }
 
     /* Leaderboard popup — floats over the map area immediately left of
        the trails drawer. Shown when a trail name is clicked in the
@@ -551,6 +595,26 @@
     #trails-leaderboard .lb-close { background: transparent; border: none; color: #888; font-size: 1.1rem; cursor: pointer; padding: 0 4px; }
     #trails-leaderboard .lb-close:hover { color: #fff; }
     #trails-leaderboard .lb-empty { padding: 16px 14px; color: #888; font-size: 0.7rem; line-height: 1.4; }
+
+    /* Routes leaderboard popup mirrors the trail leaderboard visually
+       and uses the same layout slot. The two are mutually-exclusive
+       (opening one closes the other) so they never overlap. */
+    #routes-leaderboard { position: absolute; top: 0; bottom: 0; width: 340px; background: #12151a;
+                          border-left: 1px solid #2a2d35; border-right: 1px solid #2a2d35;
+                          z-index: 999; overflow-y: auto; display: none; }
+    #routes-leaderboard.open { display: block; }
+    #map-wrap.has-trails:has(#trails-drawer.open) #routes-leaderboard {
+      right: var(--trails-drawer-w, 380px);
+    }
+    #map-wrap.has-trails:not(:has(#trails-drawer.open)) #routes-leaderboard {
+      right: 14px;
+    }
+    #routes-leaderboard .lb-head { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; border-bottom: 1px solid #2a2d35; }
+    #routes-leaderboard .lb-title { font-size: 0.75rem; font-weight: 600; color: #fff; }
+    #routes-leaderboard .lb-sub   { font-size: 0.6rem; color: #888; text-transform: uppercase; letter-spacing: 0.07em; margin-top: 2px; }
+    #routes-leaderboard .lb-close { background: transparent; border: none; color: #888; font-size: 1.1rem; cursor: pointer; padding: 0 4px; }
+    #routes-leaderboard .lb-close:hover { color: #fff; }
+    #routes-leaderboard .lb-empty { padding: 16px 14px; color: #888; font-size: 0.7rem; line-height: 1.4; }
     .lb-table { width: 100%; border-collapse: collapse; font-size: 0.7rem; }
     .lb-table th { font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.07em; color: #bbb; padding: 5px 10px; text-align: right; border-bottom: 1px solid #2a2d35; font-weight: 500; background: #0e1117; position: sticky; top: 0; }
     .lb-table th:first-child, .lb-table th:nth-child(2) { text-align: left; }
@@ -786,7 +850,12 @@
       </div>
       <button id="trails-strip" onclick="toggleTrailsDrawer()" title="Toggle trails panel">▶</button>
       <div id="trails-drawer">
-        <h3>Trails Ridden <span class="preview-tag">PREVIEW</span></h3>
+        <h3>Routes Ridden <span class="preview-tag">PREVIEW</span></h3>
+        <div id="routes-ridden-wrap"></div>
+        <h3 class="section-divider">Trails Ridden <span class="preview-tag">PREVIEW</span>
+          <button id="trails-rescan-btn" type="button" title="Re-snap GPS against the latest OSM trail+road data for this ride only"
+                  onclick="rescanThisActivity()">Rescan</button>
+        </h3>
         <div id="trails-summary-cards"></div>
         <div class="section-label">Timeline of attempts</div>
         <div id="trails-timeline-wrap"></div>
@@ -805,6 +874,18 @@
           <button class="lb-close" onclick="closeTrailLeaderboard()" title="Close">×</button>
         </div>
         <div id="lb-body"></div>
+      </div>
+      <!-- Routes leaderboard popup — sibling of trails-leaderboard.
+           Opened by clicking a route name in the Routes Ridden panel. -->
+      <div id="routes-leaderboard" role="dialog" aria-label="Route leaderboard">
+        <div class="lb-head">
+          <div>
+            <div class="lb-title" id="rlb-title"></div>
+            <div class="lb-sub" id="rlb-sub"></div>
+          </div>
+          <button class="lb-close" onclick="closeRouteLeaderboard()" title="Close">×</button>
+        </div>
+        <div id="rlb-body"></div>
       </div>
     </div>
 
@@ -2930,13 +3011,16 @@ function renderTrailStats(trails) {
     document.getElementById('trails-summary-wrap').innerHTML =
       `<div class="empty-msg">No trails reached the 5% coverage threshold.</div>`;
   } else {
-    const sumRows = summary.map(t => `
+    const sumRows = summary.map(t => {
+      const kc = t.kind === 'road' ? `<span class="kind-chip-sm">road</span> ` : '';
+      return `
         <tr data-trail-summary="${_escAttr(t.name)}">
-          <td class="trail-name" title="${_escAttr(t.name)}">${_escText(t.name)}</td>
+          <td class="trail-name" title="${_escAttr(t.name)}">${kc}${_escText(t.name)}</td>
           <td>${t.visits}</td>
           <td>${t.ridden_km.toFixed(2)}</td>
           <td>${_trailPill(t)}</td>
-        </tr>`).join('');
+        </tr>`;
+    }).join('');
     document.getElementById('trails-summary-wrap').innerHTML = `
       <table class="runs-table">
         <thead><tr><th>Trail</th><th>×</th><th>km</th><th>Cov</th></tr></thead>
@@ -2948,13 +3032,14 @@ function renderTrailStats(trails) {
     const rankCell = (e.completed && e.rank && e.rank_total)
       ? `${e.rank}/${e.rank_total}` : '';
     const dirBadge = _directionBadge(e.direction);
+    const kc = e.kind === 'road' ? `<span class="kind-chip-sm">road</span> ` : '';
     return `
       <tr class="timeline-row" data-hl="${e.start_idx}:${e.end_idx}">
         <td class="t-time">${_escText(_fmtHm(e.start_time))}</td>
         <td class="t-dir" title="${_escAttr(_directionTitle(e.direction))}">${dirBadge}</td>
         <td class="trail-name trail-link" data-trail="${_escAttr(e.name)}"
             data-dir="${_escAttr(e.direction || 'mixed')}"
-            title="Show leaderboard for ${_escAttr(e.name)}">${_escText(e.name)}</td>
+            title="Show leaderboard for ${_escAttr(e.name)}">${kc}${_escText(e.name)}</td>
         <td>${e.distance_km.toFixed(2)}k</td>
         <td>${_fmtDurHms(e.duration_sec)}</td>
         <td>${_trailPill(e)}</td>
@@ -2978,12 +3063,176 @@ function renderTrailStats(trails) {
   if (strip) strip.textContent = drawer.classList.contains('open') ? '▶' : '◀';
 }
 
+// ─── Routes Ridden panel ────────────────────────────────────────────────
+// Mirrors Trails Ridden — surfaces every saved route this ride completed,
+// with the rider's rank in that route's leaderboard. Derived server-side
+// from the per-route attempts cache, so loading is essentially free once
+// the route_attempts cache is warm.
+let _routesRiddenSeq = 0;
+async function loadRoutesRidden() {
+  const wrap = document.getElementById("routes-ridden-wrap");
+  if (!currentFilename || !wrap) return;
+  const mySeq = ++_routesRiddenSeq;
+  const myFilename = currentFilename;
+  wrap.classList.remove("empty");
+  wrap.innerHTML = `<div id="routes-ridden-empty">Loading…</div>`;
+  let payload;
+  try {
+    const r = await fetch(
+      `/api/activity/${encodeURIComponent(myFilename)}/routes-ridden`,
+      { cache: "no-store" },
+    );
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    payload = await r.json();
+  } catch (err) {
+    if (_routesRiddenSeq !== mySeq) return;   // newer load started
+    wrap.innerHTML = `<div id="routes-ridden-empty">Failed to load: ${_escText(err.message)}</div>`;
+    return;
+  }
+  if (_routesRiddenSeq !== mySeq) return;     // newer load started during fetch
+  const routes = payload.routes || [];
+  if (routes.length === 0) {
+    // Hide the whole section (header + body) — keeps the drawer dense
+    // when no saved routes matched this ride.
+    wrap.classList.add("empty");
+    const header = wrap.previousElementSibling;
+    if (header && header.tagName === "H3") header.style.display = "none";
+    return;
+  }
+  // Make sure the header is visible (might have been hidden on prior load).
+  const header = wrap.previousElementSibling;
+  if (header && header.tagName === "H3") header.style.display = "";
+
+  wrap.innerHTML = routes.map(m => {
+    const rankCls = m.is_best ? "r-rank best" : "r-rank";
+    const dur = _fmtDurHms(m.duration_sec);
+    return `
+      <div class="route-row" data-rid="${_escAttr(m.route_id)}" data-hl="${m.first_idx}:${m.last_idx}">
+        <span class="r-name" title="Open route">${_escText(m.route_name)}</span>
+        <span class="${rankCls}" title="Rank in this route's leaderboard">${m.rank}/${m.rank_total}</span>
+        <span class="r-dur">${dur}</span>
+      </div>`;
+  }).join("");
+  // Click delegation:
+  //   route-name click → open the in-page leaderboard popup (mirrors
+  //     the trail leaderboard behaviour the user expects)
+  //   row click       → highlight the match span on the map
+  // The popup is opened in-place rather than navigating to /routes/<id>
+  // — the detail page is still reachable via the routes list nav.
+  wrap.querySelectorAll(".route-row").forEach(row => {
+    const rid = row.dataset.rid;
+    const rname = row.querySelector(".r-name").textContent;
+    const hl  = row.dataset.hl;
+    row.querySelector(".r-name").addEventListener("click", (e) => {
+      e.stopPropagation();
+      openRouteLeaderboard(rid, rname);
+    });
+    row.addEventListener("click", () => {
+      if (typeof highlightRun === "function" && hl) {
+        const [s, e] = hl.split(":").map(Number);
+        if (Number.isFinite(s) && Number.isFinite(e)) highlightRun(s, e);
+      }
+    });
+  });
+}
+
+// ─── Route leaderboard popup ────────────────────────────────────────────
+// Mirrors openTrailLeaderboard — pops up over the map (in the same slot
+// as the trail leaderboard) showing every attempt of a saved route.
+// Opening the route popup closes any open trail popup, and vice-versa.
+async function openRouteLeaderboard(routeId, routeName) {
+  // Close any open trail leaderboard so the two popups never overlap.
+  const trailsPop = document.getElementById('trails-leaderboard');
+  if (trailsPop) trailsPop.classList.remove('open');
+
+  const pop  = document.getElementById('routes-leaderboard');
+  const body = document.getElementById('rlb-body');
+  document.getElementById('rlb-title').textContent = routeName || 'Route';
+  document.getElementById('rlb-sub').textContent = 'Loading…';
+  body.innerHTML = '';
+  pop.classList.add('open');
+
+  let payload;
+  try {
+    const r = await fetch(`/api/routes/${encodeURIComponent(routeId)}/attempts`,
+                          { cache: 'no-store' });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    payload = await r.json();
+  } catch (err) {
+    body.innerHTML = `<div class="lb-empty">Failed to load: ${_escText(err.message)}</div>`;
+    document.getElementById('rlb-sub').textContent = '';
+    return;
+  }
+  const attempts = payload.attempts || [];
+  document.getElementById('rlb-sub').textContent =
+    attempts.length ? `${attempts.length} attempts · fastest first` : 'No attempts yet';
+  if (!attempts.length) {
+    body.innerHTML = `<div class="lb-empty">No completed attempts of this route are on record yet.</div>`;
+    return;
+  }
+  const curFn = trackData?.filename;
+  const tbody = attempts.map((a, i) => {
+    const isHere = a.filename === curFn;
+    const target = `/log/${encodeURIComponent(a.filename)}`
+                 + `?route=${encodeURIComponent(routeId)}`
+                 + `&hl=${encodeURIComponent(`${a.first_idx}:${a.last_idx}`)}`;
+    return `
+      <tr class="${isHere ? 'lb-current' : ''}" data-nav="${_escAttr(target)}">
+        <td>${i + 1}</td>
+        <td title="${_escAttr(a.title || a.filename)}">${_escText(a.date)}</td>
+        <td>${_fmtDurHms(a.duration_sec)}</td>
+      </tr>`;
+  }).join('');
+  body.innerHTML = `
+    <table class="lb-table">
+      <thead><tr><th>#</th><th>Date</th><th>Duration</th></tr></thead>
+      <tbody>${tbody}</tbody>
+    </table>`;
+  body.querySelectorAll('tr[data-nav]').forEach(tr => {
+    tr.addEventListener('click', () => { location.href = tr.dataset.nav; });
+  });
+}
+
+function closeRouteLeaderboard() {
+  const pop = document.getElementById('routes-leaderboard');
+  if (pop) pop.classList.remove('open');
+}
+
+// ─── Per-log trail-match rescan ─────────────────────────────────────────
+// Wipes this activity's trail_match cache and recomputes inline against
+// the current OSM data + matcher version. Used when the matcher changes
+// (e.g. v13 added road snapping) or when the user wants to refresh a
+// single ride after a new route is saved.
+async function rescanThisActivity() {
+  if (!currentFilename) return;
+  const btn = document.getElementById('trails-rescan-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Rescan…'; }
+  try {
+    const r = await fetch(
+      `/api/activity/${encodeURIComponent(currentFilename)}/rescan-trails`,
+      { method: 'POST' },
+    );
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const payload = await r.json();
+    if (payload && payload.result) {
+      renderTrailStats(payload.result);
+    }
+  } catch (err) {
+    alert(`Rescan failed: ${err.message}`);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Rescan'; }
+  }
+}
+
 // ─── Trail leaderboard popup ────────────────────────────────────────────
 // Triggered by clicking a trail name in the timeline. Floats over the
 // map area immediately to the left of the trails drawer. Rows are
 // clickable: navigate to /log/<filename> for that attempt.
 
 async function openTrailLeaderboard(name, direction) {
+  // Close the routes leaderboard so the two popups never overlap.
+  const routesPop = document.getElementById('routes-leaderboard');
+  if (routesPop) routesPop.classList.remove('open');
   const pop = document.getElementById('trails-leaderboard');
   const body = document.getElementById('lb-body');
   const dir = direction || 'all';
@@ -3394,6 +3643,7 @@ async function loadActivity(filename) {
   renderTrackLayers(activeSegments);
   renderRunStats(trackData.meta);
   renderTrailStats(trackData.trails);
+  loadRoutesRidden();   // sibling of Trails Ridden — see fn below
   // Cross-track navigation hook: if we arrived via a leaderboard click on
   // another activity page, reopen the leaderboard and highlight the span
   // of the attempt that was clicked. URL shape:
