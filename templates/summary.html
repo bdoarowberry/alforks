@@ -1,12 +1,8 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  {% include '_head.html' %}
   <title>AlForks – Summary</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/base.css">
   <script src="/static/utils.js"></script>
   <script src="/static/sync_toast.js" defer></script>
@@ -53,7 +49,7 @@
     /* Promoted section titles. Sized to match the page-title scale used on
        Logs / Compare / Setup / Training so the app reads consistently
        across pages. */
-    .s2-section-title { font-size: 1.4rem; font-weight: 500; color: #fff;
+    .s2-section-title { font-size: 1.4rem; font-weight: 500; color: var(--text-primary);
                         letter-spacing: -0.02em; margin: 0; line-height: 1.2; }
 
     /* "By activity" header — title on its own row, year chips on the row
@@ -116,7 +112,7 @@
 
     /* ── Activity stack ─────────────────────────────────────────────── */
     .s2-activities { background: var(--bg-page); border: 1px solid var(--border-hair); border-top: none; border-radius: 4px; }
-    .s2-row { border-top: 1px solid var(--border-row); border-left: 2px solid #3b82f6; background: var(--bg-page); }
+    .s2-row { border-top: 1px solid var(--border-row); border-left: 2px solid var(--accent); background: var(--bg-page); }
     .s2-row > .head { all: unset; cursor: pointer; display: flex; align-items: center; gap: 18px; padding: 14px 18px; width: 100%; }
     .s2-row .glyph { min-width: 38px; height: 28px; padding: 0 7px; display: inline-flex; align-items: center; justify-content: center; border-radius: 4px; font-family: var(--mono); font-weight: 600; font-size: 11px; letter-spacing: 0.05em; flex-shrink: 0; }
     .s2-row .name  { font-size: 14px; color: #fff; font-weight: 500; }

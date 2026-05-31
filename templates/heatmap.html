@@ -1,8 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  {% include '_head.html' %}
   <title>AlForks – Heat Map</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -36,13 +35,8 @@
        the year filter to "All". */
     #year-lock-hint { font-size: 10px; color: var(--text-muted); font-family: var(--font-mono); letter-spacing: 0.04em; text-transform: none; margin-left: 6px; font-style: italic; }
 
-    /* Filter chips — match Summary .s2-year-chips. Override the
-       loose .filter-btn defaults from base.css for this page only. */
-    #filter-bar .filter-btn { padding: 4px 10px; font-size: 10px; font-family: var(--font-mono); letter-spacing: 0.04em; color: var(--text-muted); background: rgba(255,255,255,0.04); border: 1px solid var(--border-hair); border-radius: 3px; cursor: pointer; transition: color 0.12s, background 0.12s, border-color 0.12s; }
-    #filter-bar .filter-btn:hover:not(.active) { color: var(--text-secondary); border-color: var(--border-hair); }
-    #filter-bar .filter-btn.active { color: var(--text-primary); background: rgba(255,255,255,0.10); border-color: rgba(255,255,255,0.18); }
-
-    /* Year filter locked (Recency mode) — non-"All" chips are disabled
+    /* Filter chips inherit the canonical .filter-btn from base.css.
+       Year filter locked (Recency mode) — non-"All" chips are disabled
        so the user can see the full set but knows only "All" is selectable. */
     #year-filters.locked .filter-btn:not(.active) { opacity: 0.3; pointer-events: none; }
 

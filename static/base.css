@@ -1,21 +1,22 @@
 /* Shared base styles for AlForks pages.
    Included by every template after its own <title>. Template-specific styles
-   live in that template's inline <style>. */
+   live in that template's inline <style>.
 
-/* Inter for body, JetBrains Mono for numerics. Loaded once here so
-   every page has them — individual templates no longer need their own
-   <link rel="stylesheet" href="…fonts.googleapis…"> entry. */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap');
+   Fonts are loaded via the _head.html partial (preconnect + <link>), not via
+   CSS @import — @import is render-blocking and serial; <link> in the head
+   parallelises with the rest of the stylesheet fetch. */
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-/* Shared palette tokens — mirror the Summary page so the chrome reads as
-   one design language across the site. Pages with their own inline
-   <style> can still override locally; everywhere else inherits these. */
+/* Shared palette tokens — the canonical surface/border/text scale plus
+   the semantic accents (warn/danger/success/link) used across pages.
+   Pages with their own inline <style> can still override locally;
+   everywhere else inherits these. */
 :root {
   --bg-page:       #0a0c0c;
   --bg-card:       #0f1313;
   --bg-elev:       #11161a;
+  --bg-map:        #050708;        /* Leaflet/Mapbox container — darker than page */
   --border-hair:   rgba(255, 255, 255, 0.11);
   --border-row:    rgba(255, 255, 255, 0.14);
   --text-primary:  #fff;
@@ -23,7 +24,29 @@
   --text-tertiary: rgba(255, 255, 255, 0.62);
   --text-muted:    rgba(255, 255, 255, 0.5);
   --text-faint:    rgba(255, 255, 255, 0.38);
+  --surface-tint:  rgba(255, 255, 255, 0.04);   /* chip/segctrl resting fill */
+
+  /* Action accent — single brand blue, plus hover + soft tint variants. */
   --accent:        #3b82f6;
+  --accent-hover:  #2563eb;
+  --accent-soft:   rgba(59, 130, 246, 0.10);
+
+  /* Semantic accents — warn (amber), danger (red), success (green).
+     Used for action buttons, status pills, anomaly highlights. */
+  --warn:           #f59e0b;
+  --warn-hover:     #d97706;
+  --warn-soft:      rgba(245, 158, 11, 0.10);
+  --warn-border:    #4a3a1f;
+  --danger:         #ef4444;
+  --danger-soft:    rgba(239, 68, 68, 0.10);
+  --danger-border:  #4a2020;
+  --success:        #22c55e;
+
+  /* Inline link blue — distinct from --accent. Used for clickable text
+     in tables/lists (route name, trail name, ride filename). */
+  --link:           #93c5fd;
+  --link-hover:     #bfdbfe;
+
   --font-sans:     'Inter', system-ui, -apple-system, sans-serif;
   --font-mono:     'JetBrains Mono', ui-monospace, 'SF Mono', monospace;
 }
@@ -34,11 +57,10 @@ body {
   color: var(--text-secondary);
 }
 
-/* Header + navigation. Palette mirrors the Summary page tokens
-   (bg-card, hair border, secondary text) so the chrome reads as one
-   piece with the dashboard panels below. */
+/* Header + navigation. Palette mirrors the Summary page tokens so the
+   chrome reads as one piece with the dashboard panels below. */
 header {
-  background: #0f1313;
+  background: var(--bg-card);
   padding: 0 20px;
   height: 52px;
   display: flex;
@@ -51,7 +73,7 @@ header {
 header h1 {
   font-size: 1rem;
   font-weight: 600;
-  color: #fff;
+  color: var(--text-primary);
   letter-spacing: 0.03em;
   margin-right: 8px;
 }
@@ -60,14 +82,14 @@ nav {
 }
 nav a {
   font-size: 0.8rem;
-  color: rgba(255,255,255,0.7);
+  color: var(--text-secondary);
   text-decoration: none;
   padding: 4px 10px;
   border-radius: 4px;
   transition: all 0.12s;
 }
-nav a:hover   { color: #fff; background: rgba(255,255,255,0.05); }
-nav a.active  { color: #3b82f6; background: #1a2a3a; }
+nav a:hover   { color: var(--text-primary); background: var(--surface-tint); }
+nav a.active  { color: var(--accent); background: var(--accent-soft); }
 
 /* Pill badge attached to a nav link — used for the Review count. */
 nav a .nav-pill {
@@ -75,10 +97,10 @@ nav a .nav-pill {
   margin-left: 6px;
   padding: 1px 6px;
   font-size: 9px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--font-mono);
   letter-spacing: 0.04em;
   border-radius: 8px;
-  background: #f59e0b;
+  background: var(--warn);
   color: #0b0d0c;
   font-weight: 600;
   vertical-align: middle;
@@ -95,12 +117,12 @@ nav a.active .nav-pill { background: #fbbf24; }
   font-size: 0.7rem;
   padding: 5px 14px;
   border-radius: 3px;
-  border: 1px solid rgba(255,255,255,0.14);
+  border: 1px solid var(--border-row);
   background: transparent;
-  color: rgba(255,255,255,0.75);
+  color: var(--text-secondary);
   cursor: pointer;
   transition: all 0.12s;
-  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-family: var(--font-mono);
   letter-spacing: 0.10em;
   text-transform: uppercase;
   display: inline-flex;
@@ -108,25 +130,60 @@ nav a.active .nav-pill { background: #fbbf24; }
   gap: 6px;
 }
 .nav-sync-btn::before { content: '↻'; font-size: 0.95rem; line-height: 1; transform: translateY(-1px); }
-.nav-sync-btn:hover { color: #fff; background: rgba(59,130,246,0.10); border-color: #3b82f6; }
+.nav-sync-btn:hover { color: var(--text-primary); background: var(--accent-soft); border-color: var(--accent); }
 .nav-sync-btn:active { transform: translateY(1px); }
 
 
-/* Filter button group (Summary + Heatmap) */
+/* Filter chip (canonical) — neutral-white active state. Used by
+   Summary, Heatmap, archived Summary, anywhere a year/type/preset
+   toggle row appears. Heatmap boosts specificity with `#filter-bar
+   .filter-btn` for its in-bar version. */
 .filter-btn {
-  font-size: 0.78rem;
-  padding: 4px 12px;
-  border-radius: 4px;
-  border: 1px solid #2a2d35;
-  background: #1a1d23;
-  color: #ccc;
+  padding: 4px 10px;
+  font-size: 10px;
+  font-family: var(--font-mono);
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  background: var(--surface-tint);
+  border: 1px solid var(--border-hair);
+  border-radius: 3px;
   cursor: pointer;
-  font-family: inherit;
-  transition: all 0.12s;
+  transition: color 0.12s, background 0.12s, border-color 0.12s;
 }
-.filter-btn:hover { border-color: #aaa; color: #fff; }
-.filter-btn.active { background: #1a2a3a; color: #3b82f6; border-color: #3b82f6; }
+.filter-btn:hover:not(.active) { color: var(--text-secondary); }
+.filter-btn.active {
+  color: var(--text-primary);
+  background: rgba(255,255,255,0.10);
+  border-color: rgba(255,255,255,0.18);
+}
 
+
+/* Canonical page H1 — sits inside <main> right after the global <header>.
+   Most templates inline this; .page-title is the shared shortcut. */
+.page-title {
+  font-size: 1.4rem;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+/* Native <select> chevron is OS-specific and looks alien against the
+   site's hairline-bordered inputs. Strip it, draw our own via background
+   SVG. Inputs that opt into this should add the .styled-select class
+   (or pages can apply it to their region/year/sort dropdowns). */
+.styled-select {
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  background-color: transparent;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12' fill='none' stroke='rgba(255,255,255,0.5)' stroke-width='1.5'><path d='M3 5l3 3 3-3'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  background-size: 12px 12px;
+  padding-right: 26px;
+}
+.styled-select::-ms-expand { display: none; }
 
 /* Sub-navigation tabs — sits inside a page that has its own sibling pages
    sharing a top-level nav entry (e.g. Trails ⇄ Routes). Anchored beneath

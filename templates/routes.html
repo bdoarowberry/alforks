@@ -1,8 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  {% include '_head.html' %}
   <title>AlForks – Trails &amp; Routes</title>
   <script src="/static/utils.js"></script>
   <script src="/static/sync_toast.js" defer></script>
@@ -10,11 +9,11 @@
   <link rel="stylesheet" href="/static/base.css">
   <style>
     body { display: flex; flex-direction: column; min-height: 100vh; }
-    main { padding: 18px 22px 32px; max-width: 1480px; margin: 0 auto; width: 100%; }
+    main { padding: 18px 22px 32px; max-width: 1680px; margin: 0 auto; width: 100%; }
     .num, .num * { font-variant-numeric: tabular-nums; }
 
-    h1.page-title { font-size: 1.4rem; font-weight: 500; letter-spacing: -0.02em; color: var(--text-primary); margin: 0 0 6px; }
-    .page-sub { font-size: 0.78rem; color: var(--text-tertiary); margin: 0 0 18px; }
+    /* H1 uses the canonical .page-title from base.css. */
+    .page-sub { font-size: 0.78rem; color: var(--text-tertiary); margin: 6px 0 18px; }
 
     /* Action bar — region filter + new route + rescan-all */
     #actions {
@@ -33,9 +32,7 @@
       font-size: 0.78rem; cursor: pointer; transition: all 0.12s;
       font-family: var(--font-sans); text-decoration: none; display: inline-block;
     }
-    .btn:hover  { border-color: var(--accent); color: #fff; }
-    .btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-    .btn-primary:hover { background: #2563eb; }
+    .btn:hover  { border-color: var(--accent); color: var(--text-primary); }
     .btn:disabled { opacity: 0.5; cursor: wait; }
     .btn-mono {
       font-family: var(--font-mono); font-size: 0.7rem;
@@ -60,8 +57,8 @@
     .routes-table tbody tr { transition: background 0.08s; }
     .routes-table tbody tr:hover td { background: rgba(255,255,255,0.04); }
     .routes-table tbody tr:last-child td { border-bottom: none; }
-    .route-name { color: #93c5fd; cursor: pointer; }
-    .route-name:hover { color: #bfdbfe; text-decoration: underline; }
+    .route-name { color: var(--link); cursor: pointer; }
+    .route-name:hover { color: var(--link-hover); text-decoration: underline; }
     .region-pill {
       display: inline-block; padding: 1px 7px; border-radius: 2px;
       font-size: 0.65rem; font-family: var(--font-mono);
@@ -78,8 +75,8 @@
       font-size: 0.7rem; padding: 3px 8px; cursor: pointer; transition: all 0.12s;
       font-family: var(--font-sans); text-decoration: none; display: inline-block;
     }
-    .row-actions a:hover, .row-actions button:hover { color: #fff; border-color: var(--accent); }
-    .row-actions .del:hover { color: #ef4444; border-color: #ef4444; }
+    .row-actions a:hover, .row-actions button:hover { color: var(--text-primary); border-color: var(--accent); }
+    .row-actions .del:hover { color: var(--danger); border-color: var(--danger); }
 
     .empty {
       padding: 36px 18px; text-align: center; color: var(--text-tertiary);
@@ -96,7 +93,7 @@
       pointer-events: none; z-index: 1000;
     }
     #toast.show  { opacity: 1; }
-    #toast.error { border-color: #ef4444; color: #fecaca; }
+    #toast.error { border-color: var(--danger); color: var(--text-primary); }
   </style>
 </head>
 <body>
@@ -127,12 +124,12 @@
 
   <div id="actions">
     <label for="region-filter" style="font-size:0.7rem;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:0.14em;">Region</label>
-    <select id="region-filter">
+    <select id="region-filter" class="styled-select">
       <option value="">All regions</option>
     </select>
     <div class="spacer"></div>
     <button id="rescan-btn" class="btn btn-mono" title="Re-snap every ride against the latest matcher (background)">Rescan all logs</button>
-    <a href="/routes/edit" class="btn btn-primary">+ New Route</a>
+    <a href="/routes/edit" class="btn btn-mono">+ New Route</a>
   </div>
 
   <div id="list-wrap"></div>
@@ -244,7 +241,7 @@ async function render() {
     wrap.innerHTML = `
       <div class="empty">
         ${note}
-        <div><a class="btn btn-primary empty-cta" href="/routes/edit">+ Build your first route</a></div>
+        <div><a class="btn btn-mono empty-cta" href="/routes/edit">+ Build your first route</a></div>
       </div>`;
     return;
   }

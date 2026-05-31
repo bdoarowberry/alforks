@@ -1,12 +1,8 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  {% include '_head.html' %}
   <title>AlForks – Review</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
@@ -27,7 +23,7 @@
     .rv-tab { background: none; border: none; border-bottom: 2px solid transparent; color: var(--text-secondary); font-size: 0.82rem; font-family: inherit; padding: 10px 16px; cursor: pointer; transition: all 0.12s; display: inline-flex; align-items: center; gap: 8px; }
     .rv-tab:hover { color: var(--text-primary); }
     .rv-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
-    .rv-tab .rv-pill { font-size: 9px; font-family: var(--font-mono); padding: 1px 6px; border-radius: 8px; background: var(--surface-strong, rgba(255,255,255,0.06)); color: var(--text-tertiary); letter-spacing: 0.04em; }
+    .rv-tab .rv-pill { font-size: 9px; font-family: var(--font-mono); padding: 1px 6px; border-radius: 8px; background: var(--surface-tint); color: var(--text-tertiary); letter-spacing: 0.04em; }
     .rv-tab.active .rv-pill { background: var(--accent); color: #0b0d0c; }
 
     .rv-panel { display: none; }
@@ -41,8 +37,8 @@
     /* ── Reusable button ─────────────────────────────────────────────── */
     .r-btn { font-size: 0.65rem; padding: 2px 8px; border-radius: 3px; border: 1px solid var(--border-row); background: transparent; color: var(--text-secondary); cursor: pointer; transition: all 0.12s; font-family: inherit; }
     .r-btn:hover { border-color: #aaa; color: var(--text-primary); }
-    .r-btn.danger { border-color: #ef4444; color: #ef4444; }
-    .r-btn.danger:hover { background: #ef4444; color: #fff; }
+    .r-btn.danger { border-color: var(--danger); color: var(--danger); }
+    .r-btn.danger:hover { background: var(--danger); color: #fff; }
     .r-btn.active { border-color: #facc15; color: #facc15; }
     @keyframes rs-spin { from { transform: rotate(0); } to { transform: rotate(360deg); } }
     .rs-spinner { display: inline-block; animation: rs-spin 0.9s linear infinite; }
@@ -56,13 +52,13 @@
     .dup-row:first-child { border-top: none; }
     .dup-row.excluded { opacity: 0.55; }
     .dup-row.selected { background: rgba(239,68,68,0.06); }
-    .dup-row .dup-cb { width: 16px; height: 16px; cursor: pointer; accent-color: #ef4444; margin: 0; }
+    .dup-row .dup-cb { width: 16px; height: 16px; cursor: pointer; accent-color: var(--danger); margin: 0; }
 
     /* Bulk-action bar — sticks above the duplicate list when ≥1 row is
        selected. Mirrors the danger styling of the per-row Delete button so
        the destructive intent is unambiguous. */
     #dup-bulk-bar { display: none; position: sticky; top: 0; z-index: 10;
-                    background: var(--bg-card); border: 1px solid #ef4444;
+                    background: var(--bg-card); border: 1px solid var(--danger);
                     border-radius: 4px; padding: 8px 14px; margin-bottom: 12px;
                     align-items: center; gap: 14px; max-width: 980px; }
     #dup-bulk-bar.visible { display: flex; }
@@ -76,7 +72,7 @@
     .dup-empty { color: var(--text-muted); font-size: 0.85rem; text-align: center; padding: 32px; }
     .dup-color-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 8px; vertical-align: middle; flex-shrink: 0; }
     .dup-map-toggle { background: transparent; border: 1px solid var(--border-row); color: var(--text-secondary); font-size: 0.7rem; padding: 3px 8px; border-radius: 3px; cursor: pointer; font-family: inherit; }
-    .dup-map-toggle:hover { border-color: #3b82f6; color: #3b82f6; }
+    .dup-map-toggle:hover { border-color: var(--accent); color: var(--accent); }
     .dup-not-dup { background: transparent; border: 1px solid var(--border-row); color: var(--text-secondary); font-size: 0.7rem; padding: 3px 8px; border-radius: 3px; cursor: pointer; font-family: inherit; margin-left: auto; }
     .dup-not-dup:hover { border-color: var(--pos, #4ade80); color: var(--pos, #4ade80); }
     .dup-not-dup:disabled { opacity: 0.5; cursor: not-allowed; }
@@ -84,7 +80,7 @@
     .dup-metrics .m { display: flex; flex-direction: column; min-width: 0; }
     .dup-metrics .m .lbl { font-size: 0.58rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); }
     .dup-metrics .m .val { font-size: 0.78rem; color: var(--text-secondary); font-family: var(--font-mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .dup-metrics .m.outlier .val { color: #f59e0b; }
+    .dup-metrics .m.outlier .val { color: var(--warn); }
     .dup-minimaps { display: none; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 1px; background: var(--border-hair); border-top: 1px solid var(--border-hair); }
     .dup-group.map-open .dup-minimaps { display: grid; }
     .dup-minimap-cell { background: var(--bg-card); display: flex; flex-direction: column; min-width: 0; }
@@ -167,8 +163,8 @@
     .iss-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 3px; }
     .iss-item { display: flex; gap: 8px; align-items: baseline; font-size: 0.78rem; color: var(--text-secondary); }
     .iss-sev-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
-    .iss-item.sev-high .iss-sev-dot { background: #ef4444; }
-    .iss-item.sev-med  .iss-sev-dot { background: #f59e0b; }
+    .iss-item.sev-high .iss-sev-dot { background: var(--danger); }
+    .iss-item.sev-med  .iss-sev-dot { background: var(--warn); }
     .iss-item.sev-low  .iss-sev-dot { background: #9ca3af; }
     .iss-msg { line-height: 1.4; }
     .iss-actions { display: flex; align-items: center; gap: 6px; }

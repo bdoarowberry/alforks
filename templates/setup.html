@@ -1,8 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  {% include '_head.html' %}
   <title>AlForks – Setup</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
   <link rel="stylesheet" href="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.css"/>
@@ -16,40 +15,40 @@
     body { height: 100vh; display: flex; flex-direction: column; }
 
     /* Section tabs */
-    #tab-bar { background: #0e1117; border-bottom: 1px solid #2a2d35; padding: 0 20px; display: flex; flex-shrink: 0; }
-    .tab-btn { background: none; border: none; border-bottom: 2px solid transparent; color: #bbb; font-size: 0.82rem; font-family: inherit; padding: 12px 18px; cursor: pointer; transition: all 0.12s; }
-    .tab-btn:hover { color: #fff; }
-    .tab-btn.active { color: #3b82f6; border-bottom-color: #3b82f6; }
+    #tab-bar { background: var(--bg-card); border-bottom: 1px solid var(--border-hair); padding: 0 22px; display: flex; flex-shrink: 0; }
+    .tab-btn { background: none; border: none; border-bottom: 2px solid transparent; color: var(--text-secondary); font-size: 0.82rem; font-family: inherit; padding: 12px 18px; cursor: pointer; transition: all 0.12s; }
+    .tab-btn:hover { color: var(--text-primary); }
+    .tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
 
     main { flex: 1; overflow: hidden; }
     .tab-panel { display: none; height: 100%; }
     .tab-panel.active { display: flex; }
 
     /* ===== Types panel ===== */
-    #types-panel { flex-direction: column; padding: 24px; overflow-y: auto; }
-    #types-panel h2 { font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.08em; color: #bbb; margin-bottom: 16px; font-weight: 500; }
+    #types-panel { flex-direction: column; padding: 18px 22px 32px; overflow-y: auto; }
+    #types-panel h2 { font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-secondary); margin-bottom: 16px; font-weight: 500; }
 
     #types-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; max-width: 1200px; }
-    .type-card { background: #12151a; border: 1px solid #2a2d35; border-radius: 8px; padding: 14px 16px; display: flex; align-items: center; gap: 12px; }
-    .type-swatch { width: 36px; height: 36px; border-radius: 6px; flex-shrink: 0; cursor: pointer; border: 2px solid transparent; transition: border-color 0.1s; display: flex; align-items: center; justify-content: center; font-weight: 600; font-size: 0.68rem; }
-    .type-swatch:hover { border-color: #3b82f6; }
+    .type-card { background: var(--bg-card); border: 1px solid var(--border-hair); border-radius: 4px; padding: 14px 16px; display: flex; align-items: center; gap: 12px; }
+    .type-swatch { width: 36px; height: 36px; border-radius: 4px; flex-shrink: 0; cursor: pointer; border: 2px solid transparent; transition: border-color 0.1s; display: flex; align-items: center; justify-content: center; font-weight: 600; font-size: 0.68rem; }
+    .type-swatch:hover { border-color: var(--accent); }
     .type-info { flex: 1; min-width: 0; }
-    .type-label-input { background: transparent; border: none; border-bottom: 1px solid transparent; color: #e0e0e0; font-size: 0.9rem; font-weight: 500; font-family: inherit; padding: 2px 4px; width: 100%; transition: border-color 0.1s; }
-    .type-label-input:focus { outline: none; border-bottom-color: #3b82f6; }
+    .type-label-input { background: transparent; border: none; border-bottom: 1px solid transparent; color: var(--text-primary); font-size: 0.9rem; font-weight: 500; font-family: inherit; padding: 2px 4px; width: 100%; transition: border-color 0.1s; }
+    .type-label-input:focus { outline: none; border-bottom-color: var(--accent); }
     .type-actions { display: flex; gap: 6px; }
-    .t-btn { font-size: 0.65rem; padding: 3px 9px; border-radius: 3px; border: 1px solid #2a2d35; background: #1a1d23; color: #ccc; cursor: pointer; transition: all 0.12s; }
-    .t-btn:hover { border-color: #aaa; color: #fff; }
-    .t-btn.danger { border-color: #ef4444; color: #ef4444; }
-    .t-btn.danger:hover { background: #ef4444; color: #fff; }
+    .t-btn { font-size: 0.65rem; padding: 3px 9px; border-radius: 3px; border: 1px solid var(--border-row); background: transparent; color: var(--text-secondary); cursor: pointer; transition: all 0.12s; }
+    .t-btn:hover { border-color: var(--accent); color: var(--text-primary); }
+    .t-btn.danger { border-color: var(--danger); color: var(--danger); }
+    .t-btn.danger:hover { background: var(--danger); color: var(--text-primary); }
 
     #types-add { margin-top: 20px; display: flex; gap: 8px; align-items: center; max-width: 600px; }
-    #new-type-input { flex: 1; background: #1a1d23; border: 1px solid #2a2d35; border-radius: 4px; color: #e0e0e0; font-size: 0.85rem; padding: 8px 10px; font-family: inherit; }
-    #new-type-input:focus { outline: none; border-color: #3b82f6; }
-    #add-type-btn { padding: 8px 16px; border-radius: 4px; border: 1px solid #3b82f6; background: #1a2a3a; color: #3b82f6; font-size: 0.82rem; cursor: pointer; transition: all 0.12s; }
-    #add-type-btn:hover { background: #3b82f6; color: #fff; }
+    #new-type-input { flex: 1; background: transparent; border: 1px solid var(--border-row); border-radius: 3px; color: var(--text-secondary); font-size: 0.78rem; padding: 5px 8px; font-family: inherit; }
+    #new-type-input:focus { outline: none; border-color: var(--accent); }
+    #add-type-btn { padding: 8px 16px; border-radius: 3px; border: 1px solid var(--accent); background: var(--accent-soft); color: var(--accent); font-size: 0.82rem; cursor: pointer; transition: all 0.12s; }
+    #add-type-btn:hover { background: var(--accent); color: var(--text-primary); }
 
     /* Colour picker popover */
-    #color-popover { position: fixed; background: #12151a; border: 1px solid #2a2d35; border-radius: 6px; padding: 12px; z-index: 10000; display: none; box-shadow: 0 4px 16px rgba(0,0,0,0.5); min-width: 200px; }
+    #color-popover { position: fixed; background: var(--bg-card); border: 1px solid var(--border-hair); border-radius: 4px; padding: 12px; z-index: 10000; display: none; box-shadow: 0 4px 16px rgba(0,0,0,0.5); min-width: 200px; }
     #color-popover.visible { display: block; }
     #color-popover .swatch-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; }
     /* Edit-popover row — acronym field on top, colour swatches below.
@@ -60,255 +59,213 @@
     #color-popover #cp-glyph { background: transparent; border: 1px solid var(--border-row); border-radius: 3px; color: var(--text-primary); font-size: 0.95rem; font-family: var(--font-mono); font-weight: 600; letter-spacing: 0.08em; padding: 6px 10px; width: 100%; text-align: center; text-transform: uppercase; transition: border-color 0.1s; }
     #color-popover #cp-glyph:focus { outline: none; border-color: var(--accent); }
     .color-pick { width: 24px; height: 24px; border-radius: 50%; cursor: pointer; border: 2px solid transparent; }
-    .color-pick:hover { border-color: #fff; }
+    .color-pick:hover { border-color: var(--text-primary); }
 
     /* ===== Regions panel ===== */
     #regions-panel { }
-    #regions-sidebar { width: 280px; background: #12151a; border-right: 1px solid #2a2d35; display: flex; flex-direction: column; flex-shrink: 0; overflow: hidden; position: relative; }
+    #regions-sidebar { width: 280px; background: var(--bg-card); border-right: 1px solid var(--border-hair); display: flex; flex-direction: column; flex-shrink: 0; overflow: hidden; position: relative; }
 
     /* Generic section wrapper used by Current Regions / Add Region / Regionless Tracks */
     .rs-section { display: flex; flex-direction: column; min-height: 0; flex: 1 1 0; }
     .rs-section.collapsed { flex: 0 0 auto; }
     .rs-section.collapsed .rs-section-body { display: none; }
-    .rs-section-header { padding: 10px 16px; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em; color: #ccc; border-bottom: 1px solid #2a2d35; background: #0e1117; display: flex; align-items: center; gap: 8px; flex-shrink: 0; cursor: pointer; user-select: none; }
-    .rs-section-header:hover { color: #fff; }
+    .rs-section-header { padding: 10px 16px; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-secondary); border-bottom: 1px solid var(--border-hair); background: var(--bg-card); display: flex; align-items: center; gap: 8px; flex-shrink: 0; cursor: pointer; user-select: none; }
+    .rs-section-header:hover { color: var(--text-primary); }
     .rs-section-title { flex: 1; }
-    .rs-count { color: #888; font-family: ui-monospace, monospace; font-size: 0.7rem; }
-    .rs-section-toggle { color: #888; font-size: 0.7rem; transition: transform 0.15s; display: inline-block; }
+    .rs-count { color: var(--text-tertiary); font-family: var(--font-mono); font-size: 0.7rem; }
+    .rs-section-toggle { color: var(--text-tertiary); font-size: 0.7rem; transition: transform 0.15s; display: inline-block; }
     .rs-section.collapsed .rs-section-toggle { transform: rotate(-90deg); }
     /* Draggable divider between sections — transfers space between the two adjacent sections */
-    .rs-divider { height: 6px; flex-shrink: 0; cursor: ns-resize; background: transparent; border-top: 1px solid #2a2d35; transition: background 0.12s; }
-    .rs-divider:hover, .rs-divider.dragging { background: #3b82f6; }
+    .rs-divider { height: 6px; flex-shrink: 0; cursor: ns-resize; background: transparent; border-top: 1px solid var(--border-hair); transition: background 0.12s; }
+    .rs-divider:hover, .rs-divider.dragging { background: var(--accent); }
     .rs-section-body { display: flex; flex-direction: column; min-height: 0; flex: 1; overflow: hidden; }
     #add-region-section .rs-section-body { overflow-y: auto; }
-    .rs-padded { padding: 8px 12px; border-bottom: 1px solid #1e2128; }
-    .rs-padded > input[type=text] { width: 100%; background: #1a1d23; border: 1px solid #2a2d35; border-radius: 4px; color: #e0e0e0; font-size: 0.78rem; padding: 5px 8px; font-family: inherit; box-sizing: border-box; }
-    .rs-padded > input[type=text]:focus { outline: none; border-color: #3b82f6; }
-    .rs-or { font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.07em; color: #666; text-align: center; margin: 10px 0 8px; }
+    .rs-padded { padding: 8px 12px; border-bottom: 1px solid var(--border-row); }
+    .rs-padded > input[type=text] { width: 100%; background: transparent; border: 1px solid var(--border-row); border-radius: 3px; color: var(--text-secondary); font-size: 0.78rem; padding: 5px 8px; font-family: inherit; box-sizing: border-box; }
+    .rs-padded > input[type=text]:focus { outline: none; border-color: var(--accent); }
+    .rs-or { font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.07em; color: var(--text-muted); text-align: center; margin: 10px 0 8px; }
 
-    .rs-primary-btn { width: 100%; padding: 7px; border-radius: 4px; border: 1px solid #3b82f6; background: #1a2a3a; color: #3b82f6; font-size: 0.78rem; cursor: pointer; transition: all 0.12s; font-family: inherit; }
-    .rs-primary-btn:hover, .rs-primary-btn.active { background: #3b82f6; color: #fff; }
+    .rs-primary-btn { width: 100%; padding: 7px; border-radius: 3px; border: 1px solid var(--accent); background: var(--accent-soft); color: var(--accent); font-size: 0.78rem; cursor: pointer; transition: all 0.12s; font-family: inherit; }
+    .rs-primary-btn:hover, .rs-primary-btn.active { background: var(--accent); color: var(--text-primary); }
 
     /* During add/edit, the edit card takes over the full sidebar */
     #regions-sidebar.editing-active > .rs-section { display: none; }
     #regions-sidebar.editing-active > #edit-region-card { display: flex; flex-direction: column; flex: 1; max-height: none; border-top: none; }
 
-    #draw-instructions { margin-top: 8px; padding: 10px 12px; font-size: 0.75rem; color: #bbb; line-height: 1.5; display: none; background: #0a0d12; border: 1px solid #2a2d35; border-radius: 4px; }
+    #draw-instructions { margin-top: 8px; padding: 10px 12px; font-size: 0.75rem; color: var(--text-secondary); line-height: 1.5; display: none; background: var(--bg-page); border: 1px solid var(--border-hair); border-radius: 4px; }
     #draw-instructions.visible { display: block; }
     #region-list { flex: 1; overflow-y: auto; min-height: 0; }
-    .region-item { padding: 10px 16px; border-bottom: 1px solid #1e2128; cursor: pointer; transition: background 0.1s; }
-    .region-item:hover { background: #1e2128; }
+    .region-item { padding: 10px 16px; border-bottom: 1px solid var(--border-row); cursor: pointer; transition: background 0.1s; }
+    .region-item:hover { background: var(--surface-tint); }
     .region-color { width: 12px; height: 12px; border-radius: 50%; display: inline-block; margin-right: 8px; flex-shrink: 0; }
     .region-name-row { display: flex; align-items: center; margin-bottom: 4px; }
-    .region-name { font-size: 0.85rem; color: #e0e0e0; font-weight: 500; flex: 1; }
-    .region-source-badge { font-size: 0.55rem; font-weight: 700; letter-spacing: 0.04em; color: #60a5fa; background: #1a2a3a; border: 1px solid #2a3a55; border-radius: 3px; padding: 1px 5px; margin-left: 6px; flex-shrink: 0; }
+    .region-name { font-size: 0.85rem; color: var(--text-secondary); font-weight: 500; flex: 1; }
+    .region-source-badge { font-size: 0.55rem; font-weight: 700; letter-spacing: 0.04em; color: var(--link); background: var(--accent-soft); border: 1px solid var(--accent); border-radius: 3px; padding: 1px 5px; margin-left: 6px; flex-shrink: 0; }
     /* OSM search row: input + 3 compact icon buttons */
     .osm-search-row { display: flex; gap: 4px; align-items: center; }
-    .osm-search-row input { flex: 1; min-width: 0; background: #1a1d23; border: 1px solid #2a2d35; border-radius: 4px; color: #e0e0e0; font-size: 0.78rem; padding: 5px 8px; font-family: inherit; }
-    .osm-search-row input:focus { outline: none; border-color: #3b82f6; }
-    .osm-search-row button { width: 26px; height: 26px; padding: 0; border-radius: 4px; border: 1px solid #2a2d35; background: #1a1d23; color: #888; font-size: 0.82rem; line-height: 1; cursor: pointer; font-family: inherit; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
+    .osm-search-row input { flex: 1; min-width: 0; background: transparent; border: 1px solid var(--border-row); border-radius: 3px; color: var(--text-secondary); font-size: 0.78rem; padding: 5px 8px; font-family: inherit; }
+    .osm-search-row input:focus { outline: none; border-color: var(--accent); }
+    .osm-search-row button { width: 26px; height: 26px; padding: 0; border-radius: 3px; border: 1px solid var(--border-row); background: transparent; color: var(--text-muted); font-size: 0.82rem; line-height: 1; cursor: pointer; font-family: inherit; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; transition: all 0.12s; }
+    .osm-search-row button:hover { border-color: var(--accent); color: var(--text-primary); }
     /* #region-search-btn used to have a blue-accent treatment; it now
        inherits the generic .osm-search-row button style so it reads
        consistently with its siblings (clear, filters-toggle). */
-    #region-search-clear:hover { color: #ef4444; border-color: #ef4444; }
-    #osm-filters-toggle:hover { color: #ccc; border-color: #3b82f6; }
-    .osm-deny-chip { font-size: 0.7rem; padding: 2px 4px 2px 8px; border-radius: 3px; background: #1a1d23; border: 1px solid #2a2d35; color: #ccc; display: inline-flex; align-items: center; gap: 4px; }
-    .osm-deny-chip button { background: transparent; border: none; color: #666; cursor: pointer; padding: 0 4px; font-size: 0.85rem; line-height: 1; }
-    .osm-deny-chip button:hover { color: #ef4444; }
+    #region-search-clear:hover { color: var(--danger); border-color: var(--danger); }
+    #osm-filters-toggle:hover { color: var(--text-secondary); border-color: var(--accent); }
+    .osm-deny-chip { font-size: 0.7rem; padding: 2px 4px 2px 8px; border-radius: 3px; background: var(--surface-tint); border: 1px solid var(--border-hair); color: var(--text-secondary); display: inline-flex; align-items: center; gap: 4px; }
+    .osm-deny-chip button { background: transparent; border: none; color: var(--text-muted); cursor: pointer; padding: 0 4px; font-size: 0.85rem; line-height: 1; }
+    .osm-deny-chip button:hover { color: var(--danger); }
+    /* OSM filters body (exclusions panel) */
+    .osm-filters-body { margin-top: 8px; padding: 8px 10px; background: var(--bg-page); border: 1px solid var(--border-hair); border-radius: 4px; }
+    .osm-filters-label { font-size: 0.68rem; color: var(--text-muted); margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.06em; }
+    .osm-filters-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px; }
+    .osm-filters-add { display: flex; gap: 4px; }
+    .osm-filters-add input { flex: 1; background: transparent; border: 1px solid var(--border-row); border-radius: 3px; color: var(--text-secondary); font-size: 0.74rem; padding: 4px 6px; font-family: inherit; }
+    .osm-filters-add input:focus { outline: none; border-color: var(--accent); }
+    /* OSM search results */
+    .osm-result-card { padding: 6px 8px; border: 1px solid var(--border-row); border-radius: 3px; margin-bottom: 4px; background: var(--bg-card); }
+    .osm-result-name { font-size: 0.74rem; color: var(--text-secondary); line-height: 1.3; }
+    .osm-result-type { font-size: 0.62rem; color: var(--text-muted); margin: 2px 0 6px; }
+    .osm-result-actions { display: flex; gap: 6px; }
+    .osm-result-use { border-color: var(--accent); color: var(--accent); }
     .region-default-icon { width: 16px; height: 16px; margin-left: 6px; flex-shrink: 0; }
     .region-default-icon::before { content: ''; display: block; width: 100%; height: 100%; background-color: currentColor; -webkit-mask: var(--icon-url) center / contain no-repeat; mask: var(--icon-url) center / contain no-repeat; }
     .region-actions { display: flex; gap: 6px; margin-top: 6px; }
-    .r-btn { font-size: 0.65rem; padding: 2px 8px; border-radius: 3px; border: 1px solid #2a2d35; background: #1a1d23; color: #ccc; cursor: pointer; transition: all 0.12s; }
-    .r-btn:hover { border-color: #aaa; color: #fff; }
-    .r-btn.danger { border-color: #ef4444; color: #ef4444; }
-    .r-btn.danger:hover { background: #ef4444; color: #fff; }
-    #edit-region-card { border-top: 1px solid #2a2d35; padding: 12px 16px; background: #0e1117; flex-shrink: 0; display: none; position: relative; max-height: 50vh; overflow-y: auto; }
-    #region-edit-close:hover { color: #fff; }
+    .r-btn { font-size: 0.65rem; padding: 2px 8px; border-radius: 3px; border: 1px solid var(--border-row); background: transparent; color: var(--text-secondary); cursor: pointer; transition: all 0.12s; }
+    .r-btn:hover { border-color: var(--accent); color: var(--text-primary); }
+    .r-btn.danger { border-color: var(--danger); color: var(--danger); }
+    .r-btn.danger:hover { background: var(--danger); color: var(--text-primary); }
+    #edit-region-card { border-top: 1px solid var(--border-hair); padding: 12px 16px; background: var(--bg-card); flex-shrink: 0; display: none; position: relative; max-height: 50vh; overflow-y: auto; }
+    #region-edit-close { position: absolute; top: 8px; right: 10px; background: transparent; border: none; color: var(--text-muted); font-size: 1rem; cursor: pointer; padding: 2px 6px; line-height: 1; }
+    #region-edit-close:hover { color: var(--text-primary); }
     #edit-region-card.visible { display: block; }
-    #edit-region-card h3 { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.08em; color: #bbb; margin-bottom: 10px; }
+    #edit-region-card h3 { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-secondary); margin-bottom: 10px; }
     .rfield { margin-bottom: 10px; }
-    .rfield label { display: block; font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.07em; color: #bbb; margin-bottom: 4px; }
-    .rfield input { width: 100%; background: #1a1d23; border: 1px solid #2a2d35; border-radius: 4px; color: #e0e0e0; font-size: 0.82rem; padding: 5px 8px; font-family: inherit; }
-    .rfield input:focus { outline: none; border-color: #3b82f6; }
+    .rfield label { display: block; font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.07em; color: var(--text-secondary); margin-bottom: 4px; }
+    .rfield input[type=text], .rfield input[type=number] { width: 100%; background: transparent; border: 1px solid var(--border-row); border-radius: 3px; color: var(--text-secondary); font-size: 0.82rem; padding: 5px 8px; font-family: inherit; box-sizing: border-box; }
+    .rfield input[type=text]:focus, .rfield input[type=number]:focus { outline: none; border-color: var(--accent); }
+    /* Type-select drop-downs in the region edit card */
+    .rfield select { width: 100%; border: 1px solid var(--border-row); border-radius: 3px; color: var(--text-secondary); font-size: 0.82rem; padding: 5px 8px; font-family: inherit; }
+    .rfield select:focus { outline: none; border-color: var(--accent); }
+    .rfield-hint { font-size: 0.65rem; color: var(--text-muted); margin-top: 3px; }
+    /* Winter-months micro inputs */
+    .winter-months-row { display: flex; gap: 6px; align-items: center; margin-top: 6px; font-size: 0.72rem; color: var(--text-secondary); }
+    .winter-months-row input { width: 55px; background: transparent; border: 1px solid var(--border-row); border-radius: 3px; color: var(--text-secondary); font-size: 0.78rem; padding: 3px 6px; font-family: var(--font-mono); box-sizing: border-box; }
+    .winter-months-row input:focus { outline: none; border-color: var(--accent); }
+    .winter-months-row .hint { color: var(--text-muted); }
+    /* Assisted-region checkbox row */
+    .assisted-label { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+    .assisted-label input[type=checkbox] { width: 14px; height: 14px; cursor: pointer; accent-color: var(--warn); margin: 0; }
     .color-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
     .color-swatch { width: 22px; height: 22px; border-radius: 50%; cursor: pointer; border: 2px solid transparent; transition: border-color 0.1s; }
-    .color-swatch.selected { border-color: #fff; }
-    #save-region-btn { width: 100%; padding: 6px; background: #1a2a3a; border: 1px solid #3b82f6; border-radius: 4px; color: #3b82f6; font-size: 0.78rem; cursor: pointer; transition: all 0.12s; }
-    #save-region-btn:hover { background: #3b82f6; color: #fff; }
-    #region-save-confirm { font-size: 0.7rem; color: #22c55e; text-align: center; margin-top: 6px; height: 14px; }
-    #no-regions { padding: 20px 16px; color: #666; font-size: 0.82rem; text-align: center; line-height: 1.6; }
+    .color-swatch.selected { border-color: var(--text-primary); }
+    #save-region-btn { width: 100%; padding: 6px; background: var(--accent-soft); border: 1px solid var(--accent); border-radius: 3px; color: var(--accent); font-size: 0.78rem; cursor: pointer; transition: all 0.12s; }
+    #save-region-btn:hover { background: var(--accent); color: var(--text-primary); }
+    #region-save-confirm { font-size: 0.7rem; color: var(--success); text-align: center; margin-top: 6px; height: 14px; }
+    #no-regions { padding: 20px 16px; color: var(--text-muted); font-size: 0.82rem; text-align: center; line-height: 1.6; }
     #map { flex: 1; }
 
     /* Regionless Tracks block */
-    #untagged-block { background: #0f1216; }
-    #untagged-controls { padding: 8px 12px; border-bottom: 1px solid #1e2128; display: flex; align-items: center; gap: 10px; font-size: 0.74rem; color: #ccc; flex-shrink: 0; }
+    #untagged-block { background: var(--bg-card); }
+    #untagged-controls { padding: 8px 12px; border-bottom: 1px solid var(--border-row); display: flex; align-items: center; gap: 10px; font-size: 0.74rem; color: var(--text-secondary); flex-shrink: 0; }
     #untagged-controls label { display: flex; align-items: center; gap: 5px; cursor: pointer; flex: 1; }
     #untagged-list { flex: 1; min-height: 0; overflow-y: auto; }
+    .untagged-empty { padding: 14px 16px; color: var(--text-muted); font-size: 0.78rem; text-align: center; }
     .rs-spinner { display: inline-block; animation: rs-spin 0.9s linear infinite; }
     @keyframes rs-spin { to { transform: rotate(360deg); } }
 
     /* ===== Duplicates panel ===== */
-    .dup-group { background: #12151a; border: 1px solid #2a2d35; border-radius: 8px; margin-bottom: 12px; max-width: 980px; overflow: hidden; }
-    .dup-group-header { padding: 8px 14px; background: #0e1117; border-bottom: 1px solid #2a2d35; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.07em; color: #ccc; display: flex; align-items: baseline; gap: 10px; }
-    .dup-group-header .dup-date { font-family: ui-monospace, monospace; color: #fff; }
-    .dup-group-header .dup-count { color: #888; }
-    .dup-row { padding: 10px 14px; border-top: 1px solid #1e2128; display: grid; grid-template-columns: 1fr auto auto auto auto; gap: 12px; align-items: center; }
+    .dup-group { background: var(--bg-card); border: 1px solid var(--border-hair); border-radius: 4px; margin-bottom: 12px; max-width: 980px; overflow: hidden; }
+    .dup-group-header { padding: 8px 14px; background: var(--bg-card); border-bottom: 1px solid var(--border-hair); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.07em; color: var(--text-secondary); display: flex; align-items: baseline; gap: 10px; }
+    .dup-group-header .dup-date { font-family: var(--font-mono); color: var(--text-primary); }
+    .dup-group-header .dup-count { color: var(--text-tertiary); }
+    .dup-row { padding: 10px 14px; border-top: 1px solid var(--border-row); display: grid; grid-template-columns: 1fr auto auto auto auto; gap: 12px; align-items: center; }
     .dup-row:first-child { border-top: none; }
     .dup-row.excluded { opacity: 0.55; }
-    .dup-row .dup-name { font-size: 0.86rem; color: #e0e0e0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .dup-row .dup-meta { font-size: 0.7rem; color: #888; font-family: ui-monospace, monospace; white-space: nowrap; }
-    .dup-row .dup-filename { font-size: 0.66rem; color: #666; font-family: ui-monospace, monospace; margin-top: 2px; }
+    .dup-row .dup-name { font-size: 0.86rem; color: var(--text-secondary); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .dup-row .dup-meta { font-size: 0.7rem; color: var(--text-tertiary); font-family: var(--font-mono); white-space: nowrap; font-variant-numeric: tabular-nums; }
+    .dup-row .dup-filename { font-size: 0.66rem; color: var(--text-muted); font-family: var(--font-mono); margin-top: 2px; }
     .dup-row .dup-actions { display: flex; gap: 6px; }
-    .dup-row .r-btn.active { border-color: #facc15; color: #facc15; }
-    .dup-empty { color: #666; font-size: 0.85rem; text-align: center; padding: 32px; }
+    .dup-row .r-btn.active { border-color: var(--warn); color: var(--warn); }
+    .dup-empty { color: var(--text-muted); font-size: 0.85rem; text-align: center; padding: 32px; }
 
     /* ===== Odd Times panel ===== */
-    .odd-row { background: #12151a; border: 1px solid #2a2d35; border-radius: 6px; margin-bottom: 6px; max-width: 980px;
+    .odd-row { background: var(--bg-card); border: 1px solid var(--border-hair); border-radius: 4px; margin-bottom: 6px; max-width: 980px;
                padding: 10px 14px; display: grid; grid-template-columns: 100px 90px 1fr auto auto; gap: 14px; align-items: center; }
-    .odd-row .odd-date { font-family: ui-monospace, monospace; font-size: 0.76rem; color: #ccc; }
-    .odd-row .odd-time { font-family: ui-monospace, monospace; font-size: 0.86rem; color: #facc15; font-weight: 500; }
-    .odd-row .odd-name { font-size: 0.82rem; color: #e0e0e0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .odd-row .odd-meta { font-size: 0.7rem; color: #888; font-family: ui-monospace, monospace; white-space: nowrap; }
-    .odd-row .odd-tz   { font-size: 0.66rem; color: #666; font-family: ui-monospace, monospace; white-space: nowrap; }
+    .odd-row .odd-date { font-family: var(--font-mono); font-size: 0.76rem; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+    .odd-row .odd-time { font-family: var(--font-mono); font-size: 0.86rem; color: var(--warn); font-weight: 500; font-variant-numeric: tabular-nums; }
+    .odd-row .odd-name { font-size: 0.82rem; color: var(--text-secondary); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .odd-row .odd-meta { font-size: 0.7rem; color: var(--text-tertiary); font-family: var(--font-mono); white-space: nowrap; font-variant-numeric: tabular-nums; }
+    .odd-row .odd-tz   { font-size: 0.66rem; color: var(--text-muted); font-family: var(--font-mono); white-space: nowrap; }
     .dup-color-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 8px; vertical-align: middle; flex-shrink: 0; }
-    .dup-map-toggle { background: none; border: 1px solid #2a2d35; color: #ccc; font-size: 0.7rem; padding: 3px 8px; border-radius: 3px; cursor: pointer; font-family: inherit; margin-left: auto; }
-    .dup-map-toggle:hover { border-color: #3b82f6; color: #3b82f6; }
+    .dup-map-toggle { background: transparent; border: 1px solid var(--border-row); color: var(--text-secondary); font-size: 0.7rem; padding: 3px 8px; border-radius: 3px; cursor: pointer; font-family: inherit; margin-left: auto; transition: all 0.12s; }
+    .dup-map-toggle:hover { border-color: var(--accent); color: var(--accent); }
 
     /* Per-track metric block — duplicated above each mini-map */
-    .dup-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(70px, 1fr)); gap: 4px 12px; padding: 6px 10px; background: #0e1117; border-bottom: 1px solid #1e2128; }
+    .dup-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(70px, 1fr)); gap: 4px 12px; padding: 6px 10px; background: var(--bg-card); border-bottom: 1px solid var(--border-row); }
     .dup-metrics .m { display: flex; flex-direction: column; min-width: 0; }
-    .dup-metrics .m .lbl { font-size: 0.58rem; text-transform: uppercase; letter-spacing: 0.06em; color: #777; }
-    .dup-metrics .m .val { font-size: 0.78rem; color: #e0e0e0; font-family: ui-monospace, monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .dup-metrics .m.outlier .val { color: #f59e0b; }
+    .dup-metrics .m .lbl { font-size: 0.58rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); }
+    .dup-metrics .m .val { font-size: 0.78rem; color: var(--text-secondary); font-family: var(--font-mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
+    .dup-metrics .m.outlier .val { color: var(--warn); }
 
     /* Side-by-side mini-maps (one per track in the group) */
-    .dup-minimaps { display: none; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 1px; background: #2a2d35; border-top: 1px solid #2a2d35; }
+    .dup-minimaps { display: none; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 1px; background: var(--border-hair); border-top: 1px solid var(--border-hair); }
     .dup-group.map-open .dup-minimaps { display: grid; }
-    .dup-minimap-cell { background: #12151a; display: flex; flex-direction: column; min-width: 0; }
-    .dup-minimap-head { padding: 8px 10px; display: flex; align-items: center; gap: 8px; min-width: 0; border-bottom: 1px solid #1e2128; }
-    .dup-minimap-head .name { font-size: 0.78rem; color: #e0e0e0; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .dup-minimap-map { height: 200px; width: 100%; background: #1a1d23; }
-    .untagged-item { padding: 6px 12px; border-bottom: 1px solid #1e2128; cursor: pointer; display: flex; align-items: center; gap: 8px; }
-    .untagged-item:hover, .untagged-item.active { background: #1e2128; }
-    .untagged-item .ut-date { font-family: ui-monospace, monospace; font-size: 0.66rem; color: #888; min-width: 64px; flex-shrink: 0; }
-    .untagged-item .ut-name { font-size: 0.78rem; color: #ddd; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .untagged-item.active .ut-name { color: #fff; }
+    .dup-minimap-cell { background: var(--bg-card); display: flex; flex-direction: column; min-width: 0; }
+    .dup-minimap-head { padding: 8px 10px; display: flex; align-items: center; gap: 8px; min-width: 0; border-bottom: 1px solid var(--border-row); }
+    .dup-minimap-head .name { font-size: 0.78rem; color: var(--text-secondary); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .dup-minimap-map { height: 200px; width: 100%; background: var(--bg-map); }
+    .untagged-item { padding: 6px 12px; border-bottom: 1px solid var(--border-row); cursor: pointer; display: flex; align-items: center; gap: 8px; }
+    .untagged-item:hover, .untagged-item.active { background: var(--surface-tint); }
+    .untagged-item .ut-date { font-family: var(--font-mono); font-size: 0.66rem; color: var(--text-tertiary); min-width: 64px; flex-shrink: 0; font-variant-numeric: tabular-nums; }
+    .untagged-item .ut-name { font-size: 0.78rem; color: var(--text-secondary); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .untagged-item.active .ut-name { color: var(--text-primary); }
 
     /* Delete button row in edit card */
     .region-edit-actions { display: flex; gap: 8px; }
     #save-region-btn { flex: 1; }
-    #delete-region-btn { padding: 6px 10px; border-radius: 4px; border: 1px solid #ef4444; background: transparent; color: #ef4444; font-size: 0.72rem; cursor: pointer; transition: all 0.12s; font-family: inherit; }
-    #delete-region-btn:hover { background: #ef4444; color: #fff; }
-    #region-edit-hint { font-size: 0.68rem; color: #888; margin-top: 4px; line-height: 1.4; }
+    #delete-region-btn { padding: 6px 10px; border-radius: 3px; border: 1px solid var(--danger); background: transparent; color: var(--danger); font-size: 0.72rem; cursor: pointer; transition: all 0.12s; font-family: inherit; }
+    #delete-region-btn:hover { background: var(--danger); color: var(--text-primary); }
+    #region-edit-hint { font-size: 0.68rem; color: var(--text-tertiary); margin-top: 4px; line-height: 1.4; }
 
-    /* ── Canonical panel / control treatments ───────────────────────
-       These supersede many of the literal-hex rules above (the
-       originals are preserved for now to keep the diff small; they
-       can be culled in a follow-up pass). Source order means these
-       rules win. */
+    /* ===== Sync panel ===== */
+    .sync-grid { display: flex; gap: 14px; max-width: 920px; margin-bottom: 18px; flex-wrap: wrap; }
+    .sync-card { flex: 1 1 280px; background: var(--bg-card); border: 1px solid var(--border-hair); border-radius: 4px; padding: 16px 18px; display: flex; flex-direction: column; gap: 8px; }
+    .sync-head { display: flex; align-items: center; justify-content: space-between; }
+    .sync-name { font-size: 1rem; color: var(--text-primary); font-weight: 500; }
+    .sync-state { font-size: 0.7rem; padding: 2px 8px; border-radius: 10px; background: var(--surface-tint); color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.06em; }
+    .sync-state.idle    { color: var(--text-muted); }
+    .sync-state.running { color: var(--warn); background: var(--warn-soft); }
+    .sync-state.ok      { color: var(--success); background: rgba(34,197,94,0.10); }
+    .sync-state.err     { color: var(--danger); background: var(--danger-soft); }
+    .sync-meta { font-size: 0.78rem; color: var(--text-secondary); line-height: 1.5; min-height: 36px; }
+    .sync-card button { padding: 6px 14px; border-radius: 3px; border: 1px solid var(--accent); background: var(--accent-soft); color: var(--accent); font-size: 0.78rem; cursor: pointer; font-family: inherit; align-self: flex-start; transition: all 0.12s; }
+    .sync-card button:hover:not(:disabled) { background: var(--accent); color: var(--text-primary); }
+    .sync-card button:disabled { opacity: 0.5; cursor: not-allowed; }
+    #sync-all-btn { padding: 10px 20px; border-radius: 3px; border: 1px solid var(--accent); background: var(--accent-soft); color: var(--accent); font-size: 0.85rem; cursor: pointer; font-family: inherit; max-width: 180px; margin-bottom: 24px; transition: all 0.12s; }
+    #sync-all-btn:hover { background: var(--accent); color: var(--text-primary); }
+    .autosync-card { background: var(--bg-card); border: 1px solid var(--border-hair); border-radius: 4px; padding: 16px 18px; max-width: 520px; display: flex; flex-direction: column; gap: 8px; }
+    .autosync-card label { display: flex; align-items: center; gap: 10px; font-size: 0.85rem; color: var(--text-secondary); cursor: pointer; }
+    #autosync-confirm { font-size: 0.72rem; color: var(--success); height: 14px; }
+    .panel-section-h2 { font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-secondary); margin-bottom: 16px; font-weight: 500; }
 
-    /* Panels, cards, group containers */
-    .type-card,
-    .dup-group,
-    .odd-row { background: var(--bg-card); border: 1px solid var(--border-hair); border-radius: 4px; }
-    .dup-minimap-cell { background: var(--bg-card); }
-    .dup-minimaps { background: var(--border-hair); border-top: 1px solid var(--border-hair); }
-    #untagged-block { background: var(--bg-card); }
-    #color-popover { background: var(--bg-card); border: 1px solid var(--border-hair); }
-
-    /* Tab bar */
-    #tab-bar { background: var(--bg-card); border-bottom: 1px solid var(--border-hair); }
-    .tab-btn { color: var(--text-secondary); }
-    .tab-btn:hover { color: var(--text-primary); }
-    .tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
-
-    /* Section headers (regions sidebar, dup groups, edit card) */
-    .rs-section-header { color: var(--text-secondary); border-bottom: 1px solid var(--border-hair); background: var(--bg-card); }
-    .rs-count,
-    .rs-section-toggle { color: var(--text-tertiary); }
-    #regions-sidebar { background: var(--bg-card); border-right: 1px solid var(--border-hair); }
-    .rs-padded { border-bottom: 1px solid var(--border-row); }
-    .rs-padded > input[type=text] { background: transparent; border: 1px solid var(--border-row); color: var(--text-secondary); }
-    .rs-padded > input[type=text]:focus { border-color: var(--accent); }
-    .rs-divider { border-top: 1px solid var(--border-hair); }
-    .rs-or { color: var(--text-muted); }
-    #edit-region-card { border-top: 1px solid var(--border-hair); background: var(--bg-card); }
-    #edit-region-card h3 { color: var(--text-secondary); }
-    .rfield label { color: var(--text-secondary); }
-    .rfield input { background: transparent; border: 1px solid var(--border-row); color: var(--text-secondary); }
-    .rfield input:focus { border-color: var(--accent); }
-
-    /* Generic small buttons (t-btn / r-btn / osm-search button / dup-map-toggle / .osm-deny-chip).
-       #region-search-btn deliberately falls into THIS group (not the
-       primary-action group below) so it reads consistently with its
-       siblings in the OSM search row. */
-    .t-btn,
-    .r-btn,
-    .osm-search-row button,
-    .dup-map-toggle { border: 1px solid var(--border-row); background: transparent; color: var(--text-secondary); }
-    .t-btn:hover,
-    .r-btn:hover,
-    .dup-map-toggle:hover,
-    .osm-search-row button:hover { border-color: var(--accent); color: var(--text-primary); }
-    .osm-search-row input { background: transparent; border: 1px solid var(--border-row); color: var(--text-secondary); }
-    .osm-search-row input:focus { border-color: var(--accent); }
-    .osm-deny-chip { background: rgba(255,255,255,0.04); border: 1px solid var(--border-hair); color: var(--text-secondary); }
-    .osm-deny-chip button { color: var(--text-muted); }
-
-    /* Primary-action buttons (blue-tinted): use accent rgba over transparent. */
-    #add-type-btn,
-    .rs-primary-btn,
-    #save-region-btn { background: rgba(59,130,246,0.10); border: 1px solid var(--accent); color: var(--accent); }
-    #add-type-btn:hover,
-    .rs-primary-btn:hover,
-    .rs-primary-btn.active,
-    #save-region-btn:hover { background: var(--accent); color: var(--text-primary); }
-
-    /* Inputs (regular text fields) */
-    #new-type-input { background: transparent; border: 1px solid var(--border-row); color: var(--text-secondary); }
-    #new-type-input:focus { border-color: var(--accent); }
-    .type-label-input { color: var(--text-primary); }
-    .type-label-input:focus { border-bottom-color: var(--accent); }
-
-    /* Section headings on tab content */
-    #types-panel h2 { color: var(--text-secondary); }
-
-    /* Region list / untagged */
-    .region-item { border-bottom: 1px solid var(--border-row); }
-    .region-item:hover { background: rgba(255,255,255,0.04); }
-    .region-name { color: var(--text-secondary); }
-    #untagged-controls { border-bottom: 1px solid var(--border-row); color: var(--text-secondary); }
-    .untagged-item { border-bottom: 1px solid var(--border-row); }
-    .untagged-item:hover,
-    .untagged-item.active { background: rgba(255,255,255,0.04); }
-    .untagged-item .ut-date { color: var(--text-tertiary); }
-    .untagged-item .ut-name { color: var(--text-secondary); }
-    .untagged-item.active .ut-name { color: var(--text-primary); }
-    #no-regions { color: var(--text-muted); }
-    #region-edit-hint { color: var(--text-tertiary); }
-
-    /* Duplicates / Odd-times rows */
-    .dup-group-header { background: var(--bg-card); border-bottom: 1px solid var(--border-hair); color: var(--text-secondary); }
-    .dup-group-header .dup-date { color: var(--text-primary); }
-    .dup-group-header .dup-count { color: var(--text-tertiary); }
-    .dup-row { border-top: 1px solid var(--border-row); }
-    .dup-row .dup-name { color: var(--text-secondary); }
-    .dup-row .dup-meta { color: var(--text-tertiary); }
-    .dup-row .dup-filename { color: var(--text-muted); }
-    .dup-empty { color: var(--text-muted); }
-    .dup-metrics { background: var(--bg-card); border-bottom: 1px solid var(--border-row); }
-    .dup-metrics .m .lbl { color: var(--text-muted); }
-    .dup-metrics .m .val { color: var(--text-secondary); }
-    .dup-minimap-head { border-bottom: 1px solid var(--border-row); }
-    .dup-minimap-head .name { color: var(--text-secondary); }
-    .dup-minimap-map { background: var(--bg-page); }
-    .odd-row .odd-date { color: var(--text-secondary); }
-    .odd-row .odd-name { color: var(--text-secondary); }
-    .odd-row .odd-meta { color: var(--text-tertiary); }
-    .odd-row .odd-tz { color: var(--text-muted); }
-
-    /* Draw instructions panel */
-    #draw-instructions { background: var(--bg-page); border: 1px solid var(--border-hair); color: var(--text-secondary); }
+    /* ===== Fitness panel ===== */
+    .fit-card { background: var(--bg-card); border: 1px solid var(--border-hair); border-radius: 4px; padding: 18px 20px; max-width: 520px; margin-bottom: 14px; }
+    .fit-row { display: flex; gap: 24px; margin-bottom: 18px; }
+    .fit-stat-label { font-size: 0.62rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); margin-bottom: 4px; }
+    .fit-stat-val { font-size: 1.6rem; font-weight: 500; color: var(--text-primary); font-variant-numeric: tabular-nums; }
+    .fit-stat-val.accent { color: var(--accent); }
+    .fit-stat-sub { font-size: 0.7rem; color: var(--text-muted); }
+    .fit-override-row { display: flex; gap: 10px; align-items: center; }
+    .fit-override-row label { font-size: 0.78rem; color: var(--text-secondary); min-width: 80px; }
+    .fit-override-row input { flex: 1; background: transparent; border: 1px solid var(--border-row); border-radius: 3px; color: var(--text-secondary); font-size: 0.85rem; padding: 6px 10px; font-family: inherit; }
+    .fit-override-row input:focus { outline: none; border-color: var(--accent); }
+    .fit-override-row button { padding: 6px 14px; border-radius: 3px; border: 1px solid var(--accent); background: var(--accent-soft); color: var(--accent); font-size: 0.78rem; cursor: pointer; transition: all 0.12s; }
+    .fit-override-row button:hover { background: var(--accent); color: var(--text-primary); }
+    #hr-save-confirm { font-size: 0.72rem; color: var(--success); margin-top: 8px; height: 14px; }
+    .fit-zones { background: var(--bg-page); border: 1px solid var(--border-hair); border-radius: 4px; padding: 14px 18px; max-width: 520px; font-size: 0.78rem; color: var(--text-secondary); line-height: 1.6; }
+    .fit-zones strong { color: var(--text-primary); }
+    .fit-zones ul { margin: 8px 0 0 18px; padding: 0; }
   </style>
 </head>
 <body>
@@ -327,7 +284,7 @@
   <button class="nav-sync-btn" onclick="triggerSyncAll()" title="Sync Strava + Garmin now">Sync</button>
 </header>
 
-<h1 style="font-size: 1.4rem; font-weight: 500; color: #fff; letter-spacing: -0.02em; margin: 18px 24px 12px;">Setup</h1>
+<h1 class="page-title" style="margin: 18px 22px 12px;">Setup</h1>
 
 <div id="tab-bar">
   <button class="tab-btn active" onclick="showTab('regions')">Regions</button>
@@ -390,20 +347,19 @@
             <button id="region-search-clear" onclick="clearOsmSearch()" title="Clear search" aria-label="Clear search"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21"/><path d="M22 21H7"/><path d="m5 11 9 9"/></svg></button>
             <button id="osm-filters-toggle" onclick="toggleOsmFilters()" title="OSM search exclusions" aria-label="OSM search exclusions">⚙</button>
           </div>
-          <div id="osm-filters-body" style="display:none; margin-top:8px; padding:8px 10px; background:#0a0d12; border:1px solid #2a2d35; border-radius:4px;">
-            <div style="font-size:0.68rem;color:#888;margin-bottom:6px;text-transform:uppercase;letter-spacing:0.06em;">
+          <div id="osm-filters-body" class="osm-filters-body" style="display:none;">
+            <div class="osm-filters-label">
               Exclusions — OSM <code>class</code> values to drop from results
             </div>
-            <div id="osm-deny-chips" style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:8px;"></div>
-            <div style="display:flex;gap:4px;">
+            <div id="osm-deny-chips" class="osm-filters-chips"></div>
+            <div class="osm-filters-add">
               <input id="osm-deny-input" type="text" placeholder="add class…"
-                     onkeydown="if(event.key==='Enter')addOsmDenyClass()"
-                     style="flex:1;background:#1a1d23;border:1px solid #2a2d35;border-radius:3px;color:#e0e0e0;font-size:0.74rem;padding:4px 6px;font-family:inherit;">
+                     onkeydown="if(event.key==='Enter')addOsmDenyClass()">
               <button onclick="addOsmDenyClass()" class="r-btn">Add</button>
               <button onclick="resetOsmDenyClasses()" class="r-btn" title="Restore defaults">Reset</button>
             </div>
           </div>
-          <div id="region-search-results" style="margin-top:6px; max-height:200px; overflow-y:auto;"></div>
+          <div id="region-search-results" style="margin-top:6px;max-height:200px;overflow-y:auto;"></div>
         </div>
       </section>
 
@@ -425,8 +381,7 @@
         </div>
       </section>
       <div id="edit-region-card">
-        <button id="region-edit-close" onclick="closeRegionEditPanel()" title="Close"
-                style="position:absolute; top:8px; right:10px; background:transparent; border:none; color:#888; font-size:1rem; cursor:pointer; padding:2px 6px; line-height:1;">×</button>
+        <button id="region-edit-close" onclick="closeRegionEditPanel()" title="Close">×</button>
         <h3 id="edit-title-label">New Region</h3>
         <div class="rfield">
           <label>Name</label>
@@ -438,33 +393,30 @@
         </div>
         <div class="rfield">
           <label>Default activity type</label>
-          <select id="r-default-type" style="width:100%;background:#1a1d23;border:1px solid #2a2d35;border-radius:4px;color:#e0e0e0;font-size:0.82rem;padding:5px 8px;font-family:inherit;">
+          <select id="r-default-type" class="styled-select">
             <option value="">— none —</option>
           </select>
-          <div style="font-size:0.65rem;color:#777;margin-top:3px;">Used for untyped rides matching this region (any month).</div>
+          <div class="rfield-hint">Used for untyped rides matching this region (any month).</div>
         </div>
         <div class="rfield">
           <label>Winter activity type (overrides default in winter months)</label>
-          <select id="r-winter-type" style="width:100%;background:#1a1d23;border:1px solid #2a2d35;border-radius:4px;color:#e0e0e0;font-size:0.82rem;padding:5px 8px;font-family:inherit;">
+          <select id="r-winter-type" class="styled-select">
             <option value="">— none (use default year-round) —</option>
           </select>
-          <div style="display:flex;gap:6px;align-items:center;margin-top:6px;font-size:0.72rem;color:#aaa;">
+          <div class="winter-months-row">
             Winter starts month
-            <input id="r-winter-start" type="number" min="1" max="12" value="11"
-                   style="width:55px;background:#1a1d23;border:1px solid #2a2d35;border-radius:3px;color:#e0e0e0;font-size:0.78rem;padding:3px 6px;font-family:inherit;">
+            <input id="r-winter-start" type="number" min="1" max="12" value="11">
             ends month
-            <input id="r-winter-end" type="number" min="1" max="12" value="4"
-                   style="width:55px;background:#1a1d23;border:1px solid #2a2d35;border-radius:3px;color:#e0e0e0;font-size:0.78rem;padding:3px 6px;font-family:inherit;">
-            <span style="color:#777;">(11–4 = Nov–Apr)</span>
+            <input id="r-winter-end" type="number" min="1" max="12" value="4">
+            <span class="hint">(11–4 = Nov–Apr)</span>
           </div>
         </div>
         <div class="rfield">
-          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
-            <input id="r-assisted" type="checkbox"
-                   style="width:14px;height:14px;cursor:pointer;accent-color:#f59e0b;margin:0;">
+          <label class="assisted-label">
+            <input id="r-assisted" type="checkbox">
             <span>Lift / shuttle assisted</span>
           </label>
-          <div style="font-size:0.65rem;color:#777;margin-top:3px;">
+          <div class="rfield-hint">
             Bike parks and ski hills. Rides matching this region are excluded from
             distance and duration records.
           </div>
@@ -481,11 +433,9 @@
   </div>
 
   <!-- Sync panel -->
-  <div id="sync-panel" class="tab-panel" style="flex-direction: column; padding: 24px; overflow-y: auto;">
-    <h2 style="font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.08em; color: #bbb; margin-bottom: 16px; font-weight: 500;">
-      Data Sync
-    </h2>
-    <div style="display:flex;gap:14px;max-width:920px;margin-bottom:18px;flex-wrap:wrap;">
+  <div id="sync-panel" class="tab-panel" style="flex-direction: column; padding: 18px 22px 32px; overflow-y: auto;">
+    <h2 class="panel-section-h2">Data Sync</h2>
+    <div class="sync-grid">
       <div class="sync-card" id="sync-card-strava">
         <div class="sync-head"><span class="sync-name">Strava</span><span class="sync-state" id="strava-state">—</span></div>
         <div class="sync-meta" id="strava-meta">Loading…</div>
@@ -497,69 +447,49 @@
         <button onclick="kickSync('garmin')" id="garmin-btn">Sync now</button>
       </div>
     </div>
-    <button onclick="kickSync('all')" id="sync-all-btn"
-            style="padding:10px 20px;border-radius:4px;border:1px solid #3b82f6;background:#1a2a3a;color:#3b82f6;font-size:0.85rem;cursor:pointer;font-family:inherit;max-width:180px;margin-bottom:24px;">
+    <button onclick="kickSync('all')" id="sync-all-btn">
       Sync All Sources
     </button>
 
-    <h2 style="font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.08em; color: #bbb; margin-bottom: 12px; font-weight: 500;">
-      Auto-sync on Startup
-    </h2>
-    <div style="background:#12151a;border:1px solid #2a2d35;border-radius:8px;padding:14px 18px;max-width:520px;display:flex;flex-direction:column;gap:8px;">
-      <label style="display:flex;align-items:center;gap:10px;font-size:0.85rem;color:#e0e0e0;cursor:pointer;">
+    <h2 class="panel-section-h2">Auto-sync on Startup</h2>
+    <div class="autosync-card">
+      <label>
         <input type="checkbox" id="auto-strava" onchange="saveAutoSync()">
         Run Strava sync when AlForks starts
       </label>
-      <label style="display:flex;align-items:center;gap:10px;font-size:0.85rem;color:#e0e0e0;cursor:pointer;">
+      <label>
         <input type="checkbox" id="auto-garmin" onchange="saveAutoSync()">
         Run Garmin sync when AlForks starts
       </label>
-      <div id="autosync-confirm" style="font-size:0.72rem;color:#22c55e;height:14px;"></div>
+      <div id="autosync-confirm"></div>
     </div>
-
-    <style>
-      .sync-card { flex: 1 1 280px; background: #12151a; border: 1px solid #2a2d35; border-radius: 8px; padding: 14px 16px; display: flex; flex-direction: column; gap: 8px; }
-      .sync-head { display: flex; align-items: center; justify-content: space-between; }
-      .sync-name { font-size: 1rem; color: #fff; font-weight: 500; }
-      .sync-state { font-size: 0.7rem; padding: 2px 8px; border-radius: 10px; background: #1a1d23; color: #888; text-transform: uppercase; letter-spacing: 0.06em; }
-      .sync-state.idle    { color: #888; }
-      .sync-state.running { color: #f59e0b; background: #2a1f0e; }
-      .sync-state.ok      { color: #22c55e; background: #0e2a18; }
-      .sync-state.err     { color: #ef4444; background: #2a1010; }
-      .sync-meta { font-size: 0.78rem; color: #aaa; line-height: 1.5; min-height: 36px; }
-      .sync-card button { padding: 6px 14px; border-radius: 4px; border: 1px solid #3b82f6; background: #1a2a3a; color: #3b82f6; font-size: 0.78rem; cursor: pointer; font-family: inherit; align-self: flex-start; }
-      .sync-card button:disabled { opacity: 0.5; cursor: not-allowed; }
-    </style>
   </div>
 
   <!-- Fitness panel -->
-  <div id="fitness-panel" class="tab-panel" style="flex-direction: column; padding: 24px; overflow-y: auto;">
-    <h2 style="font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.08em; color: #bbb; margin-bottom: 16px; font-weight: 500;">
-      Max Heart Rate
-    </h2>
-    <div style="background:#12151a;border:1px solid #2a2d35;border-radius:8px;padding:18px 20px;max-width:520px;margin-bottom:14px;">
-      <div style="display:flex;gap:24px;margin-bottom:18px;">
+  <div id="fitness-panel" class="tab-panel" style="flex-direction: column; padding: 18px 22px 32px; overflow-y: auto;">
+    <h2 class="panel-section-h2">Max Heart Rate</h2>
+    <div class="fit-card">
+      <div class="fit-row">
         <div>
-          <div style="font-size:0.62rem;text-transform:uppercase;letter-spacing:0.08em;color:#888;margin-bottom:4px;">Observed (from your data)</div>
-          <div id="hr-observed" style="font-size:1.6rem;font-weight:500;color:#fff;">—</div>
-          <div style="font-size:0.7rem;color:#888;">99.5th percentile of cached samples</div>
+          <div class="fit-stat-label">Observed (from your data)</div>
+          <div id="hr-observed" class="fit-stat-val">—</div>
+          <div class="fit-stat-sub">99.5th percentile of cached samples</div>
         </div>
         <div>
-          <div style="font-size:0.62rem;text-transform:uppercase;letter-spacing:0.08em;color:#888;margin-bottom:4px;">Effective (used for zones)</div>
-          <div id="hr-effective" style="font-size:1.6rem;font-weight:500;color:#3b82f6;">—</div>
+          <div class="fit-stat-label">Effective (used for zones)</div>
+          <div id="hr-effective" class="fit-stat-val accent">—</div>
         </div>
       </div>
-      <div style="display:flex;gap:10px;align-items:center;">
-        <label style="font-size:0.78rem;color:#ccc;min-width:80px;">Override:</label>
-        <input id="hr-override" type="number" min="100" max="230" placeholder="leave blank for observed"
-               style="flex:1;background:#1a1d23;border:1px solid #2a2d35;border-radius:4px;color:#e0e0e0;font-size:0.85rem;padding:6px 10px;font-family:inherit;">
-        <button onclick="saveMaxHr()" style="padding:6px 14px;border-radius:4px;border:1px solid #3b82f6;background:#1a2a3a;color:#3b82f6;font-size:0.78rem;cursor:pointer;">Save</button>
+      <div class="fit-override-row">
+        <label>Override:</label>
+        <input id="hr-override" type="number" min="100" max="230" placeholder="leave blank for observed">
+        <button onclick="saveMaxHr()">Save</button>
       </div>
-      <div id="hr-save-confirm" style="font-size:0.72rem;color:#22c55e;margin-top:8px;height:14px;"></div>
+      <div id="hr-save-confirm"></div>
     </div>
-    <div style="background:#0e1117;border:1px solid #2a2d35;border-radius:8px;padding:14px 18px;max-width:520px;font-size:0.78rem;color:#aaa;line-height:1.6;">
-      <strong style="color:#e0e0e0;">Heart-rate zones</strong> are computed as percentages of your effective max HR:
-      <ul style="margin:8px 0 0 18px;padding:0;">
+    <div class="fit-zones">
+      <strong>Heart-rate zones</strong> are computed as percentages of your effective max HR:
+      <ul>
         <li>Z1 Recovery — &lt; 60%</li>
         <li>Z2 Endurance — 60–70%</li>
         <li>Z3 Tempo — 70–80%</li>
@@ -735,7 +665,7 @@ function _buildDupGroupHeader(g, elevOutliers) {
     ? `${g.tracks.length} tracks  ·  elev diverges`
     : `${g.tracks.length} tracks`;
   header.querySelector('.dup-count').textContent = countLabel;
-  if (elevOutliers.size) header.querySelector('.dup-count').style.color = '#f59e0b';
+  if (elevOutliers.size) header.querySelector('.dup-count').style.color = 'var(--warn)';
   return header;
 }
 
@@ -1138,8 +1068,8 @@ function toggleOsmFilters() {
   const open = body.style.display === 'none';
   body.style.display = open ? 'block' : 'none';
   if (btn) {
-    btn.style.borderColor = open ? '#3b82f6' : '#2a2d35';
-    btn.style.color       = open ? '#3b82f6' : '#888';
+    btn.style.borderColor = open ? 'var(--accent)' : 'var(--border-row)';
+    btn.style.color       = open ? 'var(--accent)' : 'var(--text-muted)';
   }
   if (open && !_osmDenyClasses.length) loadOsmDenyClasses();
 }
@@ -1155,7 +1085,7 @@ function renderOsmDenyChips() {
   const wrap = document.getElementById('osm-deny-chips');
   wrap.innerHTML = '';
   if (!_osmDenyClasses.length) {
-    wrap.innerHTML = '<span style="font-size:0.7rem;color:#666;">(empty — no exclusions)</span>';
+    wrap.innerHTML = '<span style="font-size:0.7rem;color:var(--text-muted);">(empty — no exclusions)</span>';
     return;
   }
   _osmDenyClasses.forEach(cls => {
@@ -1205,34 +1135,34 @@ async function searchOsmRegions() {
   const q = document.getElementById('region-search-input').value.trim();
   const out = document.getElementById('region-search-results');
   if (!q) { out.innerHTML = ''; return; }
-  out.innerHTML = '<div style="font-size:0.72rem;color:#888;padding:4px;">Searching OSM…</div>';
+  out.innerHTML = '<div style="font-size:0.72rem;color:var(--text-muted);padding:4px;">Searching OSM…</div>';
   try {
     const r = await fetch(`/api/regions/search?q=${encodeURIComponent(q)}`);
     const d = await r.json();
     _osmResultsCache = d.results || [];
     if (!_osmResultsCache.length) {
-      out.innerHTML = '<div style="font-size:0.72rem;color:#888;padding:4px;">No polygon results found.</div>';
+      out.innerHTML = '<div style="font-size:0.72rem;color:var(--text-muted);padding:4px;">No polygon results found.</div>';
       return;
     }
     out.innerHTML = '';
     _osmResultsCache.forEach((res, i) => {
       const el = document.createElement('div');
-      el.style.cssText = 'padding:6px 8px;border:1px solid #2a2d35;border-radius:4px;margin-bottom:4px;background:#12151a;';
+      el.className = 'osm-result-card';
       el.innerHTML = `
-        <div style="font-size:0.74rem;color:#e0e0e0;line-height:1.3;"></div>
-        <div style="font-size:0.62rem;color:#777;margin:2px 0 6px;"></div>
-        <div style="display:flex;gap:6px;">
+        <div class="osm-result-name"></div>
+        <div class="osm-result-type"></div>
+        <div class="osm-result-actions">
           <button class="r-btn" data-act="preview">Preview</button>
-          <button class="r-btn" data-act="use" style="border-color:#3b82f6;color:#3b82f6;">Use this</button>
+          <button class="r-btn osm-result-use" data-act="use">Use this</button>
         </div>`;
-      el.querySelector('div').textContent = res.display_name;
-      el.querySelectorAll('div')[1].textContent = res.type;
+      el.querySelector('.osm-result-name').textContent = res.display_name;
+      el.querySelector('.osm-result-type').textContent = res.type;
       el.querySelector('[data-act="preview"]').onclick = () => previewOsmResult(i);
       el.querySelector('[data-act="use"]').onclick     = () => useOsmResult(i);
       out.appendChild(el);
     });
   } catch (e) {
-    out.innerHTML = `<div style="font-size:0.72rem;color:#ef4444;padding:4px;">Search failed: ${e.message}</div>`;
+    out.innerHTML = `<div style="font-size:0.72rem;color:var(--danger);padding:4px;">Search failed: ${e.message}</div>`;
   }
 }
 
@@ -1727,7 +1657,7 @@ function renderUntaggedLayers() {
 function renderUntaggedList() {
   const list = document.getElementById('untagged-list');
   if (!untaggedTracks.length) {
-    list.innerHTML = '<div style="padding:14px 16px;color:#666;font-size:0.78rem;text-align:center;">All activities have a region match.</div>';
+    list.innerHTML = '<div class="untagged-empty">All activities have a region match.</div>';
     return;
   }
   list.innerHTML = '';

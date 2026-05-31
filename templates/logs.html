@@ -1,8 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  {% include '_head.html' %}
   <title>AlForks – Logs</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -122,7 +121,7 @@
                           font-family: var(--font-mono); font-variant-numeric: tabular-nums;
                           letter-spacing: 0.02em; }
     .issues-block { background: rgba(245,158,11,0.10); border: 1px solid rgba(245,158,11,0.35); border-radius: 3px; padding: 6px 10px; }
-    .issues-head { font-size: 0.74rem; color: #f59e0b; font-weight: 600; margin-bottom: 4px; }
+    .issues-head { font-size: 0.74rem; color: var(--warn); font-weight: 600; margin-bottom: 4px; }
     .issues-list { margin: 0 0 0 18px; padding: 0; font-size: 0.72rem; color: var(--text-secondary); }
     .issues-list li { margin: 2px 0; }
     .issues-row { display: flex; align-items: center; gap: 10px; }
@@ -146,37 +145,37 @@
     .sparkbar { height: 3px; background: rgba(255,255,255,0.06); border-radius: 2px; overflow: hidden; margin-top: 2px; }
     .sparkbar > span { display: block; height: 100%; transition: width 0.2s; }
     .sb-distance > span { background: #10b981; }
-    .sb-climb > span    { background: #f59e0b; }
-    .sb-descent > span  { background: #f59e0b; opacity: 0.7; }
+    .sb-climb > span    { background: var(--warn); }
+    .sb-descent > span  { background: var(--warn); opacity: 0.7; }
     .sb-duration > span { background: #a78bfa; }
-    .sb-avg > span      { background: #3b82f6; }
-    .sb-max > span      { background: #3b82f6; opacity: 0.7; }
-    .sb-hravg > span    { background: #ef4444; }
-    .sb-hrmax > span    { background: #ef4444; opacity: 0.7; }
+    .sb-avg > span      { background: var(--accent); }
+    .sb-max > span      { background: var(--accent); opacity: 0.7; }
+    .sb-hravg > span    { background: var(--danger); }
+    .sb-hrmax > span    { background: var(--danger); opacity: 0.7; }
     .sb-difficulty > span { background: #60a5fa; }
-    .sb-intensity > span  { background: #ef4444; }
+    .sb-intensity > span  { background: var(--danger); }
     .badge-cell { display: flex; flex-direction: column; gap: 2px; align-items: flex-start; }
     .badge-cell .l { font-size: 0.6rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.18em; font-weight: 500; }
     .difficulty { color: #60a5fa; font-weight: 600; font-family: var(--font-mono); }
-    .intensity-badge { color: #ef4444; font-weight: 600; font-family: var(--font-mono); }
+    .intensity-badge { color: var(--danger); font-weight: 600; font-family: var(--font-mono); }
     /* Excluded-from-stats toggle — same glyph/colour as the main activity page */
     .exclude-btn { background: transparent; border: 1px solid transparent; color: var(--text-muted); font-size: 0.9rem; cursor: pointer; padding: 2px 8px; border-radius: 3px; font-family: inherit; flex-shrink: 0; transition: color 0.12s, border-color 0.12s, background 0.12s; }
-    .exclude-btn:hover { color: #f59e0b; border-color: rgba(245,158,11,0.35); background: rgba(245,158,11,0.10); }
-    .exclude-btn.active { color: #f59e0b; border-color: rgba(245,158,11,0.35); background: rgba(245,158,11,0.10); }
+    .exclude-btn:hover { color: var(--warn); border-color: rgba(245,158,11,0.35); background: rgba(245,158,11,0.10); }
+    .exclude-btn.active { color: var(--warn); border-color: rgba(245,158,11,0.35); background: rgba(245,158,11,0.10); }
     .comp-row.excluded .comp-title,
     .comp-row.excluded .stats-grid,
     .comp-row.excluded .comp-top-right,
     .comp-row.excluded .type-badge-row { opacity: 0.45; }
-    .comp-row.excluded .comp-title::after { content: ' (excluded)'; font-size: 0.7rem; color: #f59e0b; opacity: 0.9; font-weight: normal; }
+    .comp-row.excluded .comp-title::after { content: ' (excluded)'; font-size: 0.7rem; color: var(--warn); opacity: 0.9; font-weight: normal; }
     /* Highlight the cell holding the highest value across the visible list,
        tinted to match the metric's sparkbar colour. */
     .stat-cell.is-max { border-radius: 4px; padding: 2px 6px; margin: -2px -6px; }
     .stat-cell.is-max:has(.sb-distance)   { background: rgba(16,185,129,0.14); }
     .stat-cell.is-max:has(.sb-distance) .v { color: #10b981; }
     .stat-cell.is-max:has(.sb-climb)      { background: rgba(245,158,11,0.14); }
-    .stat-cell.is-max:has(.sb-climb) .v   { color: #f59e0b; }
+    .stat-cell.is-max:has(.sb-climb) .v   { color: var(--warn); }
     .stat-cell.is-max:has(.sb-descent)    { background: rgba(245,158,11,0.10); }
-    .stat-cell.is-max:has(.sb-descent) .v { color: #f59e0b; }
+    .stat-cell.is-max:has(.sb-descent) .v { color: var(--warn); }
     .stat-cell.is-max:has(.sb-duration)   { background: rgba(167,139,250,0.14); }
     .stat-cell.is-max:has(.sb-duration) .v { color: #a78bfa; }
     .stat-cell.is-max:has(.sb-avg)        { background: rgba(59,130,246,0.14); }
@@ -184,9 +183,9 @@
     .stat-cell.is-max:has(.sb-max)        { background: rgba(59,130,246,0.10); }
     .stat-cell.is-max:has(.sb-max) .v     { color: #60a5fa; }
     .stat-cell.is-max:has(.sb-hravg)      { background: rgba(239,68,68,0.14); }
-    .stat-cell.is-max:has(.sb-hravg) .v   { color: #ef4444; }
+    .stat-cell.is-max:has(.sb-hravg) .v   { color: var(--danger); }
     .stat-cell.is-max:has(.sb-hrmax)      { background: rgba(239,68,68,0.10); }
-    .stat-cell.is-max:has(.sb-hrmax) .v   { color: #ef4444; }
+    .stat-cell.is-max:has(.sb-hrmax) .v   { color: var(--danger); }
     .stat-cell.is-max:has(.sb-difficulty) { background: rgba(96,165,250,0.14); }
     .stat-cell.is-max:has(.sb-intensity)  { background: rgba(239,68,68,0.14); }
 
@@ -204,7 +203,7 @@
                 display: inline-flex; align-items: center; justify-content: center; }
     .cmp-pick:hover { color: #fff; border-color: var(--accent); background: rgba(59,130,246,0.10); }
     .cmp-pick.is-a { color: #fff; border-color: var(--accent); background: var(--accent); }
-    .cmp-pick.is-b { color: #fff; border-color: #f59e0b; background: #f59e0b; }
+    .cmp-pick.is-b { color: #fff; border-color: var(--warn); background: var(--warn); }
     .comp-row.cmp-a { border-left: 2px solid var(--accent); padding-left: 10px; }
     .comp-row.cmp-b { border-left: 2px solid #f59e0b; padding-left: 10px; }
 
@@ -222,7 +221,7 @@
     #cmp-bar .slot-tag { font-size: 0.62rem; text-transform: uppercase; letter-spacing: 0.18em;
                          font-weight: 600; flex-shrink: 0; font-family: var(--font-mono); }
     #cmp-bar .slot-tag.a { color: var(--accent); }
-    #cmp-bar .slot-tag.b { color: #f59e0b; }
+    #cmp-bar .slot-tag.b { color: var(--warn); }
     #cmp-bar .slot-name { font-size: 0.78rem; color: var(--text-secondary);
                           overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
                           max-width: 220px; }

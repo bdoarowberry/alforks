@@ -1,8 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  {% include '_head.html' %}
   <title>AlForks – Trails &amp; Routes</title>
   <script src="/static/utils.js"></script>
   <script src="/static/sync_toast.js" defer></script>
@@ -13,9 +12,9 @@
     main { padding: 18px 22px 32px; max-width: 1680px; margin: 0 auto; width: 100%; }
     .num, .num * { font-variant-numeric: tabular-nums; }
 
-    h1.page-title { font-size: 1.4rem; font-weight: 500; letter-spacing: -0.02em; color: var(--text-primary); margin: 0 0 6px; }
-    .page-sub { font-size: 0.78rem; color: var(--text-tertiary); margin: 0 0 18px; }
-    .preview-tag { display: inline-block; font-size: 0.55rem; padding: 2px 6px; background: var(--bg-card); color: #f59e0b; border-radius: 3px; letter-spacing: 0.05em; margin-left: 8px; vertical-align: middle; }
+    /* H1 uses the canonical .page-title from base.css. */
+    .page-sub { font-size: 0.78rem; color: var(--text-tertiary); margin: 6px 0 18px; }
+    .preview-tag { display: inline-block; font-size: 0.55rem; padding: 2px 6px; background: var(--bg-card); color: var(--warn); border-radius: 3px; letter-spacing: 0.05em; margin-left: 8px; vertical-align: middle; }
 
     /* Filter bar */
     #filters { background: var(--bg-card); border: 1px solid var(--border-hair); border-radius: 4px; padding: 12px 16px; margin-bottom: 18px; display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
@@ -28,7 +27,7 @@
     .region-card { background: var(--bg-card); border: 1px solid var(--border-hair); border-radius: 4px; margin-bottom: 12px; overflow: hidden; }
     .region-head { padding: 12px 16px; display: flex; align-items: center; gap: 12px; cursor: pointer; user-select: none; transition: background 0.12s; }
     .region-head:hover { background: rgba(255,255,255,0.03); }
-    .region-swatch { width: 12px; height: 12px; border-radius: 2px; flex-shrink: 0; }
+    .region-swatch { width: 14px; height: 14px; border-radius: 2px; flex-shrink: 0; }
     .region-name { font-size: 0.95rem; font-weight: 500; color: var(--text-primary); }
     .region-meta { font-size: 0.72rem; color: var(--text-tertiary); font-family: var(--font-mono); margin-left: auto; }
     .region-chevron { color: var(--text-muted); font-size: 0.8rem; transition: transform 0.15s; }
@@ -46,17 +45,20 @@
     .trails-table tbody tr:hover td { background: rgba(255,255,255,0.04); }
     .trails-table tbody tr:last-child td { border-bottom: none; }
 
-    .trail-name { color: #93c5fd; }
-    .trail-name:hover { color: #bfdbfe; text-decoration: underline; }
+    .trail-name { color: var(--link); }
+    .trail-name:hover { color: var(--link-hover); text-decoration: underline; }
     .best-link { color: var(--text-tertiary); }
     .best-link:hover { color: var(--text-primary); text-decoration: underline; }
-    /* Direction badge — matches the activity-detail timeline pill. */
+    /* Direction badge — matches the activity-detail timeline pill. Five
+       semantic colour pairs (up/down/fwd/rev/mixed). Each pair is a
+       deep-tinted bg + a brighter readable fg; kept literal because
+       they're a self-contained taxonomy distinct from the global tokens. */
     .dir-pill { display: inline-block; min-width: 18px; padding: 1px 5px; border-radius: 3px; font-size: 0.65rem; font-weight: 700; text-align: center; line-height: 1; margin-right: 6px; vertical-align: middle; }
-    .dir-pill.dir-up    { background: #1d2d3a; color: #93c5fd; }
+    .dir-pill.dir-up    { background: #1d2d3a; color: var(--link); }
     .dir-pill.dir-down  { background: #2d1d3a; color: #c4b5fd; }
     .dir-pill.dir-fwd   { background: #1d3a2c; color: #6ee7b7; }
     .dir-pill.dir-rev   { background: #3a2c1d; color: #fbbf24; }
-    .dir-pill.dir-mixed { background: #2a2d35; color: #aaa; }
+    .dir-pill.dir-mixed { background: var(--bg-elev); color: var(--text-muted); border: 1px solid var(--border-hair); }
     /* Kind chip — distinguishes road segments from trail segments in the
        same leaderboard. Sits next to the direction pill. */
     .kind-chip { display: inline-block; padding: 1px 5px; border-radius: 3px;
@@ -96,7 +98,7 @@
     /* Active trail row highlight in the region tables — shows which one's
        leaderboard is currently in the detail panel. */
     .trails-table tbody tr.active-trail td { background: rgba(147, 197, 253, 0.08); }
-    .trails-table tbody tr.active-trail td:first-child { box-shadow: inset 2px 0 0 #93c5fd; }
+    .trails-table tbody tr.active-trail td:first-child { box-shadow: inset 2px 0 0 var(--link); }
   </style>
 </head>
 <body>

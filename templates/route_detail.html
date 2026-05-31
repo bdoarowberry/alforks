@@ -1,8 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  {% include '_head.html' %}
   <title>AlForks – Trails &amp; Routes</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -12,11 +11,11 @@
   <link rel="stylesheet" href="/static/base.css">
   <style>
     body { display: flex; flex-direction: column; min-height: 100vh; }
-    main { padding: 18px 22px 32px; max-width: 1480px; margin: 0 auto; width: 100%; flex: 1; }
+    main { padding: 18px 22px 32px; max-width: 1680px; margin: 0 auto; width: 100%; flex: 1; }
     .num, .num * { font-variant-numeric: tabular-nums; }
 
-    h1.page-title { font-size: 1.4rem; font-weight: 500; letter-spacing: -0.02em; color: var(--text-primary); margin: 0 0 6px; }
-    .page-sub { font-size: 0.78rem; color: var(--text-tertiary); margin: 0 0 18px; }
+    /* H1 uses the canonical .page-title from base.css. */
+    .page-sub { font-size: 0.78rem; color: var(--text-tertiary); margin: 6px 0 18px; }
 
     .route-head {
       display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap;
@@ -40,16 +39,16 @@
       font-size: 0.74rem; cursor: pointer; transition: all 0.12s;
       font-family: var(--font-sans); text-decoration: none; display: inline-block;
     }
-    .btn:hover { border-color: var(--accent); color: #fff; }
-    .btn-danger:hover { color: #ef4444; border-color: #ef4444; }
+    .btn:hover { border-color: var(--accent); color: var(--text-primary); }
+    .btn-danger:hover { color: var(--danger); border-color: var(--danger); }
 
     #map {
       height: 52vh; min-height: 360px;
-      background: #050708;
+      background: var(--bg-map);
       border: 1px solid var(--border-hair); border-radius: 4px;
       margin-bottom: 16px;
     }
-    .leaflet-container { background: #050708; }
+    .leaflet-container { background: var(--bg-map); }
 
     .lb-head {
       display: flex; justify-content: space-between; align-items: baseline;
@@ -82,8 +81,8 @@
     .lb-table tbody tr { cursor: pointer; transition: background 0.08s; }
     .lb-table tbody tr:hover td { background: rgba(255,255,255,0.04); }
     .lb-table tbody tr:last-child td { border-bottom: none; }
-    .lb-table .rank-best { color: #fbbf24; font-weight: 600; }
-    .lb-table .title-cell { color: #93c5fd; }
+    .lb-table .rank-best { color: #fbbf24; font-weight: 600; }   /* Gold rank-1 — distinct from --warn amber; intentional. */
+    .lb-table .title-cell { color: var(--link); }
     .lb-empty {
       padding: 36px 18px; text-align: center; color: var(--text-tertiary);
       background: var(--bg-card); border: 1px solid var(--border-hair); border-radius: 4px;
@@ -114,7 +113,7 @@
       pointer-events: none; z-index: 1000;
     }
     #toast.show { opacity: 1; }
-    #toast.error { border-color: #ef4444; color: #fecaca; }
+    #toast.error { border-color: var(--danger); color: var(--text-primary); }
   </style>
 </head>
 <body>

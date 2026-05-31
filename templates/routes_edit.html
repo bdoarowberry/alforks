@@ -1,8 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  {% include '_head.html' %}
   <title>AlForks – Route Builder</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -15,7 +14,7 @@
       flex: 1; display: grid; grid-template-columns: 1fr 360px;
       min-height: 0; background: var(--bg-page);
     }
-    #map { background: #050708; }
+    #map { background: var(--bg-map); }
     #sidebar {
       background: var(--bg-card);
       border-left: 1px solid var(--border-hair);
@@ -27,7 +26,7 @@
       font-size: 0.7rem; color: var(--text-tertiary); text-decoration: none;
       letter-spacing: 0.04em;
     }
-    #sidebar-head .back-link:hover { color: #fff; }
+    #sidebar-head .back-link:hover { color: var(--text-primary); }
     #sidebar-body { flex: 1; overflow: auto; padding: 12px 16px; }
     #sidebar-foot { padding: 12px 16px; border-top: 1px solid var(--border-hair);
                      display: flex; gap: 8px; align-items: center; }
@@ -64,9 +63,9 @@
       color: var(--text-secondary); border-radius: 3px;
       font-size: 0.7rem; padding: 3px 7px; cursor: pointer; transition: all 0.12s;
     }
-    .seg-row button:hover { color: #fff; border-color: var(--accent); }
+    .seg-row button:hover { color: var(--text-primary); border-color: var(--accent); }
     .seg-row .dir-toggle { min-width: 36px; font-family: var(--font-mono); }
-    .seg-row .rm:hover { color: #ef4444; border-color: #ef4444; }
+    .seg-row .rm:hover { color: var(--danger); border-color: var(--danger); }
     .seg-row .kind-tag {
       font-size: 0.6rem; font-family: var(--font-mono);
       letter-spacing: 0.08em; text-transform: uppercase;
@@ -77,10 +76,10 @@
       background: rgba(136, 136, 136, 0.20); color: #cbd5e1;
       border: 1px solid rgba(255,255,255,0.15);
     }
-    .seg-row.stale { border-color: #ef4444; }
+    .seg-row.stale { border-color: var(--danger); }
     .seg-row .stale-note {
       display: block; flex-basis: 100%; font-size: 0.7rem;
-      color: #fca5a5; font-family: var(--font-mono); margin-top: 4px;
+      color: var(--danger); font-family: var(--font-mono); margin-top: 4px;
     }
 
     #totals {
@@ -97,9 +96,11 @@
     }
     .btn:hover  { border-color: var(--accent); }
     .btn:disabled { opacity: 0.5; cursor: default; }
-    .btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-    .btn-primary:hover { background: #2563eb; }
-    .btn-danger:hover { color: #ef4444; border-color: #ef4444; }
+    .btn-mono {
+      font-family: var(--font-mono); font-size: 0.7rem;
+      letter-spacing: 0.08em; text-transform: uppercase; padding: 5px 12px;
+    }
+    .btn-danger:hover { color: var(--danger); border-color: var(--danger); }
 
     #toast {
       position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%);
@@ -109,10 +110,10 @@
       pointer-events: none; z-index: 1000;
     }
     #toast.show { opacity: 1; }
-    #toast.error { border-color: #ef4444; color: #fecaca; }
+    #toast.error { border-color: var(--danger); color: var(--text-primary); }
 
     /* Leaflet tweaks for dark theme */
-    .leaflet-container { background: #050708; }
+    .leaflet-container { background: var(--bg-map); }
     .leaflet-popup-content-wrapper, .leaflet-popup-tip {
       background: var(--bg-elev); color: var(--text-primary);
       border: 1px solid var(--border-row);
@@ -182,7 +183,7 @@
     <div id="sidebar-foot">
       <div id="totals"><strong>0.00</strong> km · <span id="seg-count">0</span> segments</div>
       <button id="cancel-btn" class="btn">Cancel</button>
-      <button id="save-btn" class="btn btn-primary">Save</button>
+      <button id="save-btn" class="btn btn-mono">Save</button>
     </div>
   </aside>
 </main>
