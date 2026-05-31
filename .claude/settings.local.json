@@ -63,7 +63,16 @@
       "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\arowberry\\\\OneDrive - BDO Canada LLP\\\\Documents\\\\Personal\\\\Claude Code Projects\\\\AlForks\" -Recurse -Include \"*.py\", \"*.js\", \"*.html\", \"*.jsx\", \"*.ts\", \"*.tsx\")",
       "Bash(Select-Object -ExpandProperty FullName)",
       "Bash(Find C:\\\\Users\\\\arowberry\\\\OneDrive - BDO Canada LLP\\\\Documents\\\\Personal\\\\Claude Code Projects\\\\AlForks\\\\templates *)",
-      "Bash(git checkout *)"
+      "Bash(git checkout *)",
+      "Read(//c/Users/arowberry/.claude/**)",
+      "Read(//c/Users/arowberry/.claude/plugins/**)",
+      "Bash(where npx *)",
+      "Bash(where python *)",
+      "Read(//c/Program Files \\(x86\\)/Microsoft/Edge/Application/**)",
+      "Read(//c/Program Files/Microsoft/Edge/Application/**)",
+      "Read(//c/Program Files/Google/Chrome/Application/**)",
+      "Bash(tasklist //FI \"IMAGENAME eq chrome.exe\")",
+      "Bash('/c/Program Files \\(x86\\)/Microsoft/Edge/Application/msedge.exe' --headless=new --disable-gpu --hide-scrollbars --no-sandbox --user-data-dir=/tmp/edge_test --window-size=1680,1050 --virtual-time-budget=8000 --screenshot=/tmp/edge_test.png http://localhost:5000/)"
     ]
   }
 }
