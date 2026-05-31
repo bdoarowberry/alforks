@@ -16,7 +16,7 @@ import urllib.request
 import urllib.parse
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from pathlib import Path
 
@@ -110,6 +110,9 @@ def save_types(types: list[dict]):
     _atomic_write(TYPES_FILE, json.dumps(types, indent=2, ensure_ascii=False))
     with _types_lock:
         _types_cache = types
+    # TYPES_FILE mtime is part of _activities_cache_key; bust the throttled
+    # key cache so the next request re-stats eagerly after a type change.
+    _invalidate_acts_key_cache()
 
 GPX_DIR.mkdir(exist_ok=True)
 CACHE_DIR.mkdir(exist_ok=True)
@@ -193,6 +196,62 @@ def _gzip_response(response):
     response.set_data(gzip.compress(data, compresslevel=6))
     response.headers["Content-Encoding"] = "gzip"
     return response
+
+
+# ─── Static asset caching ─────────────────────────────────────────────────────
+# Flask's default for /static/ is `Cache-Control: no-cache`, which forces a
+# revalidation round-trip per asset per page load. Combined with the
+# template `?v={{ asset_v(...) }}` query-string buster, we can promote
+# static assets to year-long immutable caching: the browser stops re-asking
+# until the URL itself changes (which happens whenever the file mtime
+# changes). Without ?v= we leave the conservative no-cache so iterating
+# on assets locally doesn't need a Ctrl+F5.
+
+_STATIC_MAX_AGE_SEC = 31_536_000   # 1 year
+
+
+@app.after_request
+def _static_cache_headers(response):
+    if not request.path.startswith("/static/"):
+        return response
+    if not request.args.get("v"):
+        # Missing or empty ?v= — could be a stale URL or asset_v() falling
+        # back when the file is gone. Keep Flask's safe no-cache default so
+        # we don't pin a 404 in the browser cache for a year.
+        return response
+    response.headers["Cache-Control"] = f"public, max-age={_STATIC_MAX_AGE_SEC}, immutable"
+    return response
+
+
+# Asset versioning helper — exposed to Jinja as `asset_v(filename)`.
+# Returns the file's mtime as an integer; templates append it as ?v=... so
+# any edit busts the cache instantly. Cached per process: stat once, reuse
+# until restart (and Flask is restarted any time app.py changes anyway).
+
+_asset_version_cache: dict[str, str] = {}
+_asset_version_lock                  = threading.Lock()
+
+
+def _asset_version(filename: str) -> str:
+    """Returns mtime-based version string for a /static file path.
+    Filename is relative to the static directory (e.g. 'base.css').
+    Returns '' if the file is missing — caller should still emit the URL."""
+    with _asset_version_lock:
+        if filename in _asset_version_cache:
+            return _asset_version_cache[filename]
+    path = Path(app.static_folder) / filename
+    try:
+        v = str(int(path.stat().st_mtime))
+    except (FileNotFoundError, OSError):
+        return ""
+    with _asset_version_lock:
+        _asset_version_cache[filename] = v
+    return v
+
+
+@app.context_processor
+def _inject_asset_helper():
+    return {"asset_v": _asset_version}
 
 
 # ─── Config ───────────────────────────────────────────────────────────────────
@@ -414,6 +473,9 @@ def save_metadata(meta: dict, changed_filenames: list[str] | None = None):
     _atomic_write(METADATA_FILE, json.dumps(meta, indent=2, ensure_ascii=False))
     with _metadata_lock:
         _metadata_cache = meta
+    # METADATA_FILE mtime changed — bust the throttled key cache so the next
+    # _activities_cache_key() call re-stats eagerly regardless of TTL.
+    _invalidate_acts_key_cache()
     if changed_filenames is None:
         _invalidate_activities_cache()
         _invalidate_mtb_cache()
@@ -424,6 +486,11 @@ def save_metadata(meta: dict, changed_filenames: list[str] | None = None):
         # _algo_mtb on every title/notes tweak for MTB-tagged activities.
         for fn in changed_filenames:
             _update_activity_entry(fn)
+        # Summary cache includes titles and exclude flags from metadata;
+        # must bust it even on surgical updates.
+        with _summary_data_lock:
+            _summary_data_cache = None
+            _summary_data_key   = None
 
 
 # ─── Activities list cache ─────────────────────────────────────────────────────
@@ -434,11 +501,57 @@ _activities_cache:            list | None  = None
 _activities_cache_dir_mtime: tuple | None  = None
 _activities_cache_lock                     = threading.Lock()
 
+# ─── Summary data cache ────────────────────────────────────────────────────────
+# _summary_data() is O(n_activities) in Python and is called on every page load.
+# Cache the result keyed on (days_back, units, today_iso, activities_cache_key)
+# so that repeated requests within the same day — and across the rolling window
+# — are served from memory without re-iterating 800+ activities.
+# Invalidated explicitly whenever the activities cache is invalidated.
+
+_summary_data_cache: dict | None  = None
+_summary_data_key:   tuple | None = None
+_summary_data_lock                = threading.Lock()
+
 
 def _invalidate_activities_cache():
-    global _activities_cache
+    global _activities_cache, _summary_data_cache, _summary_data_key
     with _activities_cache_lock:
         _activities_cache = None
+    with _summary_data_lock:
+        _summary_data_cache = None
+        _summary_data_key   = None
+    _invalidate_acts_key_cache()
+
+
+# Throttled cache-key computation.
+#
+# _activities_cache_key() touches 5+ filesystem paths on every call
+# (GPX dir, metadata, regions, types, plus a 443-file HR directory scan).
+# On a OneDrive-backed path each stat() is a network round-trip, adding
+# 200-400 ms to every request that calls all_activities().
+#
+# We throttle the full key computation to once per _ACTS_KEY_TTL seconds.
+# The summary cache then uses the stored key directly, so the fast path
+# has zero file I/O: just a monotonic clock read and a tuple comparison.
+#
+# Safety: a write that bumps any of the tracked files also calls
+# _invalidate_activities_cache() (or save_metadata / save_types /
+# save_regions), which clears _acts_key_cache immediately — so the next
+# request after a real change always sees the fresh key within one TTL
+# worth of lag at most.  For the HR scan (sync path only), the TTL is
+# fine because the sidebar build is much slower than _ACTS_KEY_TTL anyway.
+
+_acts_key_cache: tuple | None = None
+_acts_key_time:  float        = 0.0
+_acts_key_lock               = threading.Lock()
+_ACTS_KEY_TTL                = 30.0  # seconds — single-user local server; write paths clear eagerly
+
+
+def _invalidate_acts_key_cache() -> None:
+    """Called by any write path so the next request re-stats eagerly."""
+    global _acts_key_cache
+    with _acts_key_lock:
+        _acts_key_cache = None
 
 
 def _activities_cache_key() -> tuple:
@@ -447,7 +560,26 @@ def _activities_cache_key() -> tuple:
     that bumps every time any HR file is added/removed — so every Garmin sync
     invalidated the entire sidebar cache. The file count only changes when a
     new date appears, and the per-activity `has_hr` flag is re-stat'd anyway.
+
+    The full key is throttled: stat() calls on OneDrive paths are
+    network-latency I/O (~200-400 ms total for 4 files + 443-file HR scan).
+    We recompute at most once per _ACTS_KEY_TTL seconds and return the cached
+    value otherwise.  Write paths call _invalidate_acts_key_cache() to force
+    an immediate refresh on the next read.
     """
+    global _acts_key_cache, _acts_key_time
+    now = time.monotonic()
+    with _acts_key_lock:
+        if _acts_key_cache is not None and now - _acts_key_time < _ACTS_KEY_TTL:
+            return _acts_key_cache
+        key = _activities_cache_key_compute()
+        _acts_key_cache = key
+        _acts_key_time  = now
+        return key
+
+
+def _activities_cache_key_compute() -> tuple:
+    """Unconditional key computation — stat every tracked path."""
     def _m(p):
         try:
             return p.stat().st_mtime
@@ -1403,10 +1535,51 @@ def _summary_data(days_back: int, units: str) -> dict:
     """Build the data contract documented in design/summary/README.md from
     the user's real activities. Window is rolling-`days_back`-days back from
     today, inclusive of today.
+
+    Result is memoised in _summary_data_cache.  The cache key piggybacks on
+    _activities_cache_dir_mtime — the tuple already computed and stored by
+    all_activities() — rather than calling _activities_cache_key() again.
+    This avoids a second set of stat() calls (and the HR-dir scan) on the
+    hot path: after all_activities() runs, the key is already in memory.
+
+    Invalidation: _invalidate_activities_cache() also clears this cache, so
+    any write path that bumps the activities cache automatically busts the
+    summary cache too.
     """
-    today_dt = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    global _summary_data_cache, _summary_data_key
+
+    today_dt  = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
     today_iso = today_dt.strftime("%Y-%m-%d")
+
+    # Ensure the activities cache is warm and _activities_cache_dir_mtime is
+    # populated — this is the only stat() I/O on the hot path (and it returns
+    # from the in-memory cache on all but the first call or after a file change).
+    all_activities()
+
+    # Use the already-stored key.  If _activities_cache_dir_mtime is still
+    # None (shouldn't happen after the call above, but be defensive) fall
+    # through to compute.
+    acts_key  = _activities_cache_dir_mtime  # tuple set by all_activities()
+    cache_key = (days_back, units, today_iso, acts_key)
+
+    with _summary_data_lock:
+        if _summary_data_cache is not None and _summary_data_key == cache_key:
+            return _summary_data_cache
+
+    result = _summary_data_compute(days_back, units, today_dt, today_iso)
+
+    with _summary_data_lock:
+        _summary_data_cache = result
+        _summary_data_key   = cache_key
+
+    return result
+
+
+def _summary_data_compute(days_back: int, units: str,
+                           today_dt: datetime, today_iso: str) -> dict:
+    """Internal implementation — called only on cache miss."""
     earliest_dt = today_dt - timedelta(days=days_back - 1)
+    earliest_iso = earliest_dt.strftime("%Y-%m-%d")
 
     acts = [a for a in all_activities() if not a.get("excluded")]
     types = load_types()
@@ -1479,17 +1652,14 @@ def _summary_data(days_back: int, units: str) -> dict:
 
     for tid in ordered_ids:
         type_acts = by_type[tid]
-        # Rolling-window subset
+        # Rolling-window subset — ISO strings compare lexicographically
+        # correctly for YYYY-MM-DD, so no datetime parse needed here.
         in_window = []
         for a in type_acts:
             d = (a.get("date") or "")[:10]
-            if not d:
+            if len(d) != 10:
                 continue
-            try:
-                dt = datetime.strptime(d, "%Y-%m-%d")
-            except ValueError:
-                continue
-            if earliest_dt <= dt <= today_dt:
+            if earliest_iso <= d <= today_iso:
                 in_window.append(a)
 
         # Days set + dominant type for the ribbon
@@ -1509,22 +1679,21 @@ def _summary_data(days_back: int, units: str) -> dict:
         if sorted_dates:
             run = 1
             longest_streak = 1
-            for i in range(1, len(sorted_dates)):
-                prev = datetime.strptime(sorted_dates[i - 1], "%Y-%m-%d")
-                cur  = datetime.strptime(sorted_dates[i],     "%Y-%m-%d")
-                if (cur - prev).days == 1:
+            # date.fromisoformat is ~3x faster than datetime.strptime for
+            # YYYY-MM-DD strings; parse once into a list then index.
+            date_objs = [date.fromisoformat(d) for d in sorted_dates]
+            for i in range(1, len(date_objs)):
+                if (date_objs[i] - date_objs[i - 1]).days == 1:
                     run += 1
                     longest_streak = max(longest_streak, run)
                 else:
                     run = 1
             # Current streak is consecutive days ending at today (or yesterday)
-            last_dt = datetime.strptime(sorted_dates[-1], "%Y-%m-%d")
-            if (today_dt - last_dt).days <= 1:
+            today_date = today_dt.date()
+            if (today_date - date_objs[-1]).days <= 1:
                 run = 1
-                for i in range(len(sorted_dates) - 1, 0, -1):
-                    a_dt = datetime.strptime(sorted_dates[i], "%Y-%m-%d")
-                    p_dt = datetime.strptime(sorted_dates[i - 1], "%Y-%m-%d")
-                    if (a_dt - p_dt).days == 1:
+                for i in range(len(date_objs) - 1, 0, -1):
+                    if (date_objs[i] - date_objs[i - 1]).days == 1:
                         run += 1
                     else:
                         break
@@ -1641,17 +1810,17 @@ def _summary_data(days_back: int, units: str) -> dict:
                 "ascent":   [None] * 12,
                 "descent":  [None] * 12,
             }
-        # Aggregate
+        # Aggregate — extract year/month directly from the ISO string to
+        # avoid datetime.strptime overhead on every activity.
         for a in type_acts:
             d = (a.get("date") or "")[:10]
             if len(d) != 10:
                 continue
             try:
-                dt = datetime.strptime(d, "%Y-%m-%d")
-            except ValueError:
+                yr_str = d[:4]
+                mi = int(d[5:7]) - 1
+            except (ValueError, IndexError):
                 continue
-            yr_str = str(dt.year)
-            mi = dt.month - 1
             if yr_str not in h:
                 continue
             s = a.get("stats") or {}
@@ -1680,12 +1849,12 @@ def _summary_data(days_back: int, units: str) -> dict:
             if len(d) != 10:
                 continue
             try:
-                dt = datetime.strptime(d, "%Y-%m-%d")
-            except ValueError:
+                yr = int(d[:4])
+                mo = int(d[5:7])
+            except (ValueError, IndexError):
                 continue
-            ym = (dt.year, dt.month)
-            if first_year is None or ym < (first_year, first_month):
-                first_year, first_month = ym
+            if first_year is None or (yr, mo) < (first_year, first_month):
+                first_year, first_month = yr, mo
         cur_year = today_dt.year
         cur_month_idx = today_dt.month - 1
         for yr_str, monthly in h.items():
@@ -1727,9 +1896,10 @@ def _summary_data(days_back: int, units: str) -> dict:
             })
 
     # ─── Cross-activity totals ──────────────────────────────────────────────
+    # ISO string compare replaces datetime.strptime for the window filter.
     all_in_window = [a for tid in ordered_ids for a in by_type[tid]
-                     if (a.get("date") or "")[:10]
-                     and earliest_dt <= datetime.strptime(a["date"][:10], "%Y-%m-%d") <= today_dt]
+                     if earliest_iso <= (a.get("date") or "")[:10] <= today_iso
+                     and len((a.get("date") or "")[:10]) == 10]
     unique_active = {a["date"][:10] for a in all_in_window if a.get("date")}
     sorted_dates_all = sorted(unique_active)
     longest_streak_all = 0
@@ -1737,21 +1907,18 @@ def _summary_data(days_back: int, units: str) -> dict:
     if sorted_dates_all:
         run = 1
         longest_streak_all = 1
-        for i in range(1, len(sorted_dates_all)):
-            prev = datetime.strptime(sorted_dates_all[i - 1], "%Y-%m-%d")
-            cur  = datetime.strptime(sorted_dates_all[i],     "%Y-%m-%d")
-            if (cur - prev).days == 1:
+        date_objs_all = [date.fromisoformat(d) for d in sorted_dates_all]
+        for i in range(1, len(date_objs_all)):
+            if (date_objs_all[i] - date_objs_all[i - 1]).days == 1:
                 run += 1
                 longest_streak_all = max(longest_streak_all, run)
             else:
                 run = 1
-        last_dt = datetime.strptime(sorted_dates_all[-1], "%Y-%m-%d")
-        if (today_dt - last_dt).days <= 1:
+        today_date = today_dt.date()
+        if (today_date - date_objs_all[-1]).days <= 1:
             run = 1
-            for i in range(len(sorted_dates_all) - 1, 0, -1):
-                a_dt = datetime.strptime(sorted_dates_all[i], "%Y-%m-%d")
-                p_dt = datetime.strptime(sorted_dates_all[i - 1], "%Y-%m-%d")
-                if (a_dt - p_dt).days == 1:
+            for i in range(len(date_objs_all) - 1, 0, -1):
+                if (date_objs_all[i] - date_objs_all[i - 1]).days == 1:
                     run += 1
                 else:
                     break
@@ -1760,7 +1927,7 @@ def _summary_data(days_back: int, units: str) -> dict:
     last_date_all = max(unique_active) if unique_active else None
     days_since = None
     if last_date_all:
-        days_since = (today_dt - datetime.strptime(last_date_all, "%Y-%m-%d")).days
+        days_since = (today_dt.date() - date.fromisoformat(last_date_all)).days
 
     # Active days in the last 14 days (rolling fortnight ending today).
     fortnight_start = (today_dt - timedelta(days=13)).strftime("%Y-%m-%d")
@@ -2726,18 +2893,44 @@ def _geocode_key(lat: float, lon: float) -> str:
     return f"{round(lat, 1)},{round(lon, 1)}"
 
 
+# Process-local memoised copy of the geocode dict. Reloaded from disk only
+# when the file mtime changes — avoids the per-activity reparse burden when
+# /api/activities or /api/summary lists 500+ rows and each calls reverse_geocode().
+_geocode_mem_cache: dict | None = None
+_geocode_mem_mtime: float = -1.0
+_geocode_mem_lock = threading.Lock()
+
+
 def _load_geocode_cache() -> dict:
-    if not _GEOCODE_CACHE_FILE.exists():
-        return {}
+    global _geocode_mem_cache, _geocode_mem_mtime
     try:
-        return json.loads(_GEOCODE_CACHE_FILE.read_text(encoding="utf-8"))
-    except Exception:
+        st = _GEOCODE_CACHE_FILE.stat()
+    except FileNotFoundError:
         return {}
+    with _geocode_mem_lock:
+        if _geocode_mem_cache is not None and st.st_mtime == _geocode_mem_mtime:
+            return _geocode_mem_cache
+        try:
+            data = json.loads(_GEOCODE_CACHE_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            data = {}
+        _geocode_mem_cache = data
+        _geocode_mem_mtime = st.st_mtime
+        return data
 
 
 def _save_geocode_cache(cache: dict) -> None:
+    """Persist + refresh the in-memory copy so the next read hits the new
+    bytes without a stat-then-reparse round trip."""
+    global _geocode_mem_cache, _geocode_mem_mtime
     try:
         _atomic_write(_GEOCODE_CACHE_FILE, json.dumps(cache))
+        with _geocode_mem_lock:
+            _geocode_mem_cache = dict(cache)
+            try:
+                _geocode_mem_mtime = _GEOCODE_CACHE_FILE.stat().st_mtime
+            except FileNotFoundError:
+                _geocode_mem_mtime = -1.0
     except Exception:
         pass
 
