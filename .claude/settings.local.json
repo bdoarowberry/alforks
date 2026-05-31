@@ -72,7 +72,9 @@
       "Read(//c/Program Files/Microsoft/Edge/Application/**)",
       "Read(//c/Program Files/Google/Chrome/Application/**)",
       "Bash(tasklist //FI \"IMAGENAME eq chrome.exe\")",
-      "Bash('/c/Program Files \\(x86\\)/Microsoft/Edge/Application/msedge.exe' --headless=new --disable-gpu --hide-scrollbars --no-sandbox --user-data-dir=/tmp/edge_test --window-size=1680,1050 --virtual-time-budget=8000 --screenshot=/tmp/edge_test.png http://localhost:5000/)"
+      "Bash('/c/Program Files \\(x86\\)/Microsoft/Edge/Application/msedge.exe' --headless=new --disable-gpu --hide-scrollbars --no-sandbox --user-data-dir=/tmp/edge_test --window-size=1680,1050 --virtual-time-budget=8000 --screenshot=/tmp/edge_test.png http://localhost:5000/)",
+      "Bash(attrib .git/COMMIT_EDITMSG)",
+      "Bash(rm -f .git/COMMIT_EDITMSG)"
     ]
   }
 }

@@ -46,15 +46,43 @@ Training are fine — those don't exist globally).
 | `--text-muted` | `rgba(255,255,255,0.5)` | De-emphasized labels, axis ticks |
 | `--text-faint` | `rgba(255,255,255,0.38)` | Disabled state, placeholder, separator dots |
 
+### Surfaces (extras)
+
+| Token | Value | Used for |
+|---|---|---|
+| `--bg-map` | `#050708` | Leaflet/Mapbox container — darker than `--bg-page` so tile colours pop |
+| `--surface-tint` | `rgba(255,255,255,0.04)` | Chip/segctrl resting fill, hover wash on rows |
+
 ### Accent
 
 | Token | Value | Used for |
 |---|---|---|
 | `--accent` | `#3b82f6` | Active state, focus ring, primary action |
+| `--accent-hover` | `#2563eb` | Hover state for solid-accent surfaces |
+| `--accent-soft` | `rgba(59,130,246,0.10)` | Tinted backgrounds for accent-active chips/links |
 
-For semantic positive/negative deltas, use OKLCH so they look right on the
-dark background. Summary defines them locally; promote if a third page
-needs them:
+### Semantic accents
+
+For warn/danger/success affordances — action button states, anomaly
+highlights, status pills, save confirmations. Replace literal `#f59e0b`,
+`#ef4444`, `#22c55e` and `#93c5fd` with these.
+
+| Token | Value | Used for |
+|---|---|---|
+| `--warn` | `#f59e0b` | Amber — exclude, lift, preview-tag, anomaly indicator |
+| `--warn-hover` | `#d97706` | Hover variant for solid-amber surfaces |
+| `--warn-soft` | `rgba(245,158,11,0.10)` | Tinted warn background |
+| `--warn-border` | `#4a3a1f` | Resting border for amber-text buttons |
+| `--danger` | `#ef4444` | Red — delete, anomaly, toast error border |
+| `--danger-soft` | `rgba(239,68,68,0.10)` | Tinted danger background |
+| `--danger-border` | `#4a2020` | Resting border for red-text buttons |
+| `--success` | `#22c55e` | Green — save confirmation, success state |
+| `--link` | `#93c5fd` | Inline link text in tables (route/trail/ride name) |
+| `--link-hover` | `#bfdbfe` | Link hover |
+
+For semantic positive/negative *chart deltas*, use OKLCH so they look right
+on the dark background. Summary defines them locally; promote if a third
+page needs them:
 
 ```css
 --pos: oklch(0.78 0.15 145);  /* up-and-to-the-right */
@@ -68,8 +96,13 @@ needs them:
 --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', monospace;
 ```
 
-Both loaded once via `@import` at the top of `base.css`. Never `<link>`
-the Google Fonts URL again from a template.
+Both loaded via `templates/_head.html` — a partial included as
+`{% include '_head.html' %}` in every template's `<head>`. The partial
+ships `<meta charset>` + `<meta viewport>` + preconnects + a single
+`<link rel="stylesheet">` for both font families. **Don't** put a
+duplicate font `<link>` (or `@import`) in any individual template —
+the partial covers it. `<link>` in the head fetches in parallel with
+`base.css`; `@import` would be render-blocking and serial.
 
 ---
 
@@ -266,25 +299,30 @@ _None outstanding. Previously listed items have all been resolved._
 **Page-frame padding split: `18px 22px 32px` vs `32px 36px`**
 - Summary is the only page using the airier `32px 36px`. Either bring it back to the compact value (matches Logs/Compare/Training) or document why dashboards get more breathing room than data tables.
 
-**Border-radius mix: 3px / 4px / 6px / 8px**
-- Canonical: 3px for chips/inputs, 4px for panels and segmented controls.
-- 6px and 8px appear in legacy pages (Compare picker, Setup type-card, exag-ctrl original). Replace as those pages get touched.
-
-**`.filter-btn` in `base.css` is a vestigial style**
-- Currently used only by the archived `summary.html` and overridden locally in `heatmap.html`. The class lives in `base.css` partly out of historical inertia.
-- Either: (a) update its definition in `base.css` to match the canonical chip and drop the local override in `heatmap.html`, or (b) delete it from `base.css` and let pages style their own chips.
-
-### Low-impact drift
-
 **Eyebrow letter-spacing variations: 0.14em / 0.18em / 0.22em**
 - Mostly explained by the size hierarchy (panel-internal vs section vs hero).
 - Training's `.tl-eyebrow` at 0.22em is slightly out of band. Bring to 0.18em next time the page is touched.
 
-**H1 page-title styling is inlined on most pages**
-- Could be promoted to a `.page-title` class in `base.css`. Low priority — the inline is fine and it's the same spec everywhere.
+### Low-impact drift
 
-**Setup uses many literal hex colours and old-style buttons**
-- Whole page is older. Worth a focused pass at some point but not blocking.
+**Remaining short-hex text colours in index.html**
+- A handful of `color: #ccc`, `#aaa`, `#888`, `#bbb` survive in popovers and overlays. They don't map cleanly 1:1 to text tier tokens; replace as those overlays are touched.
+
+**A/B accent encoding in compare.html — out of scope, by design**
+- `#3b82f6` (A) and `#f59e0b` (B) are literal because they're a semantic encoding (which side is which), not chrome. Don't tokenize.
+
+### Resolved (kept for changelog)
+
+- **Routes pages introduced a 3rd max-width (1480px)** → both routes pages now use canonical 1680px.
+- **`.btn-primary` solid-blue button in routes.html** → dropped; `+ New Route` / `Save` use the bordered `.btn-mono` style, consistent with the rest of the site.
+- **Duplicate Google Fonts `<link>` in summary/training/review** → consolidated into `templates/_head.html`, included by every template. `@import` removed from `base.css` (was render-blocking).
+- **`.filter-btn` in base.css using old palette** → now matches the canonical chip pattern (neutral-white active, tokens throughout). Heatmap's local override still wins via `#filter-bar` specificity but is no longer needed for correctness.
+- **Header/nav/`.nav-sync-btn` in base.css using literal hex** → all tokenized.
+- **Index.html legacy palette (#12151a / #2a2d35 / #1a1d23 / #1a2a3a / #0e1117)** → swept to tokens; ~80 declarations now use the system.
+- **`.page-title` not a shared class** → now defined in base.css; routes, route_detail, trails (and setup) use it instead of inline H1 specs.
+- **`--bg-map` token missing** → added for Leaflet/Mapbox containers (route_detail, routes_edit use it).
+- **Native `<select>` chevron looked alien** → `.styled-select` class in base.css strips the OS chevron and draws a CSS SVG one. Applied to routes filter and setup edit selects.
+- **Setup full token sweep + radius normalisation (8px→4px panels, 6px→3px chips/inputs)** → done. Most inline `style="..."` blobs extracted to classes.
 
 ### Out of scope (deliberate differences)
 
@@ -299,15 +337,19 @@ _None outstanding. Previously listed items have all been resolved._
 
 When you build a new page, copy this checklist:
 
-- [ ] `<link rel="stylesheet" href="/static/base.css">` (no manual font import)
-- [ ] No `:root` redefinition (just use the global tokens)
+- [ ] `{% include '_head.html' %}` at the top of `<head>` (handles meta + fonts)
+- [ ] `<link rel="stylesheet" href="/static/base.css">`
+- [ ] No `:root` redefinition (just use the global tokens; aliasing for page-local readability is fine)
 - [ ] `<main>` with `max-width: 1680px`, `margin: 0 auto`, padding from the canonical pair
-- [ ] Page H1 uses the canonical spec (1.4rem / 500 / -0.02em)
-- [ ] Filter chips use the canonical chip pattern (neutral-white active)
+- [ ] Page H1 uses `<h1 class="page-title">` (defined in base.css)
+- [ ] Filter chips use the canonical `.filter-btn` (or the inline pattern from the design system)
 - [ ] Segmented controls use the canonical `s2-segctrl` pattern
 - [ ] Panels use `var(--bg-card) / var(--border-hair) / 4px`
 - [ ] Numeric columns use `var(--font-mono)` with `font-variant-numeric: tabular-nums`
-- [ ] No literal text hex colours — all text uses `var(--text-*)` tokens
-- [ ] No literal border hex colours — all borders use `var(--border-*)` tokens
+- [ ] Native `<select>` elements get `class="styled-select"` for the consistent chevron
+- [ ] No literal text hex colours — use `var(--text-*)` tokens (and `var(--link)` for table links)
+- [ ] No literal border hex colours — use `var(--border-*)` tokens
+- [ ] Warn/danger/success states use `var(--warn|danger|success)` not literal `#f59e0b/#ef4444/#22c55e`
+- [ ] Action buttons stay bordered/ghost — no solid-accent CTAs (use `.btn-mono` for emphasis)
 
 If you need to deviate, add an entry to "Out of scope" above explaining why.
