@@ -9,10 +9,10 @@
   <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
   <link href="https://api.mapbox.com/mapbox-gl-js/v3.3.0/mapbox-gl.css" rel="stylesheet">
   <script src="https://api.mapbox.com/mapbox-gl-js/v3.3.0/mapbox-gl.js"></script>
-  <link rel="stylesheet" href="/static/base.css">
-  <script src="/static/utils.js"></script>
-  <script src="/static/sync_toast.js" defer></script>
-  <script src="/static/review_nav.js" defer></script>
+  <link rel="stylesheet" href="/static/base.css?v={{ asset_v('base.css') }}">
+  <script src="/static/utils.js?v={{ asset_v('utils.js') }}"></script>
+  <script src="/static/sync_toast.js?v={{ asset_v('sync_toast.js') }}" defer></script>
+  <script src="/static/review_nav.js?v={{ asset_v('review_nav.js') }}" defer></script>
   <style>
     /* Style tokens come from /static/base.css. Surface treatments mirror
        Summary: bg-card panels with hair borders, mono numerics, and

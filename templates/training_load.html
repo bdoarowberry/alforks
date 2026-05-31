@@ -3,10 +3,10 @@
 <head>
   {% include '_head.html' %}
   <title>AlForks – Training</title>
-  <link rel="stylesheet" href="/static/base.css">
-  <script src="/static/utils.js"></script>
-  <script src="/static/sync_toast.js" defer></script>
-  <script src="/static/review_nav.js" defer></script>
+  <link rel="stylesheet" href="/static/base.css?v={{ asset_v('base.css') }}">
+  <script src="/static/utils.js?v={{ asset_v('utils.js') }}"></script>
+  <script src="/static/sync_toast.js?v={{ asset_v('sync_toast.js') }}" defer></script>
+  <script src="/static/review_nav.js?v={{ asset_v('review_nav.js') }}" defer></script>
   <style>
     /* Page-local tokens. Surface / text / font tokens alias base.css
        so Training shares the canonical chrome with the rest of the

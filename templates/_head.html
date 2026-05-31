@@ -1,15 +1,23 @@
-{# Shared head fragment — meta + font loading.
+{# Shared head fragment — meta + font + CDN preconnects.
    Included inside every template's <head> via {% include '_head.html' %}.
 
-   Fonts: preconnect to googleapis hosts (saves the DNS+TLS round trip)
-   then a single <link rel="stylesheet"> with both families. Loading
-   here (not via @import in base.css) lets the browser fetch the
-   stylesheet in parallel with base.css instead of serially after it.
+   Preconnects: open the TCP+TLS connection to each CDN before any of
+   their scripts/styles are requested. Saves ~50-200ms per origin on
+   first-visit cold load — the request can fire immediately instead
+   of waiting on DNS+handshake. crossorigin attribute matches the
+   eventual fetch credentials mode (gstatic/jsdelivr/unpkg/mapbox are
+   all anonymous/CORS).
 
-   `display=swap` makes the system fallback show immediately while
-   webfonts download — eliminates the flash of invisible text. #}
+   Fonts: preconnects + a single <link rel="stylesheet"> with both
+   families. Loading here (not via @import in base.css) lets the
+   browser fetch in parallel with base.css instead of serially.
+   `display=swap` keeps the system fallback visible while webfonts
+   download — no flash of invisible text. #}
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="preconnect" href="https://unpkg.com" crossorigin>
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<link rel="preconnect" href="https://api.mapbox.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
