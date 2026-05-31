@@ -285,19 +285,34 @@ def _merge_stats(is_assisted: list[bool], per_pt: list, base_stats: dict) -> dic
 def _per_pt_from_points(points: list) -> tuple[list, list]:
     """Reconstruct per_pt transitions and latlons from the cached points array.
     Uses smoothed speed already stored in points, so no re-filtering needed.
+
+    The datetime parse for points[i-1]['time'] is reused as the prev value
+    on the next iteration — halves fromisoformat() calls on long rides.
     """
     latlons = [(p["lat"], p["lon"]) for p in points]
     per_pt = [{'dt': 0, 'dist': 0.0, 'speed': None, 'ele_delta': 0.0}]
+    # Cache the parsed prev-timestamp across iterations so each ts is parsed
+    # at most once (was: parsed twice — once as curr, once as next-prev).
+    prev_ts_str: str | None = points[0].get("time") if points else None
+    prev_dt = None
+    if prev_ts_str:
+        try:
+            prev_dt = datetime.fromisoformat(prev_ts_str)
+        except Exception:
+            prev_dt = None
     for i in range(1, len(points)):
         prev, curr = points[i - 1], points[i]
         dt = 0
-        if prev.get("time") and curr.get("time"):
+        curr_ts_str = curr.get("time")
+        curr_dt = None
+        if curr_ts_str:
             try:
-                t0 = datetime.fromisoformat(prev["time"])
-                t1 = datetime.fromisoformat(curr["time"])
-                dt = (t1 - t0).total_seconds()
+                curr_dt = datetime.fromisoformat(curr_ts_str)
             except Exception:
-                pass
+                curr_dt = None
+        if prev_dt is not None and curr_dt is not None:
+            dt = (curr_dt - prev_dt).total_seconds()
+        prev_dt = curr_dt
         ele_delta = 0.0
         if prev.get("ele") is not None and curr.get("ele") is not None:
             ele_delta = curr["ele"] - prev["ele"]

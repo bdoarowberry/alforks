@@ -29,6 +29,7 @@ import threading
 import time
 import urllib.parse
 import urllib.request
+from datetime import datetime
 from pathlib import Path
 
 import osm_breaker
@@ -1281,7 +1282,6 @@ def _coalesce_runs(runs, points,
 def _parse_iso(ts: str):
     # Both ends of any gap come from the same activity, so identical tz
     # offset — datetime.fromisoformat handles the +HH:MM suffix natively.
-    from datetime import datetime
     return datetime.fromisoformat(ts)
 
 
