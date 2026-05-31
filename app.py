@@ -88,6 +88,25 @@ def _safe_json(obj) -> str:
     return json.dumps(obj).replace("</", "<\\/")
 
 
+# Fields stripped from each region for the "lite" payload used by pages that
+# only need metadata (chip rendering, dropdowns, lookups by id). `geometry`
+# is the giant polygon array (3.5+ MB across all regions); other lite-omitted
+# fields are similarly only useful inside the Setup map editor.
+_REGION_HEAVY_FIELDS = ("geometry", "source")
+
+
+def _regions_lite(regions: list[dict]) -> list[dict]:
+    """Strip geometry + other map-only fields from each region. Cuts the
+    inlined `const REGIONS = ...` payload on /logs and /routes from
+    ~1.27 MB to ~5 KB while still carrying id/name/color/default_type/
+    winter_default_type/winter_months/assisted — everything the chip
+    rendering and region dropdowns need."""
+    return [
+        {k: v for k, v in r.items() if k not in _REGION_HEAVY_FIELDS}
+        for r in regions
+    ]
+
+
 def load_types() -> list[dict]:
     global _types_cache
     if _types_cache is not None:
@@ -1398,7 +1417,7 @@ def logs():
     two rows to overlay them at /compare."""
     return render_template("logs.html",
                            types_json=_safe_json(load_types()),
-                           regions_json=_safe_json(load_regions()),
+                           regions_json=_safe_json(_regions_lite(load_regions())),
                            mapbox_token=load_config().get("mapbox_token", ""))
 
 
@@ -1455,10 +1474,12 @@ def review_page():
 @app.route("/routes")
 def routes_list_page():
     """List of saved routes. Shares a sub-nav with /trails so the two
-    pages feel like one Trails-and-Routes view."""
+    pages feel like one Trails-and-Routes view. Region payload is lite
+    (no geometry) — the list view only needs name + colour for the
+    region chip + dropdown."""
     return render_template(
         "routes.html",
-        regions_json=_safe_json(load_regions()),
+        regions_json=_safe_json(_regions_lite(load_regions())),
     )
 
 
@@ -1484,10 +1505,14 @@ def routes_edit_page():
 
     `?id=<route_id>` loads an existing route; without it, a fresh blank
     builder. See route_builder.py for the underlying region artifact.
+
+    Region payload is lite — the builder fetches per-region geometry
+    via /api/regions/<id>/trails-geometry once the user picks one,
+    so the initial bundle is just the dropdown's id/name list.
     """
     return render_template(
         "routes_edit.html",
-        regions_json=_safe_json(load_regions()),
+        regions_json=_safe_json(_regions_lite(load_regions())),
         route_id=request.args.get("id") or "",
     )
 
