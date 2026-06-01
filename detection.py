@@ -667,7 +667,7 @@ DETECTION_ALGORITHMS: list[tuple] = [
 # Signature string for cache invalidation. Consumed by app.py to compute the
 # CACHE_VERSION hash — bump when threshold values or algorithm logic changes.
 ALGO_SIG = (
-    f"v14-ele-sm-persisted,{_STATION_THRESH_M},{_LIFT_MIN_RIDE_SEC},{_LIFT_MAX_RIDE_SEC},{_LIFT_MIN_NET_GAIN},"
+    f"v15-ele-sm-poly50,{_STATION_THRESH_M},{_LIFT_MIN_RIDE_SEC},{_LIFT_MAX_RIDE_SEC},{_LIFT_MIN_NET_GAIN},"
     f"{_ASSISTED_MIN_DT_SEC},{_ASSISTED_MIN_GAIN_M},"
     f"{_LIFT_SPEED_MIN},{_LIFT_SPEED_MAX},{_LIFT_SPEED_STD},"
     f"{_LIFT_SINUOSITY},{_LIFT_WIN_GAIN},{_LIFT_MIN_GAIN},{_LIFT_MIN_DUR},"
