@@ -393,7 +393,7 @@ const HEAT_TARGET_POINTS = 500;
 function buildHeatPoints() {
   const out = [];
   for (const act of allActivities) {
-    const n = act.polyline.length;
+    const n = act.polyline?.length || 0;
     if (!n) continue;
     const stride = Math.max(1, Math.ceil(n / HEAT_TARGET_POINTS));
     for (let i = 0; i < n; i += stride) {
