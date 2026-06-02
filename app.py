@@ -2287,6 +2287,11 @@ def _invalidate_route_attempts(route_id: str | None = None) -> None:
 _TRAIL_PREWARM_RUNNING = False
 _TRAIL_PREWARM_RESCAN  = False   # set when a trigger arrives mid-run
 _trail_prewarm_lock    = threading.Lock()
+# Progress for the user-facing rescan indicator (exposed by
+# /api/trail-match/status). Guarded by _trail_prewarm_lock. `total`/`done`
+# track the current (or most recent) pass; `finished_at` is stamped when the
+# worker drops _TRAIL_PREWARM_RUNNING so the UI can show a final "done".
+_trail_prewarm_progress = {"done": 0, "total": 0, "started_at": None, "finished_at": None}
 
 
 def _prewarm_trail_matches_async() -> None:
@@ -2323,6 +2328,7 @@ def _trail_prewarm_worker() -> None:
         # running flag stuck and block future triggers.
         with _trail_prewarm_lock:
             _TRAIL_PREWARM_RUNNING = False
+            _trail_prewarm_progress["finished_at"] = time.time()
 
 
 def _trail_prewarm_worker_inner() -> None:
@@ -2368,6 +2374,11 @@ def _trail_prewarm_worker_inner() -> None:
                 pass
         todo.append(fn)
 
+    # Publish the size of this pass so the rescan indicator can show a count.
+    with _trail_prewarm_lock:
+        _trail_prewarm_progress.update(done=0, total=len(todo),
+                                       started_at=time.time(), finished_at=None)
+
     if not todo:
         logger.info("trail prewarm: nothing to do (%d MTB activities, all cached)",
                     len(activities))
@@ -2407,6 +2418,8 @@ def _trail_prewarm_worker_inner() -> None:
                 meta_fp=meta_fp,
             )
             done += 1
+            with _trail_prewarm_lock:
+                _trail_prewarm_progress["done"] = done
             # Each successful compute invalidates the leaderboard so the
             # next /api/trails/leaderboard or /api/activity request sees
             # the new ride.
@@ -2475,8 +2488,8 @@ def api_activity_rescan_trails(filename: str):
     returned synchronously). Used by the rescan button on the activity
     detail page after a route is saved or the matcher changes.
     """
-    p = GPX_DIR / filename
-    if not p.exists():
+    p = _safe_gpx_path(filename)
+    if p is None or not p.exists():
         abort(404)
     disk = TRAIL_MATCH_CACHE_DIR / f"{filename}.json"
     if disk.exists():
@@ -2489,7 +2502,7 @@ def api_activity_rescan_trails(filename: str):
         for k in list(trail_match._RESULT_MEM_CACHE):
             if k[0] == filename:
                 trail_match._RESULT_MEM_CACHE.pop(k, None)
-    data = parse_gpx(filename)
+    data = parse_gpx(p)
     if data is None:
         return jsonify({"error": "could not parse GPX"}), 500
     file_meta = (load_metadata() or {}).get(filename) or {}
@@ -2515,6 +2528,90 @@ def api_activity_rescan_trails(filename: str):
     _invalidate_trail_leaderboards()
     _invalidate_route_attempts()   # one ride's match changed → any route attempt may have changed
     return jsonify({"ok": True, "result": result})
+
+
+@app.route("/api/activity/<path:filename>/route-suggestion")
+def api_activity_route_suggestion(filename: str):
+    """Propose a route built from a ride's detected trail timeline.
+
+    The reverse of attempt detection: take the trails the matcher snapped
+    this ride onto and rebuild them as ordered edge segments (see
+    `route_attempts.build_segments_from_ride`). Returns the proposal —
+    region, suggested name, segments — WITHOUT saving. The builder opens
+    it pre-filled (`/routes/edit?from=<filename>`) so the rider can trim
+    detours / trailing trails before saving.
+    """
+    p = _safe_gpx_path(filename)
+    if p is None or not p.exists():
+        abort(404)
+    data = get_activity(filename)
+    if data is None:
+        return jsonify({"error": "could not parse GPX"}), 500
+
+    file_meta = (load_metadata() or {}).get(filename) or {}
+    meta_fp = hashlib.md5(json.dumps({
+        "trim":             file_meta.get("trim"),
+        "smoothing":        file_meta.get("smoothing"),
+        "time_shift_hours": file_meta.get("time_shift_hours"),
+        "spike_repair":     file_meta.get("spike_repair"),
+    }, sort_keys=True).encode()).hexdigest()[:12]
+    result = trail_match.cached_match(
+        filename, p.stat().st_mtime, data,
+        cache_dir_osm=OSM_PATHS_CACHE_DIR,
+        cache_dir_results=TRAIL_MATCH_CACHE_DIR,
+        cache_dir_roads=OSM_ROADS_CACHE_DIR,
+        meta_fp=meta_fp,
+    )
+    timeline = (result or {}).get("timeline") or []
+    if not timeline:
+        return jsonify({"error": "No trails detected in this ride — nothing to build a route from."}), 422
+
+    # Candidate regions: the ride's matched regions first; fall back to all.
+    act = next((a for a in all_activities() if a.get("filename") == filename), None)
+    region_ids = list((act or {}).get("regions") or []) or [r["id"] for r in load_regions()]
+
+    # Pick the region whose route graph resolves the most segments — a ride
+    # tagged with two overlapping regions should build against the one that
+    # actually owns the trails it rode.
+    best_segs: list[dict] = []
+    best_region: str | None = None
+    for rid in region_ids:
+        region = next((r for r in load_regions() if r["id"] == rid), None)
+        if region is None:
+            continue
+        try:
+            art = route_builder.get_region_artifact(
+                region,
+                artifacts_dir=REGION_TRAILS_CACHE_DIR,
+                osm_paths_dir=OSM_PATHS_CACHE_DIR,
+                osm_roads_dir=OSM_ROADS_CACHE_DIR,
+            )
+        except Exception:
+            continue
+        segs = route_attempts.build_segments_from_ride(timeline, data["points"], art)
+        if len(segs) > len(best_segs):
+            best_segs, best_region = segs, rid
+
+    if not best_segs:
+        return jsonify({"error": "Detected trails couldn't be mapped to a region's route graph."}), 422
+
+    # Suggested name: the de-duplicated consecutive trail-name chain.
+    chain: list[str] = []
+    for s in best_segs:
+        if not chain or chain[-1] != s["trail_name"]:
+            chain.append(s["trail_name"])
+    name = " → ".join(chain)
+    if len(name) > 80:
+        name = " → ".join(chain[:3]) + f" → +{len(chain) - 3} more"
+
+    return jsonify({
+        "version":    ROUTES_API_VERSION,
+        "filename":   filename,
+        "region_id":  best_region,
+        "name":       name,
+        "segments":   best_segs,
+        "trail_chain": chain,
+    })
 
 
 @app.route("/api/trail-match/rescan-all", methods=["POST"])
@@ -2543,12 +2640,23 @@ def api_trail_match_rescan_all():
                      "message": "Rescan started — prewarm runs in background."})
 
 
+@app.route("/api/trail-match/status")
+def api_trail_match_status():
+    """Progress of the background trail-match prewarm (what 'Rescan all logs'
+    kicks off). `running` flips false when the worker finishes; `done`/`total`
+    track the current pass so the UI can show a live count and a final done."""
+    with _trail_prewarm_lock:
+        running = _TRAIL_PREWARM_RUNNING
+        prog = dict(_trail_prewarm_progress)
+    return jsonify({"running": running, **prog})
+
+
 # ─── Route builder ──────────────────────────────────────────────────────────
 # Saved routes are user-defined orderings of trail segments within a region
 # (see route_builder.py for the upstream artifact that powers selection).
 # Bump ROUTES_API_VERSION alongside route_builder.ROUTE_BUILDER_VERSION
 # whenever the wire shape changes — clients use it to invalidate caches.
-ROUTES_API_VERSION       = 5
+ROUTES_API_VERSION       = 6   # v6: added 50-point preview polyline to the list payload
 REGION_TRAILS_CACHE_DIR  = CACHE_DIR / "region_trails"
 # OSM_ROADS_CACHE_DIR moved up next to OSM_PATHS_CACHE_DIR — see there.
 ROUTES_DIR               = CACHE_DIR / "routes"
@@ -2691,19 +2799,79 @@ def api_region_edges_summary(region_id: str):
                      "region_id": region_id, "edges": edges})
 
 
+def _downsample_latlon(coords: list, n: int = 50) -> list:
+    """Downsample a [[lat,lon],...] list to n+1 points (n evenly-spaced plus
+    the final point). Sibling of `_downsample_polyline`, but operates on
+    coordinate pairs rather than GPX point dicts."""
+    if not coords:
+        return []
+    if len(coords) <= n:
+        return [[c[0], c[1]] for c in coords]
+    step = len(coords) / n
+    out = [[coords[int(i * step)][0], coords[int(i * step)][1]] for i in range(n)]
+    out.append([coords[-1][0], coords[-1][1]])
+    return out
+
+
+def _region_edge_polylines(region_id: str) -> dict:
+    """edge_id -> polyline ([[lat,lon],...]) for one region, read from the
+    cached trails+roads artifact (in-memory after first build). Returns {}
+    if the region or its artifact is unavailable."""
+    region = next((r for r in load_regions() if r["id"] == region_id), None)
+    if region is None:
+        return {}
+    try:
+        artifact = route_builder.get_region_artifact(
+            region,
+            artifacts_dir=REGION_TRAILS_CACHE_DIR,
+            osm_paths_dir=OSM_PATHS_CACHE_DIR,
+            osm_roads_dir=OSM_ROADS_CACHE_DIR,
+        )
+    except Exception:
+        return {}
+    out = {}
+    for collection in (artifact.get("trails") or [], artifact.get("roads") or []):
+        for entry in collection:
+            for e in (entry.get("edges") or []):
+                out[e["id"]] = e.get("polyline") or []
+    return out
+
+
+def _route_preview_polyline(route: dict, edge_polys: dict, n: int = 50) -> list:
+    """Concatenate the route's edge polylines in segment order and downsample
+    to ~n points for a list-page mini-map. Segments whose edge_id is missing
+    from the artifact (stale ids) are skipped — the preview shows whatever
+    geometry is still resolvable."""
+    coords = []
+    for seg in route.get("segments") or []:
+        pl = edge_polys.get(seg.get("edge_id"))
+        if pl:
+            coords.extend(pl)
+    return _downsample_latlon(coords, n)
+
+
 @app.route("/api/routes", methods=["GET"])
 def api_routes_list():
-    """List routes, enriched with attempt count + best time per route.
+    """List routes, enriched with attempt count + best time + a 50-point
+    preview polyline per route.
 
     Stats come from `_get_route_attempts` which is cached on disk + in
-    memory; a warm list page fires no trail_match recomputes."""
+    memory; a warm list page fires no trail_match recomputes. The preview
+    polyline is built server-side from the cached region artifact (one edge
+    map per region, shared across that region's routes) so the list page
+    never has to pull the ~600 KB geometry artifact to draw thumbnails."""
     routes = _all_routes()
+    edge_cache: dict[str, dict] = {}   # region_id -> {edge_id: polyline}, once per region
     out = []
     for r in routes:
         rid = r["id"]
         stats = _get_route_attempts(rid, route=r) or {}
+        region_id = r.get("region_id")
+        if region_id not in edge_cache:
+            edge_cache[region_id] = _region_edge_polylines(region_id)
         out.append({
             **r,
+            "polyline":          _route_preview_polyline(r, edge_cache[region_id]),
             "attempts":          stats.get("attempt_count", 0),
             "best_duration_sec": stats.get("best_duration_sec"),
             "best_filename":     stats.get("best_filename"),

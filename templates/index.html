@@ -543,6 +543,9 @@
     }
     #trails-rescan-btn:hover { color: #fff; border-color: var(--accent); }
     #trails-rescan-btn:disabled { opacity: 0.5; cursor: wait; }
+    /* Build-route action lives in the always-visible activity header so it's
+       available on every log, not just ones with a populated trails drawer. */
+    #build-route-btn { font-size: 0.74rem; white-space: nowrap; }
     /* Routes Ridden section — sits above Trails Ridden in the same drawer.
        Empty state hides the whole block so the drawer isn't a deadspace
        when no saved routes were matched. */
@@ -769,6 +772,8 @@
                   title="Exclude from statistics">⊘</button>
           <button id="assisted-activity-btn" class="ah-action-btn" onclick="toggleAssisted()"
                   title="Lift / shuttle assisted">LIFT</button>
+          <button id="build-route-btn" class="ah-action-btn" onclick="buildRouteFromThisRide()"
+                  title="Build a route from this ride's detected trails">+ Route</button>
           <button id="delete-activity-btn" class="ah-action-btn" onclick="deleteCurrent()"
                   title="Delete this ride log">🗑</button>
         </div>
@@ -3195,6 +3200,15 @@ async function openRouteLeaderboard(routeId, routeName) {
 function closeRouteLeaderboard() {
   const pop = document.getElementById('routes-leaderboard');
   if (pop) pop.classList.remove('open');
+}
+
+// ─── Build a route from this ride ───────────────────────────────────────
+// Opens the route builder pre-filled with the trails this ride was matched
+// onto (server reconstructs ordered edge segments from the trail_match
+// timeline). The rider trims detours / trailing trails, then saves.
+function buildRouteFromThisRide() {
+  if (!currentFilename) return;
+  location.href = '/routes/edit?from=' + encodeURIComponent(currentFilename);
 }
 
 // ─── Per-log trail-match rescan ─────────────────────────────────────────

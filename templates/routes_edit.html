@@ -553,18 +553,21 @@ async function saveRoute() {
       throw new Error(err.error || `HTTP ${resp.status}`);
     }
     const saved = await resp.json();
-    state.routeId = saved.id;
-    history.replaceState(null, "", `/routes/edit?id=${saved.id}`);
-    toast(`Saved "${saved.name}"`);
+    toast(`Saved "${saved.name}" — opening…`);
+    // Hand off to the Routes page, which auto-opens this route's attempts
+    // panel via ?open=<id>. Brief delay so the toast is visible first.
+    setTimeout(() => {
+      location.href = `/routes?open=${encodeURIComponent(saved.id)}`;
+    }, 500);
   } catch (e) {
     toast(`Save failed: ${e.message}`, true);
-  } finally {
     saveBtn.disabled = false;
   }
 }
 
-// ─── Load existing route, or pick a default region ─────────────────────────
+// ─── Load existing route, pre-fill from a ride, or pick a default region ────
 async function init() {
+  const fromFile = new URLSearchParams(location.search).get("from");
   if (state.routeId) {
     try {
       const resp = await fetch(`/api/routes/${state.routeId}`);
@@ -577,6 +580,30 @@ async function init() {
       await setRegion(route.region_id);
     } catch (e) {
       toast(`Failed to load route: ${e.message}`, true);
+    }
+  } else if (fromFile) {
+    // "Build route from this ride" — pre-fill segments from the ride's
+    // detected trail timeline (unsaved). The rider trims detours / trailing
+    // trails, then Save creates a new route (POST).
+    try {
+      toast("Analyzing ride & matching trails…");
+      const resp = await fetch(`/api/activity/${encodeURIComponent(fromFile)}/route-suggestion`);
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        throw new Error(err.error || `HTTP ${resp.status}`);
+      }
+      const sug = await resp.json();
+      state.name     = sug.name || "";
+      state.segments = sug.segments || [];   // set BEFORE setRegion so its tail renders them
+      $("route-name").value = state.name;
+      await setRegion(sug.region_id);
+      toast(`Pre-filled ${state.segments.length} segments from ride — trim what you didn't mean to include, then Save.`);
+    } catch (e) {
+      toast(`Couldn't build from ride: ${e.message}`, true);
+      if (REGIONS.length) {
+        const moose = REGIONS.find(r => /moose/i.test(r.name));
+        await setRegion((moose || REGIONS[0]).id);
+      }
     }
   } else if (REGIONS.length) {
     // Prefer Moose Mountain if present (the validated region); else first.

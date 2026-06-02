@@ -3,6 +3,8 @@
 <head>
   {% include '_head.html' %}
   <title>AlForks – Trails &amp; Routes</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="/static/utils.js?v={{ asset_v('utils.js') }}"></script>
   <script src="/static/sync_toast.js?v={{ asset_v('sync_toast.js') }}" defer></script>
   <script src="/static/review_nav.js?v={{ asset_v('review_nav.js') }}" defer></script>
@@ -15,9 +17,9 @@
     /* H1 uses the canonical .page-title from base.css. */
     .page-sub { font-size: 0.78rem; color: var(--text-tertiary); margin: 6px 0 18px; }
 
-    /* Action bar — region filter + new route + rescan-all */
+    /* Action bar — region filter + layout toggle + new route + rescan-all */
     #actions {
-      display: flex; gap: 12px; align-items: center; margin-bottom: 14px;
+      display: flex; gap: 12px; align-items: center; margin-bottom: 14px; flex-wrap: wrap;
     }
     #region-filter {
       background: transparent; border: 1px solid var(--border-row);
@@ -39,7 +41,46 @@
       letter-spacing: 0.08em; text-transform: uppercase; padding: 5px 12px;
     }
 
-    /* Routes table */
+    /* Layout toggle — segmented control (Cards | Table) */
+    .layout-toggle { display: inline-flex; border: 1px solid var(--border-row); border-radius: 3px; overflow: hidden; }
+    .layout-toggle button {
+      background: transparent; border: none; color: var(--text-tertiary);
+      font-family: var(--font-mono); font-size: 0.66rem; letter-spacing: 0.08em;
+      text-transform: uppercase; padding: 5px 11px; cursor: pointer; transition: all 0.12s;
+    }
+    .layout-toggle button + button { border-left: 1px solid var(--border-row); }
+    .layout-toggle button:hover { color: var(--text-primary); }
+    .layout-toggle button.active { background: var(--accent); color: #0b0f14; }
+
+    /* Split layout: left = routes list, right = attempts detail panel.
+       Mirrors /trails — detail panel is sticky and only shown once a route
+       is clicked. */
+    #split { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; align-items: flex-start; }
+    #split.with-detail { grid-template-columns: minmax(0, 1fr) 460px; }
+    #content { min-width: 0; }
+
+    /* ── Card layout ─────────────────────────────────────────────────── */
+    .route-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px; }
+    #split.with-detail .route-cards { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
+    .route-card {
+      background: var(--bg-card); border: 1px solid var(--border-hair); border-radius: 5px;
+      overflow: hidden; cursor: pointer; transition: border-color 0.12s, transform 0.08s;
+      display: flex; flex-direction: column;
+    }
+    .route-card:hover { border-color: var(--accent); }
+    .route-card.active-route { border-color: var(--link); box-shadow: 0 0 0 1px var(--link); }
+    .route-card .route-map { height: 132px; width: 100%; background: var(--bg-map); }
+    .route-card .card-body { padding: 10px 12px 12px; display: flex; flex-direction: column; gap: 7px; }
+    .route-card .card-title { display: flex; align-items: baseline; gap: 7px; flex-wrap: wrap; }
+    .route-card .card-name { color: var(--text-primary); font-size: 0.88rem; font-weight: 500; }
+    .route-card .card-stats {
+      display: flex; gap: 10px; flex-wrap: wrap; font-size: 0.7rem;
+      color: var(--text-tertiary); font-family: var(--font-mono); font-variant-numeric: tabular-nums;
+    }
+    .route-card .card-stats strong { color: var(--text-secondary); font-weight: 600; }
+    .route-card .card-actions { display: flex; gap: 6px; margin-top: 2px; }
+
+    /* ── Table layout ────────────────────────────────────────────────── */
     .routes-table { width: 100%; border-collapse: collapse; font-size: 0.82rem;
                      background: var(--bg-card); border: 1px solid var(--border-hair);
                      border-radius: 4px; overflow: hidden; }
@@ -47,23 +88,28 @@
                         letter-spacing: 0.10em; color: var(--text-tertiary);
                         padding: 10px 14px; text-align: right; font-weight: 500;
                         background: rgba(0,0,0,0.15); border-bottom: 1px solid var(--border-hair); }
-    .routes-table th:first-child { text-align: left; }
+    .routes-table th:first-child, .routes-table th.map-h { text-align: left; }
+    .routes-table th.map-h { width: 132px; }
     .routes-table th.actions-h { width: 1%; white-space: nowrap; text-align: right; }
     .routes-table td { padding: 9px 14px; color: var(--text-secondary);
                         text-align: right; border-bottom: 1px solid var(--border-row);
                         font-variant-numeric: tabular-nums; }
-    .routes-table td:first-child { color: var(--text-primary); text-align: left;
-                                    font-variant-numeric: normal; }
-    .routes-table tbody tr { transition: background 0.08s; }
+    .routes-table td.name-cell { color: var(--text-primary); text-align: left;
+                                  font-variant-numeric: normal; }
+    .routes-table td.map-cell { padding: 6px 14px; text-align: left; }
+    .routes-table td.map-cell .route-map { width: 120px; height: 70px; border-radius: 3px;
+                                            background: var(--bg-map); border: 1px solid var(--border-hair); }
+    .routes-table tbody tr { transition: background 0.08s; cursor: pointer; }
     .routes-table tbody tr:hover td { background: rgba(255,255,255,0.04); }
     .routes-table tbody tr:last-child td { border-bottom: none; }
-    .route-name { color: var(--link); cursor: pointer; }
-    .route-name:hover { color: var(--link-hover); text-decoration: underline; }
+    .routes-table tbody tr.active-route td { background: rgba(147, 197, 253, 0.08); }
+    .routes-table tbody tr.active-route td.name-cell { box-shadow: inset 2px 0 0 var(--link); }
+
     .region-pill {
       display: inline-block; padding: 1px 7px; border-radius: 2px;
       font-size: 0.65rem; font-family: var(--font-mono);
       background: rgba(255,255,255,0.06); color: var(--text-tertiary);
-      border: 1px solid rgba(255,255,255,0.10); margin-left: 6px;
+      border: 1px solid rgba(255,255,255,0.10);
       vertical-align: 1px;
     }
     .pending { color: var(--text-muted); font-family: var(--font-mono); }
@@ -85,6 +131,30 @@
     }
     .empty .empty-cta { display: inline-block; margin-top: 14px; }
 
+    /* ── Detail panel (attempts) — mirrors /trails leaderboard panel ──── */
+    #detail { display: none; position: sticky; top: 16px; max-height: calc(100vh - 80px);
+              overflow-y: auto; background: var(--bg-card); border: 1px solid var(--border-hair);
+              border-radius: 4px; }
+    #split.with-detail #detail { display: block; }
+    .detail-head { padding: 14px 16px; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid var(--border-hair); }
+    .detail-title { font-size: 0.95rem; font-weight: 600; color: var(--text-primary); }
+    .detail-sub { font-size: 0.65rem; color: var(--text-tertiary); text-transform: uppercase; letter-spacing: 0.07em; margin-top: 2px; }
+    .detail-open { font-size: 0.66rem; font-family: var(--font-mono); color: var(--link); text-decoration: none; white-space: nowrap; }
+    .detail-open:hover { color: var(--link-hover); text-decoration: underline; }
+    .detail-close { background: transparent; border: none; color: var(--text-tertiary); font-size: 1.2rem; cursor: pointer; padding: 0 4px; }
+    .detail-close:hover { color: var(--text-primary); }
+    .detail-empty, .detail-loading { padding: 24px 16px; color: var(--text-tertiary); font-size: 0.78rem; line-height: 1.5; text-align: center; }
+    .lb-table { width: 100%; border-collapse: collapse; font-size: 0.74rem; }
+    .lb-table th { font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-tertiary); padding: 6px 10px; text-align: right; border-bottom: 1px solid var(--border-hair); font-weight: 500; background: rgba(0,0,0,0.15); position: sticky; top: 0; z-index: 1; }
+    .lb-table th:first-child, .lb-table th.t-l { text-align: left; }
+    .lb-table td { padding: 5px 10px; color: var(--text-secondary); text-align: right; border-bottom: 1px solid var(--border-row); font-variant-numeric: tabular-nums; }
+    .lb-table td:first-child { color: var(--text-primary); font-weight: 600; }
+    .lb-table td.t-l { text-align: left; color: var(--text-secondary); }
+    .lb-table td.title-cell { color: var(--link); }
+    .lb-table .rank-best { color: #fbbf24; font-weight: 600; }  /* Gold rank-1 — matches route_detail. */
+    .lb-table tbody tr { cursor: pointer; transition: background 0.08s; }
+    .lb-table tbody tr:hover td { background: rgba(255,255,255,0.04); }
+
     #toast {
       position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%);
       background: var(--bg-elev); border: 1px solid var(--border-row);
@@ -94,6 +164,7 @@
     }
     #toast.show  { opacity: 1; }
     #toast.error { border-color: var(--danger); color: var(--text-primary); }
+    .leaflet-container { background: var(--bg-map); }
   </style>
 </head>
 <body>
@@ -115,7 +186,7 @@
 <main>
   <h1 class="page-title">Trails &amp; Routes</h1>
   <p class="page-sub">Routes are ordered sequences of trail and road edges within a region.
-    Attempts and best times appear here once the matcher detects them in your rides.</p>
+    Click a route to see its attempts on the right — fastest first.</p>
 
   <nav class="subnav-tabs">
     <a href="/trails">Trails</a>
@@ -127,12 +198,29 @@
     <select id="region-filter" class="styled-select">
       <option value="">All regions</option>
     </select>
+    <div class="layout-toggle" role="group" aria-label="List layout">
+      <button data-layout="cards" type="button">Cards</button>
+      <button data-layout="table" type="button">Table</button>
+    </div>
     <div class="spacer"></div>
     <button id="rescan-btn" class="btn btn-mono" title="Re-snap every ride against the latest matcher (background)">Rescan all logs</button>
     <a href="/routes/edit" class="btn btn-mono">+ New Route</a>
   </div>
 
-  <div id="list-wrap"></div>
+  <div id="split">
+    <div id="content"><div id="list-wrap"></div></div>
+    <aside id="detail" role="complementary" aria-label="Route attempts">
+      <div class="detail-head">
+        <div style="flex:1; min-width:0;">
+          <div class="detail-title" id="detail-title"></div>
+          <div class="detail-sub" id="detail-sub"></div>
+        </div>
+        <a class="detail-open" id="detail-open" href="#" title="Open the full route page (with context map)">Open full page →</a>
+        <button class="detail-close" onclick="closeDetail()" title="Close">×</button>
+      </div>
+      <div id="detail-body"></div>
+    </aside>
+  </div>
 </main>
 
 <div id="toast"></div>
@@ -178,13 +266,17 @@ populateRegionFilter();
 
 let routes = [];
 let regionFilter = "";
-// region_id → Map<edge_id, length_m>. Populated lazily as routes for that
-// region are first rendered, so we never fetch a region artifact we
-// don't need. Multiple routes in the same region share one fetch. Only
-// successful fetches are cached — a transient failure should not poison
-// the cache forever (a later render gets to retry).
-const edgeLengthCache = new Map();
 
+// Layout: 'cards' | 'table', persisted so the choice sticks across visits.
+const LAYOUT_KEY = 'routesLayout';
+let layout = (localStorage.getItem(LAYOUT_KEY) === 'table') ? 'table' : 'cards';
+function syncLayoutToggle() {
+  document.querySelectorAll('.layout-toggle button').forEach(b =>
+    b.classList.toggle('active', b.dataset.layout === layout));
+}
+
+// region_id → Map<edge_id, length_m>. Populated lazily; shared across routes.
+const edgeLengthCache = new Map();
 async function getEdgeLengths(regionId) {
   if (edgeLengthCache.has(regionId)) return edgeLengthCache.get(regionId);
   try {
@@ -200,11 +292,6 @@ async function getEdgeLengths(regionId) {
   }
 }
 
-// Render race guard. Multiple async render() calls can interleave (a
-// region-filter change while a delete-triggered render is mid-flight).
-// Stamp each call with a monotonic id and bail if a later one has started.
-let renderSeq = 0;
-
 function routeDistance_m(route, edgeLengths) {
   let total = 0;
   for (const seg of route.segments || []) {
@@ -213,6 +300,67 @@ function routeDistance_m(route, edgeLengths) {
   return total;
 }
 
+// ─── Lazy mini-maps (mirrors /logs: IntersectionObserver + LRU eviction) ──────
+const MAX_ACTIVE_MAPS = 24;
+const mapInstances = new Map();   // rid → Leaflet map
+const mapAccess    = new Map();   // rid → last-touch ts
+
+function destroyAllMaps() {
+  for (const m of mapInstances.values()) { try { m.remove(); } catch (_e) {} }
+  mapInstances.clear();
+  mapAccess.clear();
+}
+
+function evictIfOver() {
+  if (mapInstances.size <= MAX_ACTIVE_MAPS) return;
+  const sorted = [...mapAccess.entries()].sort((a, b) => a[1] - b[1]);
+  for (const [rid] of sorted) {
+    if (mapInstances.size <= MAX_ACTIVE_MAPS) break;
+    const m = mapInstances.get(rid);
+    if (!m) continue;
+    const el = m._container;
+    const r = el.getBoundingClientRect();
+    const visible = r.bottom > -200 && r.top < (window.innerHeight + 200);
+    if (visible) continue;
+    m.remove();
+    mapInstances.delete(rid);
+    mapAccess.delete(rid);
+    el.dataset.mapInit = '';
+  }
+}
+
+function initRouteMap(mapEl) {
+  const rid = mapEl.dataset.rid;
+  if (mapInstances.has(rid)) { mapAccess.set(rid, Date.now()); return; }
+  let polyline = [];
+  try { polyline = JSON.parse(mapEl.dataset.polyline || '[]'); } catch (_e) {}
+  if (!polyline.length) {
+    mapEl.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-size:0.62rem;font-family:var(--font-mono);">no geometry</div>`;
+    return;
+  }
+  const m = L.map(mapEl, {
+    zoomControl: false, attributionControl: false, dragging: false,
+    scrollWheelZoom: false, doubleClickZoom: false, boxZoom: false,
+    keyboard: false, touchZoom: false,
+  });
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png',
+              { maxZoom: 19 }).addTo(m);
+  L.polyline(polyline, { color: '#fbbf24', weight: 3, opacity: 0.95 }).addTo(m);
+  m.fitBounds(L.latLngBounds(polyline), { padding: [10, 10] });
+  mapInstances.set(rid, m);
+  mapAccess.set(rid, Date.now());
+  mapEl.dataset.mapInit = '1';
+  evictIfOver();
+}
+
+const mapObserver = new IntersectionObserver(entries => {
+  for (const e of entries) {
+    if (e.isIntersecting) initRouteMap(e.target);
+    else evictIfOver();
+  }
+}, { rootMargin: '300px' });
+
+// ─── Load + render ────────────────────────────────────────────────────────────
 async function loadRoutes() {
   $("list-wrap").innerHTML = `<div class="empty">Loading routes…</div>`;
   try {
@@ -224,11 +372,16 @@ async function loadRoutes() {
     $("list-wrap").innerHTML = `<div class="empty">Failed to load routes: ${_esc(e.message)}</div>`;
     return;
   }
-  render();
+  await render();
 }
+
+// Render race guard — a filter change or layout toggle mid-fetch.
+let renderSeq = 0;
 
 async function render() {
   const mySeq = ++renderSeq;
+  destroyAllMaps();
+  mapObserver.disconnect();   // drop stale observations; re-observe current nodes below
   const wrap = $("list-wrap");
   let view = routes;
   if (regionFilter) view = view.filter(r => r.region_id === regionFilter);
@@ -246,8 +399,7 @@ async function render() {
     return;
   }
 
-  // Fetch edge-length maps for every region the visible routes use.
-  // Single fetch per region; shared via edgeLengthCache.
+  // Edge-length maps for every region the visible routes use (distance totals).
   const regionsNeeded = [...new Set(view.map(r => r.region_id))];
   const lengthMaps = new Map();
   await Promise.all(regionsNeeded.map(async (rid) => {
@@ -255,44 +407,92 @@ async function render() {
   }));
   if (renderSeq !== mySeq) return;   // a newer render started while we awaited
 
+  wrap.innerHTML = (layout === 'table')
+    ? renderTable(view, lengthMaps)
+    : renderCards(view, lengthMaps);
+
+  wireRows();
+  // Lazily init every mini-map as it scrolls into view.
+  wrap.querySelectorAll('.route-map').forEach(el => mapObserver.observe(el));
+  // Re-mark the active route if its panel is still open.
+  if (activeRid) markActiveRow(activeRid);
+}
+
+function statsBits(r, lengthMaps) {
+  const segCount = (r.segments || []).length;
+  const dist_km  = routeDistance_m(r, lengthMaps.get(r.region_id) || new Map()) / 1000;
+  const distTxt  = dist_km > 0 ? `${dist_km.toFixed(2)} km` : '—';
+  const attempts = (r.attempts > 0) ? r.attempts : '—';
+  const best     = (r.best_duration_sec != null && r.best_duration_sec > 0)
+    ? fmtDurHms(r.best_duration_sec) : '—';
+  return { segCount, distTxt, attempts, best };
+}
+
+function actionsHtml() {
+  return `
+    <div class="row-actions">
+      <a data-act="edit" title="Open builder">Edit</a>
+      <button data-act="dup" title="Duplicate">Duplicate</button>
+      <button class="del" data-act="del" title="Delete">Delete</button>
+    </div>`;
+}
+
+function renderCards(view, lengthMaps) {
+  const cards = view.map(r => {
+    const region = regionById[r.region_id];
+    const regionLbl = region ? region.name : r.region_id;
+    const b = statsBits(r, lengthMaps);
+    const poly = _esc(JSON.stringify(r.polyline || []));
+    return `
+      <div class="route-card" data-rid="${_esc(r.id)}">
+        <div class="route-map" data-rid="${_esc(r.id)}" data-polyline="${poly}"></div>
+        <div class="card-body">
+          <div class="card-title">
+            <span class="card-name">${_esc(r.name)}</span>
+            <span class="region-pill">${_esc(regionLbl)}</span>
+          </div>
+          <div class="card-stats">
+            <span><strong>${b.segCount}</strong> seg</span>
+            <span><strong>${b.distTxt}</strong></span>
+            <span><strong>${b.attempts}</strong> att</span>
+            <span>best <strong>${b.best}</strong></span>
+          </div>
+          ${actionsHtml()}
+        </div>
+      </div>`;
+  }).join("");
+  return `<div class="route-cards">${cards}</div>`;
+}
+
+function renderTable(view, lengthMaps) {
   const rows = view.map(r => {
     const region = regionById[r.region_id];
     const regionLbl = region ? region.name : r.region_id;
-    const segCount  = (r.segments || []).length;
-    const detailUrl = `/routes/${encodeURIComponent(r.id)}`;
-    const editUrl   = `/routes/edit?id=${encodeURIComponent(r.id)}`;
-    const dist_km   = routeDistance_m(r, lengthMaps.get(r.region_id) || new Map()) / 1000;
-    const distCell  = dist_km > 0
-      ? `${dist_km.toFixed(2)} km`
+    const b = statsBits(r, lengthMaps);
+    const poly = _esc(JSON.stringify(r.polyline || []));
+    const distCell = b.distTxt !== '—' ? b.distTxt
       : `<span class="pending" title="Distance unavailable — region artifact may be unreachable or saved edge ids are stale.">—</span>`;
-    // Attempts + best are placeholders until Stage C lands the matcher.
-    const attemptsCell = (r.attempts > 0)
-      ? `${r.attempts}` : `<span class="pending" title="No matching attempts detected yet">—</span>`;
-    const bestCell = (r.best_duration_sec != null && r.best_duration_sec > 0)
-      ? `<span title="Set on ${_esc(r.best_date || '')}">${fmtDurHms(r.best_duration_sec)}</span>`
+    const attemptsCell = (b.attempts !== '—') ? b.attempts
+      : `<span class="pending" title="No matching attempts detected yet">—</span>`;
+    const bestCell = (b.best !== '—')
+      ? `<span title="Set on ${_esc(r.best_date || '')}">${b.best}</span>`
       : `<span class="pending">—</span>`;
     return `
       <tr data-rid="${_esc(r.id)}">
-        <td><a class="route-name" href="${detailUrl}">${_esc(r.name)}</a>
-            <span class="region-pill">${_esc(regionLbl)}</span></td>
-        <td>${segCount}</td>
+        <td class="map-cell"><div class="route-map" data-rid="${_esc(r.id)}" data-polyline="${poly}"></div></td>
+        <td class="name-cell">${_esc(r.name)} <span class="region-pill">${_esc(regionLbl)}</span></td>
+        <td>${b.segCount}</td>
         <td>${distCell}</td>
         <td>${attemptsCell}</td>
         <td>${bestCell}</td>
-        <td class="actions-h">
-          <div class="row-actions">
-            <a href="${editUrl}" title="Open builder">Edit</a>
-            <button data-act="dup" title="Duplicate">Duplicate</button>
-            <button class="del" data-act="del" title="Delete">Delete</button>
-          </div>
-        </td>
+        <td class="actions-h">${actionsHtml()}</td>
       </tr>`;
   }).join("");
-
-  wrap.innerHTML = `
+  return `
     <table class="routes-table">
       <thead>
         <tr>
+          <th class="map-h">Preview</th>
           <th>Name</th>
           <th>Segments</th>
           <th>Distance</th>
@@ -303,31 +503,153 @@ async function render() {
       </thead>
       <tbody>${rows}</tbody>
     </table>`;
+}
 
-  // Delegate action buttons.
-  wrap.querySelectorAll("tr[data-rid]").forEach(tr => {
-    const rid = tr.dataset.rid;
-    tr.querySelector("[data-act='dup']")?.addEventListener("click",
-      () => duplicateRoute(rid));
-    tr.querySelector("[data-act='del']")?.addEventListener("click",
-      () => deleteRoute(rid));
+// Wire row click → attempts panel; action buttons stop propagation.
+function wireRows() {
+  $("list-wrap").querySelectorAll("[data-rid]").forEach(el => {
+    // The map element also carries data-rid; skip it (its parent handles clicks).
+    if (el.classList.contains('route-map')) return;
+    const rid = el.dataset.rid;
+    el.addEventListener("click", () => openDetailFor(rid));
+    el.querySelector("[data-act='edit']")?.addEventListener("click", (e) => {
+      e.stopPropagation();
+      location.href = `/routes/edit?id=${encodeURIComponent(rid)}`;
+    });
+    el.querySelector("[data-act='dup']")?.addEventListener("click", (e) => {
+      e.stopPropagation(); duplicateRoute(rid);
+    });
+    el.querySelector("[data-act='del']")?.addEventListener("click", (e) => {
+      e.stopPropagation(); deleteRoute(rid);
+    });
   });
 }
 
+// ─── Attempts detail panel ────────────────────────────────────────────────────
+let activeRid = null;
+
+function markActiveRow(rid) {
+  document.querySelectorAll('.active-route').forEach(el => el.classList.remove('active-route'));
+  if (!rid) return;
+  document.querySelectorAll(`[data-rid="${CSS.escape(rid)}"]`).forEach(el => {
+    if (!el.classList.contains('route-map')) el.classList.add('active-route');
+  });
+}
+
+// Opening/closing the panel resizes #content, so visible Leaflet maps need
+// their size recomputed or they render with grey gaps.
+function invalidateVisibleMaps() {
+  setTimeout(() => { for (const m of mapInstances.values()) { try { m.invalidateSize(); } catch (_e) {} } }, 60);
+}
+
+async function openDetailFor(rid) {
+  const route = routes.find(x => x.id === rid);
+  if (!route) return;
+  activeRid = rid;
+  markActiveRow(rid);
+  const split = $("split");
+  const wasOpen = split.classList.contains('with-detail');
+  split.classList.add('with-detail');
+  if (!wasOpen) invalidateVisibleMaps();
+
+  const region = regionById[route.region_id];
+  $("detail-title").textContent = route.name;
+  $("detail-sub").textContent = region ? region.name : route.region_id;
+  $("detail-open").href = `/routes/${encodeURIComponent(rid)}`;
+  $("detail-body").innerHTML = `<div class="detail-loading">Loading attempts…</div>`;
+
+  let d;
+  try {
+    const r = await fetch(`/api/routes/${encodeURIComponent(rid)}/attempts`);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    d = await r.json();
+  } catch (e) {
+    // A newer open superseded this one — don't clobber its content.
+    if (activeRid !== rid) return;
+    $("detail-body").innerHTML = `<div class="detail-empty">Failed to load attempts: ${_esc(e.message)}</div>`;
+    return;
+  }
+  if (activeRid !== rid) return;   // user clicked another route while we awaited
+  renderAttempts(route, d);
+}
+
+function renderAttempts(route, d) {
+  const attempts = d.attempts || [];
+  const sub = $("detail-sub");
+  const region = regionById[route.region_id];
+  const regionName = region ? region.name : route.region_id;
+  sub.textContent = attempts.length
+    ? `${regionName} · ${attempts.length} attempt${attempts.length === 1 ? '' : 's'} · fastest first`
+    : `${regionName} · no attempts yet`;
+
+  if (!attempts.length) {
+    $("detail-body").innerHTML = `<div class="detail-empty">No matching attempts detected yet.<br>
+      Once the matcher has snapped this route's trails + roads against your rides,
+      attempts will appear here.</div>`;
+    return;
+  }
+  // First segment's trail name drives the activity-detail ?lb= highlight hook.
+  const firstSeg = (route.segments || [])[0];
+  const lbName = firstSeg ? firstSeg.trail_name : '';
+  const rows = attempts.map((a, i) => {
+    const rankCell = (i === 0) ? `<span class="rank-best">1</span>` : `${i + 1}`;
+    const target = `/log/${encodeURIComponent(a.filename)}`
+      + `?lb=${encodeURIComponent(lbName)}`
+      + `&hl=${encodeURIComponent(`${a.first_idx}:${a.last_idx}`)}`;
+    return `
+      <tr data-nav="${_esc(target)}">
+        <td>${rankCell}</td>
+        <td class="t-l">${_esc(a.date)}</td>
+        <td class="t-l title-cell" title="${_esc(a.filename)}">${_esc(a.title || a.filename)}</td>
+        <td>${fmtDurHms(a.duration_sec)}</td>
+      </tr>`;
+  }).join("");
+  $("detail-body").innerHTML = `
+    <table class="lb-table">
+      <thead><tr><th class="t-l">#</th><th class="t-l">Date</th><th class="t-l">Ride</th><th>Dur</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+}
+
+function closeDetail() {
+  $("split").classList.remove("with-detail");
+  activeRid = null;
+  markActiveRow(null);
+  invalidateVisibleMaps();
+}
+
+// Leaderboard row → open that ride's log.
+$("detail-body").addEventListener("click", (ev) => {
+  const tr = ev.target.closest("tr[data-nav]");
+  if (tr) location.href = tr.getAttribute("data-nav");
+});
+
+// ─── Controls ───────────────────────────────────────────────────────────────
 $("region-filter").addEventListener("change", (e) => {
   regionFilter = e.target.value;
   render();
 });
+
+document.querySelectorAll('.layout-toggle button').forEach(btn => {
+  btn.addEventListener('click', () => {
+    if (layout === btn.dataset.layout) return;
+    layout = btn.dataset.layout;
+    localStorage.setItem(LAYOUT_KEY, layout);
+    syncLayoutToggle();
+    render();
+  });
+});
+syncLayoutToggle();
 
 async function deleteRoute(rid) {
   const r = routes.find(x => x.id === rid);
   if (!r) return;
   if (!confirm(`Delete "${r.name}"? This can't be undone.`)) return;
   try {
-    const resp = await fetch(`/api/routes/${encodeURIComponent(rid)}`,
-                              { method: "DELETE" });
+    const resp = await fetch(`/api/routes/${encodeURIComponent(rid)}`, { method: "DELETE" });
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     toast(`Deleted "${r.name}"`);
+    if (activeRid === rid) closeDetail();
     await loadRoutes();
   } catch (e) {
     toast(`Delete failed: ${e.message}`, true);
@@ -337,11 +659,7 @@ async function deleteRoute(rid) {
 async function duplicateRoute(rid) {
   const src = routes.find(x => x.id === rid);
   if (!src) return;
-  const payload = {
-    name:      `${src.name} (copy)`,
-    region_id: src.region_id,
-    segments:  src.segments,
-  };
+  const payload = { name: `${src.name} (copy)`, region_id: src.region_id, segments: src.segments };
   try {
     const resp = await fetch("/api/routes",
       { method: "POST", headers: { "Content-Type": "application/json" },
@@ -357,10 +675,41 @@ async function duplicateRoute(rid) {
   }
 }
 
+// Background-rescan progress. The prewarm runs server-side; we poll
+// /api/trail-match/status and reflect live counts on the button, ending
+// with a "Done" and a routes reload so attempt counts / bests refresh.
+let _rescanPoll = null;
+
+async function pollRescanStatus() {
+  const btn = $("rescan-btn");
+  let s;
+  try {
+    const r = await fetch("/api/trail-match/status", { cache: "no-store" });
+    s = await r.json();
+  } catch (_e) { return; }   // transient — keep polling
+  if (s.running) {
+    btn.disabled = true;
+    btn.textContent = s.total ? `Processing ${s.done}/${s.total}…` : "Processing…";
+    return;
+  }
+  // Finished.
+  clearInterval(_rescanPoll); _rescanPoll = null;
+  btn.textContent = "Done ✓";
+  toast("Rescan complete — leaderboards refreshed");
+  await loadRoutes();   // attempts / best times may have changed
+  setTimeout(() => { btn.disabled = false; btn.textContent = "Rescan all logs"; }, 2500);
+}
+
+function startRescanPolling() {
+  if (_rescanPoll) clearInterval(_rescanPoll);
+  _rescanPoll = setInterval(pollRescanStatus, 1500);
+  pollRescanStatus();   // immediate first tick
+}
+
 $("rescan-btn").addEventListener("click", async () => {
   if (!confirm("Re-snap every ride against the latest matcher? Takes a few minutes in the background.")) return;
   const btn = $("rescan-btn");
-  btn.disabled = true; btn.textContent = "Started…";
+  btn.disabled = true; btn.textContent = "Starting…";
   try {
     const resp = await fetch("/api/trail-match/rescan-all", { method: "POST" });
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
@@ -368,12 +717,32 @@ $("rescan-btn").addEventListener("click", async () => {
     toast(payload.message || "Rescan started");
   } catch (e) {
     toast(`Rescan failed: ${e.message}`, true);
-  } finally {
     btn.disabled = false; btn.textContent = "Rescan all logs";
+    return;
+  }
+  startRescanPolling();
+});
+
+loadRoutes().then(() => {
+  // Just saved a route in the builder? It hands off here with ?open=<id> —
+  // open that route's attempts panel and scroll it into view.
+  const openId = new URLSearchParams(location.search).get("open");
+  if (openId && routes.some(r => r.id === openId)) {
+    openDetailFor(openId);
+    const el = document.querySelector(`[data-rid="${CSS.escape(openId)}"]:not(.route-map)`);
+    if (el) el.scrollIntoView({ block: "center", behavior: "smooth" });
   }
 });
 
-loadRoutes();
+// If a prewarm is already running (startup, a sync, or another tab kicked
+// it off), reflect it on the button so the page doesn't look idle.
+(async () => {
+  try {
+    const r = await fetch("/api/trail-match/status", { cache: "no-store" });
+    const s = await r.json();
+    if (s.running) startRescanPolling();
+  } catch (_e) { /* ignore */ }
+})();
 </script>
 </body>
 </html>
