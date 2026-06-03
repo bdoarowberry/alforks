@@ -100,6 +100,16 @@
     .mapboxgl-ctrl-attrib { background: rgba(15,19,19,0.7) !important; color: var(--text-muted) !important; font-size: 10px; font-family: var(--font-mono); }
     .mapboxgl-ctrl-attrib a { color: var(--text-muted) !important; }
 
+    /* Leaflet 2D control chrome (zoom bar + rotate compass) — match the dark
+       site surface, mirroring the index mini-map controls. Without this the
+       Leaflet controls render in their default white. The compass arrow is a
+       two-tone (#333/#ccc) inline-SVG background, so invert() keeps it visible
+       on the dark button. */
+    .leaflet-bar { border: 1px solid var(--border-row); box-shadow: none; border-radius: 4px; overflow: hidden; }
+    .leaflet-bar a, .leaflet-bar a:hover { background-color: rgba(15,19,19,0.92); color: var(--text-secondary); border-bottom-color: var(--border-row); }
+    .leaflet-bar a:hover { background-color: rgba(255,255,255,0.05); color: #fff; }
+    .leaflet-control-rotate-arrow { filter: invert(1); }
+
     /* Chart column — flex item alongside #map-wrap. Scrolls internally
        if content exceeds the available row height. */
     .chart-col { flex: 1 1 280px; min-width: 280px; min-height: 0; display: flex; flex-direction: column; gap: 10px; overflow-y: auto; }
