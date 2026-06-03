@@ -131,17 +131,22 @@
     }
     .empty .empty-cta { display: inline-block; margin-top: 14px; }
 
-    /* ── Suggested routes section ─────────────────────────────────────── */
-    #suggestions-section { margin-bottom: 24px; }
-    .sug-head { display: flex; align-items: center; gap: 9px; margin-bottom: 12px;
-                 padding-bottom: 8px; border-bottom: 1px solid var(--border-hair); }
-    .sug-toggle { background: transparent; border: none; color: var(--text-tertiary);
-                   cursor: pointer; font-size: 0.8rem; padding: 0 2px; line-height: 1; }
-    .sug-toggle:hover { color: var(--text-primary); }
-    .sug-title { font-size: 0.82rem; font-weight: 600; color: var(--text-primary); }
+    /* ── My Routes / Suggested Routes tabs ────────────────────────────── */
+    .route-tabs { display: flex; gap: 2px; margin-bottom: 16px;
+                   border-bottom: 1px solid var(--border-hair); }
+    .route-tabs button {
+      background: transparent; border: none; border-bottom: 2px solid transparent;
+      color: var(--text-tertiary); font-family: var(--font-sans); font-size: 0.85rem;
+      font-weight: 500; padding: 8px 14px; cursor: pointer; transition: all 0.12s;
+      display: inline-flex; align-items: center; gap: 7px; margin-bottom: -1px;
+    }
+    .route-tabs button:hover { color: var(--text-primary); }
+    .route-tabs button.active { color: var(--text-primary); border-bottom-color: var(--accent); }
+    .tab-count { font-family: var(--font-mono); font-size: 0.62rem; padding: 1px 6px;
+                  border-radius: 8px; background: rgba(255,255,255,0.08); color: var(--text-tertiary); }
+    .route-tabs button.active .tab-count { background: var(--accent); color: #0b0f14; }
     .sug-meta { font-size: 0.68rem; color: var(--text-tertiary);
-                 font-family: var(--font-mono); }
-    #suggestions-section.collapsed #suggestions-wrap { display: none; }
+                 font-family: var(--font-mono); margin: 0 0 12px; }
     .route-card.sug-card { border-color: rgba(251, 191, 36, 0.30); }
     .route-card.sug-card:hover { border-color: #fbbf24; }
     .sug-count { font-family: var(--font-mono); font-size: 0.62rem; letter-spacing: 0.06em;
@@ -239,15 +244,18 @@
 
   <div id="split">
     <div id="content">
-      <section id="suggestions-section" style="display:none;">
-        <div class="sug-head">
-          <button class="sug-toggle" id="sug-toggle" type="button" aria-label="Collapse suggestions">▾</button>
-          <span class="sug-title">Suggested routes</span>
-          <span class="sug-meta" id="sug-meta"></span>
-        </div>
+      <div class="route-tabs" role="tablist">
+        <button type="button" data-tab="mine" class="active" role="tab">My Routes</button>
+        <button type="button" data-tab="suggested" role="tab">Suggested Routes
+          <span class="tab-count" id="sug-tab-count" style="display:none;"></span></button>
+      </div>
+      <div id="tab-mine" role="tabpanel">
+        <div id="list-wrap"></div>
+      </div>
+      <div id="tab-suggested" role="tabpanel" style="display:none;">
+        <p class="sug-meta" id="sug-meta"></p>
         <div id="suggestions-wrap"></div>
-      </section>
-      <div id="list-wrap"></div>
+      </div>
     </div>
     <aside id="detail" role="complementary" aria-label="Route attempts">
       <div class="detail-head">
@@ -774,22 +782,27 @@ function destroySuggestionMaps() {
 }
 
 function renderSuggestions() {
-  const section = $("suggestions-section");
   const wrap = $("suggestions-wrap");
   const meta = $("sug-meta");
+  const badge = $("sug-tab-count");
   destroySuggestionMaps();
 
   let view = suggestions;
   if (regionFilter) view = view.filter(s => s.region_id === regionFilter);
 
-  if (!view.length && !sugComputing) { section.style.display = "none"; return; }
-  section.style.display = "";
+  // Tab count badge (shows even while the Suggested tab is hidden).
+  if (view.length) { badge.textContent = String(view.length); badge.style.display = ""; }
+  else if (sugComputing) { badge.textContent = "…"; badge.style.display = ""; }
+  else { badge.style.display = "none"; }
 
-  if (!view.length && sugComputing) {
-    meta.textContent = "scanning…";
-    wrap.innerHTML = `<div class="empty">Scanning your rides for loops you've done more than once…</div>`;
+  if (!view.length) {
+    meta.textContent = "";
+    wrap.innerHTML = sugComputing
+      ? `<div class="empty">Scanning your rides for loops you've done more than once…</div>`
+      : `<div class="empty">No recurring routes found that aren't already saved.${regionFilter ? ' Try clearing the region filter.' : ''}</div>`;
     return;
   }
+
   meta.textContent = sugComputing
     ? `${view.length} so far · still scanning…`
     : `${view.length} loop${view.length === 1 ? '' : 's'} ridden more than once, not yet saved`;
@@ -879,10 +892,37 @@ async function saveSuggestion(sugId) {
   }
 }
 
-$("sug-toggle").addEventListener("click", () => {
-  const sec = $("suggestions-section");
-  sec.classList.toggle("collapsed");
-  $("sug-toggle").textContent = sec.classList.contains("collapsed") ? "▸" : "▾";
+// Tabs: My Routes (default) | Suggested Routes. The HTML starts on My
+// Routes, so no initial switch is needed.
+let activeTab = 'mine';
+function switchTab(tab) {
+  if (tab !== 'mine' && tab !== 'suggested') tab = 'mine';
+  activeTab = tab;
+  document.querySelectorAll('.route-tabs button').forEach(b =>
+    b.classList.toggle('active', b.dataset.tab === tab));
+  $("tab-mine").style.display      = (tab === 'mine')      ? '' : 'none';
+  $("tab-suggested").style.display = (tab === 'suggested') ? '' : 'none';
+  // The Cards|Table toggle and the attempts panel are My-Routes concepts.
+  const lt = document.querySelector('.layout-toggle');
+  if (lt) lt.style.display = (tab === 'mine') ? '' : 'none';
+  if (tab === 'suggested') {
+    closeDetail();
+    // Suggestion mini-maps were observed while their tab was hidden (a
+    // display:none container can't size a Leaflet map). Now that it's
+    // visible, init any that haven't drawn and resize the rest.
+    setTimeout(() => {
+      $("suggestions-wrap").querySelectorAll('.route-map').forEach(el => {
+        const rid = el.dataset.rid;
+        if (rid && mapInstances.has(rid)) { try { mapInstances.get(rid).invalidateSize(); } catch (_e) {} }
+        else initRouteMap(el);
+      });
+    }, 40);
+  } else {
+    invalidateVisibleMaps();
+  }
+}
+document.querySelectorAll('.route-tabs button').forEach(btn => {
+  btn.addEventListener('click', () => switchTab(btn.dataset.tab));
 });
 
 // Background-rescan progress. The prewarm runs server-side; we poll
