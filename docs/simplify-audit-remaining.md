@@ -23,6 +23,20 @@ to-do list, not a spec — re-verify before acting.
 - `5bfa630` `sync/_common.py` holding the byte-identical `_secure_chmod`
 - `3666b50` route 4 local HTML escapers through `utils.js` `escapeHtml`
 
+### Session 2 (2026-06-03, low-risk in-file/cross-file dedup)
+- `_ID_RE` precompiled — the 3 `re.fullmatch(r"[a-f0-9]{12}", …)` id guards in `app.py`
+- `_region_by_id(region_id)` in `app.py` — 6 `next((r for r in load_regions() …))`
+  lookups + 2 `any(…)` membership checks (load_regions is already mem-cached)
+- `_downsample_points(items, n, get)` core — `_downsample_latlon`/`_downsample_polyline`
+  now one-line wrappers (verified output-identical over 2000 random trials)
+- `_iter_region_edges(artifact)` generator — the (trails+roads → entry → edges) walk
+  in `api_region_edges_summary` + `_region_edge_polylines`
+- `route_attempts._build_node_xy` — the inlined 6-line junction+endpoint index (×2)
+- `sidebar_cache._entry_date` — `(entry.get("date") or "")[:10]` in read + write
+- `trail_match._read_osm_cache_stale` — unified byte-identical `_read_{trail,road}_cache_stale`
+- `route_builder._read_valid_artifact` — the double-checked cache read (before + inside lock)
+- `sync/strava_sync._advance_newest_epoch` — the ISO→epoch block in skip + write branches
+
 ## Key decisions / landmines (don't relitigate without reading these)
 - **Haversine stays duplicated on purpose.** `detection.haversine` and
   `trail_match._haversine_m` are mathematically equal but round differently at the
@@ -62,24 +76,24 @@ to-do list, not a spec — re-verify before acting.
   sync CLIs a small `atomic_write_text` in `sync/_common.py` rather than importing cache_utils.
 
 ### In-file / cross-file dedup (lower risk)
-- **`detection.py` local dups:** snap-and-trim segment loop ×4 (extract
-  `_finalize_lift_segments(..., trim_fn=None)`); two-end trim scans; two manual cumsum
-  loops where `_prefix_sum` exists; cable-speed filter comprehension ×3; raw/smoothed
-  ele-delta blocks.
-- **`trail_match.py` local dups:** byte-identical `_read_trail_cache_stale` /
-  `_read_road_cache_stale`; endpoint-touch completion override copy-pasted between the
-  summary and timeline passes.
-- **`route_attempts.py` / `route_builder.py`:** identical 6-line `node_xy` build
-  (route_attempts, two spots); double-checked-locking read block written twice in route_builder.
-- **`sidebar_cache.py`:** `(entry.get("date") or "")[:10]` in both read and write paths.
-- **`sync/strava_sync.py`:** identical ISO→epoch block in the skip and write branches.
-- **`app.py` remaining:** region-artifact edge iteration dup (→ `_iter_region_edges`);
-  near-identical `_downsample_latlon` / `_downsample_polyline` (one core + key accessor);
-  inline decimation reimplementing `_decimated_coords`; `re.fullmatch(r"[a-f0-9]{12}", …)`
-  id guard ×3 (→ precompiled `_ID_RE`); repeated `load_regions()` linear-scan lookup
-  (→ `_region_by_id`), incl. `_route_proposal_for_ride` calling `load_regions()` per loop iter.
-- **`point_gap_seconds(a, b, start_field, end_field)`** to collapse the "parse two point
-  timestamps, diff seconds, guard KeyError/ValueError" pattern in `trail_match` + `route_attempts`.
+- **`detection.py` local dups (STILL OPEN, but low priority):** snap-and-trim segment
+  loop ×4 (extract `_finalize_lift_segments(..., trim_fn=None)`); two-end trim scans;
+  cable-speed filter comprehension; raw/smoothed ele-delta blocks. **Held off in
+  session 2** — detection feeds `ALGO_SIG`, and the "two manual cumsum loops where
+  `_prefix_sum` exists" couldn't be relocated (the prefix sites already use `_prefix_sum`);
+  reconcile against `tests/test_detection.py` and only touch if output stays bit-identical.
+- **`trail_match.py` remaining:** endpoint-touch completion override copy-pasted between
+  the summary and timeline passes. *(stale-cache readers DONE in session 2.)*
+- ~~`route_attempts` node_xy~~ / ~~`route_builder` DCL read~~ — **DONE (session 2).**
+- ~~`sidebar_cache` date prefix~~ / ~~`strava_sync` ISO→epoch~~ — **DONE (session 2).**
+- **`app.py` remaining:** inline decimation reimplementing `_decimated_coords` (still open).
+  *(edge-iteration, downsample pair, `_ID_RE`, `_region_by_id` all DONE in session 2 — and
+  note `_route_proposal_for_ride`'s per-iter `load_regions()` is a non-issue: it's mem-cached.)*
+- **`point_gap_seconds` — SKIPPED (session 2).** The three sites diverge too much to share
+  cleanly: `_fragment_gap_ok` returns a bool and guards `ValueError` only; the leaderboard
+  duration site returns `int` seconds and guards `(KeyError, ValueError)`; `trail_match`'s
+  `_gap_sec`/`_dur_sec` are index-based closures over `points` with different fallbacks
+  (`inf` vs `0.0`). The shared core is one expression — not worth the semantic-merge risk.
 
 ### Deliberately skipped (don't redo)
 - Stale `554` / `669` hard-coded counts in comments — appear in **8 places**; editing the
