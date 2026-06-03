@@ -2791,18 +2791,25 @@ def api_region_edges_summary(region_id: str):
                      "region_id": region_id, "edges": edges})
 
 
-def _downsample_latlon(coords: list, n: int = 50) -> list:
-    """Downsample a [[lat,lon],...] list to n+1 points (n evenly-spaced plus
-    the final point). Sibling of `_downsample_polyline`, but operates on
-    coordinate pairs rather than GPX point dicts."""
-    if not coords:
+def _downsample_points(items: list, n: int, get) -> list:
+    """Downsample `items` to n+1 [lat,lon] pairs (n evenly-spaced plus the
+    final item, so the true endpoint is always represented). `get(item)`
+    yields the (lat, lon) pair. Inputs of <= n items are returned as-is."""
+    if not items:
         return []
-    if len(coords) <= n:
-        return [[c[0], c[1]] for c in coords]
-    step = len(coords) / n
-    out = [[coords[int(i * step)][0], coords[int(i * step)][1]] for i in range(n)]
-    out.append([coords[-1][0], coords[-1][1]])
+    if len(items) <= n:
+        return [[*get(it)] for it in items]
+    step = len(items) / n
+    out = [[*get(items[int(i * step)])] for i in range(n)]
+    out.append([*get(items[-1])])
     return out
+
+
+def _downsample_latlon(coords: list, n: int = 50) -> list:
+    """Downsample a [[lat,lon],...] list to n+1 points. Sibling of
+    `_downsample_polyline`, but operates on coordinate pairs rather than
+    GPX point dicts."""
+    return _downsample_points(coords, n, lambda c: (c[0], c[1]))
 
 
 def _region_edge_polylines(region_id: str) -> dict:
@@ -4326,18 +4333,11 @@ def _effective_max_hr() -> int | None:
 
 
 def _downsample_polyline(points: list, n: int = 50) -> list:
-    """Return n+1 (lat, lon) pairs from the GPX point list: n evenly-spaced
+    """Return n+1 [lat, lon] pairs from the GPX point list: n evenly-spaced
     samples plus the final point appended, so a track's true endpoint is
     always represented regardless of step alignment. Inputs of <= n points
     are returned as-is (no append)."""
-    if not points:
-        return []
-    if len(points) <= n:
-        return [[p["lat"], p["lon"]] for p in points]
-    step = len(points) / n
-    out = [[points[int(i * step)]["lat"], points[int(i * step)]["lon"]] for i in range(n)]
-    out.append([points[-1]["lat"], points[-1]["lon"]])
-    return out
+    return _downsample_points(points, n, lambda p: (p["lat"], p["lon"]))
 
 
 def _difficulty_score(distance_km: float | None, elev_gain_m: float | None,
