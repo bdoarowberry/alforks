@@ -131,6 +131,32 @@
     }
     .empty .empty-cta { display: inline-block; margin-top: 14px; }
 
+    /* ── Suggested routes section ─────────────────────────────────────── */
+    #suggestions-section { margin-bottom: 24px; }
+    .sug-head { display: flex; align-items: center; gap: 9px; margin-bottom: 12px;
+                 padding-bottom: 8px; border-bottom: 1px solid var(--border-hair); }
+    .sug-toggle { background: transparent; border: none; color: var(--text-tertiary);
+                   cursor: pointer; font-size: 0.8rem; padding: 0 2px; line-height: 1; }
+    .sug-toggle:hover { color: var(--text-primary); }
+    .sug-title { font-size: 0.82rem; font-weight: 600; color: var(--text-primary); }
+    .sug-meta { font-size: 0.68rem; color: var(--text-tertiary);
+                 font-family: var(--font-mono); }
+    #suggestions-section.collapsed #suggestions-wrap { display: none; }
+    .route-card.sug-card { border-color: rgba(251, 191, 36, 0.30); }
+    .route-card.sug-card:hover { border-color: #fbbf24; }
+    .sug-count { font-family: var(--font-mono); font-size: 0.62rem; letter-spacing: 0.06em;
+                  text-transform: uppercase; color: #0b0f14; background: #fbbf24;
+                  padding: 1px 6px; border-radius: 2px; font-weight: 600; }
+    .sug-actions { display: flex; gap: 6px; margin-top: 2px; }
+    .sug-actions button, .sug-actions a {
+      flex: 1; text-align: center; background: transparent; border: 1px solid var(--border-row);
+      color: var(--text-secondary); border-radius: 3px; font-size: 0.7rem; padding: 4px 8px;
+      cursor: pointer; transition: all 0.12s; font-family: var(--font-sans); text-decoration: none;
+    }
+    .sug-actions a:hover, .sug-actions button:hover { color: var(--text-primary); border-color: var(--accent); }
+    .sug-actions .sug-save { border-color: rgba(251,191,36,0.5); color: var(--text-primary); }
+    .sug-actions .sug-save:hover { background: #fbbf24; color: #0b0f14; border-color: #fbbf24; }
+
     /* ── Detail panel (attempts) — mirrors /trails leaderboard panel ──── */
     #detail { display: none; position: sticky; top: 16px; max-height: calc(100vh - 80px);
               overflow-y: auto; background: var(--bg-card); border: 1px solid var(--border-hair);
@@ -208,7 +234,17 @@
   </div>
 
   <div id="split">
-    <div id="content"><div id="list-wrap"></div></div>
+    <div id="content">
+      <section id="suggestions-section" style="display:none;">
+        <div class="sug-head">
+          <button class="sug-toggle" id="sug-toggle" type="button" aria-label="Collapse suggestions">▾</button>
+          <span class="sug-title">Suggested routes</span>
+          <span class="sug-meta" id="sug-meta"></span>
+        </div>
+        <div id="suggestions-wrap"></div>
+      </section>
+      <div id="list-wrap"></div>
+    </div>
     <aside id="detail" role="complementary" aria-label="Route attempts">
       <div class="detail-head">
         <div style="flex:1; min-width:0;">
@@ -334,7 +370,12 @@ function initRouteMap(mapEl) {
   if (mapInstances.has(rid)) { mapAccess.set(rid, Date.now()); return; }
   let polyline = [];
   try { polyline = JSON.parse(mapEl.dataset.polyline || '[]'); } catch (_e) {}
-  if (!polyline.length) {
+  // Suggestion cards carry the faint member-ride tracks to draw behind the
+  // bold proposed route; routes have no data-overlays, so this is a no-op
+  // for them.
+  let overlays = [];
+  try { overlays = JSON.parse(mapEl.dataset.overlays || '[]'); } catch (_e) {}
+  if (!polyline.length && !overlays.length) {
     mapEl.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-size:0.62rem;font-family:var(--font-mono);">no geometry</div>`;
     return;
   }
@@ -345,8 +386,17 @@ function initRouteMap(mapEl) {
   });
   L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png',
               { maxZoom: 19 }).addTo(m);
-  L.polyline(polyline, { color: '#fbbf24', weight: 3, opacity: 0.95 }).addTo(m);
-  m.fitBounds(L.latLngBounds(polyline), { padding: [10, 10] });
+  const allPts = [];
+  for (const ov of overlays) {
+    if (!ov.length) continue;
+    L.polyline(ov, { color: '#64748b', weight: 1.5, opacity: 0.4 }).addTo(m);
+    for (const p of ov) allPts.push(p);
+  }
+  if (polyline.length) {
+    L.polyline(polyline, { color: '#fbbf24', weight: 3, opacity: 0.95 }).addTo(m);
+    for (const p of polyline) allPts.push(p);
+  }
+  m.fitBounds(L.latLngBounds(allPts), { padding: [10, 10] });
   mapInstances.set(rid, m);
   mapAccess.set(rid, Date.now());
   mapEl.dataset.mapInit = '1';
@@ -414,6 +464,10 @@ async function render() {
   wireRows();
   // Lazily init every mini-map as it scrolls into view.
   wrap.querySelectorAll('.route-map').forEach(el => mapObserver.observe(el));
+  // The route render disconnected the shared observer and destroyed all
+  // Leaflet instances (incl. suggestion cards). Re-observe the suggestion
+  // mini-maps so they survive a route re-render (filter / layout toggle).
+  document.querySelectorAll('#suggestions-wrap .route-map').forEach(el => mapObserver.observe(el));
   // Re-mark the active route if its panel is still open.
   if (activeRid) markActiveRow(activeRid);
 }
@@ -628,6 +682,7 @@ $("detail-body").addEventListener("click", (ev) => {
 $("region-filter").addEventListener("change", (e) => {
   regionFilter = e.target.value;
   render();
+  renderSuggestions();
 });
 
 document.querySelectorAll('.layout-toggle button').forEach(btn => {
@@ -674,6 +729,138 @@ async function duplicateRoute(rid) {
     toast(`Duplicate failed: ${e.message}`, true);
   }
 }
+
+// ─── Suggested routes (recurring loops not yet saved) ─────────────────────────
+// Geometry-clustered from the ride library server-side; a cold cache
+// computes in the background, so we poll until `computing` clears.
+let suggestions = [];
+let sugComputing = false;
+let _sugPoll = null;
+
+async function loadSuggestions() {
+  let payload;
+  try {
+    const r = await fetch("/api/routes/suggestions");
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    payload = await r.json();
+  } catch (_e) {
+    return;   // non-fatal — the page works without suggestions
+  }
+  suggestions   = payload.suggestions || [];
+  sugComputing  = !!payload.computing;
+  renderSuggestions();
+  if (sugComputing) {
+    if (_sugPoll) clearTimeout(_sugPoll);
+    _sugPoll = setTimeout(loadSuggestions, 3000);
+  } else if (_sugPoll) {
+    clearTimeout(_sugPoll); _sugPoll = null;
+  }
+}
+
+// A re-render rebuilds the suggestion DOM, so tear down their Leaflet
+// instances first — otherwise initRouteMap sees the same `sug:<id>` key
+// still registered and skips drawing into the fresh element.
+function destroySuggestionMaps() {
+  for (const rid of [...mapInstances.keys()]) {
+    if (!rid.startsWith('sug:')) continue;
+    try { mapInstances.get(rid).remove(); } catch (_e) {}
+    mapInstances.delete(rid);
+    mapAccess.delete(rid);
+  }
+}
+
+function renderSuggestions() {
+  const section = $("suggestions-section");
+  const wrap = $("suggestions-wrap");
+  const meta = $("sug-meta");
+  destroySuggestionMaps();
+
+  let view = suggestions;
+  if (regionFilter) view = view.filter(s => s.region_id === regionFilter);
+
+  if (!view.length && !sugComputing) { section.style.display = "none"; return; }
+  section.style.display = "";
+
+  if (!view.length && sugComputing) {
+    meta.textContent = "scanning…";
+    wrap.innerHTML = `<div class="empty">Scanning your rides for loops you've done more than once…</div>`;
+    return;
+  }
+  meta.textContent = sugComputing
+    ? `${view.length} so far · still scanning…`
+    : `${view.length} loop${view.length === 1 ? '' : 's'} ridden more than once, not yet saved`;
+
+  wrap.innerHTML = `<div class="route-cards">` + view.map(s => {
+    const region = regionById[s.region_id];
+    const regionLbl = region ? region.name : (s.region_name || s.region_id || '');
+    const preview  = _esc(JSON.stringify(s.preview_polyline || []));
+    const overlays = _esc(JSON.stringify((s.rides || []).map(m => m.polyline || []).filter(p => p.length)));
+    const dates = (s.rides || []).map(m => m.date).filter(Boolean).sort();
+    const dateRange = dates.length
+      ? (dates[0] === dates[dates.length - 1] ? dates[0] : `${dates[0]} – ${dates[dates.length - 1]}`)
+      : '';
+    return `
+      <div class="route-card sug-card" data-sug="${_esc(s.id)}">
+        <div class="route-map" data-rid="sug:${_esc(s.id)}" data-polyline="${preview}" data-overlays="${overlays}"></div>
+        <div class="card-body">
+          <div class="card-title">
+            <span class="card-name">${_esc(s.name)}</span>
+            <span class="region-pill">${_esc(regionLbl)}</span>
+          </div>
+          <div class="card-stats">
+            <span class="sug-count">${s.ride_count}× ridden</span>
+            <span>${_esc(dateRange)}</span>
+          </div>
+          <div class="sug-actions">
+            <button class="sug-save" data-act="save" title="Save this as a route">Save route</button>
+            <a data-act="builder" href="/routes/edit?from=${encodeURIComponent(s.representative)}" title="Open in the builder to tweak before saving">Builder</a>
+          </div>
+        </div>
+      </div>`;
+  }).join("") + `</div>`;
+
+  wireSuggestionCards();
+  wrap.querySelectorAll('.route-map').forEach(el => mapObserver.observe(el));
+}
+
+function wireSuggestionCards() {
+  $("suggestions-wrap").querySelectorAll("[data-sug]").forEach(el => {
+    el.querySelector("[data-act='save']")?.addEventListener("click", (e) => {
+      e.stopPropagation(); saveSuggestion(el.dataset.sug);
+    });
+    // The builder action is a plain <a> — let it navigate normally.
+  });
+}
+
+async function saveSuggestion(sugId) {
+  const s = suggestions.find(x => x.id === sugId);
+  if (!s) return;
+  const btn = document.querySelector(`[data-sug="${CSS.escape(sugId)}"] [data-act='save']`);
+  if (btn) { btn.disabled = true; btn.textContent = "Saving…"; }
+  try {
+    const resp = await fetch("/api/routes", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: s.name, region_id: s.region_id, segments: s.segments }),
+    });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.error || `HTTP ${resp.status}`);
+    }
+    const route = await resp.json();
+    // Hand off to the saved route's attempts panel; the suggestion drops
+    // out on the next recompute (saving a route bumps the cache key).
+    location.href = `/routes?open=${encodeURIComponent(route.id)}`;
+  } catch (e) {
+    toast(`Save failed: ${e.message}`, true);
+    if (btn) { btn.disabled = false; btn.textContent = "Save route"; }
+  }
+}
+
+$("sug-toggle").addEventListener("click", () => {
+  const sec = $("suggestions-section");
+  sec.classList.toggle("collapsed");
+  $("sug-toggle").textContent = sec.classList.contains("collapsed") ? "▸" : "▾";
+});
 
 // Background-rescan progress. The prewarm runs server-side; we poll
 // /api/trail-match/status and reflect live counts on the button, ending
@@ -733,6 +920,9 @@ loadRoutes().then(() => {
     if (el) el.scrollIntoView({ block: "center", behavior: "smooth" });
   }
 });
+
+// Suggested routes load independently (don't block the routes list).
+loadSuggestions();
 
 // If a prewarm is already running (startup, a sync, or another tab kicked
 // it off), reflect it on the button so the page doesn't look idle.
