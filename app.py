@@ -28,6 +28,7 @@ import osm_breaker
 import trail_match
 import route_builder
 import route_attempts
+import route_suggestions
 import secrets
 from detection import (
     ALGO_SIG,
@@ -2530,23 +2531,23 @@ def api_activity_rescan_trails(filename: str):
     return jsonify({"ok": True, "result": result})
 
 
-@app.route("/api/activity/<path:filename>/route-suggestion")
-def api_activity_route_suggestion(filename: str):
-    """Propose a route built from a ride's detected trail timeline.
+def _route_proposal_for_ride(filename: str, data: dict | None = None
+                             ) -> tuple[dict | None, str | None, int]:
+    """Build an unsaved route proposal from a ride's detected trail timeline.
 
     The reverse of attempt detection: take the trails the matcher snapped
     this ride onto and rebuild them as ordered edge segments (see
-    `route_attempts.build_segments_from_ride`). Returns the proposal —
-    region, suggested name, segments — WITHOUT saving. The builder opens
-    it pre-filled (`/routes/edit?from=<filename>`) so the rider can trim
-    detours / trailing trails before saving.
-    """
+    `route_attempts.build_segments_from_ride`), picking the region whose
+    graph resolves the most segments. Returns `(proposal, None, 200)` on
+    success, else `(None, error_message, status)`. Shared by the per-ride
+    endpoint and the recurring-route suggestions builder."""
     p = _safe_gpx_path(filename)
     if p is None or not p.exists():
-        abort(404)
-    data = get_activity(filename)
+        return None, "not found", 404
     if data is None:
-        return jsonify({"error": "could not parse GPX"}), 500
+        data = get_activity(filename)
+    if data is None:
+        return None, "could not parse GPX", 500
 
     file_meta = (load_metadata() or {}).get(filename) or {}
     meta_fp = hashlib.md5(json.dumps({
@@ -2564,7 +2565,7 @@ def api_activity_route_suggestion(filename: str):
     )
     timeline = (result or {}).get("timeline") or []
     if not timeline:
-        return jsonify({"error": "No trails detected in this ride — nothing to build a route from."}), 422
+        return None, "No trails detected in this ride — nothing to build a route from.", 422
 
     # Candidate regions: the ride's matched regions first; fall back to all.
     act = next((a for a in all_activities() if a.get("filename") == filename), None)
@@ -2593,7 +2594,7 @@ def api_activity_route_suggestion(filename: str):
             best_segs, best_region = segs, rid
 
     if not best_segs:
-        return jsonify({"error": "Detected trails couldn't be mapped to a region's route graph."}), 422
+        return None, "Detected trails couldn't be mapped to a region's route graph.", 422
 
     # Suggested name: the de-duplicated consecutive trail-name chain.
     chain: list[str] = []
@@ -2604,14 +2605,22 @@ def api_activity_route_suggestion(filename: str):
     if len(name) > 80:
         name = " → ".join(chain[:3]) + f" → +{len(chain) - 3} more"
 
-    return jsonify({
-        "version":    ROUTES_API_VERSION,
-        "filename":   filename,
-        "region_id":  best_region,
-        "name":       name,
-        "segments":   best_segs,
-        "trail_chain": chain,
-    })
+    return ({"region_id": best_region, "name": name,
+             "segments": best_segs, "trail_chain": chain}, None, 200)
+
+
+@app.route("/api/activity/<path:filename>/route-suggestion")
+def api_activity_route_suggestion(filename: str):
+    """Propose a route built from a ride's detected trail timeline (unsaved).
+
+    The builder opens it pre-filled (`/routes/edit?from=<filename>`) so the
+    rider can trim detours / trailing trails before saving."""
+    proposal, err, status = _route_proposal_for_ride(filename)
+    if proposal is None:
+        if status == 404:
+            abort(404)
+        return jsonify({"error": err}), status
+    return jsonify({"version": ROUTES_API_VERSION, "filename": filename, **proposal})
 
 
 @app.route("/api/trail-match/rescan-all", methods=["POST"])
@@ -2661,6 +2670,16 @@ REGION_TRAILS_CACHE_DIR  = CACHE_DIR / "region_trails"
 # OSM_ROADS_CACHE_DIR moved up next to OSM_PATHS_CACHE_DIR — see there.
 ROUTES_DIR               = CACHE_DIR / "routes"
 ROUTE_ATTEMPTS_CACHE_DIR = CACHE_DIR / "route_attempts"
+ROUTE_SUGGESTIONS_CACHE_DIR = CACHE_DIR / "route_suggestions"
+
+# Single-payload in-memory cache for the recurring-route suggestions
+# (the whole library produces one result, unlike per-route attempts).
+# Clustering the full library is a multi-second pass, so it runs in a
+# background thread; requests return the last-known payload with a
+# `computing` flag and the page polls until it settles.
+_route_suggestions_mem: dict = {"key": None, "payload": None}
+_route_suggestions_lock = threading.Lock()
+_SUGGESTIONS_COMPUTING = False
 
 
 def _route_path(route_id: str) -> Path:
@@ -2954,6 +2973,281 @@ def api_routes_attempts(route_id: str):
         abort(404)
     payload = _get_route_attempts(route_id, route=route) or {}
     return jsonify({"version": ROUTES_API_VERSION, "route_id": route_id, **payload})
+
+
+# ─── Recurring-route suggestions ────────────────────────────────────────────
+# Auto-discover loops the rider has done >= 2 times by clustering rides on
+# GPS-footprint similarity (route_suggestions.py), then propose saving the
+# cluster's most-typical ride as a route. Cached as one payload keyed on
+# the ride set + saved routes + region polygons.
+
+def _routes_dir_fingerprint() -> tuple[int, float]:
+    """`(file_count, max_mtime)` of the saved-routes dir — moves whenever a
+    route is created/edited/deleted so the suggestions exclusion stays
+    fresh. Windows-safe (in-place replace doesn't tick dir mtime)."""
+    if not ROUTES_DIR.exists():
+        return (0, -1.0)
+    count = 0
+    max_mtime = -1.0
+    for p in ROUTES_DIR.glob("*.json"):
+        count += 1
+        try:
+            max_mtime = max(max_mtime, p.stat().st_mtime)
+        except OSError:
+            pass
+    return (count, max_mtime)
+
+
+def _suggestions_cache_key() -> tuple:
+    """Anything here changing triggers a fresh clustering pass."""
+    def _m(p):
+        try:
+            return p.stat().st_mtime
+        except OSError:
+            return -1.0
+    return (
+        route_suggestions.SUGGESTIONS_VERSION,
+        trail_match.TRAIL_MATCH_VERSION,
+        _trail_match_dir_fingerprint(),   # ride set + per-ride edits
+        _routes_dir_fingerprint(),        # saved-route exclusion
+        _m(METADATA_FILE),                # trims / regions_pinned
+        _m(REGIONS_FILE),                 # region polygons -> bucketing
+    )
+
+
+def _bbox_from_latlon(coords: list) -> list | None:
+    """Coarse [min_lat,min_lon,max_lat,max_lon] from a [[lat,lon],...] list
+    (the cached 50-pt preview polyline) — enough for the prefilter gate,
+    and free since it's already in the sidebar entry."""
+    if not coords:
+        return None
+    lats = [c[0] for c in coords]
+    lons = [c[1] for c in coords]
+    return [min(lats), min(lons), max(lats), max(lons)]
+
+
+def _saved_route_cellsets(region_id: str) -> list:
+    """Cell sets of every saved route in `region_id`, for the
+    'cluster already saved?' exclusion."""
+    edge_polys = _region_edge_polylines(region_id)
+    out = []
+    for r in _all_routes():
+        if r.get("region_id") != region_id:
+            continue
+        coords = []
+        for seg in r.get("segments") or []:
+            coords.extend(edge_polys.get(seg.get("edge_id")) or [])
+        if coords:
+            pts = [{"lat": c[0], "lon": c[1]} for c in coords]
+            out.append(route_suggestions.ride_cell_set(pts, stride=1))
+    return out
+
+
+def _build_route_suggestions() -> dict:
+    """Cluster the MTB library into recurring loops and build a savable
+    proposal for each cluster not already covered by a saved route."""
+    acts = all_activities()
+    entries: dict[str, dict] = {}
+    rides: list[dict] = []
+    for a in acts:
+        if a.get("effective_type") != "mtb" or a.get("excluded"):
+            continue
+        fn = a.get("filename")
+        pl = a.get("polyline") or []
+        dist = (a.get("stats") or {}).get("distance_km")
+        bbox = _bbox_from_latlon(pl)
+        if not fn or not bbox or not dist:
+            continue
+        entries[fn] = a
+        rides.append({"filename": fn, "regions": a.get("regions") or [],
+                      "bbox": bbox, "distance_km": dist,
+                      "date": (a.get("date") or "")[:10]})
+
+    cell_cache: dict[str, frozenset] = {}
+
+    def loader(fn: str):
+        if fn not in cell_cache:
+            d = get_activity(fn)
+            cell_cache[fn] = route_suggestions.ride_cell_set((d or {}).get("points") or [])
+        return cell_cache[fn]
+
+    clusters = route_suggestions.cluster_rides(rides, loader)
+
+    region_names = {r["id"]: r.get("name") for r in load_regions()}
+    route_cellsets_by_region: dict[str, list] = {}
+    edge_polys_by_region: dict[str, dict] = {}
+    suggestions: list[dict] = []
+    skipped_no_region = skipped_no_artifact = skipped_unbuildable = 0
+
+    for c in clusters:
+        region_id = c["region_id"]
+        # A cluster with no region can't be attributed to a route graph,
+        # and building it would fan out across every region (live OSM
+        # fetches). Skip.
+        if region_id is None:
+            skipped_no_region += 1
+            continue
+        # Only work from ALREADY-CACHED region artifacts — never trigger an
+        # Overpass fetch during the suggestions pass.
+        if not (REGION_TRAILS_CACHE_DIR / f"{region_id}.json").exists():
+            skipped_no_artifact += 1
+            continue
+
+        # Exclude clusters already captured by a saved route.
+        if region_id not in route_cellsets_by_region:
+            route_cellsets_by_region[region_id] = _saved_route_cellsets(region_id)
+        if route_suggestions.cluster_covered_by_route(
+                c["representative_cells"], route_cellsets_by_region[region_id]):
+            continue
+
+        # Build the pre-selected route from the cluster's medoid ride.
+        proposal, _err, _status = _route_proposal_for_ride(c["representative"])
+        if proposal is None:
+            skipped_unbuildable += 1
+            continue
+        prop_region = proposal.get("region_id") or region_id
+        if prop_region not in edge_polys_by_region:
+            edge_polys_by_region[prop_region] = _region_edge_polylines(prop_region)
+        preview = _route_preview_polyline(
+            {"segments": proposal["segments"]}, edge_polys_by_region[prop_region])
+
+        members = []
+        for fn in c["members"]:
+            e = entries.get(fn) or {}
+            members.append({
+                "filename": fn,
+                "date": (e.get("date") or "")[:10],
+                "distance_km": (e.get("stats") or {}).get("distance_km"),
+                "polyline": e.get("polyline") or [],
+            })
+        members.sort(key=lambda m: m["date"])
+
+        sug_id = hashlib.md5(
+            "|".join([prop_region or ""] + c["members"]).encode()
+        ).hexdigest()[:12]
+        suggestions.append({
+            "id": sug_id,
+            "region_id": prop_region,
+            "region_name": region_names.get(prop_region),
+            "ride_count": c["size"],
+            "representative": c["representative"],
+            "name": proposal["name"],
+            "segments": proposal["segments"],
+            "trail_chain": proposal.get("trail_chain") or [],
+            "preview_polyline": preview,
+            "rides": members,
+        })
+
+    suggestions.sort(key=lambda s: (-s["ride_count"], s["name"]))
+    logger.info(
+        "route suggestions: %d clusters -> %d suggestions "
+        "(skipped: %d no-region, %d uncached-artifact, %d unbuildable)",
+        len(clusters), len(suggestions),
+        skipped_no_region, skipped_no_artifact, skipped_unbuildable)
+    return {"computed_at": datetime.now(timezone.utc).isoformat(),
+            "suggestions": suggestions}
+
+
+def _suggestions_from_cache(key: tuple) -> dict | None:
+    """Return the cached suggestions payload if mem or disk holds the
+    current `key`, else None. Populates mem from disk on a hit."""
+    mem = _route_suggestions_mem
+    if mem["key"] == key and mem["payload"] is not None:
+        return mem["payload"]
+    disk = ROUTE_SUGGESTIONS_CACHE_DIR / "clusters.json"
+    if disk.exists():
+        try:
+            entry = json.loads(disk.read_text(encoding="utf-8"))
+            # Compare in JSON-normalized form: the key has nested tuples
+            # (dir fingerprints) that serialize to lists, so a raw tuple
+            # compare against the round-tripped key always misses.
+            if entry.get("key") == json.loads(json.dumps(key)):
+                payload = entry.get("payload") or {}
+                _route_suggestions_mem.update(key=key, payload=payload)
+                return payload
+        except Exception:
+            pass
+    return None
+
+
+def _compute_and_store_suggestions() -> dict:
+    payload = _build_route_suggestions()
+    # Key is read AFTER the build: building a proposal can lazily write a
+    # trail_match file (via cached_match), which bumps the trail_match dir
+    # fingerprint. Keying on the pre-build state would store under a key
+    # that's already stale, forcing a recompute on every request. The
+    # post-build key is stable because a second build finds those files
+    # cached and writes nothing.
+    key = _suggestions_cache_key()
+    ROUTE_SUGGESTIONS_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    disk = ROUTE_SUGGESTIONS_CACHE_DIR / "clusters.json"
+    try:
+        tmp = disk.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps({"key": list(key), "payload": payload},
+                                  ensure_ascii=False), encoding="utf-8")
+        tmp.replace(disk)
+    except OSError as exc:
+        logger.warning("Failed to persist route_suggestions: %s", exc)
+    _route_suggestions_mem.update(key=key, payload=payload)
+    return payload
+
+
+def _maybe_start_suggestions_worker() -> None:
+    """Kick off a background clustering pass unless one is already running."""
+    global _SUGGESTIONS_COMPUTING
+    with _route_suggestions_lock:
+        if _SUGGESTIONS_COMPUTING:
+            return
+        _SUGGESTIONS_COMPUTING = True
+
+    def run():
+        global _SUGGESTIONS_COMPUTING
+        try:
+            _compute_and_store_suggestions()
+        except Exception:
+            logger.exception("route suggestions compute failed")
+        finally:
+            with _route_suggestions_lock:
+                _SUGGESTIONS_COMPUTING = False
+
+    threading.Thread(target=run, name="route-suggestions", daemon=True).start()
+
+
+def _get_route_suggestions(force: bool = False, block: bool = False) -> dict:
+    """Recurring-route suggestions, cached (mem + one disk payload).
+
+    A warm key returns instantly with `computing: False`. On a cold/stale
+    key the clustering runs in a BACKGROUND thread (it's multi-second) and
+    this returns the last-known payload tagged `computing: True`; the page
+    polls until it settles. `block=True` forces a synchronous compute (used
+    by the offline oracle / tests)."""
+    if not force:
+        cached = _suggestions_from_cache(_suggestions_cache_key())
+        if cached is not None:
+            return {**cached, "computing": False}
+    if block:
+        return {**_compute_and_store_suggestions(), "computing": False}
+    _maybe_start_suggestions_worker()
+    last = _route_suggestions_mem["payload"] or {"suggestions": [], "computed_at": None}
+    return {**last, "computing": True}
+
+
+@app.route("/api/routes/suggestions", methods=["GET"])
+def api_routes_suggestions():
+    """Recurring loops the rider has done >= 2 times, not already saved.
+
+    Cached (disk + memory); a cold cache computes in the background and the
+    response carries `computing: true` until ready (poll to refresh).
+    Optional `?region_id=` filters the cached list; `?force=1` recomputes."""
+    payload = _get_route_suggestions(force=request.args.get("force") == "1")
+    suggestions = payload.get("suggestions") or []
+    region_id = request.args.get("region_id")
+    if region_id:
+        suggestions = [s for s in suggestions if s.get("region_id") == region_id]
+    return jsonify({"version": ROUTES_API_VERSION,
+                     "computing": payload.get("computing", False),
+                     "computed_at": payload.get("computed_at"),
+                     "suggestions": suggestions})
 
 
 @app.route("/api/activity/<path:filename>/routes-ridden")
