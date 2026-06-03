@@ -1502,7 +1502,7 @@ def route_detail_page(route_id: str):
     route = _load_route(route_id)
     if route is None:
         abort(404)
-    region = next((r for r in load_regions() if r["id"] == route["region_id"]), None)
+    region = _region_by_id(route["region_id"])
     return render_template(
         "route_detail.html",
         route_json=_safe_json(route),
@@ -2207,7 +2207,7 @@ def _get_route_attempts(route_id: str, route: dict | None = None,
 
         # Recompute. Region artifact is loaded via route_builder so we
         # get the same cached shape the /api/regions/... endpoint serves.
-        region = next((r for r in load_regions() if r["id"] == route["region_id"]), None)
+        region = _region_by_id(route["region_id"])
         if region is None:
             logger.warning("route %s references unknown region %s",
                             route_id, route.get("region_id"))
@@ -2545,7 +2545,7 @@ def _route_proposal_for_ride(filename: str, data: dict | None = None
     best_segs: list[dict] = []
     best_region: str | None = None
     for rid in region_ids:
-        region = next((r for r in load_regions() if r["id"] == rid), None)
+        region = _region_by_id(rid)
         if region is None:
             continue
         try:
@@ -2695,7 +2695,7 @@ def _validate_route_payload(payload) -> tuple[dict | None, str | None]:
     region_id = (payload.get("region_id") or "").strip()
     if not region_id:
         return None, "region_id is required"
-    if not any(r["id"] == region_id for r in load_regions()):
+    if _region_by_id(region_id) is None:
         return None, f"unknown region_id {region_id!r}"
     segments = payload.get("segments")
     if not isinstance(segments, list) or not segments:
@@ -2741,7 +2741,7 @@ def api_region_trails_geometry(region_id: str):
     instead of re-downloading ~600 KB. Cache-Control: no-cache forces a
     revalidation each request — cheap, since the server-side artifact read
     is from memory after first build."""
-    region = next((r for r in load_regions() if r["id"] == region_id), None)
+    region = _region_by_id(region_id)
     if region is None:
         abort(404)
     force = request.args.get("force") == "1"
@@ -2773,7 +2773,7 @@ def api_region_edges_summary(region_id: str):
     page only needs edge_id -> length_m to compute per-route distance
     totals, so this slim endpoint cuts the payload ~40x. Still builds the
     artifact server-side (so the cache stays warm), then strips."""
-    region = next((r for r in load_regions() if r["id"] == region_id), None)
+    region = _region_by_id(region_id)
     if region is None:
         abort(404)
     artifact = route_builder.get_region_artifact(
@@ -2809,7 +2809,7 @@ def _region_edge_polylines(region_id: str) -> dict:
     """edge_id -> polyline ([[lat,lon],...]) for one region, read from the
     cached trails+roads artifact (in-memory after first build). Returns {}
     if the region or its artifact is unavailable."""
-    region = next((r for r in load_regions() if r["id"] == region_id), None)
+    region = _region_by_id(region_id)
     if region is None:
         return {}
     try:
@@ -5225,6 +5225,12 @@ def load_regions() -> list[dict]:
         return _regions_cache
 
 
+def _region_by_id(region_id: str) -> dict | None:
+    """The region dict with this id, or None. `load_regions()` is in-memory
+    cached, so the linear scan is over the already-loaded small list."""
+    return next((r for r in load_regions() if r["id"] == region_id), None)
+
+
 def save_regions(regions: list[dict]):
     global _regions_cache, _regions_geom_hash_cached
     _atomic_write(REGIONS_FILE, json.dumps(regions, indent=2, ensure_ascii=False))
@@ -7007,7 +7013,7 @@ def api_review_counts():
 
 @app.route("/api/regions/<region_id>/usage")
 def api_region_usage(region_id):
-    if not any(r["id"] == region_id for r in load_regions()):
+    if _region_by_id(region_id) is None:
         abort(404)
     return jsonify({"count": _region_usage_dict().get(region_id, 0)})
 
