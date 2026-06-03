@@ -3232,22 +3232,67 @@ def _get_route_suggestions(force: bool = False, block: bool = False) -> dict:
     return {**last, "computing": True}
 
 
+def _dismissals_path() -> Path:
+    return ROUTE_SUGGESTIONS_CACHE_DIR / "dismissals.json"
+
+
+def _load_dismissals() -> set:
+    """Set of suggestion ids the rider has hidden. Filtered at serve time
+    (not build time) so dismissing never invalidates the clustering cache."""
+    try:
+        return set(json.loads(_dismissals_path().read_text(encoding="utf-8")) or [])
+    except Exception:
+        return set()
+
+
+def _save_dismissals(ids: set) -> None:
+    ROUTE_SUGGESTIONS_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    _atomic_write(_dismissals_path(), json.dumps(sorted(ids), ensure_ascii=False))
+
+
 @app.route("/api/routes/suggestions", methods=["GET"])
 def api_routes_suggestions():
     """Recurring loops the rider has done >= 2 times, not already saved.
 
     Cached (disk + memory); a cold cache computes in the background and the
     response carries `computing: true` until ready (poll to refresh).
-    Optional `?region_id=` filters the cached list; `?force=1` recomputes."""
+    Optional `?region_id=` filters the cached list; `?force=1` recomputes.
+    Dismissed suggestions are filtered out here (serve-time)."""
     payload = _get_route_suggestions(force=request.args.get("force") == "1")
     suggestions = payload.get("suggestions") or []
     region_id = request.args.get("region_id")
     if region_id:
         suggestions = [s for s in suggestions if s.get("region_id") == region_id]
+    dismissed = _load_dismissals()
+    if dismissed:
+        suggestions = [s for s in suggestions if s.get("id") not in dismissed]
     return jsonify({"version": ROUTES_API_VERSION,
                      "computing": payload.get("computing", False),
                      "computed_at": payload.get("computed_at"),
                      "suggestions": suggestions})
+
+
+@app.route("/api/routes/suggestions/<sug_id>/dismiss", methods=["POST"])
+def api_routes_suggestion_dismiss(sug_id: str):
+    """Hide a suggestion permanently (won't resurface unless its cluster
+    membership changes, which mints a new id)."""
+    if not re.fullmatch(r"[a-f0-9]{12}", sug_id or ""):
+        abort(404)
+    ids = _load_dismissals()
+    ids.add(sug_id)
+    _save_dismissals(ids)
+    return jsonify({"ok": True, "dismissed": sug_id})
+
+
+@app.route("/api/routes/suggestions/<sug_id>/dismiss", methods=["DELETE"])
+def api_routes_suggestion_undismiss(sug_id: str):
+    """Un-hide a previously dismissed suggestion."""
+    if not re.fullmatch(r"[a-f0-9]{12}", sug_id or ""):
+        abort(404)
+    ids = _load_dismissals()
+    ids.discard(sug_id)
+    _save_dismissals(ids)
+    return jsonify({"ok": True})
 
 
 @app.route("/api/activity/<path:filename>/routes-ridden")
