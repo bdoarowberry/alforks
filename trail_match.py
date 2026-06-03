@@ -184,8 +184,12 @@ def _osm_cache_path(cache_dir: Path, bbox) -> Path:
     return cache_dir / f"{h}.json"
 
 
-def _try_read_osm_cache(cp: Path) -> list[dict] | None:
-    mem = _OSM_TRAIL_MEM_CACHE.get(cp.stem)
+def _read_ways_mem_or_disk(cp: Path, mem_cache: dict) -> list[dict] | None:
+    """TTL-checked read of a ways cache: in-memory mirror first, then disk.
+    Populates `mem_cache` on a disk hit. Shared by the trail and road stacks
+    (each passes its own dict — they must stay separate: trail and road for
+    the same bbox hash to the same `cp.stem`)."""
+    mem = mem_cache.get(cp.stem)
     if mem is not None:
         return mem
     if not cp.exists():
@@ -194,11 +198,24 @@ def _try_read_osm_cache(cp: Path) -> list[dict] | None:
         entry = json.loads(cp.read_text(encoding="utf-8"))
         if time.time() - entry.get("fetched", 0) < OSM_CACHE_TTL_SEC:
             ways = entry["ways"]
-            _OSM_TRAIL_MEM_CACHE[cp.stem] = ways
+            mem_cache[cp.stem] = ways
             return ways
     except Exception:
         pass
     return None
+
+
+def _build_ways_query(bbox, highway_types: str) -> str:
+    """The Overpass query for named highway ways in `bbox`. Trails and roads
+    share the recursion + `out body` shape; only the highway-type set differs."""
+    s, w, n, e = bbox
+    pad = OSM_FETCH_PAD_DEG
+    return (
+        f"[out:json][timeout:{OVERPASS_TIMEOUT_SEC}];"
+        f'(way["highway"~"^({highway_types})$"]["name"]'
+        f"({s-pad},{w-pad},{n+pad},{e+pad}););"
+        f"(._;>;);out body;"
+    )
 
 
 def _read_osm_cache_stale(cp: Path) -> list[dict] | None:
@@ -214,23 +231,27 @@ def _read_osm_cache_stale(cp: Path) -> list[dict] | None:
         return None
 
 
-def fetch_osm_trails(bbox, cache_dir: Path) -> list[dict]:
-    """Return named OSM trail ways for `bbox`, cached for OSM_CACHE_TTL_SEC.
+def _fetch_osm_ways_cached(bbox, cache_dir: Path, *, mem_cache: dict, lock_for,
+                           highway_types: str, extra_tags, log_label: str
+                           ) -> list[dict]:
+    """Fetch-through-cache template shared by the trail and road stacks.
 
-    Each way: {id, name, highway, mtb_scale, coords: [(lat,lon), ...]}.
-    Returns [] on Overpass error so the route never 500s on network blip.
-    When Overpass is unreachable (timeout, breaker open, network error),
-    falls back to the on-disk cache ignoring TTL before returning [].
+    Fast-path cache read → per-bbox lock → re-check → breaker gate → Overpass
+    fetch → parse → atomic write + mem populate. The two stacks differ only in
+    `highway_types` (the query), `extra_tags` (the per-way set-specific field),
+    and their independent `mem_cache` / `lock_for` (see the cross-contamination
+    note on `_read_ways_mem_or_disk`). Returns [] on any Overpass failure,
+    falling back to the on-disk cache ignoring TTL when one exists.
     """
     cache_dir.mkdir(parents=True, exist_ok=True)
     cp = _osm_cache_path(cache_dir, bbox)
 
-    cached = _try_read_osm_cache(cp)
+    cached = _read_ways_mem_or_disk(cp, mem_cache)
     if cached is not None:
         return cached
 
-    with _osm_lock_for(cp):
-        cached = _try_read_osm_cache(cp)
+    with lock_for(cp):
+        cached = _read_ways_mem_or_disk(cp, mem_cache)
         if cached is not None:
             return cached
 
@@ -238,14 +259,7 @@ def fetch_osm_trails(bbox, cache_dir: Path) -> list[dict]:
             stale = _read_osm_cache_stale(cp)
             return stale if stale is not None else []
 
-        s, w, n, e = bbox
-        pad = OSM_FETCH_PAD_DEG
-        query = (
-            f"[out:json][timeout:{OVERPASS_TIMEOUT_SEC}];"
-            f'(way["highway"~"^({_HIGHWAY_TYPES})$"]["name"]'
-            f"({s-pad},{w-pad},{n+pad},{e+pad}););"
-            f"(._;>;);out body;"
-        )
+        query = _build_ways_query(bbox, highway_types)
         try:
             data = urllib.parse.urlencode({"data": query}).encode()
             req = urllib.request.Request(
@@ -255,12 +269,12 @@ def fetch_osm_trails(bbox, cache_dir: Path) -> list[dict]:
             with urllib.request.urlopen(req, timeout=OVERPASS_TIMEOUT_SEC + 20) as resp:
                 result = json.loads(resp.read().decode("utf-8"))
         except Exception as exc:
-            logger.warning("Overpass fetch failed for trail bbox %s: %s", bbox, exc)
+            logger.warning("Overpass %s fetch failed for bbox %s: %s", log_label, bbox, exc)
             osm_breaker.record_failure()
             stale = _read_osm_cache_stale(cp)
             return stale if stale is not None else []
 
-        ways = _parse_overpass_ways(result)
+        ways = _parse_overpass_ways(result, extra_tags)
         try:
             tmp = cp.with_suffix(cp.suffix + ".tmp")
             tmp.write_text(
@@ -269,13 +283,17 @@ def fetch_osm_trails(bbox, cache_dir: Path) -> list[dict]:
             )
             tmp.replace(cp)
         except OSError as exc:
-            logger.warning("Failed to persist trail cache %s: %s", cp, exc)
-        _OSM_TRAIL_MEM_CACHE[cp.stem] = ways
+            logger.warning("Failed to persist %s cache %s: %s", log_label, cp, exc)
+        mem_cache[cp.stem] = ways
         osm_breaker.record_success()
         return ways
 
 
-def _parse_overpass_ways(osm_json) -> list[dict]:
+def _parse_overpass_ways(osm_json, extra_tags=None) -> list[dict]:
+    """Parse Overpass way elements into named-way dicts. `extra_tags(tags) ->
+    dict` contributes the set-specific fields (mtb_scale for trails, oneway for
+    roads); they are inserted *before* `coords` so the cache-file key order is
+    identical across both sets (stable bytes → warm caches keep reading)."""
     nodes = {
         e["id"]: (e["lat"], e["lon"])
         for e in osm_json.get("elements", []) if e.get("type") == "node"
@@ -295,10 +313,25 @@ def _parse_overpass_ways(osm_json) -> list[dict]:
             "id": e["id"],
             "name": name,
             "highway": tags.get("highway"),
-            "mtb_scale": tags.get("mtb:scale"),
+            **(extra_tags(tags) if extra_tags else {}),
             "coords": coords,
         })
     return ways
+
+
+def fetch_osm_trails(bbox, cache_dir: Path) -> list[dict]:
+    """Return named OSM trail ways for `bbox`, cached for OSM_CACHE_TTL_SEC.
+
+    Each way: {id, name, highway, mtb_scale, coords: [(lat,lon), ...]}.
+    Returns [] on Overpass error so the route never 500s on a network blip.
+    """
+    return _fetch_osm_ways_cached(
+        bbox, cache_dir,
+        mem_cache=_OSM_TRAIL_MEM_CACHE, lock_for=_osm_lock_for,
+        highway_types=_HIGHWAY_TYPES,
+        extra_tags=lambda t: {"mtb_scale": t.get("mtb:scale")},
+        log_label="trail",
+    )
 
 
 # ─── Road OSM fetch ─────────────────────────────────────────────────────────
@@ -320,107 +353,24 @@ def _road_lock_for(cp: Path) -> threading.Lock:
         return _road_locks[key]
 
 
-def _try_read_road_cache(cp: Path) -> list[dict] | None:
-    mem = _OSM_ROAD_MEM_CACHE.get(cp.stem)
-    if mem is not None:
-        return mem
-    if not cp.exists():
-        return None
-    try:
-        entry = json.loads(cp.read_text(encoding="utf-8"))
-        if time.time() - entry.get("fetched", 0) < OSM_CACHE_TTL_SEC:
-            ways = entry["ways"]
-            _OSM_ROAD_MEM_CACHE[cp.stem] = ways
-            return ways
-    except Exception:
-        pass
-    return None
-
-
 def fetch_osm_roads(bbox, cache_dir: Path) -> list[dict]:
     """Return named OSM road ways for `bbox`, cached for OSM_CACHE_TTL_SEC.
 
     Each way: {id, name, highway, oneway, coords: [(lat,lon), ...]}.
     Returns [] on Overpass error so the caller never 500s on a network blip.
-    When Overpass is unreachable, falls back to the on-disk cache ignoring TTL.
+
+    Shares `_fetch_osm_ways_cached` with trails but keeps its own mem cache and
+    lock registry: the bbox hash (`_osm_cache_path`) ignores the cache dir, so
+    a trail and road query for the same bbox land on the same `cp.stem` — one
+    shared mem dict would serve trail ways for a road request.
     """
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    cp = _osm_cache_path(cache_dir, bbox)   # same hash scheme as trails
-
-    cached = _try_read_road_cache(cp)
-    if cached is not None:
-        return cached
-
-    with _road_lock_for(cp):
-        cached = _try_read_road_cache(cp)
-        if cached is not None:
-            return cached
-
-        if osm_breaker.should_skip():
-            stale = _read_osm_cache_stale(cp)
-            return stale if stale is not None else []
-
-        s, w, n, e = bbox
-        pad = OSM_FETCH_PAD_DEG
-        query = (
-            f"[out:json][timeout:{OVERPASS_TIMEOUT_SEC}];"
-            f'(way["highway"~"^({_ROAD_HIGHWAY_TYPES})$"]["name"]'
-            f"({s - pad},{w - pad},{n + pad},{e + pad}););"
-            f"(._;>;);out body;"
-        )
-        try:
-            data = urllib.parse.urlencode({"data": query}).encode()
-            req = urllib.request.Request(
-                _OVERPASS_URL, data=data,
-                headers={"User-Agent": "AlanForks-GPX-Viewer/1.0"},
-            )
-            with urllib.request.urlopen(req, timeout=OVERPASS_TIMEOUT_SEC + 20) as resp:
-                result = json.loads(resp.read().decode("utf-8"))
-        except Exception as exc:
-            logger.warning("Overpass road fetch failed for bbox %s: %s", bbox, exc)
-            osm_breaker.record_failure()
-            stale = _read_osm_cache_stale(cp)
-            return stale if stale is not None else []
-
-        ways = _parse_overpass_road_ways(result)
-        try:
-            tmp = cp.with_suffix(cp.suffix + ".tmp")
-            tmp.write_text(
-                json.dumps({"fetched": time.time(), "ways": ways}, ensure_ascii=False),
-                encoding="utf-8",
-            )
-            tmp.replace(cp)
-        except OSError as exc:
-            logger.warning("Failed to persist road cache %s: %s", cp, exc)
-        _OSM_ROAD_MEM_CACHE[cp.stem] = ways
-        osm_breaker.record_success()
-        return ways
-
-
-def _parse_overpass_road_ways(osm_json) -> list[dict]:
-    nodes = {
-        e["id"]: (e["lat"], e["lon"])
-        for e in osm_json.get("elements", []) if e.get("type") == "node"
-    }
-    ways: list[dict] = []
-    for e in osm_json.get("elements", []):
-        if e.get("type") != "way":
-            continue
-        tags = e.get("tags", {})
-        name = tags.get("name")
-        if not name:
-            continue
-        coords = [nodes[nid] for nid in e.get("nodes", []) if nid in nodes]
-        if len(coords) < 2:
-            continue
-        ways.append({
-            "id":      e["id"],
-            "name":    name,
-            "highway": tags.get("highway"),
-            "oneway":  tags.get("oneway") == "yes",
-            "coords":  coords,
-        })
-    return ways
+    return _fetch_osm_ways_cached(
+        bbox, cache_dir,
+        mem_cache=_OSM_ROAD_MEM_CACHE, lock_for=_road_lock_for,
+        highway_types=_ROAD_HIGHWAY_TYPES,
+        extra_tags=lambda t: {"oneway": t.get("oneway") == "yes"},
+        log_label="road",
+    )
 
 
 # ─── Combined trails+roads fetch ────────────────────────────────────────────
