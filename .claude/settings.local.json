@@ -103,7 +103,11 @@
       "Bash(awk -F: '$1>=2280')",
       "Bash(awk -F: '$1>3500 && $1<3690')",
       "Bash(awk 'NR<=1709 && /^def /{ln=NR; l=$0} END{print ln\": \"l}' app.py)",
-      "Bash(awk 'NR>=1630 && NR<=1645 && /^def |^@app/{print NR\": \"$0}' app.py)"
+      "Bash(awk 'NR>=1630 && NR<=1645 && /^def |^@app/{print NR\": \"$0}' app.py)",
+      "PowerShell($conn = Get-NetTCPConnection -LocalPort 5000 -State Listen -ErrorAction SilentlyContinue; if \\($conn\\) { Stop-Process -Id $conn.OwningProcess -Force; Start-Sleep -Milliseconds 800; Write-Output \"stopped old PID $\\($conn.OwningProcess\\)\" } else { Write-Output \"nothing was listening\" }; Start-Process -FilePath \"C:\\\\Users\\\\arowberry\\\\AppData\\\\Local\\\\Microsoft\\\\WindowsApps\\\\python.exe\" -ArgumentList \"app.py\" -WorkingDirectory \"C:\\\\Claude Code Projects\\\\AlForks\" -WindowStyle Hidden; Write-Output \"relaunched\")",
+      "PowerShell($ok=$false; for \\($i=0; $i -lt 20; $i++\\) { try { $r = Invoke-WebRequest -Uri \"http://localhost:5000/compare\" -UseBasicParsing -TimeoutSec 3; $inline = \\($r.Content -split \"`n\" | Select-String \"mapboxgl-ctrl-group\"\\).Count; Write-Output \"UP: /compare HTTP $\\($r.StatusCode\\); inline mapbox rules present: $inline\"; $ok=$true; break } catch { Start-Sleep -Milliseconds 700 } }; if \\(-not $ok\\) { Write-Output \"NOT RESPONDING\" })",
+      "PowerShell($js = \\(Invoke-WebRequest -Uri \"https://unpkg.com/leaflet-rotate@0.2.8/dist/leaflet-rotate-src.js\" -UseBasicParsing -TimeoutSec 10\\).Content; $idx = $js.IndexOf\\('leaflet-control-rotate-arrow'\\); if \\($idx -ge 0\\) { $js.Substring\\([Math]::Max\\(0,$idx-200\\), 500\\) })",
+      "PowerShell($conn = Get-NetTCPConnection -LocalPort 5000 -State Listen -ErrorAction SilentlyContinue; if \\($conn\\) { Stop-Process -Id $conn.OwningProcess -Force; Start-Sleep -Milliseconds 800 }; Start-Process -FilePath \"C:\\\\Users\\\\arowberry\\\\AppData\\\\Local\\\\Microsoft\\\\WindowsApps\\\\python.exe\" -ArgumentList \"app.py\" -WorkingDirectory \"C:\\\\Claude Code Projects\\\\AlForks\" -WindowStyle Hidden; $ok=$false; for \\($i=0; $i -lt 20; $i++\\) { try { $r = Invoke-WebRequest -Uri \"http://localhost:5000/compare\" -UseBasicParsing -TimeoutSec 3; $leaf = \\($r.Content -split \"`n\" | Select-String \"leaflet-control-rotate-arrow\"\\).Count; Write-Output \"UP: /compare HTTP $\\($r.StatusCode\\); leaflet-rotate rule served: $leaf\"; $ok=$true; break } catch { Start-Sleep -Milliseconds 700 } }; if \\(-not $ok\\) { Write-Output \"NOT RESPONDING\" })"
     ]
   }
 }
