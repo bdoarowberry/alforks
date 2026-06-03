@@ -1606,6 +1606,36 @@ def _summary_data(days_back: int, units: str) -> dict:
     return result
 
 
+def _active_day_streaks(sorted_dates: list, today_date) -> tuple:
+    """(longest, current) consecutive-day streaks from a sorted list of
+    unique YYYY-MM-DD active-day strings. Current = the streak ending today
+    or yesterday (0 if the most recent active day is older). Both 0 when
+    there are no dates."""
+    if not sorted_dates:
+        return 0, 0
+    # date.fromisoformat is ~3x faster than datetime.strptime for
+    # YYYY-MM-DD strings; parse once into a list then index.
+    date_objs = [date.fromisoformat(d) for d in sorted_dates]
+    longest = run = 1
+    for i in range(1, len(date_objs)):
+        if (date_objs[i] - date_objs[i - 1]).days == 1:
+            run += 1
+            longest = max(longest, run)
+        else:
+            run = 1
+    current = 0
+    # Current streak is consecutive days ending at today (or yesterday).
+    if (today_date - date_objs[-1]).days <= 1:
+        run = 1
+        for i in range(len(date_objs) - 1, 0, -1):
+            if (date_objs[i] - date_objs[i - 1]).days == 1:
+                run += 1
+            else:
+                break
+        current = run
+    return longest, current
+
+
 def _summary_data_compute(days_back: int, units: str,
                            today_dt: datetime, today_iso: str) -> dict:
     """Internal implementation — called only on cache miss."""
@@ -1706,29 +1736,7 @@ def _summary_data_compute(days_back: int, units: str,
         unique_dates = {(a.get("date") or "")[:10] for a in in_window if a.get("date")}
         # Streaks (current + longest) from unique active dates within window
         sorted_dates = sorted(d for d in unique_dates if d)
-        longest_streak = current_streak = 0
-        if sorted_dates:
-            run = 1
-            longest_streak = 1
-            # date.fromisoformat is ~3x faster than datetime.strptime for
-            # YYYY-MM-DD strings; parse once into a list then index.
-            date_objs = [date.fromisoformat(d) for d in sorted_dates]
-            for i in range(1, len(date_objs)):
-                if (date_objs[i] - date_objs[i - 1]).days == 1:
-                    run += 1
-                    longest_streak = max(longest_streak, run)
-                else:
-                    run = 1
-            # Current streak is consecutive days ending at today (or yesterday)
-            today_date = today_dt.date()
-            if (today_date - date_objs[-1]).days <= 1:
-                run = 1
-                for i in range(len(date_objs) - 1, 0, -1):
-                    if (date_objs[i] - date_objs[i - 1]).days == 1:
-                        run += 1
-                    else:
-                        break
-                current_streak = run
+        longest_streak, current_streak = _active_day_streaks(sorted_dates, today_dt.date())
 
         def _stat_sum(key):
             return sum((a.get("stats") or {}).get(key) or 0 for a in in_window)
@@ -1933,27 +1941,7 @@ def _summary_data_compute(days_back: int, units: str,
                      and len((a.get("date") or "")[:10]) == 10]
     unique_active = {a["date"][:10] for a in all_in_window if a.get("date")}
     sorted_dates_all = sorted(unique_active)
-    longest_streak_all = 0
-    current_streak_all = 0
-    if sorted_dates_all:
-        run = 1
-        longest_streak_all = 1
-        date_objs_all = [date.fromisoformat(d) for d in sorted_dates_all]
-        for i in range(1, len(date_objs_all)):
-            if (date_objs_all[i] - date_objs_all[i - 1]).days == 1:
-                run += 1
-                longest_streak_all = max(longest_streak_all, run)
-            else:
-                run = 1
-        today_date = today_dt.date()
-        if (today_date - date_objs_all[-1]).days <= 1:
-            run = 1
-            for i in range(len(date_objs_all) - 1, 0, -1):
-                if (date_objs_all[i] - date_objs_all[i - 1]).days == 1:
-                    run += 1
-                else:
-                    break
-            current_streak_all = run
+    longest_streak_all, current_streak_all = _active_day_streaks(sorted_dates_all, today_dt.date())
 
     last_date_all = max(unique_active) if unique_active else None
     days_since = None
@@ -2295,6 +2283,20 @@ _trail_prewarm_lock    = threading.Lock()
 _trail_prewarm_progress = {"done": 0, "total": 0, "started_at": None, "finished_at": None}
 
 
+def _meta_fp(file_meta: dict) -> str:
+    """Short fingerprint of the per-file metadata that affects snapped GPX
+    data (trim, smoothing, time-shift, spike-repair), passed to
+    trail_match.cached_match so a metadata edit invalidates the trail cache
+    even when the raw GPX mtime is unchanged. ALL call sites must use this
+    so their MD5s agree — a mismatch silently recomputes."""
+    return hashlib.md5(json.dumps({
+        "trim":             file_meta.get("trim"),
+        "smoothing":        file_meta.get("smoothing"),
+        "time_shift_hours": file_meta.get("time_shift_hours"),
+        "spike_repair":     file_meta.get("spike_repair"),
+    }, sort_keys=True).encode()).hexdigest()[:12]
+
+
 def _prewarm_trail_matches_async() -> None:
     """Idempotent with rescan-on-trigger semantics. If a worker is already
     running, set the rescan flag so the worker loops again after it
@@ -2354,15 +2356,7 @@ def _trail_prewarm_worker_inner() -> None:
         # Without this, a trim edit would silently skip prewarm and
         # leave the leaderboard stale until the user opened the page.
         file_meta = meta.get(fn, {})
-        meta_fp_src = {
-            "trim": file_meta.get("trim"),
-            "smoothing": file_meta.get("smoothing"),
-            "time_shift_hours": file_meta.get("time_shift_hours"),
-            "spike_repair": file_meta.get("spike_repair"),
-        }
-        expected_fp = hashlib.md5(
-            json.dumps(meta_fp_src, sort_keys=True).encode()
-        ).hexdigest()[:12]
+        expected_fp = _meta_fp(file_meta)
         disk = TRAIL_MATCH_CACHE_DIR / f"{fn}.json"
         if disk.exists():
             try:
@@ -2402,15 +2396,7 @@ def _trail_prewarm_worker_inner() -> None:
             # accidentally produce two different cache entries for the
             # same activity.
             file_meta = meta.get(fn, {})
-            meta_fp_src = {
-                "trim": file_meta.get("trim"),
-                "smoothing": file_meta.get("smoothing"),
-                "time_shift_hours": file_meta.get("time_shift_hours"),
-                "spike_repair": file_meta.get("spike_repair"),
-            }
-            meta_fp = hashlib.md5(
-                json.dumps(meta_fp_src, sort_keys=True).encode()
-            ).hexdigest()[:12]
+            meta_fp = _meta_fp(file_meta)
             trail_match.cached_match(
                 fn, p.stat().st_mtime, data,
                 cache_dir_osm=OSM_PATHS_CACHE_DIR,
@@ -2510,15 +2496,7 @@ def api_activity_rescan_trails(filename: str):
     # KEEP IN SYNC with the prewarm + activity-detail call sites — using
     # different keys here would produce a different MD5 and the next
     # request would silently recompute against the matching-shape entry.
-    meta_fp_src = {
-        "trim":             file_meta.get("trim"),
-        "smoothing":        file_meta.get("smoothing"),
-        "time_shift_hours": file_meta.get("time_shift_hours"),
-        "spike_repair":     file_meta.get("spike_repair"),
-    }
-    meta_fp = hashlib.md5(
-        json.dumps(meta_fp_src, sort_keys=True).encode()
-    ).hexdigest()[:12]
+    meta_fp = _meta_fp(file_meta)
     result = trail_match.cached_match(
         filename, p.stat().st_mtime, data,
         cache_dir_osm=OSM_PATHS_CACHE_DIR,
@@ -2550,12 +2528,7 @@ def _route_proposal_for_ride(filename: str, data: dict | None = None
         return None, "could not parse GPX", 500
 
     file_meta = (load_metadata() or {}).get(filename) or {}
-    meta_fp = hashlib.md5(json.dumps({
-        "trim":             file_meta.get("trim"),
-        "smoothing":        file_meta.get("smoothing"),
-        "time_shift_hours": file_meta.get("time_shift_hours"),
-        "spike_repair":     file_meta.get("spike_repair"),
-    }, sort_keys=True).encode()).hexdigest()[:12]
+    meta_fp = _meta_fp(file_meta)
     result = trail_match.cached_match(
         filename, p.stat().st_mtime, data,
         cache_dir_osm=OSM_PATHS_CACHE_DIR,
@@ -3678,15 +3651,7 @@ def api_activity(filename):
             # the trail_match cache. The raw GPX mtime alone isn't
             # enough — these edits live in metadata.json. Fingerprint
             # them into a short hash and pass through.
-            meta_fp_src = {
-                "trim": file_meta.get("trim"),
-                "smoothing": file_meta.get("smoothing"),
-                "time_shift_hours": file_meta.get("time_shift_hours"),
-                "spike_repair": file_meta.get("spike_repair"),
-            }
-            meta_fp = hashlib.md5(
-                json.dumps(meta_fp_src, sort_keys=True).encode()
-            ).hexdigest()[:12]
+            meta_fp = _meta_fp(file_meta)
             disk_before = TRAIL_MATCH_CACHE_DIR / f"{filename}.json"
             existed_before = disk_before.exists()
             trails = trail_match.cached_match(
@@ -6624,6 +6589,46 @@ _ODD_TIME_NIGHT_HOURS = {21, 22, 23, 0, 1, 2, 3, 4, 5, 6}
 _ODD_TIMES_LAZY_LOOKUP_BUDGET = 20
 
 
+def _iter_spike_flagged_activities():
+    """Yield (activity, n_spikes, max_implied_kmh) for every non-excluded,
+    non-repaired, non-approved activity whose GPS-speed scan trips the
+    spike-flag threshold. Single source of truth for the three callers
+    (/api/speed-spikes, the /review flagged set, the review-counts badge)
+    so they can't drift on which rides count as spike-flagged."""
+    for act in all_activities():
+        if act.get("excluded"):
+            continue
+        file_meta = act.get("meta") or {}
+        if file_meta.get("spike_repair") or file_meta.get("issues_approved"):
+            continue
+        data = get_activity(act["filename"])
+        if not data:
+            continue
+        pts = data.get("points") or []
+        if len(pts) < 2 * _SPIKE_WINDOW + 1:
+            continue
+        mask, max_implied = _find_speed_spikes(pts)
+        n = sum(mask)
+        if _is_spike_flagged(n, max_implied):
+            yield act, n, max_implied
+
+
+def _odd_time_local_dt(dt, tz_name):
+    """Resolve a start datetime to location-local time for night-window
+    classification. Returns the localized datetime, or None when the zone
+    is unknown/unresolvable (callers skip rather than false-flag). The lazy
+    tz_name resolution that /api/odd-times does lives in that caller; this
+    only does the dt -> local conversion the three callers share."""
+    if tz_name:
+        try:
+            return dt.astimezone(ZoneInfo(tz_name)) if dt.tzinfo else dt.replace(tzinfo=ZoneInfo(tz_name))
+        except ZoneInfoNotFoundError:
+            return None
+    if dt.tzinfo is None:
+        return dt
+    return None
+
+
 @app.route("/api/odd-times")
 def api_odd_times():
     """Flag rides whose start time, in the activity-location's local zone,
@@ -6657,23 +6662,12 @@ def api_odd_times():
             # returns None — no outer try/except needed here.
             tz_name = _weather_timezone_name(lat, lon, date_str)
 
-        if tz_name:
-            try:
-                local_dt = dt.astimezone(ZoneInfo(tz_name)) if dt.tzinfo else dt.replace(tzinfo=ZoneInfo(tz_name))
-            except ZoneInfoNotFoundError:
-                continue
-        elif dt.tzinfo is None:
-            # Naive timestamp + no tz_name: trust the wall-clock at face value.
-            # Correct for TrailForks-style files (naive == local clock) but
-            # would re-introduce the original false-flag bug for any naive-UTC
-            # source. Accepted limitation — gpxpy emits naive only when the
-            # source GPX had no timezone marker, and TrailForks is the only
-            # known producer of that shape we ingest.
-            local_dt = dt
-        else:
-            continue
-
-        if local_dt.hour not in _ODD_TIME_NIGHT_HOURS:
+        local_dt = _odd_time_local_dt(dt, tz_name)
+        # Naive timestamp + no tz_name resolves to the wall-clock at face
+        # value (correct for TrailForks-style files where naive == local
+        # clock; an accepted limitation for any naive-UTC source). A zone we
+        # can't resolve yields None — skip rather than false-flag.
+        if local_dt is None or local_dt.hour not in _ODD_TIME_NIGHT_HOURS:
             continue
         s = a.get("stats") or {}
         date_str = (a.get("date") or "")[:10]
@@ -6708,23 +6702,7 @@ def api_speed_spikes():
     on the first call, then served from the regular activity cache.
     """
     flagged: list[dict] = []
-    for act in all_activities():
-        if act.get("excluded"):
-            continue
-        file_meta = act.get("meta") or {}
-        if file_meta.get("spike_repair") or file_meta.get("issues_approved"):
-            # Already repaired or user-acknowledged — don't re-flag.
-            continue
-        data = get_activity(act["filename"])
-        if not data:
-            continue
-        pts = data.get("points") or []
-        if len(pts) < 2 * _SPIKE_WINDOW + 1:
-            continue
-        spikes, max_implied = _find_speed_spikes(pts)
-        n = sum(spikes)
-        if not _is_spike_flagged(n, max_implied):
-            continue
+    for act, n, max_implied in _iter_spike_flagged_activities():
         s = act.get("stats") or {}
         flagged.append({
             "filename":      act["filename"],
@@ -6955,36 +6933,14 @@ def _review_flagged_filenames() -> set:
                 dt = None
             if dt is not None:
                 tz_name = a.get("tz_name")
-                local_dt = None
-                if tz_name:
-                    try:
-                        local_dt = (dt.astimezone(ZoneInfo(tz_name)) if dt.tzinfo
-                                    else dt.replace(tzinfo=ZoneInfo(tz_name)))
-                    except ZoneInfoNotFoundError:
-                        local_dt = None
-                elif dt.tzinfo is None:
-                    local_dt = dt
+                local_dt = _odd_time_local_dt(dt, tz_name)
                 if local_dt is not None and local_dt.hour in _ODD_TIME_NIGHT_HOURS:
                     flagged.add(fn)
 
     # GPS spikes — expensive (full point scan per non-repaired/approved
     # activity). Skip activities that the user has already triaged.
-    for act in all_activities():
-        if act.get("excluded"):
-            continue
-        meta = act.get("meta") or {}
-        if meta.get("spike_repair") or meta.get("issues_approved"):
-            continue
-        data = get_activity(act["filename"])
-        if not data:
-            continue
-        pts = data.get("points") or []
-        if len(pts) < 2 * _SPIKE_WINDOW + 1:
-            continue
-        mask, max_implied = _find_speed_spikes(pts)
-        n = sum(mask)
-        if _is_spike_flagged(n, max_implied):
-            flagged.add(act["filename"])
+    for act, _n, _max in _iter_spike_flagged_activities():
+        flagged.add(act["filename"])
 
     # Cache a frozenset so a future caller can't mutate the shared state in
     # place. (Callers only iterate / membership-check, but the safety belt
@@ -7023,23 +6979,7 @@ def api_review_counts():
 
     # Speed spikes — match /api/speed-spikes' threshold (≥3 spikes or any
     # single ≥80 km/h). Skips repaired and approved rides.
-    spikes = 0
-    for act in all_activities():
-        if act.get("excluded"):
-            continue
-        meta = act.get("meta") or {}
-        if meta.get("spike_repair") or meta.get("issues_approved"):
-            continue
-        data = get_activity(act["filename"])
-        if not data:
-            continue
-        pts = data.get("points") or []
-        if len(pts) < 2 * _SPIKE_WINDOW + 1:
-            continue
-        mask, max_implied = _find_speed_spikes(pts)
-        n = sum(mask)
-        if _is_spike_flagged(n, max_implied):
-            spikes += 1
+    spikes = sum(1 for _ in _iter_spike_flagged_activities())
 
     # Odd times — re-derive count from the existing endpoint's heuristic.
     # Cheaper version: just count activities whose start hour falls in the
@@ -7055,14 +6995,8 @@ def api_review_counts():
         except ValueError:
             continue
         tz_name = a.get("tz_name")
-        if tz_name:
-            try:
-                local_dt = dt.astimezone(ZoneInfo(tz_name)) if dt.tzinfo else dt.replace(tzinfo=ZoneInfo(tz_name))
-            except ZoneInfoNotFoundError:
-                continue
-        elif dt.tzinfo is None:
-            local_dt = dt
-        else:
+        local_dt = _odd_time_local_dt(dt, tz_name)
+        if local_dt is None:
             continue
         if local_dt.hour in _ODD_TIME_NIGHT_HOURS:
             odd += 1
