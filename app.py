@@ -2640,6 +2640,11 @@ ROUTES_DIR               = CACHE_DIR / "routes"
 ROUTE_ATTEMPTS_CACHE_DIR = CACHE_DIR / "route_attempts"
 ROUTE_SUGGESTIONS_CACHE_DIR = CACHE_DIR / "route_suggestions"
 
+# The id charset we mint ourselves for routes / suggestions. Validating
+# against it before touching the filesystem defends against path traversal
+# from a crafted client-supplied id.
+_ID_RE = re.compile(r"[a-f0-9]{12}")
+
 # Single-payload in-memory cache for the recurring-route suggestions
 # (the whole library produces one result, unlike per-route attempts).
 # Clustering the full library is a multi-second pass, so it runs in a
@@ -2653,7 +2658,7 @@ _SUGGESTIONS_COMPUTING = False
 def _route_path(route_id: str) -> Path:
     # Allow only the id charset we generate ourselves — defends against
     # path traversal if a client supplies a crafted id.
-    if not re.fullmatch(r"[a-f0-9]{12}", route_id or ""):
+    if not _ID_RE.fullmatch(route_id or ""):
         return None
     return ROUTES_DIR / f"{route_id}.json"
 
@@ -3239,7 +3244,7 @@ def api_routes_suggestions():
 def api_routes_suggestion_dismiss(sug_id: str):
     """Hide a suggestion permanently (won't resurface unless its cluster
     membership changes, which mints a new id)."""
-    if not re.fullmatch(r"[a-f0-9]{12}", sug_id or ""):
+    if not _ID_RE.fullmatch(sug_id or ""):
         abort(404)
     ids = _load_dismissals()
     ids.add(sug_id)
@@ -3250,7 +3255,7 @@ def api_routes_suggestion_dismiss(sug_id: str):
 @app.route("/api/routes/suggestions/<sug_id>/dismiss", methods=["DELETE"])
 def api_routes_suggestion_undismiss(sug_id: str):
     """Un-hide a previously dismissed suggestion."""
-    if not re.fullmatch(r"[a-f0-9]{12}", sug_id or ""):
+    if not _ID_RE.fullmatch(sug_id or ""):
         abort(404)
     ids = _load_dismissals()
     ids.discard(sug_id)

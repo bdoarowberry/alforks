@@ -57,6 +57,11 @@ def _entry_path(sidebar_cache_dir: Path, filename: str) -> Path:
     return sidebar_cache_dir / f"{filename}.json"
 
 
+def _entry_date(entry: dict) -> str:
+    """The entry's `YYYY-MM-DD` date prefix (the HR-cache lookup key), or ""."""
+    return (entry.get("date") or "")[:10]
+
+
 def read_sidebar_entry(*, sidebar_cache_dir: Path, hr_cache_dir: Path,
                        filename: str, expected_fp: str
                        ) -> tuple[dict, dict] | None:
@@ -74,7 +79,7 @@ def read_sidebar_entry(*, sidebar_cache_dir: Path, hr_cache_dir: Path,
     entry = blob.get("entry")
     if not isinstance(entry, dict):
         return None
-    date_str = (entry.get("date") or "")[:10]
+    date_str = _entry_date(entry)
     if hr_file_mtime(hr_cache_dir, date_str) != blob.get("hr_mtime", -1.0):
         return None
     sl = entry.get("start_latlon")
@@ -88,7 +93,7 @@ def write_sidebar_entry(*, sidebar_cache_dir: Path, hr_cache_dir: Path,
     page render; worst case is we recompute next time."""
     try:
         sidebar_cache_dir.mkdir(parents=True, exist_ok=True)
-        date_str = (entry.get("date") or "")[:10]
+        date_str = _entry_date(entry)
         blob = {"fp": fp,
                 "hr_mtime": hr_file_mtime(hr_cache_dir, date_str),
                 "entry": entry}

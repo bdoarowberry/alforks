@@ -357,6 +357,16 @@ def write_gpx(activity: dict, streams: dict) -> bool:
 
 # ─── Sync ─────────────────────────────────────────────────────────────────────
 
+def _advance_newest_epoch(newest_epoch: int, a: dict) -> int:
+    """Fold an activity's start time into the running newest-epoch high-water
+    mark. Best-effort: a missing or garbled start_date leaves it unchanged."""
+    try:
+        start_dt = datetime.fromisoformat(a["start_date"].rstrip("Z")).timestamp()
+        return max(newest_epoch, int(start_dt))
+    except Exception:
+        return newest_epoch
+
+
 def cmd_sync(only_new: bool = True) -> None:
     token  = get_access_token()
     status = load_status()
@@ -383,11 +393,7 @@ def cmd_sync(only_new: bool = True) -> None:
         # silently re-downloaded on the next sync.
         if (out.exists() or archived.exists()) and only_new:
             skipped += 1
-            try:
-                start_dt = datetime.fromisoformat(a["start_date"].rstrip("Z")).timestamp()
-                newest_epoch = max(newest_epoch, int(start_dt))
-            except Exception:
-                pass
+            newest_epoch = _advance_newest_epoch(newest_epoch, a)
             continue
         # Skip non-GPS activities (manual, virtual without GPS, etc.)
         if not a.get("start_latlng"):
@@ -403,11 +409,7 @@ def cmd_sync(only_new: bool = True) -> None:
             tag_msg = f"  [tag: {applied_tag}]" if applied_tag else ""
             print(f"  + {a.get('start_date_local','?')[:16]}  {a.get('name','')[:60]}  -> {out.name}{tag_msg}")
             written += 1
-            try:
-                start_dt = datetime.fromisoformat(a["start_date"].rstrip("Z")).timestamp()
-                newest_epoch = max(newest_epoch, int(start_dt))
-            except Exception:
-                pass
+            newest_epoch = _advance_newest_epoch(newest_epoch, a)
         else:
             empty += 1
 

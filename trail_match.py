@@ -201,10 +201,10 @@ def _try_read_osm_cache(cp: Path) -> list[dict] | None:
     return None
 
 
-def _read_trail_cache_stale(cp: Path) -> list[dict] | None:
-    """Read the trail cache ignoring TTL. Trails change slowly; stale cache
-    is better than empty when Overpass is unreachable. Returns None only
-    when the file is missing or corrupt."""
+def _read_osm_cache_stale(cp: Path) -> list[dict] | None:
+    """Read an OSM ways cache (trail or road) ignoring TTL. Ways change
+    slowly; stale cache is better than empty when Overpass is unreachable.
+    Returns None only when the file is missing or corrupt."""
     if not cp.exists():
         return None
     try:
@@ -235,7 +235,7 @@ def fetch_osm_trails(bbox, cache_dir: Path) -> list[dict]:
             return cached
 
         if osm_breaker.should_skip():
-            stale = _read_trail_cache_stale(cp)
+            stale = _read_osm_cache_stale(cp)
             return stale if stale is not None else []
 
         s, w, n, e = bbox
@@ -257,7 +257,7 @@ def fetch_osm_trails(bbox, cache_dir: Path) -> list[dict]:
         except Exception as exc:
             logger.warning("Overpass fetch failed for trail bbox %s: %s", bbox, exc)
             osm_breaker.record_failure()
-            stale = _read_trail_cache_stale(cp)
+            stale = _read_osm_cache_stale(cp)
             return stale if stale is not None else []
 
         ways = _parse_overpass_ways(result)
@@ -337,17 +337,6 @@ def _try_read_road_cache(cp: Path) -> list[dict] | None:
     return None
 
 
-def _read_road_cache_stale(cp: Path) -> list[dict] | None:
-    """Read the road cache ignoring TTL. See _read_trail_cache_stale."""
-    if not cp.exists():
-        return None
-    try:
-        entry = json.loads(cp.read_text(encoding="utf-8"))
-        return entry.get("ways")
-    except Exception:
-        return None
-
-
 def fetch_osm_roads(bbox, cache_dir: Path) -> list[dict]:
     """Return named OSM road ways for `bbox`, cached for OSM_CACHE_TTL_SEC.
 
@@ -368,7 +357,7 @@ def fetch_osm_roads(bbox, cache_dir: Path) -> list[dict]:
             return cached
 
         if osm_breaker.should_skip():
-            stale = _read_road_cache_stale(cp)
+            stale = _read_osm_cache_stale(cp)
             return stale if stale is not None else []
 
         s, w, n, e = bbox
@@ -390,7 +379,7 @@ def fetch_osm_roads(bbox, cache_dir: Path) -> list[dict]:
         except Exception as exc:
             logger.warning("Overpass road fetch failed for bbox %s: %s", bbox, exc)
             osm_breaker.record_failure()
-            stale = _read_road_cache_stale(cp)
+            stale = _read_osm_cache_stale(cp)
             return stale if stale is not None else []
 
         ways = _parse_overpass_road_ways(result)

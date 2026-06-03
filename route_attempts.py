@@ -165,6 +165,18 @@ def _coalesce_timeline(timeline: list[dict]) -> list[dict]:
 
 # ─── Endpoint lookup ────────────────────────────────────────────────────────
 
+def _build_node_xy(region_artifact: dict) -> dict[str, tuple[float, float]]:
+    """node_id -> (lat, lon) across junctions + per-entry endpoints
+    (component pseudo-nodes). A single lookup covers trail and road edges."""
+    node_xy: dict[str, tuple[float, float]] = {}
+    for j in region_artifact.get("junctions") or []:
+        node_xy[j["id"]] = (j["lat"], j["lon"])
+    for entry in (region_artifact.get("trails") or []) + (region_artifact.get("roads") or []):
+        for ep in entry.get("endpoints") or []:
+            node_xy[ep["id"]] = (ep["lat"], ep["lon"])
+    return node_xy
+
+
 def _segment_endpoints(route: dict, region_artifact: dict
                         ) -> list[tuple[str, str, str, tuple, tuple, list]]:
     """For each segment in `route`, find its trail_name, kind, direction, the
@@ -178,15 +190,7 @@ def _segment_endpoints(route: dict, region_artifact: dict
     segment whose edge_id is unknown (stale artifact rebuild) is dropped
     silently and logged at DEBUG.
     """
-    # Build a node_id -> (lat, lon) index across junctions + per-entry
-    # endpoints (component pseudo-nodes). A single lookup table covers
-    # both trail and road edges.
-    node_xy: dict[str, tuple[float, float]] = {}
-    for j in region_artifact.get("junctions") or []:
-        node_xy[j["id"]] = (j["lat"], j["lon"])
-    for entry in (region_artifact.get("trails") or []) + (region_artifact.get("roads") or []):
-        for ep in entry.get("endpoints") or []:
-            node_xy[ep["id"]] = (ep["lat"], ep["lon"])
+    node_xy = _build_node_xy(region_artifact)
 
     # edge_id -> (trail_name, kind) and edge_id -> polyline. The artifact is
     # the source of truth for both the canonical name/kind and the geometry.
@@ -284,12 +288,7 @@ def build_segments_from_ride(timeline: list[dict],
     # Same coalescing the detector uses — so a trail trail_match split into
     # several runs is rebuilt as one continuous edge group, not dropped.
     timeline = _coalesce_timeline(timeline)
-    node_xy: dict[str, tuple[float, float]] = {}
-    for j in region_artifact.get("junctions") or []:
-        node_xy[j["id"]] = (j["lat"], j["lon"])
-    for entry in (region_artifact.get("trails") or []) + (region_artifact.get("roads") or []):
-        for ep in entry.get("endpoints") or []:
-            node_xy[ep["id"]] = (ep["lat"], ep["lon"])
+    node_xy = _build_node_xy(region_artifact)
 
     by_name: dict[tuple[str, str], dict] = {}
     for entry in region_artifact.get("trails") or []:
