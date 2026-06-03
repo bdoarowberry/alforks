@@ -2292,6 +2292,19 @@ def _meta_fp(file_meta: dict) -> str:
     }, sort_keys=True).encode()).hexdigest()[:12]
 
 
+def _cached_match(filename: str, mtime: float, data: dict, meta_fp: str):
+    """`trail_match.cached_match` bound to this app's three cache dirs. Callers
+    still pass `mtime` explicitly — sites differ (`p.stat().st_mtime` on the
+    request paths vs `_stat_mtime(p)` on the activity-detail path)."""
+    return trail_match.cached_match(
+        filename, mtime, data,
+        cache_dir_osm=OSM_PATHS_CACHE_DIR,
+        cache_dir_results=TRAIL_MATCH_CACHE_DIR,
+        cache_dir_roads=OSM_ROADS_CACHE_DIR,
+        meta_fp=meta_fp,
+    )
+
+
 def _prewarm_trail_matches_async() -> None:
     """Idempotent with rescan-on-trigger semantics. If a worker is already
     running, set the rescan flag so the worker loops again after it
@@ -2392,13 +2405,7 @@ def _trail_prewarm_worker_inner() -> None:
             # same activity.
             file_meta = meta.get(fn, {})
             meta_fp = _meta_fp(file_meta)
-            trail_match.cached_match(
-                fn, p.stat().st_mtime, data,
-                cache_dir_osm=OSM_PATHS_CACHE_DIR,
-                cache_dir_results=TRAIL_MATCH_CACHE_DIR,
-                cache_dir_roads=OSM_ROADS_CACHE_DIR,
-                meta_fp=meta_fp,
-            )
+            _cached_match(fn, p.stat().st_mtime, data, meta_fp)
             done += 1
             with _trail_prewarm_lock:
                 _trail_prewarm_progress["done"] = done
@@ -2492,13 +2499,7 @@ def api_activity_rescan_trails(filename: str):
     # different keys here would produce a different MD5 and the next
     # request would silently recompute against the matching-shape entry.
     meta_fp = _meta_fp(file_meta)
-    result = trail_match.cached_match(
-        filename, p.stat().st_mtime, data,
-        cache_dir_osm=OSM_PATHS_CACHE_DIR,
-        cache_dir_results=TRAIL_MATCH_CACHE_DIR,
-        cache_dir_roads=OSM_ROADS_CACHE_DIR,
-        meta_fp=meta_fp,
-    )
+    result = _cached_match(filename, p.stat().st_mtime, data, meta_fp)
     _invalidate_trail_leaderboards()
     _invalidate_route_attempts()   # one ride's match changed → any route attempt may have changed
     return jsonify({"ok": True, "result": result})
@@ -2524,13 +2525,7 @@ def _route_proposal_for_ride(filename: str, data: dict | None = None
 
     file_meta = (load_metadata() or {}).get(filename) or {}
     meta_fp = _meta_fp(file_meta)
-    result = trail_match.cached_match(
-        filename, p.stat().st_mtime, data,
-        cache_dir_osm=OSM_PATHS_CACHE_DIR,
-        cache_dir_results=TRAIL_MATCH_CACHE_DIR,
-        cache_dir_roads=OSM_ROADS_CACHE_DIR,
-        meta_fp=meta_fp,
-    )
+    result = _cached_match(filename, p.stat().st_mtime, data, meta_fp)
     timeline = (result or {}).get("timeline") or []
     if not timeline:
         return None, "No trails detected in this ride — nothing to build a route from.", 422
@@ -3653,13 +3648,7 @@ def api_activity(filename):
             meta_fp = _meta_fp(file_meta)
             disk_before = TRAIL_MATCH_CACHE_DIR / f"{filename}.json"
             existed_before = disk_before.exists()
-            trails = trail_match.cached_match(
-                filename, _stat_mtime(p), data,
-                cache_dir_osm=OSM_PATHS_CACHE_DIR,
-                cache_dir_results=TRAIL_MATCH_CACHE_DIR,
-                cache_dir_roads=OSM_ROADS_CACHE_DIR,
-                meta_fp=meta_fp,
-            )
+            trails = _cached_match(filename, _stat_mtime(p), data, meta_fp)
             # If cached_match wrote a fresh file for this activity (first
             # request or invalidated cache), the leaderboard built before
             # this call doesn't include the current attempts — meaning
@@ -6383,12 +6372,9 @@ def _region_usage_dict() -> dict[str, int]:
         return counts
 
 
-def _decimated_coords(filename: str, max_points: int = 120) -> list[list[float]]:
-    """Lat/lon polyline for a track, evenly thinned to ~max_points samples.
-    Used by lightweight UI overlays (regionless tracks map, duplicates map)
-    where the full point density would balloon the payload for no gain."""
-    data = get_activity(filename)
-    pts = (data or {}).get("points") or []
+def _decimate_latlon(pts: list, max_points: int) -> list[list[float]]:
+    """Evenly thin a GPX point list to ~max_points [lat,lon] pairs (5 dp),
+    always keeping the true endpoint. Returns [] for <2 points."""
     if len(pts) < 2:
         return []
     step = max(1, len(pts) // max_points)
@@ -6398,6 +6384,14 @@ def _decimated_coords(filename: str, max_points: int = 120) -> list[list[float]]
     if out and (out[-1][0] != round(last["lat"], 5) or out[-1][1] != round(last["lon"], 5)):
         out.append([round(last["lat"], 5), round(last["lon"], 5)])
     return out
+
+
+def _decimated_coords(filename: str, max_points: int = 120) -> list[list[float]]:
+    """Lat/lon polyline for a track, evenly thinned to ~max_points samples.
+    Used by lightweight UI overlays (regionless tracks map, duplicates map)
+    where the full point density would balloon the payload for no gain."""
+    data = get_activity(filename)
+    return _decimate_latlon((data or {}).get("points") or [], max_points)
 
 
 @app.route("/api/track-coords/<path:filename>")
@@ -7038,14 +7032,7 @@ def api_regions_untagged():
         if (act.get("meta") or {}).get("regions_pinned"):
             continue
         data = get_activity(act["filename"])
-        pts  = (data or {}).get("points") or []
-        if len(pts) < 2:
-            continue
-        step = max(1, len(pts) // 80)
-        coords = [[round(p["lat"], 5), round(p["lon"], 5)]
-                  for p in pts[::step] if "lat" in p and "lon" in p]
-        if pts[-1] is not pts[::step][-1]:
-            coords.append([round(pts[-1]["lat"], 5), round(pts[-1]["lon"], 5)])
+        coords = _decimate_latlon((data or {}).get("points") or [], 80)
         if len(coords) < 2:
             continue
         out.append({
