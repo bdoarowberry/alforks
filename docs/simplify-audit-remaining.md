@@ -56,12 +56,20 @@ to-do list, not a spec — re-verify before acting.
 ## Remaining — Python (mostly verifiable with the offline test suite)
 
 ### Bigger refactors
-- **Unify the 3 OSM-cache + Overpass-fetch stacks.** Lift stack in `app.py`
-  (`_fetch_osm_lifts` area) + trail stack + road stack in `trail_match.py`. The two
-  `trail_match` Overpass parsers are identical except one tag field (`mtb_scale` vs
-  `oneway`). *Stage it:* collapse the two `trail_match` trail/road triples first
-  (they share `_osm_lock_for`, the round+md5 cache-path scheme, cache/stale readers,
-  and the urlopen+breaker+atomic-write body). Highest-dup item in the repo; moderate risk.
+- **Unify the 3 OSM-cache + Overpass-fetch stacks.** **Step 1 DONE (session 2,
+  `75ba972`):** the two `trail_match` trail/road stacks now share
+  `_fetch_osm_ways_cached` + `_build_ways_query` + `_read_ways_mem_or_disk` +
+  `_parse_overpass_ways(extra_tags=…)`; behavior pinned by `tests/test_osm_fetch.py`
+  (10 chars tests: query strings, key order, cache bytes, breaker/network fallbacks,
+  mem-cache non-cross-contamination). Mem caches + lock registries kept **separate per
+  set** on purpose (trail+road same-bbox share a `cp.stem`). **Step 2 STILL OPEN:** fold
+  the `app.py` lift stack (`_fetch_osm_lifts`) into the same template. Lower value +
+  higher risk — it crosses the module boundary (app.py has its own same-named
+  `_try_read_osm_cache`/`_read_osm_cache_stale`/`_osm_lock_for` copies), the lift query
+  differs structurally (`out geom;` not `(._;>;);out body;`, hardcoded `pad=0.01` +
+  `timeout=20`), uses `_atomic_write` vs hand-rolled tmp+replace, and feeds `ALGO_SIG`
+  not `TRAIL_MATCH_VERSION`. If done, pin it with lift golden tests the same way first,
+  and decide where the template lives (neutral `osm_fetch.py`, not the trail-matcher).
 - **`build_leaderboards` / `build_region_trail_index` shared row extraction** in
   `trail_match.py`. Both walk `scan_cached_results` → timeline → skip incomplete/unnamed →
   compute direction/date/idx/title, then bucket differently. Extract
