@@ -151,26 +151,6 @@ class TestCellSimilarity(unittest.TestCase):
         self.assertEqual(rs.cell_similarity(frozenset(), self.big), 0.0)
 
 
-class TestUnionFind(unittest.TestCase):
-    def test_transitive_chain_one_component(self):
-        uf = rs._UF()
-        uf.union("a", "b")
-        uf.union("b", "c")  # a~b, b~c => {a,b,c} even though a,c never joined
-        groups = uf.groups()
-        self.assertEqual(len(groups), 1)
-        self.assertEqual(set(groups[0]), {"a", "b", "c"})
-
-    def test_separate_components(self):
-        uf = rs._UF()
-        uf.union("a", "b")
-        uf.union("x", "y")
-        uf.add("loner")
-        groups = {frozenset(g) for g in uf.groups()}
-        self.assertIn(frozenset({"a", "b"}), groups)
-        self.assertIn(frozenset({"x", "y"}), groups)
-        self.assertIn(frozenset({"loner"}), groups)
-
-
 class TestCanaryGeometry(unittest.TestCase):
     """Synthetic stand-ins for the documented real-data canaries, proving
     the primitives compose into the intended cluster/exclude behavior
@@ -189,21 +169,23 @@ class TestCanaryGeometry(unittest.TestCase):
         return pts
 
     def test_cox_hill_three_days_cluster(self):
-        # Three jittered recordings of one loop -> one component of 3.
+        # Three jittered recordings of one loop -> one cluster of 3.
+        # Drives the real complete-linkage clustering (`_complete_linkage`),
+        # which replaced the retired union-find canary.
         rides = {
             "2019": rs.ride_cell_set(self._loop(jitter_m=0)),
             "2020": rs.ride_cell_set(self._loop(jitter_m=8)),
             "2023": rs.ride_cell_set(self._loop(jitter_m=15)),
         }
-        uf = rs._UF()
         names = list(rides)
-        for a in names:
-            uf.add(a)
+        pair_sim = {}
         for i in range(len(names)):
             for j in range(i + 1, len(names)):
-                if rs.cell_similarity(rides[names[i]], rides[names[j]]) >= rs.SIM_THRESHOLD:
-                    uf.union(names[i], names[j])
-        groups = uf.groups()
+                a, b = names[i], names[j]
+                s = rs.cell_similarity(rides[a], rides[b])
+                if s > 0:
+                    pair_sim[rs._pk(a, b)] = s
+        groups = rs._complete_linkage(names, pair_sim, 0.55)
         self.assertEqual(len(groups), 1)
         self.assertEqual(set(groups[0]), {"2019", "2020", "2023"})
 
@@ -225,7 +207,7 @@ class TestCanaryGeometry(unittest.TestCase):
 
         a = rs.ride_cell_set(short_pts)
         b = rs.ride_cell_set(short_pts2)
-        self.assertGreaterEqual(rs.cell_similarity(a, b), rs.SIM_THRESHOLD)
+        self.assertGreaterEqual(rs.cell_similarity(a, b), 0.55)
 
 
 def _cells(lo, hi):

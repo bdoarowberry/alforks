@@ -15,7 +15,8 @@ The pipeline is two-stage to avoid an O(n^2) blow-up over ~800 rides:
      point-level work.
   2. Reduce each surviving ride to the SET of ~60 m grid cells its track
      occupies, then score pairs by cell-set overlap. Cluster the
-     resulting similarity graph (union-find); a connected component of
+     resulting similarity graph by complete (mutual) linkage — a cluster
+     is a set whose every pair clears the threshold; a cluster of
      >= MIN_CLUSTER_SIZE rides not already covered by a saved route is a
      suggestion.
 
@@ -61,8 +62,7 @@ CELL_STRIDE = 3
 PREFILTER_DIST_FRAC = 0.20   # total ride distance must match within +-20%
 BBOX_MIN_OVERLAP = 0.30      # min IoU of the two rides' bounding boxes
 
-# Default metric/threshold for the low-level `cell_similarity` primitive.
-SIM_THRESHOLD = 0.55
+# Default metric for the low-level `cell_similarity` primitive.
 SIM_METRIC = "containment"   # "containment" | "jaccard"
 
 # Clustering rides into "same loop" groups uses SYMMETRIC Jaccard, not
@@ -162,40 +162,6 @@ def cell_similarity(
     else:  # containment
         denom = min(len(a), len(b))
     return inter / denom if denom else 0.0
-
-
-# ── Connected-components clustering ───────────────────────────────────
-class _UF:
-    """Minimal union-find over hashable items, with `groups()` returning
-    the members of each component with >1 element first established by
-    insertion order."""
-
-    def __init__(self) -> None:
-        self._parent: dict = {}
-
-    def add(self, x) -> None:
-        self._parent.setdefault(x, x)
-
-    def find(self, x):
-        self.add(x)
-        root = x
-        while self._parent[root] != root:
-            root = self._parent[root]
-        # Path compression.
-        while self._parent[x] != root:
-            self._parent[x], x = root, self._parent[x]
-        return root
-
-    def union(self, a, b) -> None:
-        ra, rb = self.find(a), self.find(b)
-        if ra != rb:
-            self._parent[ra] = rb
-
-    def groups(self) -> list[list]:
-        comps: dict = {}
-        for x in self._parent:
-            comps.setdefault(self.find(x), []).append(x)
-        return list(comps.values())
 
 
 # ── Pipeline ──────────────────────────────────────────────────────────
