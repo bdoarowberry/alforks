@@ -279,17 +279,29 @@ class TestClusterRides(unittest.TestCase):
         load, _ = self._loader({"a": _cells(0, 60), "b": _cells(500, 560)})
         self.assertEqual(rs.cluster_rides(rides, load), [])
 
-    def test_transitive_three_via_hub(self):
-        # a~b and b~c (b is the hub overlapping both); a and c don't
-        # overlap directly. One component of 3; representative = b (largest
-        # footprint).
+    def test_mutual_linkage_prevents_chaining(self):
+        # a~b (Jaccard 0.6) and b~c weakly (0.33), a and c disjoint. Under
+        # single-linkage this would blob into one cluster of 3 (the real
+        # over-merge). Mutual/complete linkage must keep only {a,b}; c,
+        # which isn't similar to a, stays out.
         rides = [_ride("a", dist=20), _ride("b", dist=21), _ride("c", dist=22)]
         load, _ = self._loader({
             "a": _cells(0, 60), "b": _cells(0, 100), "c": _cells(60, 120)})
         clusters = rs.cluster_rides(rides, load)
         self.assertEqual(len(clusters), 1)
-        self.assertEqual(clusters[0]["members"], ["a", "b", "c"])
-        self.assertEqual(clusters[0]["representative"], "b")
+        self.assertEqual(clusters[0]["members"], ["a", "b"])
+
+    def test_representative_is_medoid_not_partial(self):
+        # a,b are the full loop; c is a partial recording overlapping both.
+        # All three are a clique, but the representative must be a central
+        # full ride, never the partial c.
+        rides = [_ride("a", dist=20), _ride("b", dist=21), _ride("c", dist=20)]
+        load, _ = self._loader({
+            "a": _cells(0, 100), "b": _cells(0, 100), "c": _cells(0, 70)})
+        clusters = rs.cluster_rides(rides, load)
+        self.assertEqual(len(clusters), 1)
+        self.assertEqual(clusters[0]["size"], 3)
+        self.assertNotEqual(clusters[0]["representative"], "c")
 
     def test_multi_region_ride_not_duplicated(self):
         # Both rides tagged with two regions -> the pair surfaces in both

@@ -61,14 +61,25 @@ CELL_STRIDE = 3
 PREFILTER_DIST_FRAC = 0.20   # total ride distance must match within +-20%
 BBOX_MIN_OVERLAP = 0.30      # min IoU of the two rides' bounding boxes
 
-# A graph edge is drawn between two rides when their cell-set similarity
-# reaches this. Containment (intersection / smaller set) is used rather
-# than Jaccard so a trimmed or sparsely-recorded ride of the same loop
-# still matches its fuller twin; the distance gate above prevents
-# containment from over-merging a short ride that merely sits inside a
-# longer ride's footprint.
+# Default metric/threshold for the low-level `cell_similarity` primitive.
 SIM_THRESHOLD = 0.55
 SIM_METRIC = "containment"   # "containment" | "jaccard"
+
+# Clustering rides into "same loop" groups uses SYMMETRIC Jaccard, not
+# containment: two rides are the same route only if they cover the *same*
+# ground, so a short ride that merely sits inside a longer ride's
+# footprint (containment ~1.0) must NOT merge. Combined with mutual
+# (complete) linkage below — a cluster is a set whose every pair clears
+# the threshold — this prevents the single-linkage chaining that blobbed
+# distinct overlapping loops together on real data.
+CLUSTER_SIM_METRIC = "jaccard"
+CLUSTER_SIM_THRESHOLD = 0.50
+
+# The "is this cluster already a saved route?" exclusion DOES use
+# containment: a route's footprint should suppress a ride it covers, even
+# if the ride is a shorter slice of a longer saved route.
+COVERAGE_SIM_METRIC = "containment"
+COVERAGE_SIM_THRESHOLD = 0.55
 
 MIN_CLUSTER_SIZE = 2
 
@@ -188,6 +199,50 @@ class _UF:
 
 
 # ── Pipeline ──────────────────────────────────────────────────────────
+def _pk(a: str, b: str) -> tuple[str, str]:
+    """Order-independent pair key."""
+    return (a, b) if a < b else (b, a)
+
+
+def _complete_linkage(items: list[str], pair_sim: dict, threshold: float) -> list[list[str]]:
+    """Agglomerative complete-linkage clustering. Two clusters merge only
+    when EVERY cross-pair similarity clears `threshold` (the complete-
+    linkage score = the minimum cross-pair similarity), greedily strongest
+    first. Result: every returned cluster is a clique at `threshold`, so a
+    weak chain A-B-C with A,C dissimilar never collapses into one group.
+
+    `pair_sim` maps `_pk(a,b)` -> similarity; absent pairs are 0 (they
+    failed the prefilter or scored zero), which keeps cross-region and
+    non-overlapping rides apart."""
+    clusters = [[x] for x in items]
+
+    def link(c1: list[str], c2: list[str]) -> float:
+        worst = 1.0
+        for a in c1:
+            for b in c2:
+                s = pair_sim.get(_pk(a, b), 0.0)
+                if s < worst:
+                    worst = s
+                    if worst < threshold:
+                        return worst  # can never merge — stop early
+        return worst
+
+    while len(clusters) > 1:
+        best = None
+        best_val = threshold
+        for i in range(len(clusters)):
+            for j in range(i + 1, len(clusters)):
+                v = link(clusters[i], clusters[j])
+                if v >= best_val:
+                    best_val, best = v, (i, j)
+        if best is None:
+            break
+        i, j = best
+        clusters[i].extend(clusters[j])
+        del clusters[j]
+    return clusters
+
+
 def cluster_rides(
     rides: list[dict],
     cell_set_loader: Callable[[str], "frozenset | None"],
@@ -195,11 +250,11 @@ def cluster_rides(
     cell_m: float = GRID_CELL_M,
     bbox_min_overlap: float = BBOX_MIN_OVERLAP,
     dist_frac: float = PREFILTER_DIST_FRAC,
-    sim_threshold: float = SIM_THRESHOLD,
-    sim_metric: str = SIM_METRIC,
+    sim_threshold: float = CLUSTER_SIM_THRESHOLD,
+    sim_metric: str = CLUSTER_SIM_METRIC,
     min_cluster_size: int = MIN_CLUSTER_SIZE,
 ) -> list[dict]:
-    """Group geometrically-similar rides.
+    """Group rides that are the same loop into clusters.
 
     `rides` is per-ride metadata dicts: `{filename, regions:[id,...],
     bbox, distance_km, date}`. `cell_set_loader(filename)` returns that
@@ -207,17 +262,17 @@ def cluster_rides(
     survive the cheap prefilter — so the expensive point load happens for
     a small fraction of the library.
 
-    Returns a list of cluster dicts:
+    Pairing is prefiltered within region buckets (bbox overlap + distance)
+    to keep it ~O(rides_per_region^2); the surviving pairs are scored with
+    symmetric Jaccard and grouped by complete linkage so each cluster is a
+    mutually-similar set, not a chain. Returns cluster dicts:
         {region_id, members:[fn,...], size, representative,
          representative_cells}
     sorted largest-first. Saved-route exclusion is applied separately by
-    the caller via `cluster_covered_by_route` (it needs route geometry
-    this layer doesn't have)."""
+    the caller via `cluster_covered_by_route`."""
     by_fn = {r["filename"]: r for r in rides}
 
     # Bucket by region so pairing is O(rides_per_region^2), not O(all^2).
-    # A multi-region ride joins every one of its buckets; the union-find
-    # below is global, so a cross-bucket match still merges correctly.
     buckets: dict = {}
     for r in rides:
         for rid in (r.get("regions") or [None]):
@@ -234,7 +289,7 @@ def cluster_rides(
                     continue
                 if bbox_iou(ra.get("bbox") or [], rb.get("bbox") or []) < bbox_min_overlap:
                     continue
-                candidate_pairs.add((a, b) if a < b else (b, a))
+                candidate_pairs.add(_pk(a, b))
 
     if not candidate_pairs:
         return []
@@ -244,28 +299,26 @@ def cluster_rides(
     for a, b in candidate_pairs:
         involved.add(a)
         involved.add(b)
-    cells: dict = {}
-    for fn in involved:
-        cs = cell_set_loader(fn)
-        cells[fn] = cs if cs else frozenset()
+    cells: dict = {fn: (cell_set_loader(fn) or frozenset()) for fn in involved}
 
-    # Stage 3: score each candidate pair; similar pairs draw a graph edge.
-    uf = _UF()
-    for fn in involved:
-        uf.add(fn)
+    # Stage 3: score each candidate pair (symmetric Jaccard).
+    pair_sim: dict = {}
     for a, b in candidate_pairs:
-        if cell_similarity(cells[a], cells[b], sim_metric) >= sim_threshold:
-            uf.union(a, b)
+        s = cell_similarity(cells[a], cells[b], sim_metric)
+        if s > 0:
+            pair_sim[_pk(a, b)] = s
 
-    # Stage 4: connected components of >= min_cluster_size become clusters.
+    # Stage 4: complete-linkage clustering over the rides that scored a
+    # non-zero pair. Cross-region pairs are absent from pair_sim (sim 0),
+    # so this stays effectively per-region while naturally treating a
+    # multi-region ride as a single item (no cross-bucket duplication).
+    items = sorted({x for pair in pair_sim for x in pair})
     clusters: list = []
-    for group in uf.groups():
+    for group in _complete_linkage(items, pair_sim, sim_threshold):
         if len(group) < min_cluster_size:
             continue
         members = sorted(group)
-        # Representative = most-fully-recorded footprint (largest cell
-        # set), tie-broken by newest ride.
-        rep = max(members, key=lambda fn: (len(cells[fn]), by_fn[fn].get("date") or ""))
+        rep = _medoid(members, pair_sim, by_fn)
         rep_regions = by_fn[rep].get("regions") or []
         clusters.append({
             "region_id": rep_regions[0] if rep_regions else None,
@@ -279,12 +332,26 @@ def cluster_rides(
     return clusters
 
 
+def _medoid(members: list[str], pair_sim: dict, by_fn: dict) -> str:
+    """The cluster's most central ride: highest average similarity to the
+    other members. This avoids both truncated rides (low overlap) and
+    detour-heavy rides (extra ground the others don't share) as the route
+    source. Tie-broken by newest date, then filename for determinism."""
+    if len(members) == 1:
+        return members[0]
+
+    def avg_sim(fn: str) -> float:
+        return sum(pair_sim.get(_pk(fn, o), 0.0) for o in members if o != fn) / (len(members) - 1)
+
+    return max(members, key=lambda fn: (avg_sim(fn), by_fn[fn].get("date") or "", fn))
+
+
 def cluster_covered_by_route(
     representative_cells: "frozenset",
     route_cellsets: Iterable["frozenset"],
     *,
-    sim_threshold: float = SIM_THRESHOLD,
-    sim_metric: str = SIM_METRIC,
+    sim_threshold: float = COVERAGE_SIM_THRESHOLD,
+    sim_metric: str = COVERAGE_SIM_METRIC,
 ) -> bool:
     """True if any already-saved route's footprint already captures this
     cluster (the representative ride is contained in a route within
