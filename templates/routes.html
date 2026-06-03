@@ -278,11 +278,8 @@ const REGIONS = {{ regions_json|safe }};
 const regionById = Object.fromEntries(REGIONS.map(r => [r.id, r]));
 
 const $ = (id) => document.getElementById(id);
-function _esc(s) {
-  return String(s ?? '').replace(/[&<>"']/g, c => ({
-    "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;",
-  }[c]));
-}
+// Canonical HTML escaper lives in static/utils.js (escapeHtml).
+function _esc(s) { return escapeHtml(s); }
 function fmtDurHms(sec) {
   sec = Math.max(0, Math.round(sec || 0));
   const h = Math.floor(sec / 3600);

@@ -171,7 +171,7 @@ const ROUTE  = {{ route_json  | safe }};
 const REGION = {{ region_json | safe }};
 
 const $ = (id) => document.getElementById(id);
-const _esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+const _esc = escapeHtml;   // canonical impl in static/utils.js
 function fmtDurHms(sec) {
   sec = Math.max(0, Math.round(sec || 0));
   const h = Math.floor(sec / 3600);

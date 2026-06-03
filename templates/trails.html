@@ -151,10 +151,8 @@
 <script>
 const STORAGE_KEY = 'trailsExpandedRegions';
 
-function _escAttr(s) {
-  return String(s ?? '').replaceAll('&', '&amp;').replaceAll('"', '&quot;')
-    .replaceAll("'", '&#39;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
-}
+// Canonical HTML escaper lives in static/utils.js (escapeHtml).
+function _escAttr(s) { return escapeHtml(s); }
 function _escText(s) {
   return String(s ?? '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
 }

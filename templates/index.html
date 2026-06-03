@@ -3317,14 +3317,8 @@ async function openTrailLeaderboard(name, direction) {
 // quote in a metadata title would terminate the attribute mid-string
 // and silently break navigation. _escAttr quotes for attribute values,
 // _escText for text content.
-function _escAttr(s) {
-  return String(s ?? '')
-    .replaceAll('&', '&amp;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#39;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;');
-}
+// Canonical HTML escaper lives in static/utils.js (escapeHtml).
+function _escAttr(s) { return escapeHtml(s); }
 function _escText(s) {
   return String(s ?? '')
     .replaceAll('&', '&amp;')
