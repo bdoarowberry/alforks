@@ -336,16 +336,22 @@ function applyDualBasemap() {
   }
 }
 
-function _drawTrackOnMap(targetMap, data, slot, prevOverlays) {
-  prevOverlays.forEach(l => targetMap.removeLayer(l));
-  prevOverlays.length = 0;
-  if (!data?.points || data.points.length < 2) return null;
-  const latlngs = data.points
+// Defensive coord filter → [[lat,lon],...]. Drops NaN / (0,0) / out-of-range
+// points which otherwise inflate getBounds() and force fitBounds to zoom way out.
+function validLatLngs(points) {
+  return (points || [])
     .filter(p => p && Number.isFinite(p.lat) && Number.isFinite(p.lon)
               && (p.lat !== 0 || p.lon !== 0)
               && p.lat >= -90 && p.lat <= 90
               && p.lon >= -180 && p.lon <= 180)
     .map(p => [p.lat, p.lon]);
+}
+
+function _drawTrackOnMap(targetMap, data, slot, prevOverlays) {
+  prevOverlays.forEach(l => targetMap.removeLayer(l));
+  prevOverlays.length = 0;
+  if (!data?.points || data.points.length < 2) return null;
+  const latlngs = validLatLngs(data.points);
   if (latlngs.length < 2) return null;
   const color = colorFor(slot);
   const layer = L.polyline(latlngs, { color, weight: 3, opacity: 0.9 }).addTo(targetMap);
@@ -606,14 +612,7 @@ function fitBoundsBoth(boundsA, boundsB) {
 
 function drawTrack(data, slot) {
   if (!data || !data.points || data.points.length < 2) return null;
-  // Defensive coord filter: occasional GPX exports include (0,0) or NaN
-  // points which inflate getBounds() and force fitBounds to zoom way out.
-  const latlngs = data.points
-    .filter(p => p && Number.isFinite(p.lat) && Number.isFinite(p.lon)
-              && (p.lat !== 0 || p.lon !== 0)
-              && p.lat >= -90 && p.lat <= 90
-              && p.lon >= -180 && p.lon <= 180)
-    .map(p => [p.lat, p.lon]);
+  const latlngs = validLatLngs(data.points);
   if (latlngs.length < 2) return null;
   // Polyline weight matches Logs SEGMENT_STYLES (3) for visual parity
   // when the user navigates between pages.
