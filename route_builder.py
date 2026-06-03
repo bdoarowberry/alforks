@@ -525,6 +525,20 @@ def _artifact_path(cache_dir: Path, region_id: str) -> Path:
     return cache_dir / f"{region_id}.json"
 
 
+def _read_valid_artifact(ap: Path, force_rebuild: bool) -> dict | None:
+    """The cached artifact at `ap` if present and version-current, else None.
+    Corrupt / wrong-version / unreadable files read as a miss."""
+    if force_rebuild or not ap.exists():
+        return None
+    try:
+        entry = json.loads(ap.read_text(encoding="utf-8"))
+        if entry.get("version") == ROUTE_BUILDER_VERSION:
+            return entry
+    except Exception:
+        pass
+    return None
+
+
 def get_region_artifact(region: dict, *,
                         artifacts_dir: Path,
                         osm_paths_dir: Path,
@@ -536,22 +550,14 @@ def get_region_artifact(region: dict, *,
     """
     artifacts_dir.mkdir(parents=True, exist_ok=True)
     ap = _artifact_path(artifacts_dir, region["id"])
-    if not force_rebuild and ap.exists():
-        try:
-            entry = json.loads(ap.read_text(encoding="utf-8"))
-            if entry.get("version") == ROUTE_BUILDER_VERSION:
-                return entry
-        except Exception:
-            pass
+    cached = _read_valid_artifact(ap, force_rebuild)
+    if cached is not None:
+        return cached
 
     with _artifact_lock_for(region["id"]):
-        if not force_rebuild and ap.exists():
-            try:
-                entry = json.loads(ap.read_text(encoding="utf-8"))
-                if entry.get("version") == ROUTE_BUILDER_VERSION:
-                    return entry
-            except Exception:
-                pass
+        cached = _read_valid_artifact(ap, force_rebuild)
+        if cached is not None:
+            return cached
         artifact = build_region_artifact(
             region,
             osm_paths_dir=osm_paths_dir,
