@@ -40,6 +40,8 @@ import xml.sax.saxutils as sx
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from _common import secure_chmod as _secure_chmod
+
 # ─── Layout ───────────────────────────────────────────────────────────────────
 # Project root is the parent of the sync/ folder this script lives in.
 _ROOT             = Path(__file__).resolve().parent.parent
@@ -54,15 +56,6 @@ STATUS_FILE       = TOKEN_DIR / "strava_status.json"
 OAUTH_PORT        = 8765
 REDIRECT_URI      = f"http://localhost:{OAUTH_PORT}/callback"
 SCOPE             = "activity:read_all"
-
-
-def _secure_chmod(path: Path, mode: int) -> None:
-    """Best-effort permission hardening. Posix honours the mode; Windows
-    only toggles the read-only bit and relies on ACLs for access control."""
-    try:
-        path.chmod(mode)
-    except OSError:
-        pass
 
 
 # ─── Credentials ──────────────────────────────────────────────────────────────

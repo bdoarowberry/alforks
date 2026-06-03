@@ -24,6 +24,8 @@ import urllib.request
 from datetime import datetime
 from pathlib import Path
 
+from _common import secure_chmod as _secure_chmod
+
 # ─── Layout ───────────────────────────────────────────────────────────────────
 # Project root is the parent of the sync/ folder this script lives in.
 _ROOT         = Path(__file__).resolve().parent.parent
@@ -35,15 +37,6 @@ HR_CACHE_DIR  = CACHE_DIR / "hr"
 TOKEN_DIR        = Path.home() / ".alforks"
 STATUS_FILE      = TOKEN_DIR / "garmin_status.json"
 GARMIN_CREDS_FILE = TOKEN_DIR / "garmin_creds.txt"
-
-
-def _secure_chmod(path: Path, mode: int) -> None:
-    """Best-effort permission hardening. Posix honours the mode; Windows
-    only toggles the read-only bit and relies on ACLs for access control."""
-    try:
-        path.chmod(mode)
-    except OSError:
-        pass
 
 
 def _read_creds_file() -> tuple[str, str] | None:
