@@ -2765,6 +2765,13 @@ def api_region_trails_geometry(region_id: str):
     return resp
 
 
+def _iter_region_edges(artifact: dict):
+    """Yield every edge dict across the artifact's trails + roads collections."""
+    for collection in (artifact.get("trails") or [], artifact.get("roads") or []):
+        for entry in collection:
+            yield from (entry.get("edges") or [])
+
+
 @app.route("/api/regions/<region_id>/edges-summary")
 def api_region_edges_summary(region_id: str):
     """Return just the edge id + length list for `region_id`.
@@ -2782,11 +2789,8 @@ def api_region_edges_summary(region_id: str):
         osm_paths_dir=OSM_PATHS_CACHE_DIR,
         osm_roads_dir=OSM_ROADS_CACHE_DIR,
     )
-    edges = []
-    for collection in (artifact.get("trails") or [], artifact.get("roads") or []):
-        for entry in collection:
-            for e in (entry.get("edges") or []):
-                edges.append({"id": e["id"], "length_m": e["length_m"]})
+    edges = [{"id": e["id"], "length_m": e["length_m"]}
+             for e in _iter_region_edges(artifact)]
     return jsonify({"version": ROUTES_API_VERSION,
                      "region_id": region_id, "edges": edges})
 
@@ -2828,11 +2832,7 @@ def _region_edge_polylines(region_id: str) -> dict:
         )
     except Exception:
         return {}
-    out = {}
-    for collection in (artifact.get("trails") or [], artifact.get("roads") or []):
-        for entry in collection:
-            for e in (entry.get("edges") or []):
-                out[e["id"]] = e.get("polyline") or []
+    out = {e["id"]: (e.get("polyline") or []) for e in _iter_region_edges(artifact)}
     return out
 
 
