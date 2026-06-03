@@ -79,7 +79,31 @@
       "Bash(tasklist //FI \"IMAGENAME eq python.exe\")",
       "Bash(tasklist *)",
       "Bash(taskkill //PID 51312 //F)",
-      "Bash(disown)"
+      "Bash(disown)",
+      "Bash(wsl --status)",
+      "Bash(wsl --list --verbose)",
+      "Bash(cp *)",
+      "Bash(wsl *)",
+      "Bash(taskkill //PID 38380 //F)",
+      "Bash(git --no-pager diff --stat)",
+      "Bash(git --no-pager diff)",
+      "Bash(git *)",
+      "Bash(Get-ChildItem -Path \"C:\\\\Claude Code Projects\\\\AlForks\" -Recurse -Include \"*.html\",\"*.js\",\"*.ts\")",
+      "Bash(Select-Object FullName)",
+      "Bash(Select-Object Name)",
+      "Bash(break)",
+      "PowerShell(Get-NetTCPConnection *)",
+      "PowerShell(Stop-Process *)",
+      "Bash(cd C:\\\\Claude Code Projects\\\\AlForks *)",
+      "PowerShell($n = \\(Get-Command node -ErrorAction SilentlyContinue\\); if \\($n\\) { $n.Source } else { \"node not found\" })",
+      "PowerShell($py = Get-Command python -ErrorAction SilentlyContinue; if \\($py\\) { $py.Source; & python --version } else { \"python not found\" })",
+      "PowerShell($conn = Get-NetTCPConnection -LocalPort 5000 -State Listen -ErrorAction SilentlyContinue; if \\($conn\\) { \"LISTENING on 5000 \\(PID $\\($conn.OwningProcess | Select-Object -First 1\\)\\)\" } else { \"not yet listening\" })",
+      "Bash(xargs wc -l)",
+      "Bash(awk 'NR>=2280 && NR<=3690 && /^def |^[[:space:]]*def /{print NR\": \"$0}' app.py)",
+      "Bash(awk -F: '$1>=2280')",
+      "Bash(awk -F: '$1>3500 && $1<3690')",
+      "Bash(awk 'NR<=1709 && /^def /{ln=NR; l=$0} END{print ln\": \"l}' app.py)",
+      "Bash(awk 'NR>=1630 && NR<=1645 && /^def |^@app/{print NR\": \"$0}' app.py)"
     ]
   }
 }
