@@ -985,15 +985,6 @@ const TYPE_LABELS = Object.fromEntries(TYPES.map(t => [t.id, t.label]));
 const TYPE_COLORS = Object.fromEntries(TYPES.map(t => [t.id, t.color]));
 const TYPE_BG     = Object.fromEntries(TYPES.map(t => [t.id, t.bg]));
 
-function typeShortLabel(id) {
-  // Always use the canonical 3-letter glyph — typeGlyph() reads the
-  // per-type `glyph` field set in Setup, falling back to a derived
-  // 3-char acronym when the user hasn't customised it. Older callers
-  // expected the legacy "Mountain Bike → MTB" hard-code which broke
-  // the moment a label was edited.
-  return typeGlyph(id);
-}
-
 // Populate the header type selector + sidebar filter + bulk type dropdowns
 (function populateTypeSelects() {
   function fill(sel, emptyLabel) {
@@ -2359,11 +2350,9 @@ let smoothStart    = 0;      // range handle positions in km (original distances
 let smoothEnd      = 0;
 let smoothDragSide = null;   // 'left' | 'right' while dragging
 
+// Point-object form of haversineKm (same formula, {lat,lon} args).
 function _haversineKm(a, b) {
-  const R = 6371, toRad = d => d * Math.PI / 180;
-  const dLat = toRad(b.lat - a.lat), dLon = toRad(b.lon - a.lon);
-  const x = Math.sin(dLat/2)**2 + Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * Math.sin(dLon/2)**2;
-  return R * 2 * Math.asin(Math.sqrt(x));
+  return haversineKm(a.lat, a.lon, b.lat, b.lon);
 }
 
 // Moving-average smoothing over a sub-range [startKm, endKm]. Points outside
@@ -3956,7 +3945,9 @@ function renderActivityList(reSelectFilename) {
         badge.style.background = t.bg;
         badge.style.color      = t.color;
       }
-      badge.textContent = typeShortLabel(typeKey);
+      // Canonical 3-letter glyph (per-type `glyph` from Setup, else a derived
+      // acronym) — not the editable label, which would break the badge on rename.
+      badge.textContent = typeGlyph(typeKey);
       dateDiv.appendChild(badge);
     }
 
