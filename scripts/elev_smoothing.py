@@ -1,7 +1,8 @@
 """Elevation-gain smoothing harness.
 
 Background: AlForks currently computes `elev_gain_m` as the straight sum of
-positive consecutive ele_deltas (app.py:808). On rides where the source GPX
+positive consecutive ele_deltas (the `sm_delta > 0` branch of the per-point
+ride-stats loop in app.py). On rides where the source GPX
 carries raw barometric data this over-reads by 4-72% vs. Trailforks'
 displayed gain. This script loads a calibration set of real rides (with
 known TF / Strava reference numbers) and reports what each candidate
@@ -155,7 +156,7 @@ def s_ma_min_delta(k: int, threshold_m: float) -> Callable[[list[float]], float]
     """Apply moving-average smoothing, then the hysteresis threshold. The
     two filters target different noise: MA handles fast jitter, threshold
     handles drift-driven slow wobble."""
-    ma = s_ma(k); thr = s_min_delta(threshold_m)
+    thr = s_min_delta(threshold_m)
     def fn(eles):
         sm = _moving_avg(eles, k)
         return thr(sm)

@@ -1,7 +1,7 @@
 """Generic cache / filesystem utilities extracted from app.py.
 
 - `_atomic_write`: write-replace with OneDrive-aware retry on Windows.
-- `_ensure_daily_backup` / `_init_backup_tracking`: daily snapshots of
+- `_ensure_daily_backup` / `init_backup_tracking`: daily snapshots of
   user-edited config files (metadata, regions, types, geocode cache), pruned
   after 7 days.
 - `LRUCache`: thread-safe bounded ordered-dict LRU used by the in-memory

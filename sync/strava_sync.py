@@ -27,6 +27,7 @@ display, HR alignment, and merge logic consistent with the rest of the app.
 import argparse
 import http.server
 import json
+import re
 import shutil
 import socketserver
 import sys
@@ -435,7 +436,6 @@ def _first_time_of(path: Path) -> tuple[str, datetime] | None:
         head = path.read_text(encoding="utf-8", errors="ignore")[:8192]
     except Exception:
         return None
-    import re
     m = re.search(r"<time>(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2}):(\d{2})", head)
     if not m:
         return None

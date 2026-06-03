@@ -5078,15 +5078,12 @@ def _garmin_status() -> dict:
     return status
 
 
-_HR_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
-
-
 @app.route("/debug/hr/<date_str>")
 def debug_hr_day(date_str):
     """Render the raw cached Garmin daily HR for a date — no activity matching,
     just the full 24-hour sample stream so you can sanity-check the signal.
     """
-    if not _HR_DATE_RE.match(date_str):
+    if not _DATE_RE.match(date_str):
         abort(400)
     fp = HR_CACHE_DIR / f"{date_str}.json"
     if not fp.exists():
@@ -6413,9 +6410,7 @@ def _region_usage_dict() -> dict[str, int]:
         try: gpx_mtime = GPX_DIR.stat().st_mtime
         except OSError: gpx_mtime = -1.0
         # Hash of just region IDs + geometries (defaults / names don't matter)
-        geom_hash = hashlib.md5(repr([
-            (r.get("id"), r.get("geometry") or {}) for r in regions
-        ]).encode()).hexdigest()
+        geom_hash = _regions_geom_hash(regions)
         key = (gpx_mtime, geom_hash)
         if _region_usage_counts is not None and _region_usage_cache_key == key:
             return _region_usage_counts

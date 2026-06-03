@@ -448,13 +448,6 @@ def _algo_osm(per_pt: list, latlons: list, osm_lifts: list) -> list[bool]:
     return _detect_station_lifts(latlons, per_pt, osm_lifts)
 
 
-def _algo_combined(per_pt: list, latlons: list, osm_lifts: list) -> list[bool]:
-    """OSM if available, else the heuristic fallback."""
-    if osm_lifts:
-        return _detect_station_lifts(latlons, per_pt, osm_lifts)
-    return _detect_assisted(per_pt, latlons)
-
-
 def _try_snap_to_osm(start: int, end: int, latlons: list, osm_lifts: list) -> tuple[int, int] | None:
     """Find the OSM lift whose stations best bracket a candidate segment."""
     n = len(latlons)

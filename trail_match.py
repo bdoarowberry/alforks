@@ -7,9 +7,9 @@ the nearest way within SNAP_THRESHOLD_M, groups consecutive matches by
 trail name, and reports a chronological timeline plus a per-trail
 coverage summary.
 
-Validated end-to-end against the May 10 2025 Moose Mountain ride in
-scripts/trail_match_probe.py. This module is the productionised version
-of that probe.
+Validated end-to-end against the May 10 2025 Moose Mountain ride (via a
+throwaway probe script, since removed once this productionised version
+landed).
 
 Coverage > 100% is possible and expected when the rider rides a trail in
 both directions (e.g. climbs Cutoff then comes back down it) or when
@@ -937,11 +937,10 @@ def _split_traversals_linear(progress: list[float], min_delta: float) -> list[tu
 
 def _split_traversals_loop(angles: list[float]) -> list[tuple[int, int, str]]:
     """Loop trails: split on full 2π revolutions. Each ±2π span = one lap."""
-    import math as _m
     n = len(angles)
     if n < 4:
         return [(0, n, "+")]
-    twopi = 2 * _m.pi
+    twopi = 2 * math.pi
     out: list[tuple[int, int, str]] = []
     seg_start = 0
     seg_origin = angles[0]
@@ -957,7 +956,7 @@ def _split_traversals_loop(angles: list[float]) -> list[tuple[int, int, str]]:
             seg_origin = angles[i]
     # Trailing partial revolution
     final_delta = angles[-1] - seg_origin
-    if abs(final_delta) > _m.pi * 0.25 or not out:
+    if abs(final_delta) > math.pi * 0.25 or not out:
         out.append((seg_start, n, "+" if final_delta >= 0 else "-"))
     return out
 
@@ -1217,11 +1216,11 @@ def _coalesce_runs(runs, points,
 
     See COALESCE_* docs above for rule rationale.
 
-      Pattern 1 — adjacent [A, A] with gap <= max_split_sec. Merge keeps
+      Pattern 1 — adjacent [A, A] with gap <= max_gap_sec. Merge keeps
                   span [A1.start, A2.end] and ridden_km = A1.ridden +
                   A2.ridden (the gap between is the tiny seam from the
                   filtered B, contributing negligible distance).
-      Pattern 2 — [A, B, A] with B different-name and dur <= max_split_sec.
+      Pattern 2 — [A, B, A] with B different-name and dur <= max_crossing_sec.
                   Drop B. Merge keeps span [A1.start, A2.end] but
                   ridden_km = A1.ridden + A2.ridden — explicitly does NOT
                   include B's contribution, even though B's points fall
@@ -1743,18 +1742,17 @@ def build_region_trail_index(cache_dir_results: Path,
             # Bucket key is name + direction so "Cutoff up" and "Cutoff
             # down" rank against each other separately. Display name in
             # the UI is the same; the direction field carries the badge.
-            bucket_name = name
             dur = int(entry.get("duration_sec") or 0)
             date = (entry.get("start_time") or "")[:10]
             start_idx = int(entry.get("start_idx") or 0)
             end_idx   = int(entry.get("end_idx")   or 0)
             for region_id in regions:
                 region_dict = out.setdefault(region_id, {})
-                trail_key = (bucket_name, direction)
+                trail_key = (name, direction)
                 trail = region_dict.get(trail_key)
                 if trail is None:
                     region_dict[trail_key] = {
-                        "name":      bucket_name,
+                        "name":      name,
                         "direction": direction,
                         "kind":      entry.get("kind", "trail"),
                         "attempts": 1,

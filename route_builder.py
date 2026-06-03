@@ -48,11 +48,6 @@ JUNCTION_PROJECT_M = 15.0
 logger = logging.getLogger(__name__)
 
 
-# Road OSM fetch lives in trail_match.py so trail_match can match against
-# roads without a circular import. Re-export here for legacy callers.
-fetch_osm_roads = trail_match.fetch_osm_roads
-
-
 # ─── Polygon geometry ───────────────────────────────────────────────────────
 
 def _polygon_ring_latlon(region: dict) -> list[tuple[float, float]]:
@@ -415,7 +410,7 @@ def build_region_artifact(region: dict, *,
     bbox = _ring_bbox(ring)
 
     trail_ways = trail_match.fetch_osm_trails(bbox, osm_paths_dir)
-    road_ways  = fetch_osm_roads(bbox,           osm_roads_dir)
+    road_ways  = trail_match.fetch_osm_roads(bbox,           osm_roads_dir)
 
     # If either fetch returned empty, it could mean Overpass actually has
     # nothing — or it timed out / 504'd. The fetch helpers log a warning

@@ -65,7 +65,4 @@ def record_success() -> None:
 def reset() -> None:
     """Force breaker back to closed state with no failure history. Intended
     for tests; production code should use record_success() instead."""
-    global _open_until
-    with _lock:
-        _failures.clear()
-        _open_until = 0.0
+    record_success()
