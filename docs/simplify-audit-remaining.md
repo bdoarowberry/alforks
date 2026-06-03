@@ -70,15 +70,14 @@ to-do list, not a spec — re-verify before acting.
   `timeout=20`), uses `_atomic_write` vs hand-rolled tmp+replace, and feeds `ALGO_SIG`
   not `TRAIL_MATCH_VERSION`. If done, pin it with lift golden tests the same way first,
   and decide where the template lives (neutral `osm_fetch.py`, not the trail-matcher).
-- **`build_leaderboards` / `build_region_trail_index` shared row extraction** in
-  `trail_match.py`. Both walk `scan_cached_results` → timeline → skip incomplete/unnamed →
-  compute direction/date/idx/title, then bucket differently. Extract
-  `_iter_completed_attempts(...)` yielding a normalized attempt dict (must yield the
-  superset of fields — one builder filters on regions). Moderate risk.
-- **`cached_match` wrapper** for the 3 constant cache-dir kwargs (`cache_dir_osm/results/roads`).
-  ~4 call sites in `app.py` (pairs with the already-extracted `_meta_fp`). Note: sites
-  vary in how mtime is sourced (`p.stat().st_mtime` vs the old `_m(p)` → now `_stat_mtime`),
-  so the wrapper must take mtime as a param. Low effort, moderate risk.
+  **Session 3 call: NOT DOING IT.** The cost/benefit is upside-down — one ~40-line body
+  deduped vs. a new module + re-pointing the two just-unified stacks + the lift stack +
+  ALGO_SIG golden tests. Revisit only if `osm_fetch.py` is being created for another reason.
+- ~~`build_leaderboards` / `build_region_trail_index` shared row extraction~~ —
+  **DONE (session 3, `1cbdb10`):** `_iter_completed_attempts(...)` generator; both
+  builders are thin consumers. Covered by new `tests/test_leaderboards.py` (5 tests).
+- ~~`cached_match` wrapper~~ — **DONE (session 3, `518050d`):** `_cached_match(filename,
+  mtime, data, meta_fp)` binds the 3 constant cache dirs; mtime stays a param (4 sites).
 - **JSON writers → `cache_utils._atomic_write`** (~7 sites: `trail_match.py`,
   `route_builder.py`, `app.py`). **Downgraded** (OneDrive rationale gone). If done, give the
   sync CLIs a small `atomic_write_text` in `sync/_common.py` rather than importing cache_utils.
@@ -90,13 +89,17 @@ to-do list, not a spec — re-verify before acting.
   session 2** — detection feeds `ALGO_SIG`, and the "two manual cumsum loops where
   `_prefix_sum` exists" couldn't be relocated (the prefix sites already use `_prefix_sum`);
   reconcile against `tests/test_detection.py` and only touch if output stays bit-identical.
-- **`trail_match.py` remaining:** endpoint-touch completion override copy-pasted between
-  the summary and timeline passes. *(stale-cache readers DONE in session 2.)*
+- ~~`trail_match.py` endpoint-touch completion override~~ — **DONE (session 3,
+  `1cbdb10`):** `_endpoint_completion(...)`, predicate injected per pass; verified
+  identical across all 28 branch combos. *(stale-cache readers DONE in session 2.)*
 - ~~`route_attempts` node_xy~~ / ~~`route_builder` DCL read~~ — **DONE (session 2).**
 - ~~`sidebar_cache` date prefix~~ / ~~`strava_sync` ISO→epoch~~ — **DONE (session 2).**
-- **`app.py` remaining:** inline decimation reimplementing `_decimated_coords` (still open).
-  *(edge-iteration, downsample pair, `_ID_RE`, `_region_by_id` all DONE in session 2 — and
-  note `_route_proposal_for_ride`'s per-iter `load_regions()` is a non-issue: it's mem-cached.)*
+- ~~`app.py` inline decimation reimplementing `_decimated_coords`~~ — **DONE (session 3,
+  `518050d`):** `_decimate_latlon(pts, max_points)` core, used by `_decimated_coords` + the
+  regions-setup overlay. *(edge-iteration, downsample pair, `_ID_RE`, `_region_by_id` DONE
+  in session 2; `_cached_match` DONE session 3.)* The ele-sparkline `//40` stride at the
+  sidebar-entry builder is **left alone** — it emits `ele` values, not lat/lon, so it's not
+  a `_decimated_coords` reimpl despite the similar stride.
 - **`point_gap_seconds` — SKIPPED (session 2).** The three sites diverge too much to share
   cleanly: `_fragment_gap_ok` returns a bool and guards `ValueError` only; the leaderboard
   duration site returns `int` seconds and guards `(KeyError, ValueError)`; `trail_match`'s
