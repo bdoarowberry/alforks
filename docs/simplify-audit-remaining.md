@@ -113,6 +113,25 @@ to-do list, not a spec — re-verify before acting.
   network path not covered by offline tests.
 
 ## Remaining — Frontend (needs a browser to verify)
+
+### Session 4 (2026-06-03) — done + browser-verified, pushed
+- ~~`validLatLngs(points)`~~ — **DONE (`3c2db58`):** extracted in compare.html (2 spots).
+- ~~`index.html` `haversineKm`/`_haversineKm` + `typeShortLabel`~~ — **DONE (`a8778d1`):**
+  `_haversineKm` wraps `haversineKm`; `typeShortLabel` inlined to `typeGlyph`.
+- **Bonus fix (`5ded9d8`):** dark-themed the Leaflet 2D zoom + rotate-compass controls on
+  compare/heatmap (they rendered default-white; only index themed `.leaflet-bar`). Compass
+  arrow is a two-tone inline-SVG → `invert(1)`. **Follow-up:** consolidate the three
+  `.leaflet-bar` copies (index + compare + heatmap) into `base.css` — now known safe.
+
+### Landmine learned this session
+- **Mapbox chrome CSS → base.css was ATTEMPTED then REVERTED.** Not because base.css is
+  wrong — because it was a **misdiagnosis**: the white zoom/compass controls a tester sees
+  on compare/heatmap are **Leaflet** 2D controls, NOT Mapbox. The `.mapboxgl-ctrl` rules
+  only style the 3D view (toggle to 3D to see them). The move was actually fine; re-doing it
+  is safe but low value. **Lesson: these pages stack Leaflet (default 2D) + Mapbox GL (3D) —
+  identify which library owns a control before touching its CSS.**
+
+### Still open (bigger, cross-file — need a shared `static/maps.js` + per-page verify)
 - **`LazyMapManager`** factory — `routes.html` lazy mini-map LRU ↔ `logs.html` are
   near-identical (routes even comments "mirrors /logs").
 - **Shared Leaflet basemap helpers** — `makeStreetLayer()` / `makeSatelliteLayer()` /
@@ -120,12 +139,9 @@ to-do list, not a spec — re-verify before acting.
   `routes.html` (note: routes uses CartoDB tiles — only the locked-map options are shared).
 - **Mapbox 3D init boilerplate** duplicated `heatmap.html` ↔ `compare.html`.
 - **View-toggle / fullscreen + basemap swap** duplicated `compare.html` ↔ `heatmap.html`.
-- **Mapbox chrome CSS** duplicated verbatim → move to `static/base.css`.
-- **`validLatLngs(points)`** track-coord sanitizing filter (compare.html, two spots).
-- **`index.html` JS:** `haversineKm` vs `_haversineKm` (make one a wrapper);
-  `renderRunStats` / `renderTrailStats` shared close-and-exit choreography;
-  `typeShortLabel` is now a pure pass-through to `typeGlyph` (one call site);
-  `build3DHeatGeoJSON` / `buildHeatPoints` share the stride/downsample loop (heatmap.html).
+- **`index.html` JS (remaining):** `renderRunStats` / `renderTrailStats` shared
+  close-and-exit choreography; `build3DHeatGeoJSON` / `buildHeatPoints` share the
+  stride/downsample loop (heatmap.html).
 - **Escape variants left on purpose:** `routes_edit.html` `escapeHtml` (uses `String(s)`,
   not null-coalesced); `training_load.html` `_attrEsc` and `index`/`trails` `_escText`
   (escape fewer chars); `summary.html` `fmtSec` (null handling vs `fmtDuration`);
