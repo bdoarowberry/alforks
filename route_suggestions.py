@@ -185,3 +185,111 @@ class _UF:
         for x in self._parent:
             comps.setdefault(self.find(x), []).append(x)
         return list(comps.values())
+
+
+# ── Pipeline ──────────────────────────────────────────────────────────
+def cluster_rides(
+    rides: list[dict],
+    cell_set_loader: Callable[[str], "frozenset | None"],
+    *,
+    cell_m: float = GRID_CELL_M,
+    bbox_min_overlap: float = BBOX_MIN_OVERLAP,
+    dist_frac: float = PREFILTER_DIST_FRAC,
+    sim_threshold: float = SIM_THRESHOLD,
+    sim_metric: str = SIM_METRIC,
+    min_cluster_size: int = MIN_CLUSTER_SIZE,
+) -> list[dict]:
+    """Group geometrically-similar rides.
+
+    `rides` is per-ride metadata dicts: `{filename, regions:[id,...],
+    bbox, distance_km, date}`. `cell_set_loader(filename)` returns that
+    ride's cell set (a frozenset) and is called ONLY for rides that
+    survive the cheap prefilter — so the expensive point load happens for
+    a small fraction of the library.
+
+    Returns a list of cluster dicts:
+        {region_id, members:[fn,...], size, representative,
+         representative_cells}
+    sorted largest-first. Saved-route exclusion is applied separately by
+    the caller via `cluster_covered_by_route` (it needs route geometry
+    this layer doesn't have)."""
+    by_fn = {r["filename"]: r for r in rides}
+
+    # Bucket by region so pairing is O(rides_per_region^2), not O(all^2).
+    # A multi-region ride joins every one of its buckets; the union-find
+    # below is global, so a cross-bucket match still merges correctly.
+    buckets: dict = {}
+    for r in rides:
+        for rid in (r.get("regions") or [None]):
+            buckets.setdefault(rid, []).append(r["filename"])
+
+    # Stage 1: candidate pairs that clear the bbox + distance gates.
+    candidate_pairs: set = set()
+    for fns in buckets.values():
+        for i in range(len(fns)):
+            for j in range(i + 1, len(fns)):
+                a, b = fns[i], fns[j]
+                ra, rb = by_fn[a], by_fn[b]
+                if not dist_within(ra.get("distance_km"), rb.get("distance_km"), dist_frac):
+                    continue
+                if bbox_iou(ra.get("bbox") or [], rb.get("bbox") or []) < bbox_min_overlap:
+                    continue
+                candidate_pairs.add((a, b) if a < b else (b, a))
+
+    if not candidate_pairs:
+        return []
+
+    # Stage 2: load cell sets only for rides that appear in a candidate pair.
+    involved: set = set()
+    for a, b in candidate_pairs:
+        involved.add(a)
+        involved.add(b)
+    cells: dict = {}
+    for fn in involved:
+        cs = cell_set_loader(fn)
+        cells[fn] = cs if cs else frozenset()
+
+    # Stage 3: score each candidate pair; similar pairs draw a graph edge.
+    uf = _UF()
+    for fn in involved:
+        uf.add(fn)
+    for a, b in candidate_pairs:
+        if cell_similarity(cells[a], cells[b], sim_metric) >= sim_threshold:
+            uf.union(a, b)
+
+    # Stage 4: connected components of >= min_cluster_size become clusters.
+    clusters: list = []
+    for group in uf.groups():
+        if len(group) < min_cluster_size:
+            continue
+        members = sorted(group)
+        # Representative = most-fully-recorded footprint (largest cell
+        # set), tie-broken by newest ride.
+        rep = max(members, key=lambda fn: (len(cells[fn]), by_fn[fn].get("date") or ""))
+        rep_regions = by_fn[rep].get("regions") or []
+        clusters.append({
+            "region_id": rep_regions[0] if rep_regions else None,
+            "members": members,
+            "size": len(members),
+            "representative": rep,
+            "representative_cells": cells[rep],
+        })
+
+    clusters.sort(key=lambda c: (-c["size"], c["representative"]))
+    return clusters
+
+
+def cluster_covered_by_route(
+    representative_cells: "frozenset",
+    route_cellsets: Iterable["frozenset"],
+    *,
+    sim_threshold: float = SIM_THRESHOLD,
+    sim_metric: str = SIM_METRIC,
+) -> bool:
+    """True if any already-saved route's footprint already captures this
+    cluster (the representative ride is contained in a route within
+    `sim_threshold`). Such clusters are dropped from suggestions."""
+    for rc in route_cellsets:
+        if cell_similarity(representative_cells, rc, sim_metric) >= sim_threshold:
+            return True
+    return False

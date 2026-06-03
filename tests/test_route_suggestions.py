@@ -228,5 +228,102 @@ class TestCanaryGeometry(unittest.TestCase):
         self.assertGreaterEqual(rs.cell_similarity(a, b), rs.SIM_THRESHOLD)
 
 
+def _cells(lo, hi):
+    """A synthetic cell set spanning integer columns [lo, hi)."""
+    return frozenset((0, j) for j in range(lo, hi))
+
+
+def _ride(fn, *, regions=("r1",), bbox=(0.0, 0.0, 1.0, 1.0), dist=20.0, date="2024-01-01"):
+    return {"filename": fn, "regions": list(regions), "bbox": list(bbox),
+            "distance_km": dist, "date": date}
+
+
+class TestClusterRides(unittest.TestCase):
+    def _loader(self, mapping):
+        """A cell-set loader backed by `mapping`, recording which
+        filenames it was asked to load (to assert laziness)."""
+        loaded = []
+
+        def load(fn):
+            loaded.append(fn)
+            return mapping.get(fn)
+
+        return load, loaded
+
+    def test_two_similar_rides_cluster(self):
+        rides = [_ride("a"), _ride("b", dist=21.0)]
+        load, _ = self._loader({"a": _cells(0, 60), "b": _cells(0, 60)})
+        clusters = rs.cluster_rides(rides, load)
+        self.assertEqual(len(clusters), 1)
+        self.assertEqual(clusters[0]["members"], ["a", "b"])
+        self.assertEqual(clusters[0]["size"], 2)
+
+    def test_distance_gate_excludes_long_ride(self):
+        # c overlaps a/b geometrically but is +40% distance: the prefilter
+        # blocks both its pairs, so it never joins. Mirrors Elbow 2020.
+        rides = [_ride("a", dist=20.0), _ride("b", dist=21.0), _ride("c", dist=28.0)]
+        load, _ = self._loader({"a": _cells(0, 60), "b": _cells(0, 60), "c": _cells(0, 60)})
+        clusters = rs.cluster_rides(rides, load)
+        self.assertEqual(len(clusters), 1)
+        self.assertEqual(clusters[0]["members"], ["a", "b"])
+
+    def test_disjoint_bbox_no_pair(self):
+        rides = [_ride("a"), _ride("b", bbox=(9.0, 9.0, 10.0, 10.0))]
+        load, _ = self._loader({"a": _cells(0, 60), "b": _cells(0, 60)})
+        self.assertEqual(rs.cluster_rides(rides, load), [])
+
+    def test_low_geometry_overlap_no_cluster(self):
+        # Same region, overlapping bbox, similar distance, but disjoint
+        # footprints -> no edge -> no cluster.
+        rides = [_ride("a"), _ride("b", dist=21.0)]
+        load, _ = self._loader({"a": _cells(0, 60), "b": _cells(500, 560)})
+        self.assertEqual(rs.cluster_rides(rides, load), [])
+
+    def test_transitive_three_via_hub(self):
+        # a~b and b~c (b is the hub overlapping both); a and c don't
+        # overlap directly. One component of 3; representative = b (largest
+        # footprint).
+        rides = [_ride("a", dist=20), _ride("b", dist=21), _ride("c", dist=22)]
+        load, _ = self._loader({
+            "a": _cells(0, 60), "b": _cells(0, 100), "c": _cells(60, 120)})
+        clusters = rs.cluster_rides(rides, load)
+        self.assertEqual(len(clusters), 1)
+        self.assertEqual(clusters[0]["members"], ["a", "b", "c"])
+        self.assertEqual(clusters[0]["representative"], "b")
+
+    def test_multi_region_ride_not_duplicated(self):
+        # Both rides tagged with two regions -> the pair surfaces in both
+        # buckets but must yield a single cluster.
+        rides = [_ride("a", regions=("r1", "r2")), _ride("b", regions=("r1", "r2"), dist=21)]
+        load, _ = self._loader({"a": _cells(0, 60), "b": _cells(0, 60)})
+        clusters = rs.cluster_rides(rides, load)
+        self.assertEqual(len(clusters), 1)
+
+    def test_loader_only_called_for_prefiltered_rides(self):
+        # e has a disjoint bbox so it never forms a candidate pair -> its
+        # (expensive) cell set must never be loaded.
+        rides = [_ride("a"), _ride("b", dist=21.0),
+                 _ride("e", bbox=(9.0, 9.0, 10.0, 10.0))]
+        load, loaded = self._loader({"a": _cells(0, 60), "b": _cells(0, 60), "e": _cells(0, 60)})
+        rs.cluster_rides(rides, load)
+        self.assertNotIn("e", loaded)
+        self.assertEqual(set(loaded), {"a", "b"})
+
+
+class TestClusterCoveredByRoute(unittest.TestCase):
+    def test_covered_cluster_flagged(self):
+        rep = _cells(0, 60)
+        routes = [_cells(500, 560), _cells(0, 60)]  # second one matches
+        self.assertTrue(rs.cluster_covered_by_route(rep, routes))
+
+    def test_uncovered_cluster_not_flagged(self):
+        rep = _cells(0, 60)
+        routes = [_cells(500, 560), _cells(800, 900)]
+        self.assertFalse(rs.cluster_covered_by_route(rep, routes))
+
+    def test_no_routes_not_flagged(self):
+        self.assertFalse(rs.cluster_covered_by_route(_cells(0, 60), []))
+
+
 if __name__ == "__main__":
     unittest.main()
