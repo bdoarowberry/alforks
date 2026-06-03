@@ -24,6 +24,7 @@ import time
 from pathlib import Path
 
 import trail_match
+from geo import point_in_polygon as _point_in_polygon
 
 # Bump to invalidate per-region cached artifacts (e.g. when junction logic
 # changes). The /api/regions/<id>/trails-geometry response shape should
@@ -60,20 +61,6 @@ def _ring_bbox(ring) -> tuple[float, float, float, float]:
     lats = [p[0] for p in ring]
     lons = [p[1] for p in ring]
     return (min(lats), min(lons), max(lats), max(lons))
-
-
-def _point_in_polygon(lat: float, lon: float, ring) -> bool:
-    """Ray-casting. Matches app._point_in_polygon."""
-    n = len(ring)
-    inside = False
-    j = n - 1
-    for i in range(n):
-        yi, xi = ring[i]
-        yj, xj = ring[j]
-        if ((yi > lat) != (yj > lat)) and (lon < (xj - xi) * (lat - yi) / (yj - yi) + xi):
-            inside = not inside
-        j = i
-    return inside
 
 
 def _way_intersects_polygon(coords, ring) -> bool:

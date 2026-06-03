@@ -30,6 +30,7 @@ import route_builder
 import route_attempts
 import route_suggestions
 import secrets
+from geo import point_in_polygon as _point_in_polygon
 from detection import (
     ALGO_SIG,
     DETECTION_ALGORITHMS,
@@ -598,13 +599,17 @@ def _activities_cache_key() -> tuple:
         return key
 
 
+def _stat_mtime(p) -> float:
+    """File/dir mtime, or -1.0 when it can't be stat'd (missing /
+    racing delete). Used to build cache keys that change when inputs do."""
+    try:
+        return p.stat().st_mtime
+    except OSError:
+        return -1.0
+
+
 def _activities_cache_key_compute() -> tuple:
     """Unconditional key computation — stat every tracked path."""
-    def _m(p):
-        try:
-            return p.stat().st_mtime
-        except OSError:
-            return -1.0
     hr_dir = CACHE_DIR / "hr"
     hr_count = 0
     hr_max_mtime = 0.0
@@ -625,7 +630,7 @@ def _activities_cache_key_compute() -> tuple:
     # the old centroid-matched answers until the user touched a file.
     # hr_max_mtime invalidates when an existing HR file is overwritten by
     # an incomplete-date re-fetch; previously only count changes were caught.
-    return (_m(GPX_DIR), _m(METADATA_FILE), _m(REGIONS_FILE), _m(TYPES_FILE),
+    return (_stat_mtime(GPX_DIR), _stat_mtime(METADATA_FILE), _stat_mtime(REGIONS_FILE), _stat_mtime(TYPES_FILE),
             hr_count, hr_max_mtime, _REGION_MATCH_VERSION)
 
 
@@ -2035,12 +2040,7 @@ _trail_region_index_key:   tuple | None = None
 
 
 def _trail_leaderboard_cache_key() -> tuple:
-    def _m(p):
-        try:
-            return p.stat().st_mtime
-        except OSError:
-            return -1.0
-    return (_m(TRAIL_MATCH_CACHE_DIR), _m(METADATA_FILE),
+    return (_stat_mtime(TRAIL_MATCH_CACHE_DIR), _stat_mtime(METADATA_FILE),
             trail_match.TRAIL_MATCH_VERSION)
 
 
@@ -2136,19 +2136,14 @@ def _route_attempts_cache_key(route: dict,
     of a per-route loop — see `api_activity_routes_ridden`, which
     iterates every saved route on every request.
     """
-    def _m(p):
-        try:
-            return p.stat().st_mtime
-        except OSError:
-            return -1.0
     region_artifact_p = REGION_TRAILS_CACHE_DIR / f"{route['region_id']}.json"
     return (
         route_attempts.ROUTE_ATTEMPTS_VERSION,
         trail_match.TRAIL_MATCH_VERSION,
         route.get("modified") or route.get("created") or "",
         trail_match_fp if trail_match_fp is not None else _trail_match_dir_fingerprint(),
-        _m(METADATA_FILE),
-        _m(region_artifact_p),
+        _stat_mtime(METADATA_FILE),
+        _stat_mtime(region_artifact_p),
     )
 
 
@@ -2973,18 +2968,13 @@ def _routes_dir_fingerprint() -> tuple[int, float]:
 
 def _suggestions_cache_key() -> tuple:
     """Anything here changing triggers a fresh clustering pass."""
-    def _m(p):
-        try:
-            return p.stat().st_mtime
-        except OSError:
-            return -1.0
     return (
         route_suggestions.SUGGESTIONS_VERSION,
         trail_match.TRAIL_MATCH_VERSION,
         _trail_match_dir_fingerprint(),   # ride set + per-ride edits
         _routes_dir_fingerprint(),        # saved-route exclusion
-        _m(METADATA_FILE),                # trims / regions_pinned
-        _m(REGIONS_FILE),                 # region polygons -> bucketing
+        _stat_mtime(METADATA_FILE),                # trims / regions_pinned
+        _stat_mtime(REGIONS_FILE),                 # region polygons -> bucketing
     )
 
 
@@ -3577,9 +3567,6 @@ def api_activity(filename):
     p = _safe_gpx_path(filename)
     if p is None or not p.exists():
         abort(404)
-    def _m(path):
-        try: return path.stat().st_mtime
-        except OSError: return -1.0
     date_str = ""
     try:
         # Cheap peek at the cached parsed data to learn the date
@@ -3590,10 +3577,10 @@ def api_activity(filename):
         pass
     hr_file = HR_CACHE_DIR / f"{date_str}.json" if date_str else None
     etag = _make_etag(
-        "activity", _ACTIVITY_RESPONSE_VERSION, filename, _m(p),
-        _m(METADATA_FILE), _m(REGIONS_FILE), _m(_GEOCODE_CACHE_FILE),
-        _m(CONFIG_FILE), _m(TYPES_FILE),
-        _m(hr_file) if hr_file else 0,
+        "activity", _ACTIVITY_RESPONSE_VERSION, filename, _stat_mtime(p),
+        _stat_mtime(METADATA_FILE), _stat_mtime(REGIONS_FILE), _stat_mtime(_GEOCODE_CACHE_FILE),
+        _stat_mtime(CONFIG_FILE), _stat_mtime(TYPES_FILE),
+        _stat_mtime(hr_file) if hr_file else 0,
         # Bumping TRAIL_MATCH_VERSION changes the trails payload shape;
         # baking it into the etag means the client revalidates without
         # needing a parallel _ACTIVITY_RESPONSE_VERSION bump.
@@ -3655,7 +3642,7 @@ def api_activity(filename):
             disk_before = TRAIL_MATCH_CACHE_DIR / f"{filename}.json"
             existed_before = disk_before.exists()
             trails = trail_match.cached_match(
-                filename, _m(p), data,
+                filename, _stat_mtime(p), data,
                 cache_dir_osm=OSM_PATHS_CACHE_DIR,
                 cache_dir_results=TRAIL_MATCH_CACHE_DIR,
                 cache_dir_roads=OSM_ROADS_CACHE_DIR,
@@ -5251,20 +5238,6 @@ def save_regions(regions: list[dict]):
     _regions_geom_hash_cached = None
     with _regions_match_cache_lock:
         _regions_match_cache.clear()
-
-
-def _point_in_polygon(lat: float, lon: float, ring: list) -> bool:
-    """Ray-casting point-in-polygon. ring is [[lat, lon], ...] pairs."""
-    n = len(ring)
-    inside = False
-    j = n - 1
-    for i in range(n):
-        yi, xi = ring[i]
-        yj, xj = ring[j]
-        if ((yi > lat) != (yj > lat)) and (lon < (xj - xi) * (lat - yi) / (yj - yi) + xi):
-            inside = not inside
-        j = i
-    return inside
 
 
 def _stats_from_trimmed(pts: list, segments: list, base_stats: dict) -> dict:
