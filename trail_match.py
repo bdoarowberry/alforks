@@ -1028,6 +1028,24 @@ def _run_touches_both(points, s: int, e: int,
     return False
 
 
+def _endpoint_completion(raw_cov: float, name: str,
+                         termini_by_name: dict, touches_both) -> tuple[bool, bool]:
+    """Resolve `(completed, endpoint_completed)` for one attempt.
+
+    Completed outright when `raw_cov >= COMPLETE_COVERAGE_PCT`. Otherwise, if it
+    clears the `ENDPOINT_MIN_COVERAGE_PCT` floor and the trail's termini are
+    known, the endpoint-touch override fires when `touches_both(a, b)` is true —
+    the caller supplies that predicate (the summary pass scans every run of the
+    trail; the timeline pass checks the single attempt span)."""
+    if raw_cov >= COMPLETE_COVERAGE_PCT:
+        return True, False
+    if raw_cov >= ENDPOINT_MIN_COVERAGE_PCT:
+        term = termini_by_name.get(name)
+        if term is not None and touches_both(*term):
+            return True, True
+    return False, False
+
+
 def _project_ways(ways: list[dict], lat0: float, lon0: float) -> list[dict]:
     out = []
     for w in ways:
@@ -1401,23 +1419,15 @@ def match_trails(data: dict, cache_dir: Path,
         if raw_cov < SUMMARY_MIN_COVERAGE_PCT:
             continue
         cov_pct = min(raw_cov, 100.0)
-        completed = raw_cov >= COMPLETE_COVERAGE_PCT
-        endpoint_completed = False
         # If snap coverage didn't reach the threshold but cleared the
-        # ENDPOINT_MIN_COVERAGE_PCT floor, check whether any of this
-        # trail's runs touched both termini — the user might have ridden
-        # the whole thing but the GPS wandered off the OSM way. The
-        # coverage floor blocks false positives where a rider brushed
-        # both ends without actually riding the trail.
-        if not completed and raw_cov >= ENDPOINT_MIN_COVERAGE_PCT:
-            term = termini_by_name.get(name)
-            if term is not None:
-                a, b = term
-                for s_idx, e_idx in rec["runs"]:
-                    if _run_touches_both(points, s_idx, e_idx, a, b):
-                        endpoint_completed = True
-                        completed = True
-                        break
+        # ENDPOINT_MIN_COVERAGE_PCT floor, check whether any of this trail's
+        # runs touched both termini — the user might have ridden the whole
+        # thing but the GPS wandered off the OSM way. The coverage floor blocks
+        # false positives where a rider brushed both ends without riding it.
+        completed, endpoint_completed = _endpoint_completion(
+            raw_cov, name, termini_by_name,
+            lambda a, b: any(_run_touches_both(points, s_idx, e_idx, a, b)
+                             for s_idx, e_idx in rec["runs"]))
         summary.append({
             "name": name,
             "kind": name_kind.get(name, "trail"),
@@ -1453,15 +1463,9 @@ def match_trails(data: dict, cache_dir: Path,
         osm_len = qualifying.get(key) or name_length_km.get(e["name"], 0.0)
         raw_cov = 100.0 * e["distance_km"] / osm_len if osm_len > 0 else 0.0
         e["coverage_pct"] = round(min(raw_cov, 100.0), 1)
-        completed = raw_cov >= COMPLETE_COVERAGE_PCT
-        endpoint_completed = False
-        if not completed and raw_cov >= ENDPOINT_MIN_COVERAGE_PCT:
-            term = termini_by_name.get(e["name"])
-            if term is not None:
-                a, b = term
-                if _run_touches_both(points, e["start_idx"], e["end_idx"] + 1, a, b):
-                    endpoint_completed = True
-                    completed = True
+        completed, endpoint_completed = _endpoint_completion(
+            raw_cov, e["name"], termini_by_name,
+            lambda a, b: _run_touches_both(points, e["start_idx"], e["end_idx"] + 1, a, b))
         e["completed"]          = completed
         e["endpoint_completed"] = endpoint_completed
         timeline.append(e)
@@ -1596,6 +1600,37 @@ def scan_cached_results(cache_dir_results: Path) -> list[tuple[str, float, dict]
     return out
 
 
+def _iter_completed_attempts(cache_dir_results: Path,
+                             activity_meta: dict[str, dict] | None = None):
+    """Yield a normalized attempt dict for every completed, named timeline
+    entry across all cached results. The fields are the superset used by both
+    `build_leaderboards` and `build_region_trail_index`, so each builder reads
+    only what it needs and the scan/skip/normalize logic lives in one place."""
+    activity_meta = activity_meta or {}
+    for filename, _mtime, result in scan_cached_results(cache_dir_results):
+        timeline = (result or {}).get("timeline") or []
+        for entry in timeline:
+            if not entry.get("completed"):
+                continue
+            name = entry.get("name")
+            if not name:
+                continue
+            yield {
+                "filename":     filename,
+                "name":         name,
+                "direction":    entry.get("direction") or "mixed",
+                "title":        activity_meta.get(filename, {}).get("title") or filename,
+                "start_time":   entry.get("start_time", ""),
+                "date":         (entry.get("start_time") or "")[:10],
+                "duration_sec": int(entry.get("duration_sec") or 0),
+                "distance_km":  float(entry.get("distance_km") or 0.0),
+                "coverage_pct": float(entry.get("coverage_pct") or 0.0),
+                "kind":         entry.get("kind", "trail"),
+                "start_idx":    int(entry.get("start_idx") or 0),
+                "end_idx":      int(entry.get("end_idx")   or 0),
+            }
+
+
 def build_leaderboards(cache_dir_results: Path,
                        activity_meta: dict[str, dict] | None = None
                        ) -> dict[tuple[str, str], list[dict]]:
@@ -1606,31 +1641,22 @@ def build_leaderboards(cache_dir_results: Path,
     leaderboards (and a mixed one if the rider did out-and-back loops).
     Each leaderboard is sorted fastest first.
     """
-    cached = scan_cached_results(cache_dir_results)
     boards: dict[tuple[str, str], list[dict]] = {}
-    for filename, _mtime, result in cached:
-        timeline = (result or {}).get("timeline") or []
-        for entry in timeline:
-            if not entry.get("completed"):
-                continue
-            name = entry.get("name")
-            if not name:
-                continue
-            direction = entry.get("direction") or "mixed"
-            row = {
-                "filename": filename,
-                "title":     (activity_meta or {}).get(filename, {}).get("title") or filename,
-                "start_time": entry.get("start_time", ""),
-                "date":       (entry.get("start_time") or "")[:10],
-                "duration_sec": int(entry.get("duration_sec") or 0),
-                "distance_km":  float(entry.get("distance_km") or 0.0),
-                "coverage_pct": float(entry.get("coverage_pct") or 0.0),
-                "direction":    direction,
-                "kind":         entry.get("kind", "trail"),
-                "start_idx":    int(entry.get("start_idx") or 0),
-                "end_idx":      int(entry.get("end_idx")   or 0),
-            }
-            boards.setdefault((name, direction), []).append(row)
+    for a in _iter_completed_attempts(cache_dir_results, activity_meta):
+        row = {
+            "filename":     a["filename"],
+            "title":        a["title"],
+            "start_time":   a["start_time"],
+            "date":         a["date"],
+            "duration_sec": a["duration_sec"],
+            "distance_km":  a["distance_km"],
+            "coverage_pct": a["coverage_pct"],
+            "direction":    a["direction"],
+            "kind":         a["kind"],
+            "start_idx":    a["start_idx"],
+            "end_idx":      a["end_idx"],
+        }
+        boards.setdefault((a["name"], a["direction"]), []).append(row)
 
     for key, rows in boards.items():
         rows.sort(key=lambda r: (r["duration_sec"], r["filename"]))
@@ -1663,54 +1689,43 @@ def build_region_trail_index(cache_dir_results: Path,
 
     Completed runs only — partials are not meaningful for "best time".
     """
-    cached = scan_cached_results(cache_dir_results)
     out: dict[str, dict[str, dict]] = {}
-    activity_meta = activity_meta or {}
-    for filename, _mtime, result in cached:
-        regions = activity_regions.get(filename) or []
+    for a in _iter_completed_attempts(cache_dir_results, activity_meta):
+        regions = activity_regions.get(a["filename"]) or []
         if not regions:
             continue
-        timeline = (result or {}).get("timeline") or []
-        for entry in timeline:
-            if not entry.get("completed"):
-                continue
-            name = entry.get("name")
-            if not name:
-                continue
-            direction = entry.get("direction") or "mixed"
-            # Bucket key is name + direction so "Cutoff up" and "Cutoff
-            # down" rank against each other separately. Display name in
-            # the UI is the same; the direction field carries the badge.
-            dur = int(entry.get("duration_sec") or 0)
-            date = (entry.get("start_time") or "")[:10]
-            start_idx = int(entry.get("start_idx") or 0)
-            end_idx   = int(entry.get("end_idx")   or 0)
-            for region_id in regions:
-                region_dict = out.setdefault(region_id, {})
-                trail_key = (name, direction)
-                trail = region_dict.get(trail_key)
-                if trail is None:
-                    region_dict[trail_key] = {
-                        "name":      name,
-                        "direction": direction,
-                        "kind":      entry.get("kind", "trail"),
-                        "attempts": 1,
-                        "best_duration_sec": dur,
-                        "best_filename": filename,
-                        "best_title": activity_meta.get(filename, {}).get("title") or filename,
-                        "best_date": date,
-                        "best_start_idx": start_idx,
-                        "best_end_idx":   end_idx,
-                    }
-                else:
-                    trail["attempts"] += 1
-                    if dur < trail["best_duration_sec"]:
-                        trail["best_duration_sec"] = dur
-                        trail["best_filename"]    = filename
-                        trail["best_title"]       = activity_meta.get(filename, {}).get("title") or filename
-                        trail["best_date"]        = date
-                        trail["best_start_idx"]   = start_idx
-                        trail["best_end_idx"]     = end_idx
+        # Bucket key is name + direction so "Cutoff up" and "Cutoff down"
+        # rank against each other separately. Display name in the UI is the
+        # same; the direction field carries the badge.
+        name, direction = a["name"], a["direction"]
+        dur, date = a["duration_sec"], a["date"]
+        start_idx, end_idx = a["start_idx"], a["end_idx"]
+        for region_id in regions:
+            region_dict = out.setdefault(region_id, {})
+            trail_key = (name, direction)
+            trail = region_dict.get(trail_key)
+            if trail is None:
+                region_dict[trail_key] = {
+                    "name":      name,
+                    "direction": direction,
+                    "kind":      a["kind"],
+                    "attempts": 1,
+                    "best_duration_sec": dur,
+                    "best_filename": a["filename"],
+                    "best_title": a["title"],
+                    "best_date": date,
+                    "best_start_idx": start_idx,
+                    "best_end_idx":   end_idx,
+                }
+            else:
+                trail["attempts"] += 1
+                if dur < trail["best_duration_sec"]:
+                    trail["best_duration_sec"] = dur
+                    trail["best_filename"]    = a["filename"]
+                    trail["best_title"]       = a["title"]
+                    trail["best_date"]        = date
+                    trail["best_start_idx"]   = start_idx
+                    trail["best_end_idx"]     = end_idx
     return out
 
 
