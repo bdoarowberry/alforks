@@ -139,14 +139,27 @@ to-do list, not a spec — re-verify before acting.
   **Pattern for the rest:** shared map helpers live in `utils.js` (already loaded
   everywhere), per-page init/tiles/colours stay inline; restart Flask (utils.js asset_v +
   cached templates) and verify each page in-browser before committing.
-- **Shared Leaflet basemap helpers** — `makeStreetLayer()` / `makeSatelliteLayer()` /
-  `makeStaticMiniMap(el)` across `compare.html` (×4), `heatmap.html`, `logs.html`,
-  `routes.html` (note: routes uses CartoDB tiles — only the locked-map options are shared).
-- **Mapbox 3D init boilerplate** duplicated `heatmap.html` ↔ `compare.html`.
-- **View-toggle / fullscreen + basemap swap** duplicated `compare.html` ↔ `heatmap.html`.
-- **`index.html` JS (remaining):** `renderRunStats` / `renderTrailStats` shared
-  close-and-exit choreography; `build3DHeatGeoJSON` / `buildHeatPoints` share the
-  stride/downsample loop (heatmap.html).
+- ~~Shared Leaflet basemap helpers (`makeStreetLayer`/`makeSatelliteLayer`)~~ — **DONE
+  (`37262ce`):** extracted to utils.js; compare (main + dual A/B) + heatmap consume them.
+  *(`makeStaticMiniMap` not done — see "still open" below.)*
+- ~~Mapbox 3D init boilerplate~~ — **DONE (`028a5b6`):** `createTerrain3DMap(containerId,
+  token, onLoad)` in utils.js; compare + heatmap `init3D()` are thin wrappers (page adds its
+  own sources/layers in the onLoad callback).
+- ~~View-toggle / fullscreen + basemap swap~~ — **DONE (`1ff502e`):** `toggleMapFullscreen`
+  + `swapLeafletBasemap` in utils.js. The divergent rest of `setMapView` stays per-page.
+- ~~`index.html` `renderRunStats`/`renderTrailStats` + heatmap `build3DHeatGeoJSON`/
+  `buildHeatPoints`~~ — **DONE (`a6f9f9c`):** `makeDrawerCloser(drawerId, mapWrapClass)`
+  (returns `{drawer, mapWrap, closeAndExit}`) in index.html; `eachHeatPoint(fn)` in
+  heatmap.html. Surfaced + fixed a pre-existing bug (`f11e613`): leaderboard popups now
+  close on track switch (loadActivity didn't reset their `.open`).
+
+### Still open (small / low-value — verify each in browser)
+- **`.leaflet-bar` → base.css** — three identical copies (index + compare + heatmap) of the
+  dark-themed Leaflet control CSS. Now known safe (base.css loads after leaflet.css). Cheap.
+- **`makeStaticMiniMap(el)` / locked mini-map options** — the 8-flag `{ zoomControl:false,
+  dragging:false, … }` L.map options object shared by logs `initMap` + routes `initRouteMap`
+  (and compare's static mini-maps). Could be a `LOCKED_MINI_MAP_OPTS` const or
+  `makeStaticMiniMap(el)` helper in utils.js. Small.
 - **Escape variants left on purpose:** `routes_edit.html` `escapeHtml` (uses `String(s)`,
   not null-coalesced); `training_load.html` `_attrEsc` and `index`/`trails` `_escText`
   (escape fewer chars); `summary.html` `fmtSec` (null handling vs `fmtDuration`);
