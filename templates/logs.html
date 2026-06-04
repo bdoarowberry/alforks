@@ -734,9 +734,9 @@ function renderRow(item) {
         ${statCell('Duration',  fmtDuration(item.duration_sec || 0),  item.duration_sec==null, 'sb-duration', item.duration_sec)}
         ${statCell('Avg km/h',  fmt(item.avg_speed_kmh, 1),           item.avg_speed_kmh==null,'sb-avg',      item.avg_speed_kmh)}
         ${statCell('Max km/h',  fmt(item.max_speed_kmh, 1),           item.max_speed_kmh==null,'sb-max',      item.max_speed_kmh)}
+        ${diffCell}
         ${statCell('Avg HR',    `${item.hr_avg ?? '—'}`,              item.hr_avg==null,       'sb-hravg',    item.hr_avg)}
         ${statCell('Max HR',    `${item.hr_max ?? '—'}`,              item.hr_max==null,       'sb-hrmax',    item.hr_max)}
-        ${diffCell}
         ${intCell}
       </div>
     </div>

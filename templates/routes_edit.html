@@ -251,7 +251,8 @@ function populateRegionSelect() {
     opt.textContent = "(no regions defined)"; opt.disabled = true;
     sel.appendChild(opt); return;
   }
-  for (const r of REGIONS) {
+  const sorted = [...REGIONS].sort((a, b) => (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' }));
+  for (const r of sorted) {
     const opt = document.createElement("option");
     opt.value = r.id; opt.textContent = r.name;
     sel.appendChild(opt);

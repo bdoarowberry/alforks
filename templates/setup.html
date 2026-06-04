@@ -943,11 +943,13 @@ function buildDefaultTypeOptions() {
     const current = sel.value;
     const placeholder = sel.querySelector('option[value=""]')?.textContent || '— none —';
     sel.innerHTML = `<option value="">${placeholder}</option>`;
-    TYPES.forEach(t => {
-      const o = document.createElement('option');
-      o.value = t.id; o.textContent = t.label;
-      sel.appendChild(o);
-    });
+    [...TYPES]
+      .sort((a, b) => (a.label || '').localeCompare(b.label || '', undefined, { sensitivity: 'base' }))
+      .forEach(t => {
+        const o = document.createElement('option');
+        o.value = t.id; o.textContent = t.label;
+        sel.appendChild(o);
+      });
     sel.value = current;
   }
 }

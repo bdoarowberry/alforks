@@ -22,10 +22,11 @@
     /* position+z-index so the region popover (inside this strip) can render
        above Leaflet map panes (which reach z-index 700) further down the page. */
     #activity-header { background: var(--bg-card); border-bottom: 1px solid var(--border-hair); padding: 10px 20px; display: flex; align-items: center; gap: 14px; flex-shrink: 0; position: relative; z-index: 1100; }
-    /* "Back to Log Overview" reads as the page title for the individual
-       log view. Sized like other page titles, with arrow + text. */
-    #back-to-logs { font-size: 1rem; color: var(--text-secondary); text-decoration: none; padding: 6px 12px; border-radius: 4px; border: 1px solid var(--border-row); transition: all 0.12s; flex-shrink: 0; display: inline-flex; align-items: center; gap: 8px; font-weight: 500; letter-spacing: -0.01em; }
-    #back-to-logs:hover { color: var(--text-primary); border-color: var(--accent); background: var(--accent-soft); }
+    /* Back link sits in the sidebar header where the "LOGS" label was,
+       so it inherits that compact uppercase treatment. The track title
+       now leads the content header as the page title. */
+    #back-to-logs { color: var(--text-secondary); text-decoration: none; display: inline-flex; align-items: center; gap: 6px; transition: color 0.12s; }
+    #back-to-logs:hover { color: var(--text-primary); }
     .ah-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
     .ah-row-1 { display: flex; align-items: center; gap: 10px; min-width: 0; }
     .ah-row-2 { font-size: 0.72rem; color: var(--text-secondary); padding-left: 2px; min-height: 14px; line-height: 1.3; }
@@ -483,13 +484,6 @@
     #trails-drawer h3 { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.08em; color: #ccc; padding: 10px 14px; border-bottom: 1px solid var(--border-row); display: flex; align-items: center; justify-content: space-between; }
     #trails-drawer h3 .preview-tag { font-size: 0.55rem; padding: 2px 6px; background: var(--border-row); color: var(--warn); border-radius: 3px; letter-spacing: 0.05em; }
     #trails-drawer .section-label { font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.07em; color: #888; padding: 10px 14px 4px; }
-    /* <details>/<summary> for the rollup section — strip the default
-       disclosure triangle position and make the summary look like our
-       other section labels but clearly clickable. */
-    #trails-summary-details > summary.section-label { cursor: pointer; list-style: none; user-select: none; }
-    #trails-summary-details > summary.section-label::-webkit-details-marker { display: none; }
-    #trails-summary-details > summary.section-label::before { content: '▸ '; color: #555; }
-    #trails-summary-details[open] > summary.section-label::before { content: '▾ '; }
     /* Strip doubles as a drag handle: cursor switches to col-resize on
        hover, and a JS handler on mousedown begins a width-resize
        interaction. A short click without movement still toggles the
@@ -677,7 +671,7 @@
 <div class="layout">
   <div id="sidebar">
     <div id="sidebar-header">
-      <span>Logs</span>
+      <a href="/logs" id="back-to-logs" title="Back to Logs Overview">← Logs Overview</a>
       <button id="bulk-toggle-btn" onclick="toggleBulk()">Select</button>
     </div>
     <div id="sort-filter-bar">
@@ -745,7 +739,6 @@
 
   <div id="content">
     <div id="activity-header">
-      <a href="/logs" id="back-to-logs" title="Back to Log Overview">← Back to Log Overview</a>
       <div class="ah-main">
         <div class="ah-row-1">
           <span id="header-type-icon" title="Activity type" onclick="openTypePicker()"></span>
@@ -857,10 +850,6 @@
         <div id="trails-summary-cards"></div>
         <div class="section-label">Timeline of attempts</div>
         <div id="trails-timeline-wrap"></div>
-        <details id="trails-summary-details">
-          <summary class="section-label">Per-trail rollup</summary>
-          <div id="trails-summary-wrap"></div>
-        </details>
       </div>
       <!-- Leaderboard popup; rendered into when a trail name is clicked. -->
       <div id="trails-leaderboard" role="dialog" aria-label="Trail leaderboard">
@@ -991,11 +980,13 @@ const TYPE_BG     = Object.fromEntries(TYPES.map(t => [t.id, t.bg]));
       o.value = value; o.textContent = text;
       sel.appendChild(o);
     });
-    TYPES.forEach(t => {
-      const o = document.createElement('option');
-      o.value = t.id; o.textContent = t.label;
-      sel.appendChild(o);
-    });
+    [...TYPES]
+      .sort((a, b) => (a.label || '').localeCompare(b.label || '', undefined, { sensitivity: 'base' }))
+      .forEach(t => {
+        const o = document.createElement('option');
+        o.value = t.id; o.textContent = t.label;
+        sel.appendChild(o);
+      });
   }
   fill(document.getElementById('header-type'));
   fill(document.getElementById('filter-type'));
@@ -3022,28 +3013,6 @@ function renderTrailStats(trails) {
     </div>
   `;
 
-  _wireSummaryClicks();
-  if (summary.length === 0) {
-    document.getElementById('trails-summary-wrap').innerHTML =
-      `<div class="empty-msg">No trails reached the 5% coverage threshold.</div>`;
-  } else {
-    const sumRows = summary.map(t => {
-      const kc = t.kind === 'road' ? `<span class="kind-chip-sm">road</span> ` : '';
-      return `
-        <tr data-trail-summary="${_escAttr(t.name)}">
-          <td class="trail-name" title="${_escAttr(t.name)}">${kc}${_escText(t.name)}</td>
-          <td>${t.visits}</td>
-          <td>${t.ridden_km.toFixed(2)}</td>
-          <td>${_trailPill(t)}</td>
-        </tr>`;
-    }).join('');
-    document.getElementById('trails-summary-wrap').innerHTML = `
-      <table class="runs-table">
-        <thead><tr><th>Trail</th><th>×</th><th>km</th><th>Cov</th></tr></thead>
-        <tbody>${sumRows}</tbody>
-      </table>`;
-  }
-
   const tlRows = timeline.map(e => {
     const rankCell = (e.completed && e.rank && e.rank_total)
       ? `${e.rank}/${e.rank_total}` : '';
@@ -3355,19 +3324,6 @@ function _escText(s) {
 // Timeline click delegation. Trail-link cell opens the leaderboard;
 // anywhere else on the row highlights the run span on the map. Called
 // after each `renderTrailStats` populates the timeline table.
-let _summaryWired = false;
-function _wireSummaryClicks() {
-  if (_summaryWired) return;
-  const wrap = document.getElementById('trails-summary-wrap');
-  if (!wrap) return;
-  wrap.addEventListener('click', (ev) => {
-    const tr = ev.target.closest('tr[data-trail-summary]');
-    if (!tr) return;
-    highlightTrailSummary(tr.getAttribute('data-trail-summary'));
-  });
-  _summaryWired = true;
-}
-
 let _timelineWired = false;
 function _wireTimelineClicks() {
   if (_timelineWired) return;
@@ -3418,30 +3374,6 @@ document.addEventListener('keydown', (ev) => {
 
 // Click a per-trail summary row → highlight every attempt of that trail
 // in the timeline as one combined polyline.
-function highlightTrailSummary(name) {
-  if (!trackData || !trackData.trails) return;
-  const tl = trackData.trails.timeline || [];
-  const matches = tl.filter(e => e.name === name);
-  if (!matches.length) return;
-  // First-attempt highlight reuses runs' yellow polyline. For a multi-
-  // attempt trail, fall back to highlighting the union of attempts via
-  // the same highlightRun helper (good enough for v1).
-  clearRunHighlight();
-  const latlngs = [];
-  matches.forEach(e => {
-    const segPts = trackData.points.slice(e.start_idx, e.end_idx + 1)
-      .map(p => [p.lat, p.lon]);
-    latlngs.push(segPts);
-  });
-  _runHighlight = L.polyline(latlngs, {
-    color: '#facc15', weight: 9, opacity: 0.85, interactive: false,
-    lineCap: 'round', lineJoin: 'round',
-  }).addTo(map);
-  _runHighlight.bringToBack();
-  const flat = latlngs.flat();
-  if (flat.length) map.fitBounds(L.latLngBounds(flat), { padding: [40, 40] });
-}
-
 let _runHighlight = null;
 
 function clearRunHighlight() {

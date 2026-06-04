@@ -88,15 +88,16 @@
                         letter-spacing: 0.10em; color: var(--text-tertiary);
                         padding: 10px 14px; text-align: right; font-weight: 500;
                         background: rgba(0,0,0,0.15); border-bottom: 1px solid var(--border-hair); }
-    .routes-table th:first-child, .routes-table th.map-h { text-align: left; }
-    .routes-table th.map-h { width: 132px; }
-    .routes-table th.actions-h { width: 1%; white-space: nowrap; text-align: right; }
+    .routes-table th:first-child, .routes-table th.name-h { text-align: left; }
+    .routes-table th.map-h { width: 132px; text-align: center; }
+    .routes-table th.actions-h { width: 1%; white-space: nowrap; text-align: center; }
+    .routes-table th.num-col, .routes-table td.num-col, .routes-table td.actions-h { text-align: center; }
     .routes-table td { padding: 9px 14px; color: var(--text-secondary);
                         text-align: right; border-bottom: 1px solid var(--border-row);
                         font-variant-numeric: tabular-nums; }
     .routes-table td.name-cell { color: var(--text-primary); text-align: left;
                                   font-variant-numeric: normal; }
-    .routes-table td.map-cell { padding: 6px 14px; text-align: left; }
+    .routes-table td.map-cell { padding: 6px 14px; text-align: center; }
     .routes-table td.map-cell .route-map { width: 120px; height: 70px; border-radius: 3px;
                                             background: var(--bg-map); border: 1px solid var(--border-hair); }
     .routes-table tbody tr { transition: background 0.08s; cursor: pointer; }
@@ -301,7 +302,8 @@ function toast(msg, isErr) {
 
 function populateRegionFilter() {
   const sel = $("region-filter");
-  for (const r of REGIONS) {
+  const sorted = [...REGIONS].sort((a, b) => (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' }));
+  for (const r of sorted) {
     const opt = document.createElement("option");
     opt.value = r.id; opt.textContent = r.name;
     sel.appendChild(opt);
@@ -484,10 +486,10 @@ function renderTable(view) {
       <tr data-rid="${_esc(r.id)}">
         <td class="map-cell"><div class="route-map" data-rid="${_esc(r.id)}" data-polyline="${poly}"></div></td>
         <td class="name-cell">${_esc(r.name)} <span class="region-pill">${_esc(regionLbl)}</span></td>
-        <td>${b.segCount}</td>
-        <td>${distCell}</td>
-        <td>${attemptsCell}</td>
-        <td>${bestCell}</td>
+        <td class="num-col">${b.segCount}</td>
+        <td class="num-col">${distCell}</td>
+        <td class="num-col">${attemptsCell}</td>
+        <td class="num-col">${bestCell}</td>
         <td class="actions-h">${actionsHtml()}</td>
       </tr>`;
   }).join("");
@@ -495,12 +497,12 @@ function renderTable(view) {
     <table class="routes-table">
       <thead>
         <tr>
-          <th class="map-h">Preview</th>
-          <th>Name</th>
-          <th>Segments</th>
-          <th>Distance</th>
-          <th>Attempts</th>
-          <th>Best</th>
+          <th class="map-h"></th>
+          <th class="name-h">Name</th>
+          <th class="num-col">Segments</th>
+          <th class="num-col">Distance</th>
+          <th class="num-col">Attempts</th>
+          <th class="num-col">Best</th>
           <th class="actions-h">Actions</th>
         </tr>
       </thead>
