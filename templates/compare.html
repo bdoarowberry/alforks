@@ -409,17 +409,7 @@ function setDualMode(on) {
 function init3D() {
   if (mb3d) { mb3d.resize(); return; }
   if (!MAPBOX_TOKEN) return;
-  mapboxgl.accessToken = MAPBOX_TOKEN;
-  mb3d = new mapboxgl.Map({
-    container: 'map-3d',
-    style: 'mapbox://styles/mapbox/satellite-streets-v12',
-    center: [-114.74, 50.89], zoom: 10, pitch: 55, bearing: -15, antialias: true,
-  });
-  mb3d.addControl(new mapboxgl.NavigationControl({ visualizePitch: true }), 'top-right');
-  mb3d.on('load', () => {
-    mb3d.addSource('mapbox-dem', { type: 'raster-dem', url: 'mapbox://mapbox.mapbox-terrain-dem-v1', tileSize: 512, maxzoom: 14 });
-    mb3d.setTerrain({ source: 'mapbox-dem', exaggeration: 1.5 });
-    mb3d.addLayer({ id: 'sky', type: 'sky', paint: { 'sky-type': 'atmosphere', 'sky-atmosphere-sun': [0.0, 90.0], 'sky-atmosphere-sun-intensity': 15 } });
+  mb3d = createTerrain3DMap('map-3d', MAPBOX_TOKEN, () => {
     mb3d.addSource('compare3d', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
     mb3d.addLayer({ id: 'compare3d-layer', type: 'line', source: 'compare3d',
       layout: { 'line-join': 'round', 'line-cap': 'round' },

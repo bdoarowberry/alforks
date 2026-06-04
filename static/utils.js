@@ -139,6 +139,28 @@ function makeSatelliteLayer() {
   });
 }
 
+// Shared Mapbox GL 3D terrain map (satellite-streets style + DEM-exaggerated
+// terrain + atmospheric sky), used by the compare and heatmap 3D views. Once
+// the base terrain/sky have loaded, `onLoad(map)` runs so the page can add its
+// own data sources/layers and mark itself ready. Returns the map synchronously
+// — sources added inside onLoad don't exist until the load event fires.
+function createTerrain3DMap(containerId, token, onLoad) {
+  mapboxgl.accessToken = token;
+  const map = new mapboxgl.Map({
+    container: containerId,
+    style: 'mapbox://styles/mapbox/satellite-streets-v12',
+    center: [-114.74, 50.89], zoom: 10, pitch: 55, bearing: -15, antialias: true,
+  });
+  map.addControl(new mapboxgl.NavigationControl({ visualizePitch: true }), 'top-right');
+  map.on('load', () => {
+    map.addSource('mapbox-dem', { type: 'raster-dem', url: 'mapbox://mapbox.mapbox-terrain-dem-v1', tileSize: 512, maxzoom: 14 });
+    map.setTerrain({ source: 'mapbox-dem', exaggeration: 1.5 });
+    map.addLayer({ id: 'sky', type: 'sky', paint: { 'sky-type': 'atmosphere', 'sky-atmosphere-sun': [0.0, 90.0], 'sky-atmosphere-sun-intensity': 15 } });
+    onLoad(map);
+  });
+  return map;
+}
+
 // Open-Meteo weather code → emoji glyph. Used by the activity header
 // weather strip and the per-row weather summary on /logs.
 function weatherIcon(code) {
