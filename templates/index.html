@@ -77,24 +77,31 @@
        sidebar header instead of floating mid-page. */
     #sidebar-toggle { width: 14px; flex-shrink: 0; background: var(--bg-card); border: none; border-right: 1px solid var(--border-hair); color: var(--text-muted); cursor: pointer; font-size: 9px; padding: 14px 0 0; display: flex; align-items: flex-start; justify-content: center; transition: background 0.12s, color 0.12s; }
     #sidebar-toggle:hover { background: var(--surface-tint); color: var(--text-secondary); }
-    #sidebar-header { padding: 8px 16px; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-tertiary); border-bottom: 1px solid var(--border-hair); flex-shrink: 0; display: flex; align-items: center; justify-content: space-between; }
-    #bulk-toggle-btn { font-size: 0.68rem; padding: 2px 8px; border-radius: 3px; border: 1px solid var(--border-row); background: transparent; color: var(--text-secondary); cursor: pointer; transition: all 0.12s; }
-    #bulk-toggle-btn:hover { border-color: var(--accent); color: var(--text-primary); }
-    #bulk-toggle-btn.active { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
-    #sidebar-bulk-bar { display: none; padding: 10px 14px; background: var(--bg-card); border-bottom: 1px solid var(--border-hair); flex-shrink: 0; }
-    #sidebar-bulk-bar.visible { display: block; }
-    #sidebar-bulk-bar .bulk-row { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; }
-    #sidebar-bulk-bar .bulk-row:last-child { margin-bottom: 0; }
-    #bulk-count-label { font-size: 0.72rem; color: var(--accent); font-weight: 600; flex: 1; }
+    #sidebar-header { padding: 8px 16px; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-tertiary); border-bottom: 1px solid var(--border-hair); flex-shrink: 0; display: flex; align-items: center; }
+    /* Collapsible sidebar sections (Filters, Bulk Edit). */
+    .sidebar-section { border-bottom: 1px solid var(--border-hair); flex-shrink: 0; background: var(--bg-card); }
+    .section-toggle { width: 100%; display: flex; align-items: center; gap: 8px; background: transparent; border: none; cursor: pointer; padding: 8px 16px; color: var(--text-tertiary); font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em; font-family: inherit; }
+    .section-toggle:hover { color: var(--text-secondary); }
+    .section-chevron { font-size: 0.6rem; color: var(--text-muted); transition: transform 0.12s; }
+    .sidebar-section.open .section-chevron { transform: rotate(90deg); }
+    .section-title { font-weight: 500; }
+    .section-toggle.active .section-title { color: var(--accent); }
+    .section-body { display: none; padding: 4px 12px 10px; }
+    .sidebar-section.open > .section-body { display: block; }
+    .bulk-row { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; }
+    .bulk-row:last-child { margin-bottom: 0; }
+    #bulk-count-label { font-size: 0.68rem; color: var(--accent); font-weight: 600; margin-left: auto; }
     #sidebar-bulk-type { flex: 1; background: transparent; border: 1px solid var(--border-row); border-radius: 4px; color: var(--text-secondary); font-size: 0.75rem; padding: 4px 6px; }
     #sidebar-bulk-apply { padding: 4px 10px; border-radius: 4px; border: none; background: var(--accent); color: var(--text-primary); font-size: 0.72rem; cursor: pointer; white-space: nowrap; }
     #sidebar-bulk-apply:hover { background: #2563eb; }
     #sidebar-bulk-apply:disabled { opacity: 0.4; cursor: default; }
+    .bulk-delete-btn { background: #2a1010; border: 1px solid var(--danger); color: #ef4444; padding: 4px 10px; border-radius: 4px; font-size: 0.72rem; cursor: pointer; font-family: inherit; }
+    .bulk-delete-btn:disabled { opacity: 0.4; cursor: default; }
     .activity-cb { display: none; margin-right: 6px; accent-color: var(--accent); width: 13px; height: 13px; cursor: pointer; flex-shrink: 0; }
     .bulk-active .activity-cb { display: inline-block; }
     .bulk-active .activity-item { display: flex; align-items: flex-start; }
     .bulk-active .activity-item .item-body { flex: 1; min-width: 0; }
-    #sort-filter-bar { padding: 7px 10px; border-bottom: 1px solid var(--border-hair); background: var(--bg-card); flex-shrink: 0; display: flex; flex-direction: column; gap: 5px; }
+    #sort-filter-bar { display: flex; flex-direction: column; gap: 5px; }
     #search-input { width: 100%; background: transparent; border: 1px solid var(--border-row); border-radius: 3px; color: var(--text-secondary); font-size: 0.75rem; padding: 4px 8px; font-family: inherit; }
     #search-input:focus { outline: none; border-color: var(--accent); background: rgba(59,130,246,0.05); }
     #search-input::placeholder { color: var(--text-muted); }
@@ -428,8 +435,8 @@
     /* Vertical stats column styling. The horizontal flex layout left over
        from the legacy stats-bar is overridden here so .stat blocks stack
        vertically with a divider between rows. */
-    #stats-bar { display: flex; flex-direction: column; flex-shrink: 0; padding: 10px 12px; gap: 1px; border-bottom: none; border-right: 1px solid var(--border-row); min-width: 130px; max-width: 160px; align-self: stretch; }
-    #stats-bar .stat { flex: 0 0 auto; text-align: left; border-right: none; border-bottom: 1px solid #1e2128; padding: 6px 4px; }
+    #stats-bar { display: flex; flex-direction: column; flex-shrink: 0; padding: 10px 8px; gap: 1px; margin: 0; background: transparent; border: none; border-right: 1px solid var(--border-row); border-radius: 0; min-width: 96px; max-width: 120px; align-self: stretch; }
+    #stats-bar .stat { flex: 0 0 auto; text-align: left; border-right: none; border-bottom: 1px solid #1e2128; padding: 6px 4px; background: transparent; }
     #stats-bar .stat:last-child { border-bottom: none; }
     #stats-bar .stat-value { font-size: 1rem; }
     #stats-bar .stat-label { font-size: 0.6rem; }
@@ -509,7 +516,8 @@
     .dir-pill.dir-rev   { background: #3a2c1d; color: #fbbf24; }
     .dir-pill.dir-mixed { background: var(--border-row); color: #aaa; }
     #trails-drawer .runs-table td.t-dir { padding: 5px 4px; text-align: center; }
-    #trails-drawer .runs-table td.trail-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 140px; }
+    #trails-drawer .runs-table td.trail-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 140px; text-align: left; }
+    #trails-drawer .runs-table th.th-trail { text-align: left; }
     #trails-drawer .runs-table td.trail-link { color: #93c5fd; cursor: pointer; }
     #trails-drawer .runs-table td.trail-link:hover { color: #bfdbfe; text-decoration: underline; }
     #trails-drawer .runs-table td.t-rank { font-variant-numeric: tabular-nums; color: #ccc; }
@@ -624,7 +632,7 @@
     #map-wrap.has-trails #map-3d { position: relative; inset: auto; flex: 1; min-width: 0; height: 100%; }
     #map-wrap.has-trails #trails-strip { display: flex; }
     #map-wrap.has-trails #trails-drawer { position: relative; transform: none; transition: none; width: 0; box-shadow: none; flex: 0 0 0; height: 100%; overflow-x: hidden; }
-    #map-wrap.has-trails #trails-drawer.open { flex: 0 0 380px; width: 380px; }
+    #map-wrap.has-trails #trails-drawer.open { flex: 0 0 500px; width: 500px; }
     #map-wrap.has-trails #view-toggle,
     #map-wrap.has-trails #map-controls,
     #map-wrap.has-trails #map-legend,
@@ -672,65 +680,73 @@
   <div id="sidebar">
     <div id="sidebar-header">
       <a href="/logs" id="back-to-logs" title="Back to Logs Overview">← Logs Overview</a>
-      <button id="bulk-toggle-btn" onclick="toggleBulk()">Select</button>
     </div>
-    <div id="sort-filter-bar">
-      <div class="sfrow">
-        <input id="search-input" type="text" placeholder="Search title, location, notes…" oninput="renderActivityList()">
-      </div>
-      <div class="sfrow">
-        <span class="sflabel">Sort</span>
-        <select id="sort-field" class="sfselect" onchange="renderActivityList()">
-          <option value="date">Date</option>
-          <option value="distance">Distance</option>
-          <option value="duration">Duration</option>
-        </select>
-        <button id="sort-dir-btn" onclick="toggleSortDir()" title="Toggle direction">▼</button>
+    <div class="sidebar-section" id="filters-section">
+      <button type="button" class="section-toggle" id="filters-toggle" onclick="toggleFilters()" aria-expanded="false">
+        <span class="section-chevron">▸</span>
+        <span class="section-title">Filters</span>
         <span id="activity-count"></span>
+      </button>
+      <div class="section-body">
+        <div id="sort-filter-bar">
+          <div class="sfrow">
+            <input id="search-input" type="text" placeholder="Search title, location, notes…" oninput="renderActivityList()">
+          </div>
+          <div class="sfrow">
+            <span class="sflabel">Sort</span>
+            <select id="sort-field" class="sfselect" onchange="renderActivityList()">
+              <option value="date">Date</option>
+              <option value="distance">Distance</option>
+              <option value="duration">Duration</option>
+            </select>
+            <button id="sort-dir-btn" onclick="toggleSortDir()" title="Toggle direction">▼</button>
+          </div>
+          <div class="sfrow">
+            <span class="sflabel">Year</span>
+            <select id="filter-year" class="sfselect" onchange="renderActivityList()">
+              <option value="all">All</option>
+            </select>
+          </div>
+          <div class="sfrow">
+            <span class="sflabel">Type</span>
+            <select id="filter-type" class="sfselect" onchange="renderActivityList()">
+              <option value="all">All</option>
+              <option value="__untagged__">Untagged</option>
+            </select>
+          </div>
+          <div class="sfrow">
+            <span class="sflabel">Region</span>
+            <select id="filter-region" class="sfselect" onchange="renderActivityList()"
+                    title="Filter by region match">
+              <option value="all">All</option>
+              <option value="__untagged__">Untagged (no match)</option>
+            </select>
+          </div>
+        </div>
       </div>
-      <div class="sfrow">
-        <span class="sflabel">Year</span>
-        <select id="filter-year" class="sfselect" onchange="renderActivityList()">
-          <option value="all">All</option>
-        </select>
-      </div>
-      <div class="sfrow">
-        <span class="sflabel">Type</span>
-        <select id="filter-type" class="sfselect" onchange="renderActivityList()">
-          <option value="all">All</option>
-          <option value="__untagged__">Untagged</option>
-        </select>
-      </div>
-      <div class="sfrow">
-        <span class="sflabel">Region</span>
-        <select id="filter-region" class="sfselect" onchange="renderActivityList()"
-                title="Filter by region match">
-          <option value="all">All</option>
-          <option value="__untagged__">Untagged (no match)</option>
-        </select>
+    </div>
+    <div class="sidebar-section" id="bulk-section">
+      <button type="button" class="section-toggle" id="bulk-toggle-btn" onclick="toggleBulk()" aria-expanded="false">
+        <span class="section-chevron">▸</span>
+        <span class="section-title">Bulk Edit</span>
+        <span id="bulk-count-label"></span>
+      </button>
+      <div class="section-body">
+        <div class="bulk-row">
+          <select id="sidebar-bulk-type">
+            <option value="">Set type…</option>
+          </select>
+          <button id="sidebar-bulk-apply" onclick="applyBulk()" disabled>Apply</button>
+        </div>
+        <div class="bulk-row">
+          <button id="sidebar-bulk-delete" onclick="deleteBulk()" disabled class="bulk-delete-btn">Delete selected…</button>
+        </div>
       </div>
     </div>
     <div id="activity-list">
       <div class="skeleton-row"><div class="skeleton-bar short"></div><div class="skeleton-bar long"></div><div class="skeleton-bar medium"></div></div>
       <div class="skeleton-row"><div class="skeleton-bar short"></div><div class="skeleton-bar long"></div><div class="skeleton-bar medium"></div></div>
       <div class="skeleton-row"><div class="skeleton-bar short"></div><div class="skeleton-bar long"></div><div class="skeleton-bar medium"></div></div>
-    </div>
-    <div id="sidebar-bulk-bar">
-      <div class="bulk-row">
-        <span id="bulk-count-label">0 selected</span>
-      </div>
-      <div class="bulk-row">
-        <select id="sidebar-bulk-type">
-          <option value="">Set type…</option>
-        </select>
-        <button id="sidebar-bulk-apply" onclick="applyBulk()" disabled>Apply</button>
-      </div>
-      <div class="bulk-row">
-        <button id="sidebar-bulk-delete" onclick="deleteBulk()" disabled
-                style="background:#2a1010;border:1px solid var(--danger);color:#ef4444;padding:4px 10px;border-radius:4px;font-size:0.72rem;cursor:pointer;font-family:inherit;">
-          Delete selected…
-        </button>
-      </div>
     </div>
 
   </div>
@@ -843,12 +859,11 @@
       <div id="trails-drawer">
         <h3>Routes Ridden <span class="preview-tag">PREVIEW</span></h3>
         <div id="routes-ridden-wrap"></div>
-        <h3 class="section-divider">Trails Ridden <span class="preview-tag">PREVIEW</span>
+        <h3 class="section-divider">Trails Ridden
           <button id="trails-rescan-btn" type="button" title="Re-snap GPS against the latest OSM trail+road data for this ride only"
                   onclick="rescanThisActivity()">Rescan</button>
         </h3>
         <div id="trails-summary-cards"></div>
-        <div class="section-label">Timeline of attempts</div>
         <div id="trails-timeline-wrap"></div>
       </div>
       <!-- Leaderboard popup; rendered into when a trail name is clicked. -->
@@ -2045,6 +2060,7 @@ async function loadWeather(filename) {
 let _allRegions = [];
 fetch('/api/regions').then(r => r.json()).then(d => {
   _allRegions = d;
+  populateRegionFilter();
   // Re-render so sidebar default names can include region names
   if (typeof renderActivityList === 'function' && allActivitiesData) renderActivityList(currentFilename);
 });
@@ -2844,7 +2860,7 @@ function renderRunStats(meta) {
 
 // Default width if nothing is in localStorage. Kept in sync with the
 // CSS default — if you change one, change the other.
-const TRAILS_DRAWER_DEFAULT_W = 380;
+const TRAILS_DRAWER_DEFAULT_W = 500;
 const TRAILS_DRAWER_MIN_W     = 260;
 const TRAILS_DRAWER_MAX_W     = 720;
 const TRAILS_DRAWER_LS_KEY    = 'trailsDrawerWidthPx';
@@ -3025,7 +3041,7 @@ function renderTrailStats(trails) {
         <td class="trail-name trail-link" data-trail="${_escAttr(e.name)}"
             data-dir="${_escAttr(e.direction || 'mixed')}"
             title="Show leaderboard for ${_escAttr(e.name)}">${kc}${_escText(e.name)}</td>
-        <td>${e.distance_km.toFixed(2)}k</td>
+        <td>${e.distance_km.toFixed(1)}</td>
         <td>${_fmtDurHms(e.duration_sec)}</td>
         <td>${_trailPill(e)}</td>
         <td class="t-rank">${rankCell}</td>
@@ -3033,7 +3049,7 @@ function renderTrailStats(trails) {
   }).join('');
   document.getElementById('trails-timeline-wrap').innerHTML = `
     <table class="runs-table">
-      <thead><tr><th>Time</th><th>Dir</th><th>Trail</th><th>Dist</th><th>Dur</th><th>Cov</th><th>Rank</th></tr></thead>
+      <thead><tr><th>Time</th><th>Dir</th><th class="th-trail">Trail</th><th>Dist (km)</th><th>Dur</th><th>Coverage</th><th>Rank</th></tr></thead>
       <tbody>${tlRows}</tbody>
     </table>`;
   // Re-bind delegated click on the timeline body so the row navigates
@@ -3043,6 +3059,10 @@ function renderTrailStats(trails) {
 
   mapWrap.classList.add('has-trails');
   drawer.classList.add('open');
+  // Open wide enough to show the full timeline table: never below the
+  // sufficient default, but honour a wider saved width. Also keeps
+  // --trails-drawer-w in sync for leaderboard positioning on auto-open.
+  _setTrailsDrawerWidth(Math.max(_initialTrailsDrawerWidth(), TRAILS_DRAWER_DEFAULT_W));
   setTimeout(() => map.invalidateSize(), 0);
   const strip = document.getElementById('trails-strip');
   if (strip) strip.textContent = drawer.classList.contains('open') ? '▶' : '◀';
@@ -3639,30 +3659,43 @@ async function loadActivity(filename) {
 let bulkMode = false;
 let bulkSelected = new Set();
 
+// Bulk mode is tied to the "Bulk Edit" collapsible: opening it shows the
+// row checkboxes + the type/Apply/Delete controls; closing it exits and
+// clears the selection.
 function toggleBulk() { bulkMode ? exitBulk() : enterBulk(); }
 function enterBulk() {
   bulkMode = true;
   document.getElementById('activity-list').classList.add('bulk-active');
-  document.getElementById('bulk-toggle-btn').classList.add('active');
-  document.getElementById('bulk-toggle-btn').textContent = 'Cancel';
+  document.getElementById('bulk-section').classList.add('open');
+  const btn = document.getElementById('bulk-toggle-btn');
+  btn.classList.add('active');
+  btn.setAttribute('aria-expanded', 'true');
   updateBulkBar();
 }
 function exitBulk() {
   bulkMode = false; bulkSelected.clear();
   document.getElementById('activity-list').classList.remove('bulk-active');
-  document.getElementById('bulk-toggle-btn').classList.remove('active');
-  document.getElementById('bulk-toggle-btn').textContent = 'Select';
-  document.getElementById('sidebar-bulk-bar').classList.remove('visible');
+  document.getElementById('bulk-section').classList.remove('open');
+  const btn = document.getElementById('bulk-toggle-btn');
+  btn.classList.remove('active');
+  btn.setAttribute('aria-expanded', 'false');
   document.querySelectorAll('.activity-cb').forEach(cb => cb.checked = false);
   document.querySelectorAll('.activity-item').forEach(el => el.classList.remove('selected'));
+  updateBulkBar();
 }
 function updateBulkBar() {
   const n = bulkSelected.size;
-  document.getElementById('sidebar-bulk-bar').classList.toggle('visible', n > 0);
-  document.getElementById('bulk-count-label').textContent = `${n} selected`;
+  document.getElementById('bulk-count-label').textContent = n ? `${n} selected` : '';
   document.getElementById('sidebar-bulk-apply').disabled =
     n === 0 || !document.getElementById('sidebar-bulk-type').value;
   document.getElementById('sidebar-bulk-delete').disabled = n === 0;
+}
+
+// Filters collapsible — independent of bulk mode; state persisted.
+function toggleFilters() {
+  const open = document.getElementById('filters-section').classList.toggle('open');
+  document.getElementById('filters-toggle').setAttribute('aria-expanded', open ? 'true' : 'false');
+  try { localStorage.setItem('logs_filters_open', open ? '1' : '0'); } catch (e) {}
 }
 
 async function deleteBulk() {
@@ -3721,6 +3754,12 @@ function saveSidebarState() {
 }
 
 function restoreSidebarState() {
+  // Filters section open/closed — collapsed by default, only opened if the
+  // user previously expanded it.
+  if (localStorage.getItem('logs_filters_open') === '1') {
+    document.getElementById('filters-section')?.classList.add('open');
+    document.getElementById('filters-toggle')?.setAttribute('aria-expanded', 'true');
+  }
   try {
     const raw = localStorage.getItem(SIDEBAR_STATE_KEY);
     if (!raw) return;
@@ -3772,6 +3811,26 @@ function populateYearFilter() {
   });
 }
 
+// Append one option per region (alphabetical) after the static All /
+// Untagged entries. Called once regions have loaded; re-applies a persisted
+// selection now that its <option> exists (restoreSidebarState runs earlier,
+// before this list is built).
+function populateRegionFilter() {
+  const sel = document.getElementById('filter-region');
+  if (!sel) return;
+  const sorted = [..._allRegions].sort((a, b) =>
+    (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' }));
+  for (const r of sorted) {
+    const o = document.createElement('option');
+    o.value = r.id; o.textContent = r.name;
+    sel.appendChild(o);
+  }
+  try {
+    const raw = localStorage.getItem(SIDEBAR_STATE_KEY);
+    if (raw) { const s = JSON.parse(raw); if (s.region) sel.value = s.region; }
+  } catch (e) {}
+}
+
 function renderActivityList(reSelectFilename) {
   const year   = document.getElementById('filter-year').value;
   const type   = document.getElementById('filter-type').value;
@@ -3795,6 +3854,11 @@ function renderActivityList(reSelectFilename) {
       const matched = (act.regions || []).length > 0;
       const pinned  = (act.meta?.regions_pinned || []).length > 0;
       if (matched || pinned) return false;
+    } else if (region !== 'all') {
+      // A specific region: match a geometric region hit OR a manual pin.
+      const inRegion = (act.regions || []).includes(region)
+                    || (act.meta?.regions_pinned || []).includes(region);
+      if (!inRegion) return false;
     }
     if (search) {
       const hay = [
