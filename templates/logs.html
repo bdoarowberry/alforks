@@ -34,7 +34,6 @@
     .chip.type-chip.active { opacity: 1; border-color: currentColor; box-shadow: 0 0 0 1px currentColor inset; }
     input[type="date"] { background: transparent; border: 1px solid var(--border-row); border-radius: 3px; color: var(--text-secondary); font-size: 0.78rem; padding: 5px 8px; font-family: var(--font-mono); color-scheme: dark; }
     input[type="date"]:focus { outline: none; border-color: var(--accent); }
-    #count-label { font-size: 0.74rem; color: var(--text-tertiary); margin-left: auto; font-family: var(--font-mono); }
 
     /* Region combobox — text-input trigger with a searchable popover.
        Single-select; the trigger label reflects the current pick. */
@@ -62,23 +61,28 @@
     select.sort-select option { background: var(--bg-card); color: var(--text-secondary); }
     .sort-dir-btn { background: transparent; border: 1px solid var(--border-row); border-radius: 3px; color: var(--text-secondary); font-size: 0.85rem; padding: 3px 9px; font-family: var(--font-mono); cursor: pointer; line-height: 1; min-width: 28px; transition: color 0.12s, border-color 0.12s; }
     .sort-dir-btn:hover { color: var(--text-primary); border-color: var(--text-tertiary); }
+    #more-filters-toggle, #more-filters-clear { background: transparent; border: 1px solid var(--border-row); border-radius: 3px; color: var(--text-secondary); font-size: 0.74rem; padding: 5px 10px; font-family: var(--font-mono); cursor: pointer; transition: color 0.12s, border-color 0.12s; }
+    #more-filters-toggle:hover, #more-filters-clear:hover { color: var(--text-primary); border-color: var(--text-tertiary); }
+    #more-filters-toggle.active { border-color: var(--accent); color: var(--text-primary); }
+    #more-filters-toggle { margin-left: auto; }
+    .count-suffix { font-size: 0.8rem; font-weight: 400; letter-spacing: 0; color: var(--text-tertiary); font-family: var(--font-mono); margin-left: 12px; }
+    .count-suffix:not(:empty)::before { content: '· '; color: var(--text-muted); }
+    .more-filters-row { width: 100%; display: flex; gap: 22px; align-items: center; flex-wrap: wrap; padding-top: 10px; margin-top: 2px; border-top: 1px solid var(--border-hair); }
+    .more-filters-row[hidden] { display: none; }
+    .range-input { width: 62px; background: transparent; border: 1px solid var(--border-row); border-radius: 3px; color: var(--text-secondary); font-size: 0.78rem; padding: 4px 6px; font-family: var(--font-mono); }
+    .range-input:focus { outline: none; border-color: var(--accent); color: var(--text-primary); }
+    .range-sep { color: var(--text-muted); }
+    .range-unit { font-size: 0.72rem; color: var(--text-tertiary); }
+    .load-more-bar { display: flex; align-items: center; justify-content: center; gap: 14px; margin-top: 14px; }
 
-    /* Pagination strip — same affordance at top + bottom of the list. */
-    .pager { display: flex; align-items: center; gap: 4px; flex-wrap: wrap;
-             padding: 8px 0; font-family: var(--font-mono); font-size: 0.74rem; }
-    .pager[data-position="top"]    { margin-bottom: 4px; }
-    .pager[data-position="bottom"] { margin-top:    4px; }
+    /* Button + info text for the "Load more" footer. */
     .pager-btn { background: transparent; color: var(--text-secondary);
                  border: 1px solid var(--border-row); padding: 3px 9px;
-                 border-radius: 3px; cursor: pointer; font-family: inherit;
-                 font-size: 0.72rem; min-width: 28px; transition: all 0.12s; }
-    .pager-btn:hover:not(:disabled):not(.current) {
-      color: var(--text-primary); border-color: var(--text-tertiary); }
+                 border-radius: 3px; cursor: pointer; font-family: var(--font-mono);
+                 font-size: 0.72rem; transition: all 0.12s; }
+    .pager-btn:hover:not(:disabled) { color: var(--text-primary); border-color: var(--text-tertiary); }
     .pager-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-    .pager-btn.current { background: var(--accent); color: #0b0d0c;
-                         border-color: var(--accent); font-weight: 600; cursor: default; }
-    .pager-gap { color: var(--text-muted); padding: 0 2px; }
-    .pager-info { color: var(--text-tertiary); margin-left: auto; }
+    .pager-info { color: var(--text-tertiary); }
 
     /* Activity rows */
     #rows { display: flex; flex-direction: column; }
@@ -255,7 +259,7 @@
 </header>
 
 <main>
-  <h1 style="font-size: 1.4rem; font-weight: 500; letter-spacing: -0.02em; color: #fff; margin: 0 0 16px;">Logs Overview</h1>
+  <h1 style="font-size: 1.4rem; font-weight: 500; letter-spacing: -0.02em; color: #fff; margin: 0 0 16px;">Logs Overview<span id="count-label" class="count-suffix"></span></h1>
 
   <div id="filters">
     <div class="filter-group">
@@ -297,10 +301,27 @@
     </div>
     <label class="filter-group" style="cursor:pointer;color:#ccc;font-size:0.74rem;"
            title="Only show activities that appear on any Review tab (duplicates, missing types, GPS spikes, odd times, or data issues)">
-      <input type="checkbox" id="flagged-only" onchange="_page = 1; load();" style="margin:0;">
+      <input type="checkbox" id="flagged-only" onchange="load();" style="margin:0;">
       <span>Show only flagged ⚠</span>
     </label>
-    <span id="count-label"></span>
+    <button type="button" id="more-filters-toggle" title="Filter by distance and duration">+ More filters</button>
+    <div id="more-filters" class="more-filters-row" hidden>
+      <div class="filter-group">
+        <span class="filter-label">Distance:</span>
+        <input type="number" id="dist-min" class="range-input" min="0" step="1" placeholder="min" inputmode="decimal">
+        <span class="range-sep">–</span>
+        <input type="number" id="dist-max" class="range-input" min="0" step="1" placeholder="max" inputmode="decimal">
+        <span class="range-unit">km</span>
+      </div>
+      <div class="filter-group">
+        <span class="filter-label">Duration:</span>
+        <input type="number" id="dur-min" class="range-input" min="0" step="1" placeholder="min" inputmode="numeric">
+        <span class="range-sep">–</span>
+        <input type="number" id="dur-max" class="range-input" min="0" step="1" placeholder="max" inputmode="numeric">
+        <span class="range-unit">min</span>
+      </div>
+      <button type="button" id="more-filters-clear">Clear</button>
+    </div>
   </div>
 
   <!-- Compare action bar — sticky at the top of the list. Visible only
@@ -361,10 +382,14 @@ let _datesAreDefault = true;
   if (qr) activeRegion = qr;
 }
 
-// ─── Pagination ─────────────────────────────────────────────────────────────
+// ─── Paging (incremental "Load more") ───────────────────────────────────────
 const PAGE_SIZE = 20;
-let _allItems = [];      // full filtered list from the last fetch
-let _page = 1;           // 1-indexed
+let _allItems = [];      // full server-filtered list from the last fetch
+let _view = [];          // _allItems after the client-side distance/duration filter
+let _shown = PAGE_SIZE;  // how many rows of _view are currently rendered
+let _lastRenderedDate = null;  // tracks day-gap spacers across incremental appends
+// Client-side range filters — distance in km, duration in minutes. null = open-ended.
+let distMin = null, distMax = null, durMin = null, durMax = null;
 
 function renderTypeChips() {
   const wrap = document.getElementById('type-chips');
@@ -376,7 +401,7 @@ function renderTypeChips() {
   const allBtn = document.createElement('button');
   allBtn.className = 'chip' + (activeType === 'all' ? ' active' : '');
   allBtn.textContent = 'All';
-  allBtn.onclick = () => { activeType = 'all'; _page = 1; load(); };
+  allBtn.onclick = () => { activeType = 'all'; load(); };
   wrap.appendChild(allBtn);
   TYPES.forEach(t => {
     const b = document.createElement('button');
@@ -388,7 +413,7 @@ function renderTypeChips() {
     // the saturated colour.
     b.style.background = t.bg || 'rgba(255,255,255,0.04)';
     b.style.color      = t.color || 'var(--text-primary)';
-    b.onclick = () => { activeType = t.id; _page = 1; load(); };
+    b.onclick = () => { activeType = t.id; load(); };
     wrap.appendChild(b);
   });
 }
@@ -399,15 +424,59 @@ function init() {
   // Any manual change opts out of the auto-min/max default — the inputs
   // become user state from that point onward.
   document.getElementById('date-start').onchange = e => {
-    dateStart = e.target.value; _datesAreDefault = false; _page = 1; load();
+    dateStart = e.target.value; _datesAreDefault = false; load();
   };
   document.getElementById('date-end').onchange   = e => {
-    dateEnd   = e.target.value; _datesAreDefault = false; _page = 1; load();
+    dateEnd   = e.target.value; _datesAreDefault = false; load();
   };
   renderTypeChips();
   initRegionCombo();
   initSortControls();
+  initMoreFilters();
   load();
+}
+
+// ─── "More filters" (distance + duration) ───────────────────────────────
+// Client-side range filter over the already-loaded list. Inputs are
+// debounced and re-render in place — no refetch. The toggle label flags
+// when a range is active so a collapsed-but-applied filter isn't invisible.
+function initMoreFilters() {
+  const row   = document.getElementById('more-filters');
+  const ids   = ['dist-min', 'dist-max', 'dur-min', 'dur-max'];
+  const parse = v => { const n = parseFloat(v); return (isNaN(n) || n < 0) ? null : n; };
+
+  document.getElementById('more-filters-toggle').onclick = () => {
+    if (row.hasAttribute('hidden')) row.removeAttribute('hidden');
+    else row.setAttribute('hidden', '');
+    _updateMoreFiltersLabel();
+  };
+
+  let t = null;
+  const onInput = () => {
+    distMin = parse(document.getElementById('dist-min').value);
+    distMax = parse(document.getElementById('dist-max').value);
+    durMin  = parse(document.getElementById('dur-min').value);
+    durMax  = parse(document.getElementById('dur-max').value);
+    _updateMoreFiltersLabel();
+    clearTimeout(t);
+    t = setTimeout(_resetAndRender, 180);
+  };
+  ids.forEach(id => document.getElementById(id).addEventListener('input', onInput));
+
+  document.getElementById('more-filters-clear').onclick = () => {
+    ids.forEach(id => { document.getElementById(id).value = ''; });
+    distMin = distMax = durMin = durMax = null;
+    _updateMoreFiltersLabel();
+    _resetAndRender();
+  };
+}
+
+function _updateMoreFiltersLabel() {
+  const toggle = document.getElementById('more-filters-toggle');
+  const open   = !document.getElementById('more-filters').hasAttribute('hidden');
+  const active = (distMin != null || distMax != null || durMin != null || durMax != null);
+  toggle.textContent = (open ? '− More filters' : '+ More filters') + (active ? ' •' : '');
+  toggle.classList.toggle('active', open || active);
 }
 
 // ─── Sort controls ──────────────────────────────────────────────────────
@@ -446,16 +515,14 @@ function initSortControls() {
     sortField = sel.value;
     sortDir   = _naturalSortDir(sortField);  // reset to field's natural direction
     _updateSortDirIcon();
-    _page = 1;
     applySort();
-    _renderCurrentPage();
+    _resetAndRender();
   };
   btn.onclick = () => {
     sortDir = (sortDir === 'asc') ? 'desc' : 'asc';
     _updateSortDirIcon();
-    _page = 1;
     applySort();
-    _renderCurrentPage();
+    _resetAndRender();
   };
 }
 
@@ -507,7 +574,6 @@ function renderRegionList(query) {
       activeRegion = o.id;
       document.getElementById('region-trigger').textContent = regionLabel(activeRegion);
       closeRegionPop();
-      _page = 1;
       load();
     };
     list.appendChild(row);
@@ -811,18 +877,27 @@ async function load() {
 
   _allItems = d.items || [];
   applySort();
-  document.getElementById('count-label').textContent =
-    `${_allItems.length} ${_allItems.length === 1 ? 'activity' : 'activities'}`;
+  _resetAndRender();
 
-  if (!_allItems.length) {
-    wrap.innerHTML = '<div id="empty-msg">No activities in this range.</div>';
-    return;
-  }
+  // Update type chips' active style after potential changes
+  renderTypeChips();
+}
 
-  // Compute per-metric maxes against the *full* filtered list so sparkbars
-  // are stable as the user pages — a value's bar doesn't grow just because
-  // the per-page slice happens to exclude the global max.
-  const maxOf = key => Math.max(0, ..._allItems.map(i => i[key] || 0));
+// Apply the client-side distance/duration range to _allItems → _view, and
+// recompute per-metric sparkbar maxes + the count label against that view.
+// Maxes track the filtered view (not the visible slice) so a bar doesn't
+// grow just because a later "Load more" chunk excludes the global max.
+function _rebuildView() {
+  _view = _allItems.filter(it => {
+    const km  = it.distance_km;
+    const min = (it.duration_sec != null) ? it.duration_sec / 60 : null;
+    if (distMin != null && (km  == null || km  < distMin)) return false;
+    if (distMax != null && (km  == null || km  > distMax)) return false;
+    if (durMin  != null && (min == null || min < durMin )) return false;
+    if (durMax  != null && (min == null || min > durMax )) return false;
+    return true;
+  });
+  const maxOf = key => Math.max(0, ..._view.map(i => i[key] || 0));
   metricMax = {
     'sb-distance':   maxOf('distance_km'),
     'sb-climb':      maxOf('elev_gain_m'),
@@ -835,152 +910,116 @@ async function load() {
     'sb-difficulty': maxOf('difficulty'),
     'sb-intensity':  maxOf('intensity'),
   };
-
-  _renderCurrentPage();
-
-  // Update type chips' active style after potential changes
-  renderTypeChips();
+  const n = _view.length;
+  document.getElementById('count-label').textContent =
+    `${n} ${n === 1 ? 'activity' : 'activities'}`;
 }
 
-// Build the "1 · 2 · 3 … last" strip for the given position. Returns a
-// fresh node — callers append it at the top and bottom of the list.
-function _renderPager(position) {
-  const total = _allItems.length;
-  const lastPage = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  if (lastPage < 2) return null;
-
-  const wrap = document.createElement('div');
-  wrap.className = 'pager';
-  wrap.dataset.position = position;
-
-  const prev = document.createElement('button');
-  prev.className = 'pager-btn'; prev.textContent = '← Prev';
-  prev.disabled = _page <= 1;
-  prev.onclick = () => _goToPage(_page - 1);
-  wrap.appendChild(prev);
-
-  // Compose the visible page-number set: always show the first three and
-  // last three pages plus the current ±1, with ellipses where there's a
-  // gap. From page 1 of N this reads "1 · 2 · 3 … N-2 · N-1 · N".
-  const numbers = new Set([
-    1, 2, 3,
-    _page - 1, _page, _page + 1,
-    lastPage - 2, lastPage - 1, lastPage,
-  ]);
-  const visible = [...numbers].filter(n => n >= 1 && n <= lastPage).sort((a, b) => a - b);
-  let prevNum = 0;
-  for (const n of visible) {
-    if (n - prevNum > 1) {
-      const gap = document.createElement('span');
-      gap.className = 'pager-gap'; gap.textContent = '…';
-      wrap.appendChild(gap);
-    }
-    const b = document.createElement('button');
-    b.className = 'pager-btn pager-num' + (n === _page ? ' current' : '');
-    b.textContent = String(n);
-    b.onclick = () => _goToPage(n);
-    wrap.appendChild(b);
-    prevNum = n;
+// Append one row (plus a leading day-gap spacer when sorting by date) and
+// wire its per-row controls. Shared by the initial render and "Load more"
+// so appended rows behave identically to the first batch.
+function _appendRow(wrap, item, showGaps) {
+  if (showGaps && _lastRenderedDate) {
+    const a = new Date(_lastRenderedDate); const b = new Date(item.date);
+    const days = Math.round((a - b) / 86400000);
+    if (days > 0) wrap.appendChild(renderGap(days));
   }
+  const row = renderRow(item);
+  wrap.appendChild(row);
+  observer.observe(row);
+  const approveBtn = row.querySelector('.issues-approve');
+  if (approveBtn) {
+    approveBtn.addEventListener('click', async (ev) => {
+      ev.stopPropagation();
+      const fn = approveBtn.dataset.fn;
+      if (!confirm('Approve this recording? Warnings for it will be permanently suppressed.')) return;
+      approveBtn.disabled = true; approveBtn.textContent = '…';
+      await fetch(`/api/activity/${encodeURIComponent(fn)}/metadata`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ issues_approved: true }),
+      });
+      load();
+    });
+  }
+  const excludeBtn = row.querySelector('.exclude-btn');
+  if (excludeBtn) {
+    excludeBtn.addEventListener('click', async (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      const fn = excludeBtn.dataset.fn;
+      const newVal = !item.excluded;
+      excludeBtn.disabled = true;
+      await fetch(`/api/activity/${encodeURIComponent(fn)}/metadata`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ excluded_from_stats: newVal }),
+      });
+      load();
+    });
+  }
+  const pickBtn = row.querySelector('.cmp-pick');
+  if (pickBtn) {
+    pickBtn.addEventListener('click', (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      togglePick(item.filename, row.dataset.title);
+    });
+  }
+  _lastRenderedDate = item.date;
+}
 
-  const next = document.createElement('button');
-  next.className = 'pager-btn'; next.textContent = 'Next →';
-  next.disabled = _page >= lastPage;
-  next.onclick = () => _goToPage(_page + 1);
-  wrap.appendChild(next);
-
-  const lo = (_page - 1) * PAGE_SIZE + 1;
-  const hi = Math.min(_page * PAGE_SIZE, total);
+// Footer below the list: "Load more (N remaining)" + "Showing X of Y".
+function _renderFooter(wrap) {
+  const total = _view.length;
+  const shown = Math.min(_shown, total);
+  const bar = document.createElement('div');
+  bar.className = 'load-more-bar';
+  if (shown < total) {
+    const btn = document.createElement('button');
+    btn.className = 'pager-btn';
+    btn.textContent = `Load more (${total - shown} remaining)`;
+    btn.onclick = _loadMore;
+    bar.appendChild(btn);
+  }
   const info = document.createElement('span');
   info.className = 'pager-info';
-  info.textContent = `${lo}–${hi} of ${total}`;
-  wrap.appendChild(info);
-  return wrap;
+  info.textContent = `Showing ${shown} of ${total}`;
+  bar.appendChild(info);
+  wrap.appendChild(bar);
 }
 
-function _goToPage(n) {
-  const lastPage = Math.max(1, Math.ceil(_allItems.length / PAGE_SIZE));
-  _page = Math.max(1, Math.min(n, lastPage));
-  _renderCurrentPage();
-}
-
-// Slice _allItems into PAGE_SIZE rows starting at _page, render top+bottom
-// pagers, day-gap spacers, and per-row wiring. Pulled out of load() so
-// pager clicks can re-render without re-fetching.
-function _renderCurrentPage() {
+// Full (re)render from scratch — used after a fetch or any filter/sort
+// change. _shown is reset to the first page by _resetAndRender.
+function _render() {
+  _rebuildView();
   const wrap = document.getElementById('rows');
-  // Tear down any existing maps before clobbering the DOM.
   maps.destroyAll();
   wrap.innerHTML = '';
-
-  // Clamp page if filters shrank the list below the current page.
-  const lastPage = Math.max(1, Math.ceil(_allItems.length / PAGE_SIZE));
-  if (_page > lastPage) _page = lastPage;
-
-  const top = _renderPager('top');
-  if (top) wrap.appendChild(top);
-
-  const start = (_page - 1) * PAGE_SIZE;
-  const slice = _allItems.slice(start, start + PAGE_SIZE);
-  // Day-gap spacers only make sense when rows are in chronological
-  // order — under any other sort the gap between two adjacent rows is
-  // arbitrary, so suppress them.
-  const showGaps = (sortField === 'date');
-  let prevDate = null;
-  for (const item of slice) {
-    if (showGaps && prevDate) {
-      const a = new Date(prevDate); const b = new Date(item.date);
-      const days = Math.round((a - b) / 86400000);
-      if (days > 0) wrap.appendChild(renderGap(days));
-    }
-    const row = renderRow(item);
-    wrap.appendChild(row);
-    observer.observe(row);
-    const approveBtn = row.querySelector('.issues-approve');
-    if (approveBtn) {
-      approveBtn.addEventListener('click', async (ev) => {
-        ev.stopPropagation();
-        const fn = approveBtn.dataset.fn;
-        if (!confirm('Approve this recording? Warnings for it will be permanently suppressed.')) return;
-        approveBtn.disabled = true; approveBtn.textContent = '…';
-        await fetch(`/api/activity/${encodeURIComponent(fn)}/metadata`, {
-          method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ issues_approved: true }),
-        });
-        load();
-      });
-    }
-    const excludeBtn = row.querySelector('.exclude-btn');
-    if (excludeBtn) {
-      excludeBtn.addEventListener('click', async (ev) => {
-        ev.preventDefault();
-        ev.stopPropagation();
-        const fn = excludeBtn.dataset.fn;
-        const newVal = !item.excluded;
-        excludeBtn.disabled = true;
-        await fetch(`/api/activity/${encodeURIComponent(fn)}/metadata`, {
-          method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ excluded_from_stats: newVal }),
-        });
-        load();
-      });
-    }
-    const pickBtn = row.querySelector('.cmp-pick');
-    if (pickBtn) {
-      pickBtn.addEventListener('click', (ev) => {
-        ev.preventDefault();
-        ev.stopPropagation();
-        togglePick(item.filename, row.dataset.title);
-      });
-    }
-    prevDate = item.date;
+  _lastRenderedDate = null;
+  if (!_view.length) {
+    wrap.innerHTML = _allItems.length
+      ? '<div id="empty-msg">No activities match these filters.</div>'
+      : '<div id="empty-msg">No activities in this range.</div>';
+    return;
   }
+  const showGaps = (sortField === 'date');
+  for (const item of _view.slice(0, _shown)) _appendRow(wrap, item, showGaps);
+  _renderFooter(wrap);
+  refreshCompareUI();
+}
 
-  const bot = _renderPager('bottom');
-  if (bot) wrap.appendChild(bot);
+function _resetAndRender() { _shown = PAGE_SIZE; _render(); }
 
-  // Re-apply pair-compare highlight on surviving rows so the user's
-  // current A/B selection persists across page / filter changes.
+// Append the next PAGE_SIZE rows without tearing down existing ones — keeps
+// already-rendered maps alive (the IntersectionObserver + LRU map cap handle
+// eviction as you scroll).
+function _loadMore() {
+  const wrap = document.getElementById('rows');
+  wrap.querySelector('.load-more-bar')?.remove();
+  const from = _shown;
+  _shown = Math.min(_shown + PAGE_SIZE, _view.length);
+  const showGaps = (sortField === 'date');
+  for (const item of _view.slice(from, _shown)) _appendRow(wrap, item, showGaps);
+  _renderFooter(wrap);
   refreshCompareUI();
 }
 
