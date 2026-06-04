@@ -132,8 +132,13 @@ to-do list, not a spec — re-verify before acting.
   identify which library owns a control before touching its CSS.**
 
 ### Still open (bigger, cross-file — need a shared `static/maps.js` + per-page verify)
-- **`LazyMapManager`** factory — `routes.html` lazy mini-map LRU ↔ `logs.html` are
-  near-identical (routes even comments "mirrors /logs").
+- ~~`LazyMapManager` factory~~ — **DONE (`5a38aea`), browser-verified.** Extracted
+  `createLazyMapManager({ maxActive })` into `utils.js` (has/get/touch/register/remove/
+  evictIfOver/destroyAll/invalidateAll + exposed `instances`); logs (cap 20) + routes
+  (cap 24, `sug:<id>` keys) both consume it. Per-page init stays page-specific.
+  **Pattern for the rest:** shared map helpers live in `utils.js` (already loaded
+  everywhere), per-page init/tiles/colours stay inline; restart Flask (utils.js asset_v +
+  cached templates) and verify each page in-browser before committing.
 - **Shared Leaflet basemap helpers** — `makeStreetLayer()` / `makeSatelliteLayer()` /
   `makeStaticMiniMap(el)` across `compare.html` (×4), `heatmap.html`, `logs.html`,
   `routes.html` (note: routes uses CartoDB tiles — only the locked-map options are shared).
