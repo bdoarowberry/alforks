@@ -2305,6 +2305,41 @@ def _cached_match(filename: str, mtime: float, data: dict, meta_fp: str):
     )
 
 
+def _effective_for_match(filename: str, data: dict, file_meta: dict,
+                         eff_type: str | None = None) -> dict:
+    """Apply the full effective-data pipeline (type re-segmentation, time-shift,
+    trim, spike-repair, smoothing) to RAW parsed data before trail matching, so
+    the snapped points match the trim/smoothing that `meta_fp` encodes.
+
+    `trail_match.cached_match` keys on `meta_fp` (which fingerprints trim /
+    smoothing / time-shift / spike-repair) but NOT on `data` itself — so every
+    site that writes the cache must snap the SAME transformed points, or a site
+    that snaps raw points writes an entry the others read back. That silently
+    serves raw-track trail attempts for any ride carrying trim/smoothing/shift/
+    spike-repair metadata (prewarm/rescan used to do exactly this).
+
+    Pass `eff_type` when the caller already resolved it (the detail handler);
+    otherwise it is resolved here the same way the detail handler does, off the
+    RAW data, so all sites agree."""
+    if eff_type is None:
+        all_regions = load_regions()
+        matched_regions = _effective_regions(data, file_meta, all_regions)
+        eff_type = _effective_type_for(file_meta.get("type", ""), matched_regions,
+                                       all_regions, data.get("date") or "")
+    eff = _effective_data(filename, data, eff_type)
+    if file_meta.get("time_shift_hours"):
+        eff = _apply_time_shift(eff, file_meta["time_shift_hours"])
+    trim = file_meta.get("trim") or {}
+    if trim:
+        eff = _apply_trim(eff, trim)
+    if file_meta.get("spike_repair"):
+        eff = _apply_spike_repair(eff)
+    smoothing = file_meta.get("smoothing") or {}
+    if isinstance(smoothing, dict) and int(smoothing.get("window") or 0) > 1:
+        eff = _apply_smoothing(eff, smoothing)
+    return eff
+
+
 def _prewarm_trail_matches_async() -> None:
     """Idempotent with rescan-on-trigger semantics. If a worker is already
     running, set the rescan flag so the worker loops again after it
@@ -2405,7 +2440,12 @@ def _trail_prewarm_worker_inner() -> None:
             # same activity.
             file_meta = meta.get(fn, {})
             meta_fp = _meta_fp(file_meta)
-            _cached_match(fn, p.stat().st_mtime, data, meta_fp)
+            # Snap the SAME transformed points the detail view fingerprints —
+            # these rides are MTB by construction (filtered above), so passing
+            # eff_type explicitly skips re-resolving it. Snapping raw `data`
+            # here would poison the cache the detail view reads back.
+            match_data = _effective_for_match(fn, data, file_meta, "mtb")
+            _cached_match(fn, p.stat().st_mtime, match_data, meta_fp)
             done += 1
             with _trail_prewarm_lock:
                 _trail_prewarm_progress["done"] = done
@@ -2498,8 +2538,11 @@ def api_activity_rescan_trails(filename: str):
     # KEEP IN SYNC with the prewarm + activity-detail call sites — using
     # different keys here would produce a different MD5 and the next
     # request would silently recompute against the matching-shape entry.
+    # The snapped DATA must also match: transform to effective points before
+    # matching, or this writes a raw-snapped entry the detail view reads back.
     meta_fp = _meta_fp(file_meta)
-    result = _cached_match(filename, p.stat().st_mtime, data, meta_fp)
+    match_data = _effective_for_match(filename, data, file_meta)
+    result = _cached_match(filename, p.stat().st_mtime, match_data, meta_fp)
     _invalidate_trail_leaderboards()
     _invalidate_route_attempts()   # one ride's match changed → any route attempt may have changed
     return jsonify({"ok": True, "result": result})
@@ -2524,6 +2567,10 @@ def _route_proposal_for_ride(filename: str, data: dict | None = None
         return None, "could not parse GPX", 500
 
     file_meta = (load_metadata() or {}).get(filename) or {}
+    # Snap (and build segments below, off data["points"]) on the same transformed
+    # points the detail view caches under this meta_fp — see _effective_for_match.
+    # Both callers pass data=None, so this never double-applies the pipeline.
+    data = _effective_for_match(filename, data, file_meta)
     meta_fp = _meta_fp(file_meta)
     result = _cached_match(filename, p.stat().st_mtime, data, meta_fp)
     timeline = (result or {}).get("timeline") or []
@@ -3608,6 +3655,11 @@ def api_activity(filename):
     matched_regions = _effective_regions(get_activity(filename) or {}, file_meta, all_regions)
     eff_type = _effective_type_for(file_meta.get("type", ""), matched_regions, all_regions,
                                    data.get("date") or "")
+    # Canonical trail-match input: transform the RAW data independently of the
+    # ?notrim/?noshift/?norepair/?nosmoothing UI bypass flags below, so the snap
+    # cached under meta_fp always matches — regardless of whether this request,
+    # prewarm, or a rescan populated it first. (Only MTB activities are matched.)
+    match_data = _effective_for_match(filename, data, file_meta, eff_type) if eff_type == "mtb" else None
     data      = _effective_data(filename, data, eff_type)
     # Time-shift runs first so trim windows and HR merge see the corrected
     # timeline. ?noshift=1 bypasses it for the trim-edit UI (which wants
@@ -3648,7 +3700,7 @@ def api_activity(filename):
             meta_fp = _meta_fp(file_meta)
             disk_before = TRAIL_MATCH_CACHE_DIR / f"{filename}.json"
             existed_before = disk_before.exists()
-            trails = _cached_match(filename, _stat_mtime(p), data, meta_fp)
+            trails = _cached_match(filename, _stat_mtime(p), match_data, meta_fp)
             # If cached_match wrote a fresh file for this activity (first
             # request or invalidated cache), the leaderboard built before
             # this call doesn't include the current attempts — meaning
@@ -6591,6 +6643,29 @@ def _iter_spike_flagged_activities():
             yield act, n, max_implied
 
 
+_spike_flagged_cache: dict = {}
+_spike_flagged_cache_lock = threading.Lock()
+
+
+def _spike_flagged_activities() -> list:
+    """Materialized + cached form of `_iter_spike_flagged_activities`, keyed on
+    `_activities_cache_key()`. The underlying scan reads every non-triaged
+    activity's full point list (the expensive part of /review), and all three
+    callers — /api/speed-spikes, the /review flagged set, and the review-counts
+    badge — need it. Without this cache they each re-run the full scan, so a
+    single metadata/region/type edit pays the spike scan up to three times.
+    Returns a list of (activity, n_spikes, max_implied_kmh)."""
+    cache_key = _activities_cache_key()
+    with _spike_flagged_cache_lock:
+        if _spike_flagged_cache.get("k") == cache_key:
+            return _spike_flagged_cache["v"]
+    result = list(_iter_spike_flagged_activities())
+    with _spike_flagged_cache_lock:
+        _spike_flagged_cache["k"] = cache_key
+        _spike_flagged_cache["v"] = result
+    return result
+
+
 def _odd_time_local_dt(dt, tz_name):
     """Resolve a start datetime to location-local time for night-window
     classification. Returns the localized datetime, or None when the zone
@@ -6680,7 +6755,7 @@ def api_speed_spikes():
     on the first call, then served from the regular activity cache.
     """
     flagged: list[dict] = []
-    for act, n, max_implied in _iter_spike_flagged_activities():
+    for act, n, max_implied in _spike_flagged_activities():
         s = act.get("stats") or {}
         flagged.append({
             "filename":      act["filename"],
@@ -6917,7 +6992,7 @@ def _review_flagged_filenames() -> set:
 
     # GPS spikes — expensive (full point scan per non-repaired/approved
     # activity). Skip activities that the user has already triaged.
-    for act, _n, _max in _iter_spike_flagged_activities():
+    for act, _n, _max in _spike_flagged_activities():
         flagged.add(act["filename"])
 
     # Cache a frozenset so a future caller can't mutate the shared state in
@@ -6957,7 +7032,7 @@ def api_review_counts():
 
     # Speed spikes — match /api/speed-spikes' threshold (≥3 spikes or any
     # single ≥80 km/h). Skips repaired and approved rides.
-    spikes = sum(1 for _ in _iter_spike_flagged_activities())
+    spikes = len(_spike_flagged_activities())
 
     # Odd times — re-derive count from the existing endpoint's heuristic.
     # Cheaper version: just count activities whose start hour falls in the

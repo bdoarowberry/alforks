@@ -18,6 +18,13 @@
   // Don't surface stale finishes when landing on a page hours after the sync.
   const FRESH_WINDOW_SEC = 60;
   let hideTimer = null;
+  // Single tracked handle for the self-rescheduling poll chain, so triggerSyncAll()
+  // reschedules the one loop instead of forking a second (compounding) chain.
+  let pollTimer = null;
+  function schedule(delay) {
+    clearTimeout(pollTimer);
+    pollTimer = setTimeout(tick, delay);
+  }
 
   function ensureContainer() {
     let el = document.getElementById(TOAST_ID);
@@ -102,11 +109,11 @@
     } catch (e) {
       // server probably restarting — fail quiet and try again later
     }
-    setTimeout(tick, nextDelay);
+    schedule(nextDelay);
   }
 
   // First check kicks off shortly after page load
-  setTimeout(tick, 1000);
+  schedule(1000);
 
   // Global helper: any page can call window.triggerSyncAll() to kick off a
   // Strava+Garmin sync without leaving its current view. The toast then
@@ -126,8 +133,9 @@
         )).join(''));
         // Reset hide timer; the regular poll will take over.
         clearTimeout(hideTimer);
-        // Poll faster while we expect activity to start
-        setTimeout(tick, 500);
+        // Poll faster while we expect activity to start (reschedules the single
+        // loop — does not fork a new chain).
+        schedule(500);
       } else {
         show('<div style="color:#888">Sync already running.</div>');
         scheduleHide();

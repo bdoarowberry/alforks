@@ -361,7 +361,10 @@ def _advance_newest_epoch(newest_epoch: int, a: dict) -> int:
     """Fold an activity's start time into the running newest-epoch high-water
     mark. Best-effort: a missing or garbled start_date leaves it unchanged."""
     try:
-        start_dt = datetime.fromisoformat(a["start_date"].rstrip("Z")).timestamp()
+        # Strava's start_date is true-UTC with a trailing "Z"; keep the tz so
+        # .timestamp() yields a correct UTC epoch instead of assuming local time
+        # (which would shift the incremental-sync "after" boundary and skip rides).
+        start_dt = datetime.fromisoformat(a["start_date"].replace("Z", "+00:00")).timestamp()
         return max(newest_epoch, int(start_dt))
     except Exception:
         return newest_epoch

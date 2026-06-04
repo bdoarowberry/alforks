@@ -1623,21 +1623,38 @@ async function saveSegmentOverrides() {
     from_dist: Math.round(editSplits[i]     * 1000) / 1000,
     to_dist:   Math.round(editSplits[i + 1] * 1000) / 1000,
   }));
-  await fetch(`/api/activity/${encodeURIComponent(currentFilename)}/segments`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ segment_overrides: overrides }),
-  });
+  const confirmEl = document.getElementById('seg-save-confirm');
+  try {
+    const res = await fetch(`/api/activity/${encodeURIComponent(currentFilename)}/segments`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ segment_overrides: overrides }),
+    });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+  } catch (e) {
+    // Persist failed — keep editDirty so the user can retry, and surface the error
+    // rather than showing a false "Saved".
+    confirmEl.style.color = '#ef4444';
+    confirmEl.textContent = 'Save failed — not saved';
+    return;
+  }
   if (!trackData.meta) trackData.meta = {};
   trackData.meta.segment_overrides = overrides;
   editDirty = false;
-  document.getElementById('seg-save-confirm').textContent = 'Saved';
-  setTimeout(() => document.getElementById('seg-save-confirm').textContent = '', 2000);
+  confirmEl.style.color = '';
+  confirmEl.textContent = 'Saved';
+  setTimeout(() => confirmEl.textContent = '', 2000);
 }
 
 async function clearSegmentOverrides() {
   if (!currentFilename) return;
-  await fetch(`/api/activity/${encodeURIComponent(currentFilename)}/segments`, { method: 'DELETE' });
+  try {
+    const res = await fetch(`/api/activity/${encodeURIComponent(currentFilename)}/segments`, { method: 'DELETE' });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+  } catch (e) {
+    document.getElementById('seg-save-confirm').textContent = 'Clear failed';
+    return;
+  }
   if (trackData.meta) delete trackData.meta.segment_overrides;
   activeSegments = trackData.segments;
   exitEditMode();
@@ -3862,7 +3879,7 @@ function renderActivityList(reSelectFilename) {
 
   // Empty state — distinguish "filters cut everything" from "no activities at all".
   if (acts.length === 0) {
-    const hasAnyFilter = year !== 'all' || type !== 'all' || search !== '';
+    const hasAnyFilter = year !== 'all' || type !== 'all' || region !== 'all' || search !== '';
     if (allActivitiesData.length === 0) {
       list.innerHTML = `<div class="activity-empty">
         <div class="empty-title">No activities yet</div>
