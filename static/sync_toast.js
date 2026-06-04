@@ -44,22 +44,30 @@
     return el;
   }
 
+  // sync messages come from subprocess output (app.py reads the last stderr/stdout
+  // line); escape before interpolating into innerHTML so markup can't break the
+  // toast. This IIFE doesn't import utils.js, so inline a tiny escaper.
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, c => (
+      { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  }
+
   function rowHtml(name, st) {
     let badge = '';
     let extra = '';
     if (st.running) {
       badge = '<span style="color:#f59e0b">⟳ syncing</span>';
-      extra = st.message ? `<div style="color:#888;margin-top:2px">${st.message}</div>` : '';
+      extra = st.message ? `<div style="color:#888;margin-top:2px">${esc(st.message)}</div>` : '';
     } else if (st.ok === true) {
       badge = '<span style="color:#22c55e">✓</span>';
-      extra = `<div style="color:#888;margin-top:2px">${st.message || 'done'}</div>`;
+      extra = `<div style="color:#888;margin-top:2px">${esc(st.message || 'done')}</div>`;
     } else if (st.ok === false) {
       badge = '<span style="color:#ef4444">✗</span>';
-      extra = `<div style="color:#ef4444;margin-top:2px">${st.message || 'error'}</div>`;
+      extra = `<div style="color:#ef4444;margin-top:2px">${esc(st.message || 'error')}</div>`;
     } else {
       return '';
     }
-    return `<div style="margin-bottom:8px"><strong style="color:#fff">${name}</strong> ${badge}${extra}</div>`;
+    return `<div style="margin-bottom:8px"><strong style="color:#fff">${esc(name)}</strong> ${badge}${extra}</div>`;
   }
 
   function show(html) {
@@ -142,7 +150,7 @@
       }
       return data;
     } catch (e) {
-      show('<div style="color:#ef4444">Sync trigger failed: ' + e.message + '</div>');
+      show('<div style="color:#ef4444">Sync trigger failed: ' + esc(e.message) + '</div>');
       scheduleHide();
       return null;
     }

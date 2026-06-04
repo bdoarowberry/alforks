@@ -211,8 +211,7 @@ const LABEL_MIN_ZOOM = 13;   // labels visible at/above this zoom
 const edgeById   = new Map();
 // trailName → array of permanent label tooltips (one per component, midpoint)
 const trailLabels = new Map();
-let trailLayerGroup;     // every clickable edge polyline
-let roadLayerGroup;      // dim dashed roads (legacy — empty now; roads are in trailLayerGroup as edges)
+let trailLayerGroup;     // every clickable edge polyline (roads included as edges)
 let labelLayerGroup;     // permanent trail-name labels
 let junctionLayer;       // always-on small junction dots
 let badgeLayer;          // segment-ordinal badges at edge midpoints (rebuilt on segment change)
@@ -277,14 +276,12 @@ async function setRegion(regionId) {
 
   // Clear existing layers
   if (trailLayerGroup) map.removeLayer(trailLayerGroup);
-  if (roadLayerGroup)  map.removeLayer(roadLayerGroup);
   if (labelLayerGroup) map.removeLayer(labelLayerGroup);
   if (junctionLayer)   map.removeLayer(junctionLayer);
   if (badgeLayer)      map.removeLayer(badgeLayer);
   edgeById.clear();
   trailLabels.clear();
   trailLayerGroup = L.layerGroup().addTo(map);
-  roadLayerGroup  = L.layerGroup().addTo(map);
   labelLayerGroup = L.layerGroup().addTo(map);
   junctionLayer   = L.layerGroup().addTo(map);
   badgeLayer      = L.layerGroup().addTo(map);

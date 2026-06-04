@@ -444,13 +444,7 @@ async function dupDeleteSelected() {
   _dupSelected.clear();
   _dupSyncBulkBar();
   // Refresh the count badges + summary line.
-  const remainingGroups = document.querySelectorAll('#dup-list .dup-group').length;
-  const remainingTracks = document.querySelectorAll('#dup-list .dup-row').length;
-  document.getElementById('dup-summary').textContent =
-    remainingGroups ? `${remainingGroups} group${remainingGroups===1?'':'s'} · ${remainingTracks} tracks` : '';
-  if (!remainingGroups) {
-    document.getElementById('dup-list').innerHTML = '<div class="dup-empty">No duplicates remaining.</div>';
-  }
+  _dupUpdateSummaryAndEmpty();
   btns.forEach(b => b.disabled = false);
   rvRefreshPills();
   if (failed) alert(`${failed} delete${failed===1?'':'s'} failed — see network tab for details.`);
@@ -754,13 +748,7 @@ async function dupNotADuplicate(groupEl, group, btn) {
     // Drop the group from the DOM and update the summary line.
     _dupReleaseLeafletInside(groupEl);
     groupEl.remove();
-    const remainingGroups = document.querySelectorAll('#dup-list .dup-group').length;
-    const remainingTracks = document.querySelectorAll('#dup-list .dup-row').length;
-    document.getElementById('dup-summary').textContent =
-      remainingGroups ? `${remainingGroups} group${remainingGroups===1?'':'s'} · ${remainingTracks} tracks` : '';
-    if (!remainingGroups) {
-      document.getElementById('dup-list').innerHTML = '<div class="dup-empty">No duplicates remaining.</div>';
-    }
+    _dupUpdateSummaryAndEmpty();
     rvRefreshPills();
   } catch (e) {
     alert('Failed to dismiss: ' + e.message);
@@ -790,13 +778,7 @@ async function deleteDupTrack(filename, row) {
         group.remove();
       }
     }
-    const remainingGroups = document.querySelectorAll('#dup-list .dup-group').length;
-    const remainingTracks = document.querySelectorAll('#dup-list .dup-row').length;
-    document.getElementById('dup-summary').textContent =
-      remainingGroups ? `${remainingGroups} group${remainingGroups===1?'':'s'} · ${remainingTracks} tracks` : '';
-    if (!remainingGroups) {
-      document.getElementById('dup-list').innerHTML = '<div class="dup-empty">No duplicates remaining.</div>';
-    }
+    _dupUpdateSummaryAndEmpty();
   } catch (e) {
     alert('Failed to delete: ' + e.message);
   }
@@ -868,6 +850,18 @@ function _fmtYmd(d) {
   return `${y}-${m}-${da}`;
 }
 
+// Recompute the duplicates summary line + inject the empty state. Shared by
+// dupDeleteSelected / dupNotADuplicate / deleteDupTrack so the three can't drift.
+function _dupUpdateSummaryAndEmpty() {
+  const remainingGroups = document.querySelectorAll('#dup-list .dup-group').length;
+  const remainingTracks = document.querySelectorAll('#dup-list .dup-row').length;
+  document.getElementById('dup-summary').textContent =
+    remainingGroups ? `${remainingGroups} group${remainingGroups===1?'':'s'} · ${remainingTracks} tracks` : '';
+  if (!remainingGroups) {
+    document.getElementById('dup-list').innerHTML = '<div class="dup-empty">No duplicates remaining.</div>';
+  }
+}
+
 function _renderOddRow(a) {
   const row = document.createElement('div');
   row.className = 'odd-row';
@@ -894,7 +888,9 @@ function _renderOddRow(a) {
   // shows the post-shift day if it differs).
   const dateEl = document.createElement('div');
   dateEl.className = 'odd-date';
-  dateEl.textContent = _fmtYmd(originalStart) || a.date || '—';
+  // _fmtYmd returns a truthy '—' on bad input, so the `|| a.date` fallback only
+  // fires when originalStart itself is null/unparseable.
+  dateEl.textContent = originalStart ? _fmtYmd(originalStart) : (a.date || '—');
 
   // Time column: original | → | new. The arrow + new-time only render
   // when a shift is active; otherwise the original time stands alone.

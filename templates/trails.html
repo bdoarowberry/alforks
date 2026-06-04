@@ -374,7 +374,13 @@ document.getElementById('detail-body').addEventListener('click', (ev) => {
   window.location = tr.getAttribute('data-nav');
 });
 
-document.getElementById('trail-search').addEventListener('input', () => render());
+// Debounce the search so each keystroke doesn't rebuild the whole region/trail
+// DOM; render() re-maps and re-builds innerHTML for every region + trail row.
+let _trailSearchTimer = null;
+document.getElementById('trail-search').addEventListener('input', () => {
+  clearTimeout(_trailSearchTimer);
+  _trailSearchTimer = setTimeout(() => render(), 130);
+});
 
 loadData().catch(err => {
   document.getElementById('content').innerHTML =

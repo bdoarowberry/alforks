@@ -1444,14 +1444,17 @@ async function loadSyncStatus() {
   } catch (e) {}
 }
 
+let _syncPoll = null;
 async function kickSync(source) {
   await fetch(`/api/sync/${source}`, { method: 'POST' });
   loadSyncStatus();
-  // Poll while any sync is running
-  const poll = setInterval(async () => {
+  // Single poll loop — clear any existing one so repeated clicks (Sync now /
+  // Sync All, or a re-click mid-sync) don't stack overlapping 2s intervals.
+  if (_syncPoll) clearInterval(_syncPoll);
+  _syncPoll = setInterval(async () => {
     await loadSyncStatus();
     const r = await fetch('/api/sync/status'); const s = await r.json();
-    if (!s.strava.running && !s.garmin.running) clearInterval(poll);
+    if (!s.strava.running && !s.garmin.running) { clearInterval(_syncPoll); _syncPoll = null; }
   }, 2000);
 }
 

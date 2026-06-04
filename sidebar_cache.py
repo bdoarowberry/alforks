@@ -80,21 +80,25 @@ def read_sidebar_entry(*, sidebar_cache_dir: Path, hr_cache_dir: Path,
     p = _entry_path(sidebar_cache_dir, filename)
     if not p.exists():
         return None
+    # Tolerant of corrupt/malformed entries: the guard must cover not just the
+    # json parse but the post-parse field access too — a structurally-valid blob
+    # with a wrong-typed `date` or `start_latlon` would otherwise raise
+    # (TypeError) past the json.loads guard and 500 the whole sidebar render.
     try:
         blob = json.loads(p.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+        if blob.get("fp") != expected_fp:
+            return None
+        entry = blob.get("entry")
+        if not isinstance(entry, dict):
+            return None
+        date_str = _entry_date(entry)
+        if hr_file_mtime(hr_cache_dir, date_str) != blob.get("hr_mtime", -1.0):
+            return None
+        sl = entry.get("start_latlon")
+        aux = {"_start_latlon": tuple(sl)} if sl else {}
+        return entry, aux
+    except (OSError, ValueError, TypeError):
         return None
-    if blob.get("fp") != expected_fp:
-        return None
-    entry = blob.get("entry")
-    if not isinstance(entry, dict):
-        return None
-    date_str = _entry_date(entry)
-    if hr_file_mtime(hr_cache_dir, date_str) != blob.get("hr_mtime", -1.0):
-        return None
-    sl = entry.get("start_latlon")
-    aux = {"_start_latlon": tuple(sl)} if sl else {}
-    return entry, aux
 
 
 def write_sidebar_entry(*, sidebar_cache_dir: Path, hr_cache_dir: Path,

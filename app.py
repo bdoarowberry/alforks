@@ -4932,6 +4932,12 @@ def _save_weights(weights: list[dict]) -> None:
     _atomic_write(WEIGHTS_FILE, json.dumps({"weights": weights}, indent=2))
 
 
+# Serialize the weights load->mutate->save so two concurrent POST/DELETE
+# requests under threaded=True can't lose an update (mirrors the lock pattern
+# used by _dup_dismissals / _regions stores).
+_weights_lock = threading.Lock()
+
+
 @app.route("/api/weights")
 def api_weights_list():
     return jsonify(_load_weights())
@@ -4949,9 +4955,10 @@ def api_weights_add():
         abort(400)
     if not (20.0 <= kg <= 300.0):
         abort(400)
-    weights = [w for w in _load_weights() if w["date"] != date]
-    weights.append({"date": date, "weight_kg": round(kg, 2)})
-    _save_weights(weights)
+    with _weights_lock:
+        weights = [w for w in _load_weights() if w["date"] != date]
+        weights.append({"date": date, "weight_kg": round(kg, 2)})
+        _save_weights(weights)
     return jsonify({"ok": True})
 
 
@@ -4959,8 +4966,9 @@ def api_weights_add():
 def api_weights_delete(date):
     if not _DATE_RE.match(date):
         abort(400)
-    weights = [w for w in _load_weights() if w["date"] != date]
-    _save_weights(weights)
+    with _weights_lock:
+        weights = [w for w in _load_weights() if w["date"] != date]
+        _save_weights(weights)
     return jsonify({"ok": True})
 
 
@@ -5195,7 +5203,10 @@ def _fetch_hourly_day(lat: float, lon: float, date_str: str) -> dict | None:
     )
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "AlanForks-GPX-Viewer/1.0"})
-        with urllib.request.urlopen(req, timeout=10) as resp:
+        # Short timeout: this runs synchronously in the request thread (up to two
+        # calls per ride when it crosses midnight), so a slow upstream must not
+        # stall the worker — same rationale as the timeout=2 tz lookup.
+        with urllib.request.urlopen(req, timeout=4) as resp:
             data = json.loads(resp.read().decode("utf-8"))
         hourly = data.get("hourly", {}) or {}
         if not hourly.get("time"):

@@ -514,7 +514,8 @@ function buildPickers() {
     const blank = `<option value="">— pick activity —</option>`;
     const opts = sortedActs.map(a => {
       const date = (a.date || '').slice(0, 10);
-      const name = a.meta?.title || a.name || a.filename;
+      // User-controlled (renamed rides) — escape before it goes into <option>.
+      const name = escapeHtml(a.meta?.title || a.name || a.filename);
       const dist = a.stats?.distance_km != null ? ` · ${a.stats.distance_km} km` : '';
       const sel = a.filename === selected ? ' selected' : '';
       return `<option value="${a.filename}"${sel}>${date} — ${name}${dist}</option>`;

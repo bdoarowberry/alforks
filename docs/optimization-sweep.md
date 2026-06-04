@@ -6,18 +6,33 @@ _Generated 2026-06-03 by a parallel multi-agent review (21 finder agents across 
 
 ---
 
-## ✅ Fixed in this session (6 P1s — all tests green, 180 passed)
+## ✅ Fixed this session — all 10 P1s + 13 P2s (tests green, 180 passed)
 
-These were applied to the working tree and verified with `pytest` (180 passed) + `py_compile`:
+Applied to the working tree across three commits, each verified with `pytest` (180 passed) + `py_compile`. Detailed entries below are struck through / marked **[done]** where fixed.
 
-1. **`index.html` — segment-override silent save.** `saveSegmentOverrides` / `clearSegmentOverrides` now check `res.ok`, keep `editDirty` on failure, and surface "Save failed" instead of a false "Saved".
-2. **`index.html:3865` — stale list on region-only filter.** Added `region !== 'all'` to the `hasAnyFilter` empty-state predicate so a no-match clears the list / shows "Clear filters".
-3. **`sync_toast.js` — compounding poll loops.** Introduced a single tracked `pollTimer` + `schedule()`; `triggerSyncAll` now reschedules the one loop instead of forking a new `tick()` chain on every manual sync.
-4. **`app.py` — trail-match cache poisoning.** Added `_effective_for_match()` and routed **all four** cache-writing sites (prewarm, rescan, route-proposal builder, detail view) through it, so the snapped points always match the trim/smoothing the `meta_fp` cache key encodes. The detail path now feeds canonical (URL-flag-independent) data to the cache, so `?notrim`/`?noshift` can't poison it either.
-5. **`sync/strava_sync.py:364` — incremental-sync boundary dropping UTC.** Now parses `start_date` tz-aware (`replace("Z", "+00:00")`) so the high-water mark is a correct UTC epoch and no rides are skipped.
-6. **`app.py` — double (triple) spike scan.** Added `_spike_flagged_activities()`, a list materialized + cached on `_activities_cache_key()`, consumed by all three callers (`/api/speed-spikes`, the `/review` flagged set, the review-counts badge) so the expensive per-activity point scan runs at most once per cache key.
+**P1 — correctness (6):**
+1. `index.html` segment-override silent save → check `res.ok`, keep `editDirty`, surface "Save failed".
+2. `index.html:3865` stale list on region-only filter → `region !== 'all'` in the empty-state predicate.
+3. `sync_toast.js` compounding poll loops → single tracked `pollTimer` + `schedule()`.
+4. `app.py` trail-match cache poisoning → `_effective_for_match()` unifying all four cache-writing sites; detail path feeds canonical (URL-flag-independent) data.
+5. `strava_sync.py:364` incremental-sync boundary dropping UTC → tz-aware parse.
+6. `app.py` double/triple spike scan → `_spike_flagged_activities()` cached per `_activities_cache_key()`.
 
-**Still open (4 P1s):** `_snap_points` spatial index, region-artifact parse memo, fitness `hr_zones` baking, and the routes.html redundant fetch — all are larger perf changes, detailed below.
+**P1 — performance (4):**
+7. `trail_match.py` `_snap_points` O(points×ways) → uniform lat/lon grid; verified byte-identical vs brute-force over 1101 points.
+8. `route_builder.py` 600 KB artifact re-parsed every call → `(path, mtime)` parse memo; `/trails-geometry` serves 304 from on-disk mtime before building.
+9. `app.py` fitness re-parses GPX per HR ride → bake `hr_zones` into the sidebar entry (gated by `sidebar_cache.ENTRY_SCHEMA_VERSION=2`), read it in `_compute_fitness_weeks`.
+10. `routes.html` redundant per-region `edges-summary` fetch → `distance_m` computed server-side in `api_routes_list`.
+
+**P2 (13):** weights lost-update lock · `sidebar_cache` corruption-tolerance widen · `sync_toast`/`compare.html`/`summary_archived.html` HTML-escaping · `setup.html` `kickSync` interval stacking · `trails.html` search debounce · `routes_edit.html` dead `roadLayerGroup` removed · `review.html` dead Odd-Times fallback · `review.html` triple-dup summary block extracted · `index.html` `saveMeta` `res.ok` · `index.html` segment-build early-break (×2) · weather fetch timeout 10s→4s.
+
+**P2 — deferred (9, with rationale):**
+- `/api/activity` etag trail-fingerprint — folding a per-request dir scan into every (incl. non-MTB / 304) request; needs a design decision (gate on MTB or cache the fingerprint).
+- `setup.html renderRegionList` sort-once — small list; a safe cache needs mutation-tracking across call sites. Low value/risk ratio.
+- `route_attempts.py` coalesce-noise misread **and** `trail_match.py` priming-loop min/max — both change attempt/traversal **output**, so they need a `TRAIL_MATCH_VERSION`/route-attempts version bump + equivalence validation. Not a quick win.
+- `detection.py` speed-sinuosity prefix sums — `ALGO_SIG` + float-summation-order sensitivity.
+- `app.py:838` `has_hr` naive timestamp — subtle tz semantics; wants its own focused change + test.
+- `logs.html` full re-render after toggle, `index.html` smoothing-drag rAF, `_saved_route_cellsets` hoist — moderate refactors, deferred from the quick-wins pass.
 
 ---
 

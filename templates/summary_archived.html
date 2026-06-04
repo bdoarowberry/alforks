@@ -617,7 +617,7 @@ function renderRecords() {
   const byLoss  = byMax('elev_loss_m');
 
   function card(label, value, act) {
-    const displayName = act.meta?.title || act.name || act.filename;
+    const displayName = escapeHtml(act.meta?.title || act.name || act.filename);
     return `
       <div class="record-card">
         <div class="record-label">${label}</div>
@@ -663,7 +663,7 @@ function renderPerTypeRecords(acts) {
   }
   function row(label, value, act) {
     if (!act) return '';
-    const name = act.meta?.title || act.name || act.filename;
+    const name = escapeHtml(act.meta?.title || act.name || act.filename);
     return `<div class="pt-record-row">
       <span class="pt-record-row-label">${label}</span>
       <span class="pt-record-row-value">${value}</span>
