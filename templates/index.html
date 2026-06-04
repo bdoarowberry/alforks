@@ -3542,6 +3542,12 @@ function updateStats(stats) {
 // ─── Activity loading ─────────────────────────────────────────────────────────
 async function loadActivity(filename) {
   if (segEditMode) exitEditMode();
+  // Start each track load with the leaderboard popups closed — they belong to
+  // the previous track's trail/route. _maybeRestoreLeaderboardState() below
+  // re-opens one only when the URL's ?lb= says to (deep-link into a track via
+  // a leaderboard). Without this the stale popup persists across track switches.
+  closeTrailLeaderboard();
+  closeRouteLeaderboard();
   currentFilename = filename;
   document.querySelectorAll('.activity-item').forEach(el =>
     el.classList.toggle('active', el.dataset.filename === filename));
