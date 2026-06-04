@@ -261,12 +261,8 @@ function initMap() {
     .setView([51, -114], 11);
   map.addControl(new L.Control.Rotate({ closeOnZeroBearing: false }));
 
-  streetLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    maxZoom: 19, attribution: '© <a href="https://openstreetmap.org/copyright">OpenStreetMap</a>',
-  });
-  satelliteLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-    maxZoom: 19, attribution: '© <a href="https://www.esri.com/">Esri</a> World Imagery',
-  });
+  streetLayer = makeStreetLayer();
+  satelliteLayer = makeSatelliteLayer();
   streetLayer.addTo(map);
 }
 
@@ -314,22 +310,14 @@ function ensureDualMaps() {
   mapA = L.map('dual-map-a', { zoomControl: true, rotate: true, touchRotate: true, zoomSnap: 0.25 })
     .setView([51, -114], 11);
   mapA.addControl(new L.Control.Rotate({ closeOnZeroBearing: false }));
-  mapAStreet = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    maxZoom: 19, attribution: '© <a href="https://openstreetmap.org/copyright">OpenStreetMap</a>',
-  });
-  mapASat = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-    maxZoom: 19, attribution: '© <a href="https://www.esri.com/">Esri</a> World Imagery',
-  });
+  mapAStreet = makeStreetLayer();
+  mapASat = makeSatelliteLayer();
   // Map B
   mapB = L.map('dual-map-b', { zoomControl: true, rotate: true, touchRotate: true, zoomSnap: 0.25 })
     .setView([51, -114], 11);
   mapB.addControl(new L.Control.Rotate({ closeOnZeroBearing: false }));
-  mapBStreet = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    maxZoom: 19, attribution: '© <a href="https://openstreetmap.org/copyright">OpenStreetMap</a>',
-  });
-  mapBSat = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-    maxZoom: 19, attribution: '© <a href="https://www.esri.com/">Esri</a> World Imagery',
-  });
+  mapBStreet = makeStreetLayer();
+  mapBSat = makeSatelliteLayer();
   // Apply current basemap to both
   applyDualBasemap();
 }

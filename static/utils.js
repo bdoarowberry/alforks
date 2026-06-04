@@ -124,6 +124,21 @@ function createLazyMapManager({ maxActive }) {
   };
 }
 
+// Leaflet basemap tile layers for the full interactive maps (compare, heatmap).
+// Street = OpenStreetMap, Satellite = Esri World Imagery; both maxZoom 19 with
+// attribution. Returns a FRESH layer each call — a Leaflet layer instance can
+// only belong to one map, so the dual-map compare view needs its own per map.
+function makeStreetLayer() {
+  return L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19, attribution: '© <a href="https://openstreetmap.org/copyright">OpenStreetMap</a>',
+  });
+}
+function makeSatelliteLayer() {
+  return L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+    maxZoom: 19, attribution: '© <a href="https://www.esri.com/">Esri</a> World Imagery',
+  });
+}
+
 // Open-Meteo weather code → emoji glyph. Used by the activity header
 // weather strip and the per-row weather summary on /logs.
 function weatherIcon(code) {

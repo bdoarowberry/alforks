@@ -245,12 +245,8 @@ map.addControl(new L.Control.Rotate({ closeOnZeroBearing: false }));
 map.on('dragstart', () => { userInteracted = true; });
 map.on('zoomstart', (e) => { if (e.originalEvent) userInteracted = true; });
 
-const streetLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-  maxZoom: 19, attribution: '© <a href="https://openstreetmap.org/copyright">OpenStreetMap</a>',
-});
-const satelliteLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-  maxZoom: 19, attribution: '© <a href="https://www.esri.com/">Esri</a> World Imagery',
-});
+const streetLayer = makeStreetLayer();
+const satelliteLayer = makeSatelliteLayer();
 streetLayer.addTo(map);
 
 let heatLayer  = null;
