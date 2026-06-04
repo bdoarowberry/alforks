@@ -59,6 +59,71 @@ function typeGlyph(input) {
   return String(input).replace(/_/g, '').slice(0, 3).toUpperCase();
 }
 
+// Lazy mini-map manager — shared by the /logs and /routes activity lists.
+// Each page lazily inits a Leaflet map per list row as it scrolls into view
+// (via IntersectionObserver) and caps the number of live maps with an LRU
+// eviction that only drops maps scrolled out of view. The page owns the
+// per-row init (tiles, colours, geometry); this owns the instance cache +
+// eviction. Typical use inside a page's init function:
+//
+//   const maps = createLazyMapManager({ maxActive: 20 });
+//   if (maps.has(key)) { maps.touch(key); return; }   // already live
+//   ... build Leaflet map `m` ...; el.dataset.mapInit = '1';
+//   maps.register(key, m);                              // cache + evict-if-over
+//
+// Eviction drops the least-recently-touched maps that are off-screen
+// (~200px margin) once `maxActive` is exceeded, clearing each evicted map's
+// container `data-map-init` so it re-inits when scrolled back.
+function createLazyMapManager({ maxActive }) {
+  const instances = new Map();   // key → Leaflet map
+  const access    = new Map();   // key → last-touch timestamp (LRU order)
+
+  function evictIfOver() {
+    if (instances.size <= maxActive) return;
+    const sorted = [...access.entries()].sort((a, b) => a[1] - b[1]);
+    for (const [key] of sorted) {
+      if (instances.size <= maxActive) break;
+      const m = instances.get(key);
+      if (!m) continue;
+      const el = m._container;
+      const r = el.getBoundingClientRect();
+      const visible = r.bottom > -200 && r.top < (window.innerHeight + 200);
+      if (visible) continue;
+      m.remove();
+      instances.delete(key);
+      access.delete(key);
+      el.dataset.mapInit = '';
+    }
+  }
+
+  return {
+    instances,                                  // exposed for page-specific sweeps
+    has:   (key) => instances.has(key),
+    get:   (key) => instances.get(key),
+    touch: (key) => access.set(key, Date.now()),
+    register(key, map) {
+      instances.set(key, map);
+      access.set(key, Date.now());
+      evictIfOver();
+    },
+    remove(key) {
+      const m = instances.get(key);
+      if (m) { try { m.remove(); } catch (_e) {} }
+      instances.delete(key);
+      access.delete(key);
+    },
+    evictIfOver,
+    destroyAll() {
+      for (const m of instances.values()) { try { m.remove(); } catch (_e) {} }
+      instances.clear();
+      access.clear();
+    },
+    invalidateAll() {
+      for (const m of instances.values()) { try { m.invalidateSize(); } catch (_e) {} }
+    },
+  };
+}
+
 // Open-Meteo weather code → emoji glyph. Used by the activity header
 // weather strip and the per-row weather summary on /logs.
 function weatherIcon(code) {

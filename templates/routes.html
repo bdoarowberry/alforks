@@ -345,38 +345,13 @@ function routeDistance_m(route, edgeLengths) {
   return total;
 }
 
-// ─── Lazy mini-maps (mirrors /logs: IntersectionObserver + LRU eviction) ──────
-const MAX_ACTIVE_MAPS = 24;
-const mapInstances = new Map();   // rid → Leaflet map
-const mapAccess    = new Map();   // rid → last-touch ts
-
-function destroyAllMaps() {
-  for (const m of mapInstances.values()) { try { m.remove(); } catch (_e) {} }
-  mapInstances.clear();
-  mapAccess.clear();
-}
-
-function evictIfOver() {
-  if (mapInstances.size <= MAX_ACTIVE_MAPS) return;
-  const sorted = [...mapAccess.entries()].sort((a, b) => a[1] - b[1]);
-  for (const [rid] of sorted) {
-    if (mapInstances.size <= MAX_ACTIVE_MAPS) break;
-    const m = mapInstances.get(rid);
-    if (!m) continue;
-    const el = m._container;
-    const r = el.getBoundingClientRect();
-    const visible = r.bottom > -200 && r.top < (window.innerHeight + 200);
-    if (visible) continue;
-    m.remove();
-    mapInstances.delete(rid);
-    mapAccess.delete(rid);
-    el.dataset.mapInit = '';
-  }
-}
+// ─── Lazy mini-maps (shared LRU manager in utils.js; per-card init below) ─────
+// Keys are route ids, plus `sug:<id>` for suggestion-card maps.
+const maps = createLazyMapManager({ maxActive: 24 });
 
 function initRouteMap(mapEl) {
   const rid = mapEl.dataset.rid;
-  if (mapInstances.has(rid)) { mapAccess.set(rid, Date.now()); return; }
+  if (maps.has(rid)) { maps.touch(rid); return; }
   let polyline = [];
   try { polyline = JSON.parse(mapEl.dataset.polyline || '[]'); } catch (_e) {}
   // Suggestion cards carry the faint member-ride tracks to draw behind the
@@ -406,16 +381,14 @@ function initRouteMap(mapEl) {
     for (const p of polyline) allPts.push(p);
   }
   m.fitBounds(L.latLngBounds(allPts), { padding: [10, 10] });
-  mapInstances.set(rid, m);
-  mapAccess.set(rid, Date.now());
   mapEl.dataset.mapInit = '1';
-  evictIfOver();
+  maps.register(rid, m);
 }
 
 const mapObserver = new IntersectionObserver(entries => {
   for (const e of entries) {
     if (e.isIntersecting) initRouteMap(e.target);
-    else evictIfOver();
+    else maps.evictIfOver();
   }
 }, { rootMargin: '300px' });
 
@@ -439,7 +412,7 @@ let renderSeq = 0;
 
 async function render() {
   const mySeq = ++renderSeq;
-  destroyAllMaps();
+  maps.destroyAll();
   mapObserver.disconnect();   // drop stale observations; re-observe current nodes below
   const wrap = $("list-wrap");
   let view = routes;
@@ -602,7 +575,7 @@ function markActiveRow(rid) {
 // Opening/closing the panel resizes #content, so visible Leaflet maps need
 // their size recomputed or they render with grey gaps.
 function invalidateVisibleMaps() {
-  setTimeout(() => { for (const m of mapInstances.values()) { try { m.invalidateSize(); } catch (_e) {} } }, 60);
+  setTimeout(() => maps.invalidateAll(), 60);
 }
 
 async function openDetailFor(rid) {
@@ -770,11 +743,9 @@ async function loadSuggestions() {
 // instances first — otherwise initRouteMap sees the same `sug:<id>` key
 // still registered and skips drawing into the fresh element.
 function destroySuggestionMaps() {
-  for (const rid of [...mapInstances.keys()]) {
+  for (const rid of [...maps.instances.keys()]) {
     if (!rid.startsWith('sug:')) continue;
-    try { mapInstances.get(rid).remove(); } catch (_e) {}
-    mapInstances.delete(rid);
-    mapAccess.delete(rid);
+    maps.remove(rid);
   }
 }
 
@@ -910,7 +881,7 @@ function switchTab(tab) {
     setTimeout(() => {
       $("suggestions-wrap").querySelectorAll('.route-map').forEach(el => {
         const rid = el.dataset.rid;
-        if (rid && mapInstances.has(rid)) { try { mapInstances.get(rid).invalidateSize(); } catch (_e) {} }
+        if (rid && maps.has(rid)) { try { maps.get(rid).invalidateSize(); } catch (_e) {} }
         else initRouteMap(el);
       });
     }, 40);

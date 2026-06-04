@@ -551,32 +551,13 @@ function initRegionCombo() {
 }
 
 // ─── Lazy maps ──────────────────────────────────────────────────────────────
-const MAX_ACTIVE_MAPS = 20;
-const mapInstances = new Map();        // filename → Leaflet map
-const mapAccess    = new Map();        // filename → last-touch ts (for LRU eviction)
-
-function evictIfOver() {
-  if (mapInstances.size <= MAX_ACTIVE_MAPS) return;
-  // Drop the least-recently-touched maps that are off-screen
-  const sorted = [...mapAccess.entries()].sort((a, b) => a[1] - b[1]);
-  for (const [fn] of sorted) {
-    if (mapInstances.size <= MAX_ACTIVE_MAPS) break;
-    const m = mapInstances.get(fn);
-    if (!m) continue;
-    const el = m._container;
-    const r = el.getBoundingClientRect();
-    const visible = r.bottom > -200 && r.top < (window.innerHeight + 200);
-    if (visible) continue;
-    m.remove();
-    mapInstances.delete(fn);
-    mapAccess.delete(fn);
-    el.dataset.mapInit = '';  // allow re-init when scrolled back into view
-  }
-}
+// Shared LRU map manager (createLazyMapManager in utils.js) caps live maps;
+// this page supplies the per-row Leaflet init below.
+const maps = createLazyMapManager({ maxActive: 20 });
 
 function initMap(rowEl) {
   const fn = rowEl.dataset.filename;
-  if (mapInstances.has(fn)) { mapAccess.set(fn, Date.now()); return; }
+  if (maps.has(fn)) { maps.touch(fn); return; }
   const polyline = JSON.parse(rowEl.dataset.polyline || '[]');
   if (!polyline.length) return;
   const mapEl = rowEl.querySelector('.comp-map');
@@ -587,10 +568,8 @@ function initMap(rowEl) {
   const polyColor = rowEl.dataset.typeColor || '#3b82f6';
   L.polyline(polyline, { color: polyColor, weight: 3, opacity: 0.9 }).addTo(m);
   m.fitBounds(L.latLngBounds(polyline), { padding: [10, 10] });
-  mapInstances.set(fn, m);
-  mapAccess.set(fn, Date.now());
   rowEl.dataset.mapInit = '1';
-  evictIfOver();
+  maps.register(fn, m);
 }
 
 const observer = new IntersectionObserver(entries => {
@@ -599,7 +578,7 @@ const observer = new IntersectionObserver(entries => {
       initMap(e.target);
       loadRowWeather(e.target);
     } else {
-      evictIfOver();
+      maps.evictIfOver();
     }
   }
 }, { rootMargin: '300px' });
@@ -811,8 +790,7 @@ async function load() {
   wrap.innerHTML = '<div id="empty-msg">Loading…</div>';
 
   // Tear down any existing maps
-  for (const [fn, m] of mapInstances) { m.remove(); }
-  mapInstances.clear(); mapAccess.clear();
+  maps.destroyAll();
 
   const r = await fetch('/api/comparison?' + params.toString());
   const d = await r.json();
@@ -932,8 +910,7 @@ function _goToPage(n) {
 function _renderCurrentPage() {
   const wrap = document.getElementById('rows');
   // Tear down any existing maps before clobbering the DOM.
-  for (const [fn, m] of mapInstances) { m.remove(); }
-  mapInstances.clear(); mapAccess.clear();
+  maps.destroyAll();
   wrap.innerHTML = '';
 
   // Clamp page if filters shrank the list below the current page.
