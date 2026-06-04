@@ -4,6 +4,12 @@ Status as of **2026-06-03**. This tracks the leftovers from a whole-repo
 simplification audit (reuse / duplication / dead-code / altitude). It is a
 to-do list, not a spec — re-verify before acting.
 
+> ✅ **Essentially complete.** Both the offline-verifiable Python bucket and the
+> browser-verified frontend bucket are swept (sessions 1–5). What remains below is
+> only the **deliberately-skipped** set (decisions recorded inline: haversine,
+> detection-`ALGO_SIG` local dups, JSON-writers downgrade, OSM lift-fold declined,
+> escape-variant differences). Nothing here is "todo" — it's "decided not to."
+
 > ⚠️ **Line numbers drifted.** Many `app.py` references below come from the
 > original audit report, which ran *before* this session's edits (which added
 > `_meta_fp`, `_stat_mtime`, the `geo` import, `_iter_spike_flagged_activities`,
@@ -153,14 +159,13 @@ to-do list, not a spec — re-verify before acting.
   heatmap.html. Surfaced + fixed a pre-existing bug (`f11e613`): leaderboard popups now
   close on track switch (loadActivity didn't reset their `.open`).
 
-### Still open (small / low-value — verify each in browser)
-- **`.leaflet-bar` → base.css** — three identical copies (index + compare + heatmap) of the
-  dark-themed Leaflet control CSS. Now known safe (base.css loads after leaflet.css). Cheap.
-- **`makeStaticMiniMap(el)` / locked mini-map options** — the 8-flag `{ zoomControl:false,
-  dragging:false, … }` L.map options object shared by logs `initMap` + routes `initRouteMap`
-  (and compare's static mini-maps). Could be a `LOCKED_MINI_MAP_OPTS` const or
-  `makeStaticMiniMap(el)` helper in utils.js. Small.
-- **Escape variants left on purpose:** `routes_edit.html` `escapeHtml` (uses `String(s)`,
+### Done (`7f91883`, browser-verified) — frontend bucket complete
+- ~~`.leaflet-bar` → base.css~~ — one copy in base.css (loaded after leaflet.css ⇒ wins);
+  removed the index + compare + heatmap inline copies. Every Leaflet map themes consistently.
+- ~~`makeStaticMiniMap(el)`~~ — utils.js helper wrapping the 8-flag locked-map options; logs
+  `initMap` + routes `initRouteMap` consume it.
+
+### Escape variants left on purpose (do not "dedup") `routes_edit.html` `escapeHtml` (uses `String(s)`,
   not null-coalesced); `training_load.html` `_attrEsc` and `index`/`trails` `_escText`
   (escape fewer chars); `summary.html` `fmtSec` (null handling vs `fmtDuration`);
   `review.html` `_fmtTime` (no `utils.js` equivalent — would need a new shared helper).
