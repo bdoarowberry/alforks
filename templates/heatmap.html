@@ -331,19 +331,26 @@ function build3DRoutesGeoJSON() {
   };
 }
 
-function build3DHeatGeoJSON() {
-  // Same per-track downsample as the 2D heat path — see HEAT_TARGET_POINTS
-  // — so densely sampled tracks don't drown out shorter ones.
-  const features = [];
+// Per-track downsample shared by the 2D heat layer (buildHeatPoints) and the
+// 3D heat source (build3DHeatGeoJSON): cap each track to ~HEAT_TARGET_POINTS so
+// densely sampled tracks don't drown out shorter ones, calling fn(lat, lon) for
+// each kept point.
+function eachHeatPoint(fn) {
   for (const act of allActivities) {
     const n = act.polyline?.length || 0;
     if (!n) continue;
     const stride = Math.max(1, Math.ceil(n / HEAT_TARGET_POINTS));
     for (let i = 0; i < n; i += stride) {
       const [lat, lon] = act.polyline[i];
-      features.push({ type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: [lon, lat] } });
+      fn(lat, lon);
     }
   }
+}
+
+function build3DHeatGeoJSON() {
+  const features = [];
+  eachHeatPoint((lat, lon) =>
+    features.push({ type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: [lon, lat] } }));
   return { type: 'FeatureCollection', features };
 }
 
@@ -386,15 +393,7 @@ const HEAT_TARGET_POINTS = 500;
 
 function buildHeatPoints() {
   const out = [];
-  for (const act of allActivities) {
-    const n = act.polyline?.length || 0;
-    if (!n) continue;
-    const stride = Math.max(1, Math.ceil(n / HEAT_TARGET_POINTS));
-    for (let i = 0; i < n; i += stride) {
-      const [lat, lon] = act.polyline[i];
-      out.push([lat, lon, 1]);
-    }
-  }
+  eachHeatPoint((lat, lon) => out.push([lat, lon, 1]));
   return out;
 }
 

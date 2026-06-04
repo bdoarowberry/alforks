@@ -2754,18 +2754,25 @@ function toggleRunsDrawer() {
   setTimeout(() => map.invalidateSize(), 0);
 }
 
-function renderRunStats(meta) {
-  const drawer  = document.getElementById('runs-drawer');
+// Drawer open/close plumbing shared by the runs + trails stat panels. Returns
+// the drawer + map-wrap elements and a `closeAndExit` that collapses the drawer,
+// drops the map-wrap modifier class, and — only if it was open — invalidates
+// the Leaflet map size next tick (closing the drawer widens the map).
+function makeDrawerCloser(drawerId, mapWrapClass) {
+  const drawer  = document.getElementById(drawerId);
   const mapWrap = document.getElementById('map-wrap');
-  const isSkiSport = ['ski','snowboard'].includes(meta?.type);
-  // The drawer takes real layout width when open — closing it expands the
-  // map, so we invalidate Leaflet's size in the close path too.
   const wasOpen = drawer.classList.contains('open');
   const closeAndExit = () => {
     drawer.classList.remove('open');
-    mapWrap.classList.remove('has-runs');
+    mapWrap.classList.remove(mapWrapClass);
     if (wasOpen) setTimeout(() => map.invalidateSize(), 0);
   };
+  return { drawer, mapWrap, closeAndExit };
+}
+
+function renderRunStats(meta) {
+  const { drawer, mapWrap, closeAndExit } = makeDrawerCloser('runs-drawer', 'has-runs');
+  const isSkiSport = ['ski','snowboard'].includes(meta?.type);
   if (!isSkiSport || !trackData || !activeSegments.length) {
     closeAndExit();
     return;
@@ -2968,14 +2975,7 @@ function _fmtHm(iso) {
 }
 
 function renderTrailStats(trails) {
-  const drawer  = document.getElementById('trails-drawer');
-  const mapWrap = document.getElementById('map-wrap');
-  const wasOpen = drawer.classList.contains('open');
-  const closeAndExit = () => {
-    drawer.classList.remove('open');
-    mapWrap.classList.remove('has-trails');
-    if (wasOpen) setTimeout(() => map.invalidateSize(), 0);
-  };
+  const { drawer, mapWrap, closeAndExit } = makeDrawerCloser('trails-drawer', 'has-trails');
 
   if (!trails || !trails.timeline || trails.timeline.length === 0) {
     closeAndExit();
