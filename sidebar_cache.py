@@ -38,6 +38,15 @@ def hr_file_mtime(hr_cache_dir: Path, date_str: str) -> float:
     return stat_mtime(hr_cache_dir / f"{date_str}.json")
 
 
+# Bump when the SHAPE of a cached entry changes (a new baked stat field, a
+# renamed key, etc.) so every entry re-bakes even though its inputs (gpx mtime,
+# meta, regions) are unchanged. Distinct from `algo_sig`, which tracks
+# detection-algorithm *output* changes — a schema change is not an algo change.
+#   1: baseline (hr_avg/hr_max baked)
+#   2: + hr_zones baked into stats (saves a per-ride HR re-merge in fitness rollups)
+ENTRY_SCHEMA_VERSION = 2
+
+
 def sidebar_fingerprint(*, gpx_mtime: float, file_meta: dict,
                         regions_mtime: float, types_mtime: float,
                         algo_sig: str, region_match_version: int) -> str:
@@ -49,6 +58,7 @@ def sidebar_fingerprint(*, gpx_mtime: float, file_meta: dict,
         "meta":          file_meta or {},
         "algo_sig":      algo_sig,
         "region_match_version": region_match_version,
+        "entry_schema":  ENTRY_SCHEMA_VERSION,
     }, sort_keys=True, ensure_ascii=False)
     return hashlib.md5(payload.encode("utf-8")).hexdigest()[:16]
 

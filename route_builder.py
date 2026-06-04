@@ -513,6 +513,23 @@ def _empty_artifact(region: dict) -> dict:
 _artifact_locks: dict[str, threading.Lock] = {}
 _artifact_locks_mu = threading.Lock()
 
+# Process-local parse memo: (path, st_mtime) -> parsed artifact dict. The region
+# artifact is ~600 KB and was being re-read + json.loads'd on every
+# get_region_artifact call (several times per /routes request and per region in
+# the suggestions build). Every consumer treats the returned dict as read-only,
+# so sharing one parsed instance per (path, mtime) is safe. One entry per path
+# is kept; a newer mtime evicts the stale parse.
+_artifact_parse_cache: dict[tuple[str, float], dict] = {}
+_artifact_parse_mu = threading.Lock()
+
+
+def _remember_artifact(ap: Path, mtime: float, artifact: dict) -> None:
+    key = (str(ap), mtime)
+    with _artifact_parse_mu:
+        for k in [k for k in _artifact_parse_cache if k[0] == str(ap)]:
+            _artifact_parse_cache.pop(k, None)
+        _artifact_parse_cache[key] = artifact
+
 
 def _artifact_lock_for(region_id: str) -> threading.Lock:
     with _artifact_locks_mu:
@@ -527,16 +544,27 @@ def _artifact_path(cache_dir: Path, region_id: str) -> Path:
 
 def _read_valid_artifact(ap: Path, force_rebuild: bool) -> dict | None:
     """The cached artifact at `ap` if present and version-current, else None.
-    Corrupt / wrong-version / unreadable files read as a miss."""
+    Corrupt / wrong-version / unreadable files read as a miss. Parsed results
+    are memoized per (path, mtime) so repeated reads don't re-parse ~600 KB."""
     if force_rebuild or not ap.exists():
         return None
     try:
+        mtime = ap.stat().st_mtime
+    except OSError:
+        return None
+    key = (str(ap), mtime)
+    with _artifact_parse_mu:
+        hit = _artifact_parse_cache.get(key)
+    if hit is not None:
+        return hit
+    try:
         entry = json.loads(ap.read_text(encoding="utf-8"))
-        if entry.get("version") == ROUTE_BUILDER_VERSION:
-            return entry
     except Exception:
-        pass
-    return None
+        return None
+    if entry.get("version") != ROUTE_BUILDER_VERSION:
+        return None
+    _remember_artifact(ap, mtime, entry)
+    return entry
 
 
 def get_region_artifact(region: dict, *,
@@ -571,6 +599,9 @@ def get_region_artifact(region: dict, *,
             tmp = ap.with_suffix(ap.suffix + ".tmp")
             tmp.write_text(json.dumps(artifact, ensure_ascii=False), encoding="utf-8")
             tmp.replace(ap)
+            # Memoize the freshly-built artifact under its new mtime so the
+            # reads that follow this build hit the parse cache immediately.
+            _remember_artifact(ap, ap.stat().st_mtime, artifact)
         except OSError as exc:
             logger.warning("Failed to persist region artifact %s: %s", ap, exc)
         return artifact

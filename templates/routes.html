@@ -320,30 +320,9 @@ function syncLayoutToggle() {
     b.classList.toggle('active', b.dataset.layout === layout));
 }
 
-// region_id → Map<edge_id, length_m>. Populated lazily; shared across routes.
-const edgeLengthCache = new Map();
-async function getEdgeLengths(regionId) {
-  if (edgeLengthCache.has(regionId)) return edgeLengthCache.get(regionId);
-  try {
-    const r = await fetch(`/api/regions/${encodeURIComponent(regionId)}/edges-summary`);
-    if (!r.ok) return new Map();   // don't cache failure
-    const d = await r.json();
-    const out = new Map();
-    for (const e of d.edges || []) out.set(e.id, e.length_m);
-    edgeLengthCache.set(regionId, out);
-    return out;
-  } catch (_e) {
-    return new Map();
-  }
-}
-
-function routeDistance_m(route, edgeLengths) {
-  let total = 0;
-  for (const seg of route.segments || []) {
-    total += edgeLengths.get(seg.edge_id) || 0;
-  }
-  return total;
-}
+// Per-route distance now arrives precomputed as r.distance_m from /api/routes
+// (the server already has the region edge map), so the client no longer fetches
+// /edges-summary per region to sum it.
 
 // ─── Lazy mini-maps (shared LRU manager in utils.js; per-card init below) ─────
 // Keys are route ids, plus `sug:<id>` for suggestion-card maps.
@@ -427,17 +406,9 @@ async function render() {
     return;
   }
 
-  // Edge-length maps for every region the visible routes use (distance totals).
-  const regionsNeeded = [...new Set(view.map(r => r.region_id))];
-  const lengthMaps = new Map();
-  await Promise.all(regionsNeeded.map(async (rid) => {
-    lengthMaps.set(rid, await getEdgeLengths(rid));
-  }));
-  if (renderSeq !== mySeq) return;   // a newer render started while we awaited
-
   wrap.innerHTML = (layout === 'table')
-    ? renderTable(view, lengthMaps)
-    : renderCards(view, lengthMaps);
+    ? renderTable(view)
+    : renderCards(view);
 
   wireRows();
   // Lazily init every mini-map as it scrolls into view.
@@ -450,9 +421,9 @@ async function render() {
   if (activeRid) markActiveRow(activeRid);
 }
 
-function statsBits(r, lengthMaps) {
+function statsBits(r) {
   const segCount = (r.segments || []).length;
-  const dist_km  = routeDistance_m(r, lengthMaps.get(r.region_id) || new Map()) / 1000;
+  const dist_km  = (r.distance_m || 0) / 1000;
   const distTxt  = dist_km > 0 ? `${dist_km.toFixed(2)} km` : '—';
   const attempts = (r.attempts > 0) ? r.attempts : '—';
   const best     = (r.best_duration_sec != null && r.best_duration_sec > 0)
@@ -469,11 +440,11 @@ function actionsHtml() {
     </div>`;
 }
 
-function renderCards(view, lengthMaps) {
+function renderCards(view) {
   const cards = view.map(r => {
     const region = regionById[r.region_id];
     const regionLbl = region ? region.name : r.region_id;
-    const b = statsBits(r, lengthMaps);
+    const b = statsBits(r);
     const poly = _esc(JSON.stringify(r.polyline || []));
     return `
       <div class="route-card" data-rid="${_esc(r.id)}">
@@ -496,11 +467,11 @@ function renderCards(view, lengthMaps) {
   return `<div class="route-cards">${cards}</div>`;
 }
 
-function renderTable(view, lengthMaps) {
+function renderTable(view) {
   const rows = view.map(r => {
     const region = regionById[r.region_id];
     const regionLbl = region ? region.name : r.region_id;
-    const b = statsBits(r, lengthMaps);
+    const b = statsBits(r);
     const poly = _esc(JSON.stringify(r.polyline || []));
     const distCell = b.distTxt !== '—' ? b.distTxt
       : `<span class="pending" title="Distance unavailable — region artifact may be unreachable or saved edge ids are stale.">—</span>`;

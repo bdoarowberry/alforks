@@ -847,10 +847,11 @@ def _build_activity_entry(filename: str, meta: dict, regions: list[dict]) -> tup
         except (KeyError, TypeError, ValueError):
             has_hr = False
     matched_regions = _effective_regions(eff, file_meta, regions)
-    # Bake hr_avg / hr_max into the sidebar entry's stats once at build time
-    # so the Summary / Training Load aggregations don't have to re-merge
-    # HR per request. The cache invalidates correctly already — `has_hr`
-    # tracks the HR cache's mtime via the activities-cache key.
+    # Bake hr_avg / hr_max / hr_zones into the sidebar entry's stats once at
+    # build time so the Summary / Training Load aggregations don't have to
+    # re-merge HR per request. The cache invalidates correctly already —
+    # `has_hr` tracks the HR cache's mtime via the activities-cache key, and
+    # the hr_zones addition is covered by sidebar_cache.ENTRY_SCHEMA_VERSION.
     stats = dict(eff["stats"])
     if has_hr:
         try:
@@ -859,6 +860,8 @@ def _build_activity_entry(filename: str, meta: dict, regions: list[dict]) -> tup
                 stats["hr_avg"] = int(merged_stats["hr_avg"])
             if merged_stats.get("hr_max") is not None:
                 stats["hr_max"] = int(merged_stats["hr_max"])
+            if merged_stats.get("hr_zones") is not None:
+                stats["hr_zones"] = [int(x) for x in merged_stats["hr_zones"]]
         except Exception:
             pass
     entry = {
@@ -2787,6 +2790,18 @@ def api_region_trails_geometry(region_id: str):
     if region is None:
         abort(404)
     force = request.args.get("force") == "1"
+    ap = REGION_TRAILS_CACHE_DIR / f"{region_id}.json"
+    # Fast path: satisfy a revalidation from the on-disk mtime alone, so a 304
+    # never builds or parses the ~600 KB artifact. The etag uses the current
+    # ROUTE_BUILDER_VERSION; a stale-version on-disk file won't match the
+    # client's cached etag, falling through to a rebuild below.
+    if not force and ap.exists():
+        try:
+            etag = f"{ap.stat().st_mtime:.3f}-{route_builder.ROUTE_BUILDER_VERSION}"
+            if request.if_none_match.contains(etag):
+                return Response(status=304)
+        except OSError:
+            pass
     artifact = route_builder.get_region_artifact(
         region,
         artifacts_dir=REGION_TRAILS_CACHE_DIR,
@@ -2794,7 +2809,6 @@ def api_region_trails_geometry(region_id: str):
         osm_roads_dir=OSM_ROADS_CACHE_DIR,
         force_rebuild=force,
     )
-    ap = REGION_TRAILS_CACHE_DIR / f"{region_id}.json"
     try:
         etag = f"{ap.stat().st_mtime:.3f}-{artifact.get('version', 0)}"
     except OSError:
@@ -2878,6 +2892,26 @@ def _region_edge_polylines(region_id: str) -> dict:
     return out
 
 
+def _region_edge_lengths(region_id: str) -> dict:
+    """edge_id -> length_m for one region, from the cached trails+roads artifact
+    (in-memory after first build). Returns {} if the region or its artifact is
+    unavailable. Lets the /routes list compute per-route distance server-side
+    instead of each client re-fetching the edges-summary."""
+    region = _region_by_id(region_id)
+    if region is None:
+        return {}
+    try:
+        artifact = route_builder.get_region_artifact(
+            region,
+            artifacts_dir=REGION_TRAILS_CACHE_DIR,
+            osm_paths_dir=OSM_PATHS_CACHE_DIR,
+            osm_roads_dir=OSM_ROADS_CACHE_DIR,
+        )
+    except Exception:
+        return {}
+    return {e["id"]: (e.get("length_m") or 0.0) for e in _iter_region_edges(artifact)}
+
+
 def _route_preview_polyline(route: dict, edge_polys: dict, n: int = 50) -> list:
     """Concatenate the route's edge polylines in segment order and downsample
     to ~n points for a list-page mini-map. Segments whose edge_id is missing
@@ -2902,17 +2936,26 @@ def api_routes_list():
     map per region, shared across that region's routes) so the list page
     never has to pull the ~600 KB geometry artifact to draw thumbnails."""
     routes = _all_routes()
-    edge_cache: dict[str, dict] = {}   # region_id -> {edge_id: polyline}, once per region
+    edge_cache: dict[str, dict] = {}    # region_id -> {edge_id: polyline}, once per region
+    length_cache: dict[str, dict] = {}  # region_id -> {edge_id: length_m}, once per region
     out = []
     for r in routes:
         rid = r["id"]
         stats = _get_route_attempts(rid, route=r) or {}
         region_id = r.get("region_id")
         if region_id not in edge_cache:
-            edge_cache[region_id] = _region_edge_polylines(region_id)
+            edge_cache[region_id]   = _region_edge_polylines(region_id)
+            length_cache[region_id] = _region_edge_lengths(region_id)
+        lengths = length_cache[region_id]
+        # Per-route distance, summed server-side from the edge map we already
+        # built for the preview polyline — saves the client an edges-summary
+        # round-trip per region on every render.
+        distance_m = sum(lengths.get(seg.get("edge_id"), 0.0)
+                         for seg in (r.get("segments") or []))
         out.append({
             **r,
             "polyline":          _route_preview_polyline(r, edge_cache[region_id]),
+            "distance_m":        distance_m,
             "attempts":          stats.get("attempt_count", 0),
             "best_duration_sec": stats.get("best_duration_sec"),
             "best_filename":     stats.get("best_filename"),
@@ -4647,17 +4690,26 @@ def _compute_fitness_weeks(n_weeks: int, type_filter: set | None = None) -> list
 
         act_zones = None
         if act.get("has_hr"):
-            data = get_activity(act["filename"])
-            if data:
-                eff    = _effective_data(act["filename"], data, (act.get("meta") or {}).get("type", ""))
-                merged = _merge_hr_into_data(eff)
-                ms     = merged.get("stats") or {}
-                z      = ms.get("hr_zones") or [0]*5
+            # Prefer the baked hr_zones/hr_avg on the sidebar entry (see
+            # _build_activity_entry). Only fall back to a full GPX parse +
+            # HR re-merge for entries that predate the baking (i.e. those
+            # written before ENTRY_SCHEMA_VERSION 2) — once they recompute,
+            # the per-ride read disappears entirely.
+            z      = s.get("hr_zones")
+            hr_avg = s.get("hr_avg")
+            if z is None:
+                data = get_activity(act["filename"])
+                if data:
+                    eff    = _effective_data(act["filename"], data, (act.get("meta") or {}).get("type", ""))
+                    ms     = _merge_hr_into_data(eff).get("stats") or {}
+                    z      = ms.get("hr_zones")
+                    hr_avg = ms.get("hr_avg")
+            if z:
                 act_zones = z
-                for i in range(5):
+                for i in range(min(5, len(z))):
                     bucket["zones"][i] += int(z[i])
-                if ms.get("hr_avg") is not None and z[1] > 0:
-                    rolling_z2_input.append((date, int(ms["hr_avg"]), int(z[1])))
+                if hr_avg is not None and len(z) > 1 and z[1] > 0:
+                    rolling_z2_input.append((date, int(hr_avg), int(z[1])))
 
         # Calories — intensity-weighted from HR zones when available,
         # MET-by-sport fallback otherwise. Weight comes from the most

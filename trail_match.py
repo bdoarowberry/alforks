@@ -83,6 +83,11 @@ VISIT_GAP_SEC = 600         # merge same-name runs separated by < this gap
 COALESCE_MAX_GAP_SEC      = 120
 COALESCE_MAX_CROSSING_SEC = 60
 BBOX_PAD_DEG = 0.0002       # cheap point-in-bbox prune slop
+# Spatial-index cell size for _snap_points. Ways are bucketed into a uniform
+# lat/lon grid of this resolution so each GPS point only tests ways in its own
+# cell instead of scanning every way. ~0.01 deg ≈ 1.1 km — coarse enough that a
+# long trail registers in few cells, fine enough to prune distant ways.
+_SNAP_GRID_CELL_DEG = 0.01
 OSM_FETCH_PAD_DEG = 0.002   # pad bbox before Overpass query
 OSM_CACHE_TTL_SEC = 90 * 24 * 3600   # 90 days — trails change slowly
 OVERPASS_TIMEOUT_SEC = 60
@@ -1076,6 +1081,27 @@ def _project_ways(ways: list[dict], lat0: float, lon0: float) -> list[dict]:
     return out
 
 
+def _snap_grid_cell(lat: float, lon: float) -> tuple[int, int]:
+    return (math.floor(lat / _SNAP_GRID_CELL_DEG), math.floor(lon / _SNAP_GRID_CELL_DEG))
+
+
+def _build_snap_grid(ways_proj: list[dict]) -> dict:
+    """Bucket ways into a uniform lat/lon grid keyed on cell (ci, cj). Each way
+    is registered in every cell its bbox — padded by BBOX_PAD_DEG, matching the
+    per-way prune in _snap_points — overlaps. A point then only tests ways in
+    its own cell; that candidate set is a superset of what the bbox prune would
+    accept, so snap results are identical to the former full linear scan."""
+    grid: dict[tuple[int, int], list] = {}
+    for w in ways_proj:
+        bb = w["bb"]
+        ci0, cj0 = _snap_grid_cell(bb[0] - BBOX_PAD_DEG, bb[1] - BBOX_PAD_DEG)
+        ci1, cj1 = _snap_grid_cell(bb[2] + BBOX_PAD_DEG, bb[3] + BBOX_PAD_DEG)
+        for ci in range(ci0, ci1 + 1):
+            for cj in range(cj0, cj1 + 1):
+                grid.setdefault((ci, cj), []).append(w)
+    return grid
+
+
 def _snap_points(points, ways_proj, lat0, lon0):
     """Return (best_name, best_dist, best_kind) per point. Assisted points
     get (None, None, None) so they break visit runs naturally.
@@ -1091,15 +1117,22 @@ def _snap_points(points, ways_proj, lat0, lon0):
     fallback path is preserved for environments without numpy.
     """
     use_numpy = _NUMPY_AVAILABLE
+    grid = _build_snap_grid(ways_proj)
     matches = []
     for p in points:
         if p.get("assisted"):
             matches.append((None, None, None))
             continue
         plat, plon = p["lat"], p["lon"]
+        # Only ways in the point's grid cell can pass the bbox prune below, so an
+        # empty cell means no snap candidate — skip the per-way work entirely.
+        candidates = grid.get(_snap_grid_cell(plat, plon))
+        if not candidates:
+            matches.append((None, None, None))
+            continue
         px, py = _to_local(plat, plon, lat0, lon0)
         best_name, best_dist, best_kind = None, SNAP_THRESHOLD_M, None
-        for w in ways_proj:
+        for w in candidates:
             wb = w["bb"]
             if (plat < wb[0] - BBOX_PAD_DEG or plat > wb[2] + BBOX_PAD_DEG
                     or plon < wb[1] - BBOX_PAD_DEG or plon > wb[3] + BBOX_PAD_DEG):
