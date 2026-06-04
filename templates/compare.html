@@ -198,7 +198,7 @@
           <button class="vtbtn"        id="vt-satellite" onclick="setMapView('satellite')">Satellite</button>
           <button class="vtbtn"        id="vt-3d"        onclick="setMapView('3d')"{% if not mapbox_token %} disabled title="No Mapbox token configured"{% endif %}>3D</button>
         </div>
-        <button id="fs-btn" onclick="toggleFullscreen()" title="Toggle fullscreen (Esc to exit)" aria-label="Toggle fullscreen">⛶</button>
+        <button id="fs-btn" onclick="toggleMapFullscreen('map-wrap')" title="Toggle fullscreen (Esc to exit)" aria-label="Toggle fullscreen">⛶</button>
       </div>
     </div>
     <div class="chart-col">
@@ -481,9 +481,7 @@ function setMapView(view) {
   } else {
     leafletEl.style.display = '';
     mb3dEl.style.display    = 'none';
-    map.removeLayer(view === 'map' ? satelliteLayer : streetLayer);
-    (view === 'map' ? streetLayer : satelliteLayer).addTo(map);
-    map.invalidateSize();
+    swapLeafletBasemap(map, view, streetLayer, satelliteLayer);
     // Dual maps share the same basemap selection.
     applyDualBasemap();
     if (dualMode) {
@@ -494,12 +492,6 @@ function setMapView(view) {
 }
 
 // ─── Fullscreen ───────────────────────────────────────────────────────────
-function toggleFullscreen() {
-  const target = document.getElementById('map-wrap');
-  if (document.fullscreenElement) document.exitFullscreen?.();
-  else                            target.requestFullscreen?.();
-}
-
 document.addEventListener('fullscreenchange', () => {
   const fs = !!document.fullscreenElement;
   document.getElementById('fs-btn').classList.toggle('active', fs);

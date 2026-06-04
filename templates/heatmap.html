@@ -173,7 +173,7 @@
       <button class="vtbtn"        id="vt-satellite" onclick="setMapView('satellite')">Satellite</button>
       <button class="vtbtn"        id="vt-3d"        onclick="setMapView('3d')"{% if not mapbox_token %} disabled title="No Mapbox token configured"{% endif %}>3D</button>
     </div>
-    <button id="fs-btn" onclick="toggleFullscreen()" title="Toggle fullscreen (Esc to exit)" aria-label="Toggle fullscreen">⛶</button>
+    <button id="fs-btn" onclick="toggleMapFullscreen('map-wrap')" title="Toggle fullscreen (Esc to exit)" aria-label="Toggle fullscreen">⛶</button>
   </div>
 
   <div id="stats-overlay" class="map-panel">
@@ -693,10 +693,7 @@ function setMapView(view) {
     leafletEl.style.display = '';
     mb3dEl.style.display    = 'none';
     exagEl.style.display    = 'none';
-    // Swap the active basemap tile layer in place.
-    map.removeLayer(view === 'map' ? satelliteLayer : streetLayer);
-    (view === 'map' ? streetLayer : satelliteLayer).addTo(map);
-    map.invalidateSize();
+    swapLeafletBasemap(map, view, streetLayer, satelliteLayer);
   }
 
   if (!activeSource && allActivities.length > 0) render();
@@ -706,15 +703,6 @@ function setMapView(view) {
 // Browser Fullscreen API on #map-wrap so just the map area expands; the
 // nav/header/filter bar are hidden until the user exits with Esc or the
 // button. Both Leaflet and Mapbox need a size refresh after the change.
-function toggleFullscreen() {
-  const target = document.getElementById('map-wrap');
-  if (document.fullscreenElement) {
-    document.exitFullscreen?.();
-  } else {
-    target.requestFullscreen?.();
-  }
-}
-
 document.addEventListener('fullscreenchange', () => {
   const fs = !!document.fullscreenElement;
   document.getElementById('fs-btn').classList.toggle('active', fs);

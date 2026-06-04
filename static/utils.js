@@ -161,6 +161,24 @@ function createTerrain3DMap(containerId, token, onLoad) {
   return map;
 }
 
+// Toggle the browser Fullscreen API on a map wrapper element (by id), so just
+// the map area expands. Exits if already fullscreen. Each page's own
+// `fullscreenchange` listener refreshes map canvas sizes after the transition.
+function toggleMapFullscreen(targetId) {
+  const target = document.getElementById(targetId);
+  if (document.fullscreenElement) document.exitFullscreen?.();
+  else                            target.requestFullscreen?.();
+}
+
+// Swap a Leaflet map's basemap between street and satellite in place. `view`
+// of 'map' selects the street layer, anything else the satellite layer. Both
+// layers must already exist (see makeStreetLayer / makeSatelliteLayer).
+function swapLeafletBasemap(map, view, streetLayer, satelliteLayer) {
+  map.removeLayer(view === 'map' ? satelliteLayer : streetLayer);
+  (view === 'map' ? streetLayer : satelliteLayer).addTo(map);
+  map.invalidateSize();
+}
+
 // Open-Meteo weather code → emoji glyph. Used by the activity header
 // weather strip and the per-row weather summary on /logs.
 function weatherIcon(code) {
