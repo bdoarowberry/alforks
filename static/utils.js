@@ -179,6 +179,18 @@ function swapLeafletBasemap(map, view, streetLayer, satelliteLayer) {
   map.invalidateSize();
 }
 
+// A non-interactive Leaflet mini-map on element `el`: every pan/zoom/keyboard
+// interaction and the default controls are disabled so it renders as a static
+// thumbnail. Used by the logs + routes list mini-maps; the caller adds the tile
+// layer, polylines, and fitBounds.
+function makeStaticMiniMap(el) {
+  return L.map(el, {
+    zoomControl: false, attributionControl: false, dragging: false,
+    scrollWheelZoom: false, doubleClickZoom: false, boxZoom: false,
+    keyboard: false, touchZoom: false,
+  });
+}
+
 // Open-Meteo weather code → emoji glyph. Used by the activity header
 // weather strip and the per-row weather summary on /logs.
 function weatherIcon(code) {

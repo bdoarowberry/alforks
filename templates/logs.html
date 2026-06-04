@@ -561,7 +561,7 @@ function initMap(rowEl) {
   const polyline = JSON.parse(rowEl.dataset.polyline || '[]');
   if (!polyline.length) return;
   const mapEl = rowEl.querySelector('.comp-map');
-  const m = L.map(mapEl, { zoomControl: false, attributionControl: false, dragging: false, scrollWheelZoom: false, doubleClickZoom: false, boxZoom: false, keyboard: false, touchZoom: false });
+  const m = makeStaticMiniMap(mapEl);
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 17 }).addTo(m);
   // Use the activity's type colour so the mini map matches the badge / icon.
   // Falls back to blue for untagged activities.

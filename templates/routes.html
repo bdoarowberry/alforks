@@ -363,11 +363,7 @@ function initRouteMap(mapEl) {
     mapEl.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-size:0.62rem;font-family:var(--font-mono);">no geometry</div>`;
     return;
   }
-  const m = L.map(mapEl, {
-    zoomControl: false, attributionControl: false, dragging: false,
-    scrollWheelZoom: false, doubleClickZoom: false, boxZoom: false,
-    keyboard: false, touchZoom: false,
-  });
+  const m = makeStaticMiniMap(mapEl);
   L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png',
               { maxZoom: 19 }).addTo(m);
   const allPts = [];
