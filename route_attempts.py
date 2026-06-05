@@ -36,7 +36,12 @@ import trail_match
 # Bump to invalidate per-route cached attempts (e.g. when the matching
 # rule changes). The cache file stores this alongside the data so old
 # entries are detected and recomputed transparently.
-ROUTE_ATTEMPTS_VERSION = 6   # v6: + best-attempt gain/loss + ride distance
+ROUTE_ATTEMPTS_VERSION = 7   # v7: drop degenerate attempts below a coverage fraction
+# An attempt must ride at least this fraction of the route's mapped length,
+# else it's a degenerate endpoint-touch match — e.g. a brief brush past a
+# trailhead where several of the route's trails converge, which satisfies
+# every segment's endpoint-touch in a tiny window. Real rides cover ~90-105%.
+ROUTE_MIN_COVERAGE_FRAC = 0.5
 
 # Re-export from trail_match so callers don't need to dig into private
 # names — the endpoint-touch radius is the central tuning knob here.
@@ -410,6 +415,15 @@ def _try_match_segment(points: list, timeline: list, j: int,
 
 # ─── Per-route attempt detection ────────────────────────────────────────────
 
+def _polyline_len_km(poly: list) -> float:
+    """Length (km) of a [[lat,lon],...] polyline via summed haversine."""
+    total = 0.0
+    for k in range(1, len(poly or [])):
+        total += trail_match._haversine_m(poly[k-1][0], poly[k-1][1],
+                                          poly[k][0], poly[k][1])
+    return total / 1000.0
+
+
 def detect_attempts_for_route(
     route: dict,
     region_artifact: dict,
@@ -428,6 +442,18 @@ def detect_attempts_for_route(
     if not segs:
         return []
     activity_meta = activity_meta or {}
+
+    # Route-level coverage guard: a valid attempt must ride at least
+    # ROUTE_MIN_COVERAGE_FRAC of the route's mapped length. Filters out
+    # degenerate endpoint-touch matches that "complete" the route in a tiny
+    # window (which otherwise rank as the fastest attempts).
+    route_len_km = sum(_polyline_len_km(s[5]) for s in segs)
+    min_attempt_km = ROUTE_MIN_COVERAGE_FRAC * route_len_km
+    if route_len_km == 0:
+        # No resolvable geometry (all segment edges stale) — the guard can't
+        # compute a coverage fraction, so it's inactive for this route.
+        logger.debug("route %s: all segment polylines empty — coverage guard inactive",
+                     route.get("id"))
 
     # Quick prune: any ride whose timeline has no entry with the same name
     # AND kind as the route's first segment can't be an attempt, skip the
@@ -474,11 +500,18 @@ def detect_attempts_for_route(
             # Actual ridden distance over the span — complete even when some of
             # the route's edges are stale (the OSM edge-sum undercounts those).
             try:
-                d0 = points[first_idx].get("dist_km") or 0.0
-                d1 = points[min(last_idx, len(points) - 1)].get("dist_km") or 0.0
+                last = len(points) - 1
+                d0 = points[min(first_idx, last)].get("dist_km") or 0.0
+                d1 = points[min(last_idx, last)].get("dist_km") or 0.0
                 dist_km = round(max(0.0, d1 - d0), 3)
             except (IndexError, KeyError, TypeError):
                 dist_km = 0.0
+            if route_len_km > 0 and dist_km < min_attempt_km:
+                logger.debug("route %s: dropping degenerate attempt in %s "
+                             "(%.2f km < %.0f%% of %.2f km route)",
+                             route.get("id"), filename, dist_km,
+                             ROUTE_MIN_COVERAGE_FRAC * 100, route_len_km)
+                continue
             attempts.append({
                 "filename":     filename,
                 "title":        activity_meta.get(filename, {}).get("title") or filename,
