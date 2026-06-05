@@ -56,6 +56,17 @@
     .region-card.open .region-body { display: block; }
     /* Routes table sits flush inside a region card (the card supplies the frame). */
     .region-body .routes-table { border: none; border-radius: 0; background: transparent; }
+    /* Suggestion cards in a region group need padding (tables sit flush). */
+    .region-body .route-cards { padding: 12px; }
+
+    /* Suggested-tab layout toggle (temporary, for comparing cards vs table). */
+    .sug-bar { display: flex; align-items: center; gap: 14px; margin-bottom: 12px; }
+    .sug-bar .sug-meta { margin: 0; flex: 1; }
+    .layout-toggle { display: inline-flex; border: 1px solid var(--border-row); border-radius: 3px; overflow: hidden; flex-shrink: 0; }
+    .layout-toggle button { background: transparent; border: none; color: var(--text-tertiary); font-family: var(--font-mono); font-size: 0.66rem; letter-spacing: 0.08em; text-transform: uppercase; padding: 5px 11px; cursor: pointer; transition: all 0.12s; }
+    .layout-toggle button + button { border-left: 1px solid var(--border-row); }
+    .layout-toggle button:hover { color: var(--text-primary); }
+    .layout-toggle button.active { background: var(--accent); color: #0b0f14; }
 
     /* Split layout: left = routes list, right = attempts detail panel.
        Mirrors /trails — detail panel is sticky and only shown once a route
@@ -255,7 +266,13 @@
         <div id="list-wrap"></div>
       </div>
       <div id="tab-suggested" role="tabpanel" style="display:none;">
-        <p class="sug-meta" id="sug-meta"></p>
+        <div class="sug-bar">
+          <p class="sug-meta" id="sug-meta"></p>
+          <div class="layout-toggle" id="sug-layout-toggle" role="group" aria-label="Suggestion layout">
+            <button data-suglayout="cards" type="button">Cards</button>
+            <button data-suglayout="table" type="button">Table</button>
+          </div>
+        </div>
         <div id="suggestions-wrap"></div>
       </div>
     </div>
@@ -302,19 +319,30 @@ function toast(msg, isErr) {
 }
 
 let routes = [];
-// Kept for renderSuggestions (region scoping); My Routes now filters via the
-// collapsible region groups + the search box rather than a dropdown.
-let regionFilter = "";
 
-// Search + region-group expand state (mirrors /trails).
+// Search + region-group expand state (mirrors /trails). My Routes and
+// Suggested keep separate expand sets.
 let currentSearch = '';
-const ROUTES_EXPAND_KEY = 'routesExpandedRegions';
-function _expandedSet() {
-  try { return new Set(JSON.parse(localStorage.getItem(ROUTES_EXPAND_KEY) || '[]')); }
+// Suggested-tab layout: 'cards' | 'table' (temporary toggle to compare).
+let sugLayout = (localStorage.getItem('suggestLayout') === 'table') ? 'table' : 'cards';
+const ROUTES_EXPAND_KEY  = 'routesExpandedRegions';
+const SUGGEST_EXPAND_KEY = 'suggestExpandedRegions';
+function _expandedSetFor(key) {
+  try { return new Set(JSON.parse(localStorage.getItem(key) || '[]')); }
   catch { return new Set(); }
 }
-function _saveExpanded(set) {
-  localStorage.setItem(ROUTES_EXPAND_KEY, JSON.stringify([...set]));
+// Wire region-header collapse within `containerId`, persisting to `key`.
+function _wireRegionHeads(containerId, key) {
+  $(containerId).querySelectorAll('.region-head').forEach(head => {
+    head.addEventListener('click', () => {
+      const card = head.parentElement;
+      const open = card.classList.toggle('open');
+      const set = _expandedSetFor(key);
+      const id = card.dataset.regionId;
+      if (open) set.add(id); else set.delete(id);
+      localStorage.setItem(key, JSON.stringify([...set]));
+    });
+  });
 }
 
 // Per-route distance now arrives precomputed as r.distance_m from /api/routes
@@ -417,7 +445,7 @@ async function render() {
   wrap.innerHTML = renderRegions(view, !!q);
 
   wireRows();
-  wireRegionHeads();
+  _wireRegionHeads('list-wrap', ROUTES_EXPAND_KEY);
   // Lazily init every mini-map as it scrolls into view.
   wrap.querySelectorAll('.route-map').forEach(el => mapObserver.observe(el));
   // The route render disconnected the shared observer and destroyed all
@@ -436,7 +464,7 @@ function renderRegions(view, searching) {
     if (!groups.has(rid)) groups.set(rid, []);
     groups.get(rid).push(r);
   }
-  const expanded = _expandedSet();
+  const expanded = _expandedSetFor(ROUTES_EXPAND_KEY);
   // Sort regions by total attempts desc (then name) — mirrors /trails.
   const regionAttempts = {};
   for (const [rid, list] of groups) {
@@ -467,19 +495,6 @@ function renderRegions(view, searching) {
         <div class="region-body">${renderTable(list)}</div>
       </div>`;
   }).join('');
-}
-
-function wireRegionHeads() {
-  $("list-wrap").querySelectorAll('.region-head').forEach(head => {
-    head.addEventListener('click', () => {
-      const card = head.parentElement;
-      const open = card.classList.toggle('open');
-      const set = _expandedSet();
-      const id = card.dataset.regionId;
-      if (open) set.add(id); else set.delete(id);
-      _saveExpanded(set);
-    });
-  });
 }
 
 function statsBits(r) {
@@ -682,8 +697,25 @@ $("route-search").addEventListener("input", () => {
   _searchTimer = setTimeout(() => {
     currentSearch = ($("route-search").value || '').toLowerCase().trim();
     render();
+    renderSuggestions();
   }, 130);
 });
+
+// Suggested-tab layout toggle (cards vs table — temporary, for comparison).
+function syncSugToggle() {
+  document.querySelectorAll('#sug-layout-toggle button').forEach(b =>
+    b.classList.toggle('active', b.dataset.suglayout === sugLayout));
+}
+document.querySelectorAll('#sug-layout-toggle button').forEach(btn => {
+  btn.addEventListener('click', () => {
+    if (sugLayout === btn.dataset.suglayout) return;
+    sugLayout = btn.dataset.suglayout;
+    localStorage.setItem('suggestLayout', sugLayout);
+    syncSugToggle();
+    renderSuggestions();
+  });
+});
+syncSugToggle();
 
 async function deleteRoute(rid) {
   const r = routes.find(x => x.id === rid);
@@ -760,49 +792,102 @@ function renderSuggestions() {
   const wrap = $("suggestions-wrap");
   const meta = $("sug-meta");
   const badge = $("sug-tab-count");
+  const toggle = $("sug-layout-toggle");
   destroySuggestionMaps();
 
+  const q = currentSearch;
   let view = suggestions;
-  if (regionFilter) view = view.filter(s => s.region_id === regionFilter);
+  if (q) {
+    view = view.filter(s => {
+      const rn = (regionById[s.region_id]?.name || s.region_name || s.region_id || '').toLowerCase();
+      return (s.name || '').toLowerCase().includes(q) || rn.includes(q);
+    });
+  }
 
-  // Tab count badge (shows even while the Suggested tab is hidden).
-  if (view.length) { badge.textContent = String(view.length); badge.style.display = ""; }
+  // Badge reflects total available suggestions, not the search view.
+  if (suggestions.length) { badge.textContent = String(suggestions.length); badge.style.display = ""; }
   else if (sugComputing) { badge.textContent = "…"; badge.style.display = ""; }
   else { badge.style.display = "none"; }
+  if (toggle) toggle.style.display = view.length ? '' : 'none';
 
   if (!view.length) {
     meta.textContent = "";
     wrap.innerHTML = sugComputing
       ? `<div class="empty">Scanning your rides for loops you've done more than once…</div>`
-      : `<div class="empty">No recurring routes found that aren't already saved.${regionFilter ? ' Try clearing the region filter.' : ''}</div>`;
+      : (q ? `<div class="empty">No suggestions match “${_esc(q)}”.</div>`
+           : `<div class="empty">No recurring routes found that aren't already saved.</div>`);
     return;
   }
 
+  const ofTotal = (q && view.length !== suggestions.length) ? ` of ${suggestions.length}` : '';
   meta.textContent = sugComputing
     ? `${view.length} so far · still scanning…`
-    : `${view.length} loop${view.length === 1 ? '' : 's'} ridden more than once, not yet saved`;
+    : `${view.length}${ofTotal} loop${view.length === 1 ? '' : 's'} ridden more than once, not yet saved`;
 
-  wrap.innerHTML = `<div class="route-cards">` + view.map(s => {
-    const region = regionById[s.region_id];
-    const regionLbl = region ? region.name : (s.region_name || s.region_id || '');
+  // Group by region; sort regions by total ride_count desc (then name).
+  const groups = new Map();
+  for (const s of view) {
+    const rid = s.region_id || '';
+    if (!groups.has(rid)) groups.set(rid, []);
+    groups.get(rid).push(s);
+  }
+  const regionRides = {};
+  for (const [rid, list] of groups) regionRides[rid] = list.reduce((n, s) => n + (s.ride_count || 0), 0);
+  const expanded = _expandedSetFor(SUGGEST_EXPAND_KEY);
+  const regionIds = [...groups.keys()].sort((a, b) =>
+    (regionRides[b] - regionRides[a]) ||
+    (regionById[a]?.name || a || 'Unassigned')
+      .localeCompare(regionById[b]?.name || b || 'Unassigned', undefined, { sensitivity: 'base' }));
+
+  wrap.innerHTML = regionIds.map(rid => {
+    const region = regionById[rid];
+    const name = region ? region.name : (rid || 'Unassigned');
+    const list = groups.get(rid).slice()
+      .sort((a, b) => (b.ride_count || 0) - (a.ride_count || 0)
+                   || (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' }));
+    const isOpen = q ? true : expanded.has(rid);
+    const swatch = region && region.color
+      ? `<div class="region-swatch" style="background:${_esc(region.color)}"></div>` : '';
+    const body = (sugLayout === 'table') ? renderSuggestionTable(list) : renderSuggestionCards(list);
+    return `
+      <div class="region-card ${isOpen ? 'open' : ''}" data-region-id="${_esc(rid)}">
+        <div class="region-head">
+          ${swatch}
+          <span class="region-name">${_esc(name)}</span>
+          <span class="region-meta">${list.length} loop${list.length === 1 ? '' : 's'} · ${regionRides[rid]} ride${regionRides[rid] === 1 ? '' : 's'}</span>
+          <span class="region-chevron">▶</span>
+        </div>
+        <div class="region-body">${body}</div>
+      </div>`;
+  }).join('');
+
+  wireSuggestionCards();
+  _wireRegionHeads('suggestions-wrap', SUGGEST_EXPAND_KEY);
+  wrap.querySelectorAll('.route-map').forEach(el => mapObserver.observe(el));
+}
+
+function _sugDateRange(s) {
+  const dates = (s.rides || []).map(m => m.date).filter(Boolean).sort();
+  if (!dates.length) return '—';
+  return dates[0] === dates[dates.length - 1] ? dates[0] : `${dates[0]} – ${dates[dates.length - 1]}`;
+}
+
+// Region-pill dropped from the card — the region is the section header now.
+function renderSuggestionCards(list) {
+  return `<div class="route-cards">` + list.map(s => {
     const preview  = _esc(JSON.stringify(s.preview_polyline || []));
     const overlays = _esc(JSON.stringify((s.rides || []).map(m => m.polyline || []).filter(p => p.length)));
-    const dates = (s.rides || []).map(m => m.date).filter(Boolean).sort();
-    const dateRange = dates.length
-      ? (dates[0] === dates[dates.length - 1] ? dates[0] : `${dates[0]} – ${dates[dates.length - 1]}`)
-      : '';
     return `
       <div class="route-card sug-card" data-sug="${_esc(s.id)}">
         <div class="route-map" data-rid="sug:${_esc(s.id)}" data-polyline="${preview}" data-overlays="${overlays}"></div>
         <div class="card-body">
           <div class="card-title">
             <span class="card-name">${_esc(s.name)}</span>
-            <span class="region-pill">${_esc(regionLbl)}</span>
             <button class="sug-dismiss" data-act="dismiss" title="Dismiss — don't suggest this again">×</button>
           </div>
           <div class="card-stats">
             <span class="sug-count">${s.ride_count}× ridden</span>
-            <span>${_esc(dateRange)}</span>
+            <span>${_esc(_sugDateRange(s))}</span>
           </div>
           <div class="sug-actions">
             <button class="sug-save" data-act="save" title="Save this as a route">Save route</button>
@@ -810,10 +895,45 @@ function renderSuggestions() {
           </div>
         </div>
       </div>`;
-  }).join("") + `</div>`;
+  }).join('') + `</div>`;
+}
 
-  wireSuggestionCards();
-  wrap.querySelectorAll('.route-map').forEach(el => mapObserver.observe(el));
+function renderSuggestionTable(list) {
+  const rows = list.map(s => {
+    const preview  = _esc(JSON.stringify(s.preview_polyline || []));
+    const overlays = _esc(JSON.stringify((s.rides || []).map(m => m.polyline || []).filter(p => p.length)));
+    // Median member-ride distance — suggestions have no detected attempts.
+    const dists = (s.rides || []).map(m => m.distance_km).filter(x => x > 0).sort((a, b) => a - b);
+    const medDist = dists.length ? dists[Math.floor((dists.length - 1) / 2)] : null;
+    const distTxt = medDist != null ? `${medDist.toFixed(1)} km` : '—';
+    return `
+      <tr data-sug="${_esc(s.id)}">
+        <td class="map-cell"><div class="route-map" data-rid="sug:${_esc(s.id)}" data-polyline="${preview}" data-overlays="${overlays}"></div></td>
+        <td class="name-cell">${_esc(s.name)}</td>
+        <td class="num-col">${s.ride_count}×</td>
+        <td class="num-col">${distTxt}</td>
+        <td class="num-col">${_esc(_sugDateRange(s))}</td>
+        <td class="actions-h">
+          <div class="row-actions">
+            <button class="sug-save" data-act="save" title="Save this as a route">Save</button>
+            <a data-act="builder" href="/routes/edit?from=${encodeURIComponent(s.representative)}" title="Open in the builder">Builder</a>
+            <button class="del" data-act="dismiss" title="Dismiss — don't suggest this again">Dismiss</button>
+          </div>
+        </td>
+      </tr>`;
+  }).join('');
+  return `
+    <table class="routes-table">
+      <thead><tr>
+        <th class="map-h"></th>
+        <th class="name-h">Name</th>
+        <th class="num-col">Ridden</th>
+        <th class="num-col">Distance</th>
+        <th class="num-col">Dates</th>
+        <th class="actions-h">Actions</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
 }
 
 function wireSuggestionCards() {
@@ -847,6 +967,7 @@ async function saveSuggestion(sugId) {
   const s = suggestions.find(x => x.id === sugId);
   if (!s) return;
   const btn = document.querySelector(`[data-sug="${CSS.escape(sugId)}"] [data-act='save']`);
+  const btnLabel = btn ? btn.textContent : null;   // "Save route" (card) or "Save" (table)
   if (btn) { btn.disabled = true; btn.textContent = "Saving…"; }
   try {
     const resp = await fetch("/api/routes", {
@@ -863,7 +984,7 @@ async function saveSuggestion(sugId) {
     location.href = `/routes?open=${encodeURIComponent(route.id)}`;
   } catch (e) {
     toast(`Save failed: ${e.message}`, true);
-    if (btn) { btn.disabled = false; btn.textContent = "Save route"; }
+    if (btn) { btn.disabled = false; btn.textContent = btnLabel || "Save route"; }
   }
 }
 
@@ -877,9 +998,9 @@ function switchTab(tab) {
     b.classList.toggle('active', b.dataset.tab === tab));
   $("tab-mine").style.display      = (tab === 'mine')      ? '' : 'none';
   $("tab-suggested").style.display = (tab === 'suggested') ? '' : 'none';
-  // The search box filters My Routes; hide it on the Suggested tab for now.
+  // Search now filters both My Routes and Suggested.
   const sw = $("route-search-wrap");
-  if (sw) sw.style.display = (tab === 'mine') ? 'flex' : 'none';
+  if (sw) sw.style.display = 'flex';
   if (tab === 'suggested') {
     closeDetail();
     // Suggestion mini-maps were observed while their tab was hidden (a
