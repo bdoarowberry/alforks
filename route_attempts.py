@@ -36,7 +36,7 @@ import trail_match
 # Bump to invalidate per-route cached attempts (e.g. when the matching
 # rule changes). The cache file stores this alongside the data so old
 # entries are detected and recomputed transparently.
-ROUTE_ATTEMPTS_VERSION = 4   # v4: accumulate fragmented same-trail runs + ignore noise entries
+ROUTE_ATTEMPTS_VERSION = 6   # v6: + best-attempt gain/loss + ride distance
 
 # Re-export from trail_match so callers don't need to dig into private
 # names — the endpoint-touch radius is the central tuning knob here.
@@ -468,6 +468,17 @@ def detect_attempts_for_route(
                 logger.debug("route %s: dropping attempt in %s — bad timestamps",
                               route.get("id"), filename)
                 continue   # skip; don't pollute leaderboard with 0-dur phantoms
+            first_idx = int(first_entry.get("start_idx") or 0)
+            last_idx  = int(last_entry.get("end_idx") or 0)
+            gain_m, loss_m = trail_match._segment_gain_loss(points, first_idx, last_idx + 1)
+            # Actual ridden distance over the span — complete even when some of
+            # the route's edges are stale (the OSM edge-sum undercounts those).
+            try:
+                d0 = points[first_idx].get("dist_km") or 0.0
+                d1 = points[min(last_idx, len(points) - 1)].get("dist_km") or 0.0
+                dist_km = round(max(0.0, d1 - d0), 3)
+            except (IndexError, KeyError, TypeError):
+                dist_km = 0.0
             attempts.append({
                 "filename":     filename,
                 "title":        activity_meta.get(filename, {}).get("title") or filename,
@@ -475,8 +486,11 @@ def detect_attempts_for_route(
                 "end_time":     last_entry.get("end_time", ""),
                 "duration_sec": dur_sec,
                 "date":         (first_entry.get("start_time") or "")[:10],
-                "first_idx":    int(first_entry.get("start_idx") or 0),
-                "last_idx":     int(last_entry.get("end_idx") or 0),
+                "first_idx":    first_idx,
+                "last_idx":     last_idx,
+                "dist_km":      dist_km,
+                "gain_m":       gain_m,
+                "loss_m":       loss_m,
             })
 
     attempts.sort(key=lambda a: (a["duration_sec"], a["filename"]))
@@ -573,11 +587,17 @@ def build_route_leaderboard(
     best_duration_sec: int | None = None
     best_filename: str | None = None
     best_date: str | None = None
+    best_gain_m: float | None = None
+    best_loss_m: float | None = None
+    best_distance_km: float | None = None
     if attempts:
         b = attempts[0]   # already sorted fastest first
         best_duration_sec = b["duration_sec"]
         best_filename     = b["filename"]
         best_date         = b["date"]
+        best_gain_m       = b.get("gain_m")
+        best_loss_m       = b.get("loss_m")
+        best_distance_km  = b.get("dist_km")
     return {
         "version":           ROUTE_ATTEMPTS_VERSION,
         "attempts":          attempts,
@@ -585,4 +605,7 @@ def build_route_leaderboard(
         "best_duration_sec": best_duration_sec,
         "best_filename":     best_filename,
         "best_date":         best_date,
+        "best_gain_m":       best_gain_m,
+        "best_loss_m":       best_loss_m,
+        "best_distance_km":  best_distance_km,
     }

@@ -3101,6 +3101,9 @@ def api_routes_list():
             "best_duration_sec": stats.get("best_duration_sec"),
             "best_filename":     stats.get("best_filename"),
             "best_date":         stats.get("best_date"),
+            "best_gain_m":       stats.get("best_gain_m"),
+            "best_loss_m":       stats.get("best_loss_m"),
+            "best_distance_km":  stats.get("best_distance_km"),
         })
     return jsonify({"version": ROUTES_API_VERSION, "routes": out})
 
