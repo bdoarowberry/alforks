@@ -1,13 +1,14 @@
-// Thin top progress strip for the cold-load sidebar-cache build — the slow
-// part of a cold first page load (parse + stats + HR merge per ride). Polls
-// /api/activities/build-status and fills while the build runs, then fades.
-// Self-contained: drop the <script defer> on any page. Warm/idle pages stop
-// polling within a few seconds.
+// Thin top progress strip for "what's processing on app open". Surfaces, in
+// priority order: the sidebar-cache build (the slow part of a cold first page
+// load) and the trail-match prewarm (re-snapping rides against OSM, which runs
+// at startup after a version bump). Polls the two status endpoints, fills
+// done/total, then fades. Self-contained: drop the <script defer> on any page.
+// Warm/idle pages stop polling within a few seconds.
 (function () {
   const POLL_MS = 700;
-  const MAX_IDLE_POLLS = 20;   // ~14s with no build before giving up (warm cache)
+  const MAX_IDLE_POLLS = 20;   // ~14s with no activity before giving up (warm cache)
 
-  let el, bar, label, seenRunning = false, idle = 0, timer = null, stopped = false;
+  let el, bar, label, seenActive = false, idle = 0, timer = null, stopped = false;
 
   function ensureEl() {
     if (el) return;
@@ -33,11 +34,11 @@
     document.body.appendChild(label);
   }
 
-  function show(done, total) {
+  function show(text, done, total) {
     ensureEl();
     el.classList.add('on'); label.classList.add('on');
     bar.style.width = (total > 0 ? Math.round((done / total) * 100) : 0) + '%';
-    label.textContent = `Preparing ${done}/${total} rides…`;
+    label.textContent = text;
   }
   function finish() {
     if (!el) return;
@@ -48,24 +49,31 @@
 
   function schedule(ms) { clearTimeout(timer); timer = setTimeout(tick, ms); }
 
+  async function status(url) {
+    try { return await (await fetch(url, { cache: 'no-store' })).json(); }
+    catch (_e) { return null; }
+  }
+
   async function tick() {
     if (stopped) return;
-    let s;
-    try {
-      const r = await fetch('/api/activities/build-status', { cache: 'no-store' });
-      s = await r.json();
-    } catch (_e) { schedule(2000); return; }
-    if (s.running && s.total > 0) {
-      seenRunning = true; idle = 0;
-      show(s.done, s.total);
-      schedule(POLL_MS);
-    } else if (seenRunning) {
-      stopped = true; finish();             // build completed → fill + fade
-    } else if (++idle <= MAX_IDLE_POLLS) {
-      schedule(POLL_MS);                     // build may start once the page fetch fires
-    } else {
-      stopped = true; hide();                // warm cache, nothing to show → stop
+    // 1) Sidebar build — highest priority (it blocks the page's own data).
+    const b = await status('/api/activities/build-status');
+    if (b && b.running && b.total > 0) {
+      seenActive = true; idle = 0;
+      show(`Preparing ${b.done}/${b.total} rides…`, b.done, b.total);
+      return schedule(POLL_MS);
     }
+    // 2) Trail-match prewarm — re-snapping rides against OSM at startup.
+    const t = await status('/api/trail-match/status');
+    if (t && t.running && t.total > 0) {
+      seenActive = true; idle = 0;
+      show(`Matching trails ${t.done}/${t.total}…`, t.done, t.total);
+      return schedule(POLL_MS);
+    }
+    // Nothing active.
+    if (seenActive) { stopped = true; return finish(); }   // finished → fill + fade
+    if (++idle <= MAX_IDLE_POLLS) return schedule(POLL_MS); // may start once the page fetch fires
+    stopped = true; hide();                                 // warm, nothing to show → stop
   }
 
   // Loaded with `defer`, so the DOM is parsed by the time this runs.
