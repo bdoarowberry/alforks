@@ -893,6 +893,15 @@ def _build_activity_entry(filename: str, meta: dict, regions: list[dict]) -> tup
     return entry, aux
 
 
+# Progress of the lazy sidebar-cache build — the slow part of a cold first page
+# load (parse + stats + HR merge per ride, 6 workers). Polled by the top
+# progress strip via /api/activities/build-status. Lock-guarded because the
+# rebuild runs across the worker pool.
+_sidebar_build_progress = {"running": False, "done": 0, "total": 0,
+                           "started_at": None, "finished_at": None}
+_sidebar_build_lock = threading.Lock()
+
+
 def all_activities() -> list[dict]:
     global _activities_cache, _activities_cache_dir_mtime
 
@@ -951,6 +960,9 @@ def all_activities() -> list[dict]:
             except Exception:
                 logger.exception("sidebar build failed for %s", f.name)
                 return None
+            finally:
+                with _sidebar_build_lock:
+                    _sidebar_build_progress["done"] += 1
 
         rebuilt_builds: dict[str, tuple[dict, dict]] = {}
         if misses:
@@ -959,8 +971,18 @@ def all_activities() -> list[dict]:
             # misses (warm cache: nothing to parse, no I/O storm to
             # mitigate). Idempotent across calls.
             _prewarm_disk_caches()
-            with ThreadPoolExecutor(max_workers=6) as pool:
-                builds = list(pool.map(_safe_build, [f for f, _ in misses]))
+            with _sidebar_build_lock:
+                _sidebar_build_progress.update(running=True, done=0,
+                                               total=len(misses),
+                                               started_at=time.time(),
+                                               finished_at=None)
+            try:
+                with ThreadPoolExecutor(max_workers=6) as pool:
+                    builds = list(pool.map(_safe_build, [f for f, _ in misses]))
+            finally:
+                with _sidebar_build_lock:
+                    _sidebar_build_progress.update(running=False,
+                                                   finished_at=time.time())
             for (f, gpx_mtime), built in zip(misses, builds):
                 if built is None:
                     continue
@@ -985,6 +1007,15 @@ def all_activities() -> list[dict]:
         # without blocking the activity API on first view.
         prewarm_geocode(start_coords)
         return result
+
+
+@app.route("/api/activities/build-status")
+def api_activities_build_status():
+    """Progress of the lazy sidebar-cache build, for the top progress strip.
+    Served on a separate thread (Flask threaded=True) so it answers while the
+    build itself runs inside the in-flight /api/activities request."""
+    with _sidebar_build_lock:
+        return jsonify(dict(_sidebar_build_progress))
 
 
 def _update_activity_entry(filename: str) -> None:
