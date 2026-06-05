@@ -858,8 +858,15 @@ async function load() {
   // Tear down any existing maps
   maps.destroyAll();
 
-  const r = await fetch('/api/comparison?' + params.toString());
-  const d = await r.json();
+  let d;
+  try {
+    const r = await fetch('/api/comparison?' + params.toString());
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    d = await r.json();
+  } catch (e) {
+    wrap.innerHTML = `<div id="empty-msg">Failed to load activities: ${e.message}</div>`;
+    return;
+  }
 
   // Hydrate the date inputs from the response if the user hasn't touched
   // them — default span is the full range of stored logs. Flip the flag
@@ -921,7 +928,8 @@ function _rebuildView() {
 function _appendRow(wrap, item, showGaps) {
   if (showGaps && _lastRenderedDate) {
     const a = new Date(_lastRenderedDate); const b = new Date(item.date);
-    const days = Math.round((a - b) / 86400000);
+    // abs() so gaps render under both date-sort directions (asc + desc).
+    const days = Math.round(Math.abs(a - b) / 86400000);
     if (days > 0) wrap.appendChild(renderGap(days));
   }
   const row = renderRow(item);
@@ -971,15 +979,15 @@ function _appendRow(wrap, item, showGaps) {
 function _renderFooter(wrap) {
   const total = _view.length;
   const shown = Math.min(_shown, total);
+  // Nothing more to load → no footer (the page title already shows the count).
+  if (shown >= total) return;
   const bar = document.createElement('div');
   bar.className = 'load-more-bar';
-  if (shown < total) {
-    const btn = document.createElement('button');
-    btn.className = 'pager-btn';
-    btn.textContent = `Load more (${total - shown} remaining)`;
-    btn.onclick = _loadMore;
-    bar.appendChild(btn);
-  }
+  const btn = document.createElement('button');
+  btn.className = 'pager-btn';
+  btn.textContent = `Load more (${total - shown} remaining)`;
+  btn.onclick = _loadMore;
+  bar.appendChild(btn);
   const info = document.createElement('span');
   info.className = 'pager-info';
   info.textContent = `Showing ${shown} of ${total}`;

@@ -2568,7 +2568,11 @@ def api_trail_hide():
         abort(400)
     keys = _load_hidden_trails()
     keys.add(key)
-    _save_hidden_trails(keys)
+    try:
+        _save_hidden_trails(keys)
+    except OSError as exc:
+        logger.warning("failed to persist hidden trails: %s", exc)
+        return jsonify({"ok": False, "error": "could not persist"}), 500
     return jsonify({"ok": True, "hidden_count": len(keys)})
 
 
@@ -2576,9 +2580,15 @@ def api_trail_hide():
 def api_trail_unhide():
     """Restore a previously hidden (trail, direction)."""
     name, key = _hidden_trail_key_from_request()
+    if not name:
+        abort(400)
     keys = _load_hidden_trails()
     keys.discard(key)
-    _save_hidden_trails(keys)
+    try:
+        _save_hidden_trails(keys)
+    except OSError as exc:
+        logger.warning("failed to persist hidden trails: %s", exc)
+        return jsonify({"ok": False, "error": "could not persist"}), 500
     return jsonify({"ok": True, "hidden_count": len(keys)})
 
 

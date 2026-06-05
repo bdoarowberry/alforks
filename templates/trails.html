@@ -283,7 +283,7 @@ function render() {
       if (!showHidden) trails = trails.filter(t => !t.hidden);
       return { reg, trails, regionMatch };
     })
-    .filter(({ trails, regionMatch }) => regionMatch || trails.length > 0);
+    .filter(({ trails }) => trails.length > 0);
 
   if (regions.length === 0) {
     content.innerHTML = `<div class="empty-state">
@@ -514,13 +514,21 @@ async function _renderTrailMap(regionId, name) {
 
 // ── Hide / restore a trail (file-backed, /trails page only) ────────────
 async function setTrailHidden(name, dir, hide) {
+  let ok = false;
   try {
-    await fetch('/api/trails/hidden', {
+    const r = await fetch('/api/trails/hidden', {
       method: hide ? 'POST' : 'DELETE',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name, direction: dir }),
     });
-  } catch (e) { /* keep the UI responsive even if the write fails */ }
+    ok = r.ok;
+  } catch (e) { ok = false; }
+  if (!ok) {
+    // Don't let the UI claim success the server didn't persist (it would
+    // silently revert on the next reload).
+    console.warn('trail hide/restore failed to persist:', name, dir);
+    return;
+  }
   for (const reg of _data.regions) {
     for (const t of reg.trails) {
       if (t.name === name && (t.direction || 'mixed') === dir) t.hidden = hide;

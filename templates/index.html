@@ -490,7 +490,6 @@
     #trails-drawer.open { transform: translateX(0); }
     #trails-drawer h3 { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.08em; color: #ccc; padding: 10px 14px; border-bottom: 1px solid var(--border-row); display: flex; align-items: center; justify-content: space-between; }
     #trails-drawer h3 .preview-tag { font-size: 0.55rem; padding: 2px 6px; background: var(--border-row); color: var(--warn); border-radius: 3px; letter-spacing: 0.05em; }
-    #trails-drawer .section-label { font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.07em; color: #888; padding: 10px 14px 4px; }
     /* Strip doubles as a drag handle: cursor switches to col-resize on
        hover, and a JS handler on mousedown begins a width-resize
        interaction. A short click without movement still toggles the
@@ -578,9 +577,9 @@
     #trails-leaderboard { position: absolute; top: 0; bottom: 0; width: 340px; background: var(--bg-card); border-left: 1px solid var(--border-row); border-right: 1px solid var(--border-row); z-index: 999; overflow-y: auto; display: none; }
     #trails-leaderboard.open { display: block; }
     /* The right offset tracks the drawer width — same CSS variable used
-       by map overlays. Falls back to the default 380 px. */
+       by map overlays. Falls back to the default 500 px. */
     #map-wrap.has-trails:has(#trails-drawer.open) #trails-leaderboard {
-      right: calc(var(--trails-drawer-w, 380px) + 0px);
+      right: calc(var(--trails-drawer-w, 500px) + 0px);
     }
     /* When drawer is closed, dock against the right edge so the popup is
        still visible to the user. */
@@ -602,7 +601,7 @@
                           z-index: 999; overflow-y: auto; display: none; }
     #routes-leaderboard.open { display: block; }
     #map-wrap.has-trails:has(#trails-drawer.open) #routes-leaderboard {
-      right: var(--trails-drawer-w, 380px);
+      right: var(--trails-drawer-w, 500px);
     }
     #map-wrap.has-trails:not(:has(#trails-drawer.open)) #routes-leaderboard {
       right: 14px;
@@ -646,12 +645,12 @@
     #map-wrap.has-trails:has(#trails-drawer.open):not(:has(#trails-leaderboard.open)) #view-toggle,
     #map-wrap.has-trails:has(#trails-drawer.open):not(:has(#trails-leaderboard.open)) #map-controls,
     #map-wrap.has-trails:has(#trails-drawer.open):not(:has(#trails-leaderboard.open)) #map-legend,
-    #map-wrap.has-trails:has(#trails-drawer.open):not(:has(#trails-leaderboard.open)) #speed-legend { right: calc(var(--trails-drawer-w, 380px) + 24px); }
+    #map-wrap.has-trails:has(#trails-drawer.open):not(:has(#trails-leaderboard.open)) #speed-legend { right: calc(var(--trails-drawer-w, 500px) + 24px); }
     /* Both drawer and leaderboard open */
     #map-wrap.has-trails:has(#trails-drawer.open):has(#trails-leaderboard.open) #view-toggle,
     #map-wrap.has-trails:has(#trails-drawer.open):has(#trails-leaderboard.open) #map-controls,
     #map-wrap.has-trails:has(#trails-drawer.open):has(#trails-leaderboard.open) #map-legend,
-    #map-wrap.has-trails:has(#trails-drawer.open):has(#trails-leaderboard.open) #speed-legend { right: calc(var(--trails-drawer-w, 380px) + 340px + 24px); }
+    #map-wrap.has-trails:has(#trails-drawer.open):has(#trails-leaderboard.open) #speed-legend { right: calc(var(--trails-drawer-w, 500px) + 340px + 24px); }
     /* Leaderboard only (drawer closed) */
     #map-wrap.has-trails:not(:has(#trails-drawer.open)):has(#trails-leaderboard.open) #view-toggle,
     #map-wrap.has-trails:not(:has(#trails-drawer.open)):has(#trails-leaderboard.open) #map-controls,
