@@ -296,6 +296,13 @@ def cmd_login():
     print(f"  Tokens saved to: {TOKEN_DIR}")
 
 
+def _emit_progress(phase: str, done: int, total: int) -> None:
+    """Machine-readable progress line the app's sync runner parses for the
+    per-phase status UI. Plain stdout; ignored by anything that doesn't grok it."""
+    print(f"@@PROGRESS {json.dumps({'phase': phase, 'done': done, 'total': total})}",
+          flush=True)
+
+
 def cmd_sync(only_missing: bool = True, throttle: float = 1.0,
              retry_empty: bool = False):
     client = get_client(interactive=False)
@@ -322,6 +329,7 @@ def cmd_sync(only_missing: bool = True, throttle: float = 1.0,
     if incomplete: breakdown.append(f"{incomplete} incomplete")
     print(f"Syncing {len(dates)} date{'s' if len(dates) != 1 else ''} "
           f"({', '.join(breakdown) or 'all'}; {len(all_dates)} total activity dates)...")
+    _emit_progress("hr", 0, len(dates))
     synced_ok = 0
     total_samples = 0
     for i, d in enumerate(dates, 1):
@@ -332,6 +340,7 @@ def cmd_sync(only_missing: bool = True, throttle: float = 1.0,
             tag = f"{n} samples" if n else "no HR data"
             print(f"  [{i}/{len(dates)}] {d}  [OK] {tag}")
         time.sleep(throttle)
+        _emit_progress("hr", i, len(dates))
 
     update_status(
         last_sync    = int(time.time()),

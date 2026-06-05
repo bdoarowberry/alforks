@@ -370,6 +370,14 @@ def _advance_newest_epoch(newest_epoch: int, a: dict) -> int:
         return newest_epoch
 
 
+def _emit_progress(phase: str, done: int, total: int) -> None:
+    """Machine-readable progress line the app's sync runner parses to drive the
+    per-phase status UI. Plain stdout, so it survives the subprocess boundary;
+    ignored by anything that doesn't understand it."""
+    print(f"@@PROGRESS {json.dumps({'phase': phase, 'done': done, 'total': total})}",
+          flush=True)
+
+
 def cmd_sync(only_new: bool = True) -> None:
     token  = get_access_token()
     status = load_status()
@@ -381,12 +389,14 @@ def cmd_sync(only_new: bool = True) -> None:
 
     acts = list_activities(token, after_epoch=after if after else None)
     print(f"Found {len(acts)} activities to consider.")
+    _emit_progress("download", 0, len(acts))
 
     GPX_DIR.mkdir(parents=True, exist_ok=True)
     written = skipped = empty = 0
     newest_epoch = after
 
-    for a in acts:
+    for i, a in enumerate(acts):
+        _emit_progress("download", i, len(acts))
         aid = a["id"]
         out = gpx_path_for(aid)
         archived = archived_path_for(aid)
@@ -416,6 +426,7 @@ def cmd_sync(only_new: bool = True) -> None:
         else:
             empty += 1
 
+    _emit_progress("download", len(acts), len(acts))
     save_status({
         "last_sync":           int(time.time()),
         "last_activity_epoch": int(newest_epoch),

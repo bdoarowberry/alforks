@@ -6323,9 +6323,11 @@ def _effective_regions(data: dict, file_meta: dict, regions: list[dict]) -> list
 
 _sync_state: dict = {
     "strava": {"running": False, "started_at": None, "finished_at": None,
-               "ok": None, "message": "", "added": 0},
+               "ok": None, "message": "", "added": 0,
+               "phase": None, "progress": {"done": 0, "total": 0}},
     "garmin": {"running": False, "started_at": None, "finished_at": None,
-               "ok": None, "message": "", "added": 0},
+               "ok": None, "message": "", "added": 0,
+               "phase": None, "progress": {"done": 0, "total": 0}},
 }
 _sync_state_lock = threading.Lock()
 
@@ -6335,17 +6337,50 @@ def _run_sync_subprocess(source: str, script: str) -> None:
     Counts new files / dates added by diffing before/after."""
     with _sync_state_lock:
         _sync_state[source].update(running=True, started_at=int(time.time()),
-                                   finished_at=None, ok=None, message="syncing…", added=0)
+                                   finished_at=None, ok=None, message="syncing…", added=0,
+                                   phase=None, progress={"done": 0, "total": 0})
     try:
         if source == "strava":
             before_files = {p.name for p in (_ROOT / "tracks").glob("strava_*.gpx")}
         else:
             before = len(list((CACHE_DIR / "hr").glob("*.json"))) if (CACHE_DIR / "hr").exists() else 0
 
-        proc = subprocess.run(
+        # Stream stdout so the sync script's `@@PROGRESS {...}` lines drive the
+        # live per-phase status. A daemon reader thread parses progress and
+        # buffers the rest for the final message; the main thread enforces the
+        # timeout via wait().
+        proc = subprocess.Popen(
             [sys.executable, str(_ROOT / "sync" / script), "--sync"],
-            capture_output=True, text=True, timeout=600,
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1,
         )
+        tail: list[str] = []
+
+        def _reader():
+            for line in proc.stdout:
+                line = line.rstrip("\n")
+                if line.startswith("@@PROGRESS "):
+                    try:
+                        p = json.loads(line[len("@@PROGRESS "):])
+                    except Exception:
+                        continue
+                    with _sync_state_lock:
+                        _sync_state[source].update(
+                            phase=p.get("phase"),
+                            progress={"done": int(p.get("done") or 0),
+                                      "total": int(p.get("total") or 0)})
+                elif line:
+                    tail.append(line)
+                    if len(tail) > 50:
+                        del tail[0]
+
+        reader = threading.Thread(target=_reader, daemon=True)
+        reader.start()
+        try:
+            proc.wait(timeout=600)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            raise
+        reader.join(timeout=2)
 
         new_files: list[str] = []
         if source == "strava":
@@ -6359,10 +6394,11 @@ def _run_sync_subprocess(source: str, script: str) -> None:
             unit = "dates"
 
         ok = proc.returncode == 0
-        msg = f"{added} new {unit}" if ok else (proc.stderr or proc.stdout).strip().splitlines()[-1] if (proc.stderr or proc.stdout).strip() else "sync failed"
+        msg = f"{added} new {unit}" if ok else (tail[-1] if tail else "sync failed")
         with _sync_state_lock:
             _sync_state[source].update(running=False, finished_at=int(time.time()),
-                                       ok=ok, message=msg, added=added)
+                                       ok=ok, message=msg, added=added,
+                                       phase=None, progress={"done": 0, "total": 0})
         # Surgical refresh: build (and persist) only the newly-synced
         # entries instead of nuking the whole 554-entry sidebar cache.
         # `_update_activity_entry` also writes the per-file sidebar
@@ -6382,11 +6418,13 @@ def _run_sync_subprocess(source: str, script: str) -> None:
     except subprocess.TimeoutExpired:
         with _sync_state_lock:
             _sync_state[source].update(running=False, finished_at=int(time.time()),
-                                       ok=False, message="timed out after 10 min")
+                                       ok=False, message="timed out after 10 min",
+                                       phase=None, progress={"done": 0, "total": 0})
     except Exception as e:
         with _sync_state_lock:
             _sync_state[source].update(running=False, finished_at=int(time.time()),
-                                       ok=False, message=f"error: {e}")
+                                       ok=False, message=f"error: {e}",
+                                       phase=None, progress={"done": 0, "total": 0})
 
 
 def _kick_sync(source: str) -> bool:

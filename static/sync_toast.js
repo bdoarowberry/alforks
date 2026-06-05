@@ -57,7 +57,13 @@
     let extra = '';
     if (st.running) {
       badge = '<span style="color:#f59e0b">⟳ syncing</span>';
-      extra = st.message ? `<div style="color:#888;margin-top:2px">${esc(st.message)}</div>` : '';
+      const pr = st.progress || {};
+      let detail = st.message || '';
+      if (st.phase && pr.total > 0) {
+        const lbl = { download: 'Downloading rides', hr: 'Fetching HR' }[st.phase] || st.phase;
+        detail = `${lbl} ${pr.done}/${pr.total}`;
+      }
+      extra = detail ? `<div style="color:#888;margin-top:2px">${esc(detail)}</div>` : '';
     } else if (st.ok === true) {
       badge = '<span style="color:#22c55e">✓</span>';
       extra = `<div style="color:#888;margin-top:2px">${esc(st.message || 'done')}</div>`;
