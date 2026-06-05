@@ -2486,6 +2486,10 @@ def api_trail_regions():
         for a in acts
     }
     index = _get_region_trail_index(activity_regions)
+    # Hidden trails are a /trails-page-only preference (file-backed). Flag
+    # them rather than dropping them so the client's "Show hidden" toggle can
+    # reveal/restore them; leaderboards + log-detail timelines are unaffected.
+    hidden = _load_hidden_trails()
     out = []
     for region_id, trails_dict in index.items():
         region = region_by_id.get(region_id)
@@ -2494,10 +2498,22 @@ def api_trail_regions():
         # trails_dict is keyed on (name, direction). Each value already
         # carries its own `name` and `direction` fields from the
         # aggregator. Sort by attempts desc, then by name, then direction.
-        trails = sorted(
-            (v for v in trails_dict.values()),
-            key=lambda t: (-t["attempts"], t["name"], t.get("direction", "")),
-        )
+        # Shallow-copy each so the per-request `hidden` flag never mutates
+        # the (possibly cached) aggregator dicts.
+        trails = [
+            {**t, "hidden": f"{t['name']}|{t.get('direction') or 'mixed'}" in hidden}
+            for t in sorted(
+                trails_dict.values(),
+                key=lambda t: (-t["attempts"], t["name"], t.get("direction", "")),
+            )
+        ]
+        # Canonical OSM trail length (stable, matches the map). The client
+        # falls back to best_distance_km when this is absent.
+        osm_lengths = _region_osm_lengths(region_id)
+        for t in trails:
+            km = osm_lengths.get(t["name"])
+            if km:
+                t["osm_length_km"] = round(km, 2)
         out.append({
             "id":     region_id,
             "name":   region.get("name") or region_id,
@@ -2510,6 +2526,91 @@ def api_trail_regions():
     # appear at the top.
     out.sort(key=lambda r: (-r["total_attempts"], r["name"]))
     return jsonify({"regions": out})
+
+
+# ── Hidden trails — a /trails-page-only display preference ────────────────
+# File-backed (survives cache clears / browser changes) and flagged at serve
+# time in api_trail_regions. Deliberately scoped to the Trails list: the
+# leaderboards, log-detail "Trails Ridden" timeline, and stats all ignore it.
+TRAIL_HIDDEN_CACHE_DIR = CACHE_DIR / "trail_dismissals"
+
+
+def _trail_hidden_path() -> Path:
+    return TRAIL_HIDDEN_CACHE_DIR / "hidden.json"
+
+
+def _load_hidden_trails() -> set:
+    """Set of "name|direction" keys the rider has hidden from /trails."""
+    try:
+        return set(json.loads(_trail_hidden_path().read_text(encoding="utf-8")) or [])
+    except Exception:
+        return set()
+
+
+def _save_hidden_trails(keys: set) -> None:
+    TRAIL_HIDDEN_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    _atomic_write(_trail_hidden_path(), json.dumps(sorted(keys), ensure_ascii=False))
+
+
+def _hidden_trail_key_from_request():
+    """(name, "name|direction") from the JSON body, direction defaulting to mixed."""
+    body = request.get_json(silent=True) or {}
+    name = (body.get("name") or "").strip()
+    direction = (body.get("direction") or "mixed").strip() or "mixed"
+    return name, f"{name}|{direction}"
+
+
+@app.route("/api/trails/hidden", methods=["POST"])
+def api_trail_hide():
+    """Hide a (trail, direction) from the /trails list."""
+    name, key = _hidden_trail_key_from_request()
+    if not name:
+        abort(400)
+    keys = _load_hidden_trails()
+    keys.add(key)
+    _save_hidden_trails(keys)
+    return jsonify({"ok": True, "hidden_count": len(keys)})
+
+
+@app.route("/api/trails/hidden", methods=["DELETE"])
+def api_trail_unhide():
+    """Restore a previously hidden (trail, direction)."""
+    name, key = _hidden_trail_key_from_request()
+    keys = _load_hidden_trails()
+    keys.discard(key)
+    _save_hidden_trails(keys)
+    return jsonify({"ok": True, "hidden_count": len(keys)})
+
+
+# Canonical OSM trail lengths, read from the already-cached region artifact
+# (no Overpass build), memoized by file mtime. Used to show a stable trail
+# distance on /trails — independent of any one ride's GPS.
+_REGION_OSM_LENGTH_MEMO = {}   # region_id -> (mtime, {name: length_km})
+
+
+def _region_osm_lengths(region_id: str) -> dict:
+    """{trail/road name: length_km} from the cached region artifact, or {}
+    if the region has no cached geometry yet (caller falls back to the
+    ridden best-attempt distance)."""
+    ap = REGION_TRAILS_CACHE_DIR / f"{region_id}.json"
+    try:
+        mtime = ap.stat().st_mtime
+    except OSError:
+        return {}
+    memo = _REGION_OSM_LENGTH_MEMO.get(region_id)
+    if memo and memo[0] == mtime:
+        return memo[1]
+    try:
+        art = json.loads(ap.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    lengths = {}
+    for entry in (art.get("trails") or []) + (art.get("roads") or []):
+        name = entry.get("name")
+        if name:
+            lengths[name] = (entry.get("total_length_m") or 0.0) / 1000.0
+    _REGION_OSM_LENGTH_MEMO[region_id] = (mtime, lengths)
+    return lengths
 
 
 @app.route("/api/activity/<path:filename>/rescan-trails", methods=["POST"])

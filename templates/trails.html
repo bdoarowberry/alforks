@@ -3,6 +3,8 @@
 <head>
   {% include '_head.html' %}
   <title>AlForks – Trails &amp; Routes</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="/static/utils.js?v={{ asset_v('utils.js') }}"></script>
   <script src="/static/sync_toast.js?v={{ asset_v('sync_toast.js') }}" defer></script>
   <script src="/static/review_nav.js?v={{ asset_v('review_nav.js') }}" defer></script>
@@ -39,11 +41,34 @@
     .trails-table { width: 100%; border-collapse: collapse; font-size: 0.78rem; }
     .trails-table th { font-size: 0.62rem; text-transform: uppercase; letter-spacing: 0.10em; color: var(--text-tertiary); padding: 8px 14px; text-align: right; border-bottom: 1px solid var(--border-hair); font-weight: 500; background: rgba(0,0,0,0.15); position: sticky; top: 0; }
     .trails-table th:first-child { text-align: left; }
+    .trails-table th.sortable { cursor: pointer; user-select: none; white-space: nowrap; }
+    .trails-table th.sortable:hover { color: var(--text-secondary); }
+    .trails-table th.sorted { color: var(--text-primary); }
     .trails-table td { padding: 7px 14px; color: var(--text-secondary); text-align: right; border-bottom: 1px solid var(--border-row); font-variant-numeric: tabular-nums; }
     .trails-table td:first-child { color: var(--text-primary); text-align: left; font-variant-numeric: normal; }
     .trails-table tbody tr { cursor: pointer; transition: background 0.08s; }
     .trails-table tbody tr:hover td { background: rgba(255,255,255,0.04); }
     .trails-table tbody tr:last-child td { border-bottom: none; }
+
+    /* Per-row hide / restore affordance. The hide button is faint until the
+       row is hovered; restore (on a hidden row) stays visible. */
+    .t-actions { width: 1%; white-space: nowrap; padding-left: 4px; }
+    .trail-hide-btn, .trail-unhide-btn { background: transparent; border: none; cursor: pointer; font-size: 0.85rem; line-height: 1; padding: 2px 5px; border-radius: 3px; }
+    .trail-hide-btn { color: var(--text-muted); opacity: 0.3; transition: opacity 0.12s, color 0.12s; }
+    .trails-table tbody tr:hover .trail-hide-btn { opacity: 1; }
+    .trail-hide-btn:hover { color: var(--warn); }
+    .trail-unhide-btn { color: var(--text-tertiary); }
+    .trail-unhide-btn:hover { color: var(--link); }
+    .trails-table tr.trail-hidden-row td { opacity: 0.4; }
+    .trails-table tr.trail-hidden-row td.t-actions { opacity: 1; }
+
+    /* "Show hidden" toggle in the filter bar (only shown when >0 hidden). */
+    #show-hidden-wrap { display: none; align-items: center; gap: 6px; font-size: 0.74rem; color: var(--text-tertiary); cursor: pointer; user-select: none; }
+    #show-hidden-wrap input { accent-color: var(--accent); cursor: pointer; }
+
+    /* Trail map atop the detail panel (canonical OSM trail geometry). */
+    #detail-map { height: 200px; width: 100%; border-bottom: 1px solid var(--border-hair); background: var(--bg-page); }
+    #detail-map .leaflet-container { background: var(--bg-page); }
 
     .trail-name { color: var(--link); }
     .trail-name:hover { color: var(--link-hover); text-decoration: underline; }
@@ -130,6 +155,9 @@
   <div id="filters">
     <span class="filter-label">Search</span>
     <input id="trail-search" type="text" placeholder="trail or region name…" />
+    <label id="show-hidden-wrap">
+      <input type="checkbox" id="show-hidden"> Show hidden (<span id="hidden-count">0</span>)
+    </label>
     <div id="stats-summary"></div>
   </div>
 
@@ -176,6 +204,49 @@ function _saveExpanded(set) {
 
 let _data = { regions: [] };
 
+// ── Column sorting (client-side, applied within every region table) ──────
+let sortKey = 'attempts';   // default matches the backend's attempts-desc order
+let sortDir = 'desc';
+const _TRAIL_COLS = [
+  ['Trail', 'name'], ['Distance', 'distance'], ['Climb', 'climb'],
+  ['Descent', 'descent'], ['Attempts', 'attempts'], ['Best', 'best'],
+  ['Best Date', 'date'],
+];
+function _naturalDir(key) {
+  // Names sort A→Z and best-time fastest-first; everything else biggest-first.
+  return (key === 'name' || key === 'best') ? 'asc' : 'desc';
+}
+function _trailSortVal(t, key) {
+  switch (key) {
+    case 'name':     return (t.name || '').toLowerCase();
+    case 'distance': return (t.osm_length_km != null ? t.osm_length_km : (t.best_distance_km || 0));
+    case 'climb':    return (+t.best_gain_m || 0);
+    case 'descent':  return (+t.best_loss_m || 0);
+    case 'best':     return (+t.best_duration_sec || 0);
+    case 'date':     return t.best_date || '';
+    case 'attempts':
+    default:         return (+t.attempts || 0);
+  }
+}
+function _sortTrails(trails) {
+  const mult = sortDir === 'asc' ? 1 : -1;
+  // Stable sort over the (already attempts-ordered) list keeps ties sensible.
+  return [...trails].sort((a, b) => {
+    const av = _trailSortVal(a, sortKey), bv = _trailSortVal(b, sortKey);
+    if (av < bv) return -mult;
+    if (av > bv) return mult;
+    return 0;
+  });
+}
+function _trailHeader() {
+  const ths = _TRAIL_COLS.map(([label, key]) => {
+    const active = sortKey === key;
+    const arrow = active ? (sortDir === 'asc' ? ' ▲' : ' ▼') : '';
+    return `<th class="sortable${active ? ' sorted' : ''}" data-sort="${key}">${label}${arrow}</th>`;
+  }).join('');
+  return `<thead><tr>${ths}<th></th></tr></thead>`;
+}
+
 async function loadData() {
   const r = await fetch('/api/trails/regions', { cache: 'no-store' });
   _data = await r.json();
@@ -184,8 +255,15 @@ async function loadData() {
 
 function render() {
   const filter = (document.getElementById('trail-search').value || '').toLowerCase().trim();
+  const showHidden = document.getElementById('show-hidden').checked;
   const content = document.getElementById('content');
   const expanded = _expandedSet();
+
+  // "Show hidden (N)" reflects the whole dataset, not the search view.
+  const totalHidden = _data.regions.reduce(
+    (s, reg) => s + reg.trails.filter(t => t.hidden).length, 0);
+  document.getElementById('show-hidden-wrap').style.display = totalHidden ? 'inline-flex' : 'none';
+  document.getElementById('hidden-count').textContent = String(totalHidden);
 
   let totalRegions = 0, totalTrails = 0, totalAttempts = 0;
 
@@ -201,9 +279,11 @@ function render() {
           trails = trails.filter(t => (t.name || '').toLowerCase().includes(filter));
         }
       }
+      // Hidden trails are dropped unless "Show hidden" is on.
+      if (!showHidden) trails = trails.filter(t => !t.hidden);
       return { reg, trails, regionMatch };
     })
-    .filter(({ reg, trails, regionMatch }) => !filter || regionMatch || trails.length > 0);
+    .filter(({ trails, regionMatch }) => regionMatch || trails.length > 0);
 
   if (regions.length === 0) {
     content.innerHTML = `<div class="empty-state">
@@ -224,7 +304,7 @@ function render() {
     const isOpen = filter ? true : expanded.has(reg.id);
     const swatch = reg.color
       ? `<div class="region-swatch" style="background:${_escAttr(reg.color)}"></div>` : '';
-    const rows = trails.map(t => {
+    const rows = _sortTrails(trails).map(t => {
       const dir = t.direction || 'mixed';
       const dirIcon = ({up:'↑',down:'↓',forward:'→',reverse:'←'})[dir] || '↔';
       const dirTitle = ({up:'Climb',down:'Descent',forward:'Forward',reverse:'Reverse'})[dir] || 'Mixed';
@@ -239,12 +319,21 @@ function render() {
         + `&dir=${encodeURIComponent(dir)}`
         + `&hl=${encodeURIComponent(`${t.best_start_idx}:${t.best_end_idx}`)}`;
       const trailKey = `${t.name}|${dir}`;
+      const actionBtn = t.hidden
+        ? `<button class="trail-unhide-btn" data-trail="${_escAttr(t.name)}" data-dir="${_escAttr(dir)}" title="Restore this trail to the list">↺</button>`
+        : `<button class="trail-hide-btn" data-trail="${_escAttr(t.name)}" data-dir="${_escAttr(dir)}" title="Hide this trail from the list">⊘</button>`;
+      // Canonical OSM trail length; falls back to the ridden best-attempt distance.
+      const distKm = (t.osm_length_km != null ? t.osm_length_km : (t.best_distance_km || 0));
       return `
-        <tr data-trail="${_escAttr(t.name)}" data-dir="${_escAttr(dir)}" data-key="${_escAttr(trailKey)}">
+        <tr data-trail="${_escAttr(t.name)}" data-dir="${_escAttr(dir)}" data-key="${_escAttr(trailKey)}"${t.hidden ? ' class="trail-hidden-row"' : ''}>
           <td>${dirPill}${kindChip}<span class="trail-name">${_escText(t.name)}</span></td>
+          <td>${distKm.toFixed(1)} km</td>
+          <td>${Math.round(+t.best_gain_m || 0)} m</td>
+          <td>${Math.round(+t.best_loss_m || 0)} m</td>
           <td>${t.attempts}</td>
           <td>${_fmtDurHms(t.best_duration_sec)}</td>
           <td><a class="best-link" href="${_escAttr(bestNav)}" title="Open best ride directly" onclick="event.stopPropagation();">${_escText(t.best_date)}</a></td>
+          <td class="t-actions">${actionBtn}</td>
         </tr>`;
     }).join('');
     return `
@@ -257,7 +346,7 @@ function render() {
         </div>
         <div class="region-body">
           <table class="trails-table">
-            <thead><tr><th>Trail</th><th>Attempts</th><th>Best</th><th>Best Date</th></tr></thead>
+            ${_trailHeader()}
             <tbody>${rows}</tbody>
           </table>
         </div>
@@ -278,6 +367,18 @@ function render() {
 //   - the "Best Date" cell has its own onclick that stops propagation
 //     and lets the native link navigate to the best ride
 function _onContentClick(ev) {
+  const hideBtn = ev.target.closest('.trail-hide-btn');
+  if (hideBtn) { ev.stopPropagation(); setTrailHidden(hideBtn.dataset.trail, hideBtn.dataset.dir, true); return; }
+  const unhideBtn = ev.target.closest('.trail-unhide-btn');
+  if (unhideBtn) { ev.stopPropagation(); setTrailHidden(unhideBtn.dataset.trail, unhideBtn.dataset.dir, false); return; }
+  const sortTh = ev.target.closest('th[data-sort]');
+  if (sortTh) {
+    const key = sortTh.dataset.sort;
+    if (sortKey === key) sortDir = (sortDir === 'asc') ? 'desc' : 'asc';
+    else { sortKey = key; sortDir = _naturalDir(key); }
+    render();
+    return;
+  }
   const head = ev.target.closest('.region-head');
   if (head) {
     const card = head.parentElement;
@@ -293,8 +394,9 @@ function _onContentClick(ev) {
     const name = row.getAttribute('data-trail');
     const dir  = row.getAttribute('data-dir') || 'mixed';
     const key  = row.getAttribute('data-key');
+    const regionId = row.closest('.region-card')?.dataset.regionId || '';
     _markActiveRow(key);
-    openDetailFor(name, dir);
+    openDetailFor(name, dir, regionId);
   }
 }
 
@@ -307,7 +409,8 @@ function _markActiveRow(key) {
 }
 
 // ── Detail panel: per-(trail, direction) leaderboard ──────────────────
-async function openDetailFor(name, direction) {
+async function openDetailFor(name, direction, regionId) {
+  _teardownDetailMap();
   const split = document.getElementById('split');
   split.classList.add('with-detail');
   const titleEl = document.getElementById('detail-title');
@@ -335,35 +438,100 @@ async function openDetailFor(name, direction) {
   subEl.textContent = rows.length
     ? `${rows.length} attempts · fastest first`
     : 'No completed attempts on record yet';
-  if (!rows.length) {
-    bodyEl.innerHTML = `<div class="detail-empty">No completed attempts of this trail are on record yet.</div>`;
-    return;
-  }
 
-  const tbody = rows.map(r => {
-    const target = `/log/${encodeURIComponent(r.filename)}`
-      + `?lb=${encodeURIComponent(name)}`
-      + `&dir=${encodeURIComponent(r.direction || direction || 'all')}`
-      + `&hl=${encodeURIComponent(`${r.start_idx}:${r.end_idx}`)}`;
-    const dateStr = r.date || (r.start_time || '').slice(0, 10);
-    return `
-      <tr data-nav="${_escAttr(target)}">
-        <td>${r.rank}</td>
-        <td title="${_escAttr(r.title || r.filename)}">${_escText(dateStr)}</td>
-        <td>${_fmtDurHms(r.duration_sec)}</td>
-        <td>${(+r.distance_km || 0).toFixed(2)}k</td>
-        <td>${Math.round(+r.coverage_pct || 0)}%</td>
-      </tr>`;
-  }).join('');
-  bodyEl.innerHTML = `
-    <table class="lb-table">
-      <thead><tr><th>#</th><th>Date</th><th>Dur</th><th>Dist</th><th>Cov</th></tr></thead>
-      <tbody>${tbody}</tbody>
-    </table>`;
+  let lbHtml;
+  if (!rows.length) {
+    lbHtml = `<div class="detail-empty">No completed attempts of this trail are on record yet.</div>`;
+  } else {
+    const tbody = rows.map(r => {
+      const target = `/log/${encodeURIComponent(r.filename)}`
+        + `?lb=${encodeURIComponent(name)}`
+        + `&dir=${encodeURIComponent(r.direction || direction || 'all')}`
+        + `&hl=${encodeURIComponent(`${r.start_idx}:${r.end_idx}`)}`;
+      const dateStr = r.date || (r.start_time || '').slice(0, 10);
+      return `
+        <tr data-nav="${_escAttr(target)}">
+          <td>${r.rank}</td>
+          <td title="${_escAttr(r.title || r.filename)}">${_escText(dateStr)}</td>
+          <td>${_fmtDurHms(r.duration_sec)}</td>
+          <td>${(+r.distance_km || 0).toFixed(2)}k</td>
+          <td>${Math.round(+r.coverage_pct || 0)}%</td>
+        </tr>`;
+    }).join('');
+    lbHtml = `
+      <table class="lb-table">
+        <thead><tr><th>#</th><th>Date</th><th>Dur</th><th>Dist</th><th>Cov</th></tr></thead>
+        <tbody>${tbody}</tbody>
+      </table>`;
+  }
+  // Map (canonical OSM trail shape) sits above the leaderboard.
+  bodyEl.innerHTML = `<div id="detail-map"></div>${lbHtml}`;
+  _renderTrailMap(regionId, name);
+}
+
+// ── Canonical OSM trail geometry for the detail-panel map ──────────────
+const _regionGeomCache = {};
+async function _fetchRegionGeometry(regionId) {
+  if (_regionGeomCache[regionId]) return _regionGeomCache[regionId];
+  const r = await fetch(`/api/regions/${encodeURIComponent(regionId)}/trails-geometry`);
+  if (!r.ok) throw new Error('geometry ' + r.status);
+  const data = await r.json();
+  _regionGeomCache[regionId] = data;
+  return data;
+}
+
+let _detailMap = null;
+function _teardownDetailMap() {
+  if (_detailMap) { _detailMap.remove(); _detailMap = null; }
+}
+
+async function _renderTrailMap(regionId, name) {
+  const el = document.getElementById('detail-map');
+  if (!el) return;
+  if (!regionId) { el.style.display = 'none'; return; }
+  let geom;
+  try { geom = await _fetchRegionGeometry(regionId); }
+  catch { el.style.display = 'none'; return; }
+  // The panel may have been re-rendered for another trail while we awaited.
+  if (document.getElementById('detail-map') !== el) return;
+  // The artifact splits trail vs road ways into separate lists; a leaderboard
+  // entry can be either kind, so search both.
+  const entry = [...(geom.trails || []), ...(geom.roads || [])].find(t => t.name === name);
+  const lines = ((entry && entry.components) || [])
+    .map(c => c.polyline).filter(p => p && p.length >= 2);
+  if (!lines.length) { el.style.display = 'none'; return; }
+  el.style.display = 'block';
+  // Interactive but no scroll-zoom, so scrolling the panel doesn't hijack.
+  const map = L.map(el, { zoomControl: true, scrollWheelZoom: false, attributionControl: false });
+  makeStreetLayer().addTo(map);
+  const drawn = lines.map(p => L.polyline(p, { color: '#3b82f6', weight: 4, opacity: 0.9 }).addTo(map));
+  let bounds = drawn[0].getBounds();
+  drawn.slice(1).forEach(l => { bounds = bounds.extend(l.getBounds()); });
+  map.fitBounds(bounds, { padding: [16, 16] });
+  setTimeout(() => map.invalidateSize(), 0);
+  _detailMap = map;
+}
+
+// ── Hide / restore a trail (file-backed, /trails page only) ────────────
+async function setTrailHidden(name, dir, hide) {
+  try {
+    await fetch('/api/trails/hidden', {
+      method: hide ? 'POST' : 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, direction: dir }),
+    });
+  } catch (e) { /* keep the UI responsive even if the write fails */ }
+  for (const reg of _data.regions) {
+    for (const t of reg.trails) {
+      if (t.name === name && (t.direction || 'mixed') === dir) t.hidden = hide;
+    }
+  }
+  render();
 }
 
 function closeDetail() {
   document.getElementById('split').classList.remove('with-detail');
+  _teardownDetailMap();
   _markActiveRow(null);
 }
 
@@ -381,6 +549,7 @@ document.getElementById('trail-search').addEventListener('input', () => {
   clearTimeout(_trailSearchTimer);
   _trailSearchTimer = setTimeout(() => render(), 130);
 });
+document.getElementById('show-hidden').addEventListener('change', render);
 
 loadData().catch(err => {
   document.getElementById('content').innerHTML =

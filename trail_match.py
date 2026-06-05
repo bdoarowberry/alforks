@@ -44,7 +44,7 @@ except ImportError:
 # snap threshold or run-collapsing logic changes). The /api/activity
 # response version in app.py should bump alongside this so clients
 # pick up the new shape.
-TRAIL_MATCH_VERSION = 13
+TRAIL_MATCH_VERSION = 14
 
 SNAP_THRESHOLD_M = 8.0   # tightened from 12 m: roads parallel to mapped
                          # trails (e.g. Moose Mountain Road alongside
@@ -1274,6 +1274,33 @@ def _parse_iso(ts: str):
     return datetime.fromisoformat(ts)
 
 
+def _segment_gain_loss(points: list, s: int, e: int, window: int = 7):
+    """Smoothed elevation gain/loss (metres) over points[s:e]. A short
+    centred moving average suppresses GPS jitter so the totals line up
+    reasonably with the activity-level figures. Returns (gain_m, loss_m),
+    both >= 0."""
+    eles = [points[i].get("ele") for i in range(s, min(e, len(points)))]
+    eles = [x for x in eles if x is not None]
+    n = len(eles)
+    if n < 2:
+        return 0.0, 0.0
+    half = window // 2
+    gain = loss = 0.0
+    prev = None
+    for i in range(n):
+        lo = max(0, i - half)
+        hi = min(n, i + half + 1)
+        avg = sum(eles[lo:hi]) / (hi - lo)
+        if prev is not None:
+            d = avg - prev
+            if d > 0:
+                gain += d
+            else:
+                loss -= d
+        prev = avg
+    return round(gain, 1), round(loss, 1)
+
+
 def match_trails(data: dict, cache_dir: Path,
                   roads_cache_dir: Path | None = None) -> dict:
     """Match a parsed GPX activity to named OSM trails + roads.
@@ -1405,6 +1432,7 @@ def match_trails(data: dict, cache_dir: Path,
             sub_d_km = (ee_pt.get("dist_km") or 0.0) - (ss_pt.get("dist_km") or 0.0)
             dists = [m[1] for m in matches[sub_s:sub_e] if m[1] is not None]
             avg_dist_m = sum(dists) / len(dists) if dists else None
+            gain_m, loss_m = _segment_gain_loss(points, sub_s, sub_e)
             entry = {
                 "name": name,
                 "kind": name_kind.get(name, "trail"),
@@ -1414,6 +1442,8 @@ def match_trails(data: dict, cache_dir: Path,
                 "end_time": ee_pt.get("time", ""),
                 "duration_sec": round(sub_dur),
                 "distance_km": round(sub_d_km, 3),
+                "gain_m": gain_m,
+                "loss_m": loss_m,
                 "points": sub_e - sub_s,
                 "avg_dist_m": round(avg_dist_m, 1) if avg_dist_m is not None else None,
             }
@@ -1657,6 +1687,8 @@ def _iter_completed_attempts(cache_dir_results: Path,
                 "date":         (entry.get("start_time") or "")[:10],
                 "duration_sec": int(entry.get("duration_sec") or 0),
                 "distance_km":  float(entry.get("distance_km") or 0.0),
+                "gain_m":       float(entry.get("gain_m") or 0.0),
+                "loss_m":       float(entry.get("loss_m") or 0.0),
                 "coverage_pct": float(entry.get("coverage_pct") or 0.0),
                 "kind":         entry.get("kind", "trail"),
                 "start_idx":    int(entry.get("start_idx") or 0),
@@ -1744,6 +1776,9 @@ def build_region_trail_index(cache_dir_results: Path,
                     "kind":      a["kind"],
                     "attempts": 1,
                     "best_duration_sec": dur,
+                    "best_distance_km": a["distance_km"],
+                    "best_gain_m": a["gain_m"],
+                    "best_loss_m": a["loss_m"],
                     "best_filename": a["filename"],
                     "best_title": a["title"],
                     "best_date": date,
@@ -1754,6 +1789,9 @@ def build_region_trail_index(cache_dir_results: Path,
                 trail["attempts"] += 1
                 if dur < trail["best_duration_sec"]:
                     trail["best_duration_sec"] = dur
+                    trail["best_distance_km"] = a["distance_km"]
+                    trail["best_gain_m"]      = a["gain_m"]
+                    trail["best_loss_m"]      = a["loss_m"]
                     trail["best_filename"]    = a["filename"]
                     trail["best_title"]       = a["title"]
                     trail["best_date"]        = date
