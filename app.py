@@ -3013,17 +3013,57 @@ def _region_edge_lengths(region_id: str) -> dict:
     return {e["id"]: (e.get("length_m") or 0.0) for e in _iter_region_edges(artifact)}
 
 
+def _latlon_dist2(a: list, b: list) -> float:
+    """Squared lat/lon distance — cheap ordering metric for stitching."""
+    return (a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2
+
+
+# Junction-join tolerances (squared degrees): ~2e-5 deg ≈ 2 m, ~3e-4 deg ≈ 33 m.
+_PREVIEW_DUP2 = (2e-5) ** 2     # within this, two endpoints are the same junction
+_PREVIEW_GAP2 = (3e-4) ** 2     # beyond this, a missing edge → start a new piece
+
+
 def _route_preview_polyline(route: dict, edge_polys: dict, n: int = 50) -> list:
-    """Concatenate the route's edge polylines in segment order and downsample
-    to ~n points for a list-page mini-map. Segments whose edge_id is missing
-    from the artifact (stale ids) are skipped — the preview shows whatever
-    geometry is still resolvable."""
-    coords = []
+    """Stitch the route's edge polylines into connected piece(s) and downsample
+    each for a tile mini-map. Returns a LIST OF SUB-POLYLINES
+    (``[[[lat,lon],...], ...]``).
+
+    Edges are stored start_node→end_node, but a segment may be ridden either
+    way and the saved `direction` is a semantic label (climb/descent), not the
+    traversal orientation. So each edge is oriented to connect to the running
+    end (whichever of its two ends is nearer) and the shared junction point is
+    de-duplicated — this removes the spurious spikes/zig-zags from naively
+    concatenating reversed edges. A real gap (stale/missing edge, or genuinely
+    disjoint geometry) starts a NEW sub-polyline so the tile shows the gap
+    rather than a false straight-line connector."""
+    pieces: list = []
+    cur: list = []
     for seg in route.get("segments") or []:
         pl = edge_polys.get(seg.get("edge_id"))
-        if pl:
-            coords.extend(pl)
-    return _downsample_latlon(coords, n)
+        if not pl:
+            logger.debug("route %s: edge_id %s unresolved in preview",
+                         route.get("id"), seg.get("edge_id"))
+            if cur:
+                pieces.append(cur); cur = []
+            continue
+        pl = list(pl)
+        if not cur:
+            cur = pl
+            continue
+        last = cur[-1]
+        # Orient so the nearer end of pl meets the running end.
+        if _latlon_dist2(last, pl[-1]) < _latlon_dist2(last, pl[0]):
+            pl = pl[::-1]
+        gap = _latlon_dist2(last, pl[0])
+        if gap <= _PREVIEW_DUP2:
+            cur.extend(pl[1:])         # same junction — drop the duplicate point
+        elif gap <= _PREVIEW_GAP2:
+            cur.extend(pl)             # minor slop — bridge it
+        else:
+            pieces.append(cur); cur = pl   # real gap — start a new piece
+    if cur:
+        pieces.append(cur)
+    return [_downsample_latlon(p, n) for p in pieces if len(p) >= 2]
 
 
 @app.route("/api/routes", methods=["GET"])

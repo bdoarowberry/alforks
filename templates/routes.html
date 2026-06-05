@@ -354,8 +354,15 @@ function initRouteMap(mapEl) {
     for (const p of ov) allPts.push(p);
   }
   if (polyline.length) {
-    L.polyline(polyline, { color: '#fbbf24', weight: 3, opacity: 0.95 }).addTo(m);
-    for (const p of polyline) allPts.push(p);
+    // Preview is a list of sub-polylines (disjoint pieces aren't bridged, so
+    // gaps render as gaps, not spikes). Tolerate the older flat [[lat,lon],…]
+    // shape too.
+    const pieces = (typeof polyline[0][0] === 'number') ? [polyline] : polyline;
+    for (const piece of pieces) {
+      if (!piece || piece.length < 2) continue;
+      L.polyline(piece, { color: '#fbbf24', weight: 3, opacity: 0.95 }).addTo(m);
+      for (const p of piece) allPts.push(p);
+    }
   }
   m.fitBounds(L.latLngBounds(allPts), { padding: [10, 10] });
   mapEl.dataset.mapInit = '1';
