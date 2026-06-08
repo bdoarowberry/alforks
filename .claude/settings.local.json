@@ -124,7 +124,11 @@
       "Bash(find . -name strava_status.json)",
       "Bash(ls -la sync/*.json sync/.tokens/*.json)",
       "Bash(find . -name \"strava_status.json\" -not -path \"*/node_modules/*\")",
-      "Read(//c/Users/arowberry/.alforks/**)"
+      "Read(//c/Users/arowberry/.alforks/**)",
+      "Bash(xargs echo \"files:\")",
+      "Bash(ls tests/)",
+      "Bash(grep -rlE \"^import app|^from app|import app\\\\b\" tests/)",
+      "Bash(head -25 tests/test_route_attempts.py)"
     ]
   }
 }
