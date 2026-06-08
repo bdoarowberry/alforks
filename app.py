@@ -2309,7 +2309,8 @@ _trail_prewarm_lock    = threading.Lock()
 # /api/trail-match/status). Guarded by _trail_prewarm_lock. `total`/`done`
 # track the current (or most recent) pass; `finished_at` is stamped when the
 # worker drops _TRAIL_PREWARM_RUNNING so the UI can show a final "done".
-_trail_prewarm_progress = {"done": 0, "total": 0, "started_at": None, "finished_at": None}
+_trail_prewarm_progress = {"phase": None, "done": 0, "total": 0,
+                           "started_at": None, "finished_at": None}
 
 
 def _meta_fp(file_meta: dict) -> str:
@@ -2448,7 +2449,7 @@ def _trail_prewarm_worker_inner() -> None:
 
     # Publish the size of this pass so the rescan indicator can show a count.
     with _trail_prewarm_lock:
-        _trail_prewarm_progress.update(done=0, total=len(todo),
+        _trail_prewarm_progress.update(phase="matching", done=0, total=len(todo),
                                        started_at=time.time(), finished_at=None)
 
     if not todo:
@@ -2492,7 +2493,41 @@ def _trail_prewarm_worker_inner() -> None:
     # Once at the end so the /routes page can hit a warm cache during
     # prewarm windows. Individual rescans still invalidate explicitly.
     _invalidate_route_attempts()
+    # Phase 2: eagerly rebuild every saved route's leaderboard so the new
+    # rides land on /routes instantly instead of the user paying a multi-
+    # second recompute on first view. Surfaced as the "Updating routes"
+    # phase via /api/trail-match/status. Only runs when matching did work
+    # (the `if not todo: return` above guards the no-op startup case).
+    _warm_route_attempts_with_progress()
     logger.info("trail prewarm: processed %d/%d", done, len(todo))
+
+
+def _warm_route_attempts_with_progress() -> None:
+    """Recompute every saved route's leaderboard, publishing progress as the
+    'routes' phase of the prewarm indicator. Cheap when nothing changed (each
+    route is a cache-key hit); the heavy passes are after a sync or a
+    trail-match version bump, exactly when /routes would otherwise stall."""
+    try:
+        routes = _all_routes()
+    except Exception:
+        logger.exception("route-attempts warm: failed to enumerate routes")
+        return
+    total = len(routes)
+    with _trail_prewarm_lock:
+        _trail_prewarm_progress.update(phase="routes", done=0, total=total)
+    if not total:
+        return
+    # Hoist the trail_match dir scan once instead of rescanning per route.
+    trail_match_fp = _trail_match_dir_fingerprint()
+    done = 0
+    for r in routes:
+        try:
+            _get_route_attempts(r["id"], route=r, trail_match_fp=trail_match_fp)
+        except Exception:
+            logger.exception("route-attempts warm failed for %s", r.get("id"))
+        done += 1
+        with _trail_prewarm_lock:
+            _trail_prewarm_progress["done"] = done
 
 
 @app.route("/api/trails/regions")
@@ -6324,12 +6359,45 @@ def _effective_regions(data: dict, file_meta: dict, regions: list[dict]) -> list
 _sync_state: dict = {
     "strava": {"running": False, "started_at": None, "finished_at": None,
                "ok": None, "message": "", "added": 0,
-               "phase": None, "progress": {"done": 0, "total": 0}},
+               "phase": None, "progress": {"done": 0, "total": 0},
+               "ready_url": None},
     "garmin": {"running": False, "started_at": None, "finished_at": None,
                "ok": None, "message": "", "added": 0,
-               "phase": None, "progress": {"done": 0, "total": 0}},
+               "phase": None, "progress": {"done": 0, "total": 0},
+               "ready_url": None},
 }
 _sync_state_lock = threading.Lock()
+
+
+def _await_prewarm_into_sync(source: str, deadline_s: int = 600) -> None:
+    """Block until the trail-match + route-attempts prewarm drains, mirroring
+    its phase/progress into _sync_state[source]. Lets the sync toast show
+    'Matching trails N/M' then 'Updating routes N/M' and only declare the new
+    rides 'ready' once processing is genuinely complete. Best-effort: bounded
+    by deadline_s so a stuck prewarm can't pin the toast open forever."""
+    start = time.time()
+    # The prewarm spins up a worker thread; give it a beat to flip RUNNING
+    # so we don't race past a pass that hasn't started yet.
+    while time.time() - start < 2.0:
+        with _trail_prewarm_lock:
+            if _TRAIL_PREWARM_RUNNING:
+                break
+        time.sleep(0.05)
+    while True:
+        with _trail_prewarm_lock:
+            running = _TRAIL_PREWARM_RUNNING
+            phase   = _trail_prewarm_progress.get("phase")
+            done    = _trail_prewarm_progress.get("done", 0)
+            total   = _trail_prewarm_progress.get("total", 0)
+        if not running:
+            return
+        if phase in ("matching", "routes") and total:
+            with _sync_state_lock:
+                _sync_state[source].update(
+                    phase=phase, progress={"done": done, "total": total})
+        if time.time() - start > deadline_s:
+            return
+        time.sleep(0.3)
 
 
 def _run_sync_subprocess(source: str, script: str) -> None:
@@ -6338,7 +6406,8 @@ def _run_sync_subprocess(source: str, script: str) -> None:
     with _sync_state_lock:
         _sync_state[source].update(running=True, started_at=int(time.time()),
                                    finished_at=None, ok=None, message="syncing…", added=0,
-                                   phase=None, progress={"done": 0, "total": 0})
+                                   phase=None, progress={"done": 0, "total": 0},
+                                   ready_url=None)
     try:
         if source == "strava":
             before_files = {p.name for p in (_ROOT / "tracks").glob("strava_*.gpx")}
@@ -6394,37 +6463,64 @@ def _run_sync_subprocess(source: str, script: str) -> None:
             unit = "dates"
 
         ok = proc.returncode == 0
-        msg = f"{added} new {unit}" if ok else (tail[-1] if tail else "sync failed")
-        with _sync_state_lock:
-            _sync_state[source].update(running=False, finished_at=int(time.time()),
-                                       ok=ok, message=msg, added=added,
-                                       phase=None, progress={"done": 0, "total": 0})
-        # Surgical refresh: build (and persist) only the newly-synced
-        # entries instead of nuking the whole 554-entry sidebar cache.
-        # `_update_activity_entry` also writes the per-file sidebar
-        # cache, so the next request — or restart — sees the new files
-        # without rebuilding anything else.
+        if not ok:
+            with _sync_state_lock:
+                _sync_state[source].update(
+                    running=False, finished_at=int(time.time()), ok=False,
+                    message=(tail[-1] if tail else "sync failed"), added=added,
+                    phase=None, progress={"done": 0, "total": 0}, ready_url=None)
+            return
+
+        # New Strava rides go through the FULL processing chain before we
+        # call them "ready": surgical sidebar entry -> trail-match -> route
+        # leaderboards. The toast holds a "Processing…" state (mirroring the
+        # prewarm's phase/progress) and only flips to "ready" once the whole
+        # chain drains — so the success signal is honest, not just "downloaded".
         if source == "strava" and new_files:
+            # Surgical refresh: build (and persist) only the newly-synced
+            # entries instead of nuking the whole sidebar cache. Writes the
+            # per-file cache too, so a restart sees them without a rebuild.
             for fn in new_files:
                 try:
                     _update_activity_entry(fn)
                 except Exception:
                     logger.exception("sidebar update failed for %s", fn)
-            # New rides may include MTB+Moose-Mountain activities — kick
-            # the trail prewarm so they land on the leaderboard without
-            # waiting for the user to open them. The worker idempotently
-            # scans for new uncached entries, so this is cheap.
+            noun = "ride" if added == 1 else "rides"
+            with _sync_state_lock:
+                _sync_state[source].update(
+                    running=True, ok=None, added=added, phase=None,
+                    message=f"Processing {added} new {noun}…",
+                    progress={"done": 0, "total": 0}, ready_url=None)
+            # Kick the trail-match (+ route-attempts) prewarm and block until
+            # it drains, mirroring its phase/progress into the toast. New MTB
+            # rides land on the trail + route leaderboards without a restart.
             _prewarm_trail_matches_async()
+            _await_prewarm_into_sync(source)
+            newest = new_files[-1]   # sorted ascending; highest Strava id == newest
+            with _sync_state_lock:
+                _sync_state[source].update(
+                    running=False, finished_at=int(time.time()), ok=True,
+                    message=f"{added} new {noun} ready", added=added,
+                    phase=None, progress={"done": 0, "total": 0},
+                    ready_url=f"/log/{newest}")
+        else:
+            with _sync_state_lock:
+                _sync_state[source].update(
+                    running=False, finished_at=int(time.time()), ok=True,
+                    message=f"{added} new {unit}", added=added,
+                    phase=None, progress={"done": 0, "total": 0}, ready_url=None)
     except subprocess.TimeoutExpired:
         with _sync_state_lock:
             _sync_state[source].update(running=False, finished_at=int(time.time()),
                                        ok=False, message="timed out after 10 min",
-                                       phase=None, progress={"done": 0, "total": 0})
+                                       phase=None, progress={"done": 0, "total": 0},
+                                       ready_url=None)
     except Exception as e:
         with _sync_state_lock:
             _sync_state[source].update(running=False, finished_at=int(time.time()),
                                        ok=False, message=f"error: {e}",
-                                       phase=None, progress={"done": 0, "total": 0})
+                                       phase=None, progress={"done": 0, "total": 0},
+                                       ready_url=None)
 
 
 def _kick_sync(source: str) -> bool:

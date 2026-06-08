@@ -52,6 +52,21 @@
       { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   }
 
+  // Per-source processing pipelines, in order. The "Phase n/N ·" counter is
+  // derived from a phase's position here, so the toast shows overall progress
+  // (e.g. "Phase 2/3 · Matching trails"), not just the within-phase count.
+  // Single-phase pipelines (Garmin) drop the counter — a bare "1/1" is noise.
+  const PIPELINES = {
+    Strava: [
+      { phase: 'download', label: 'Downloading rides' },
+      { phase: 'matching', label: 'Matching trails' },
+      { phase: 'routes',   label: 'Updating routes' },
+    ],
+    Garmin: [
+      { phase: 'hr', label: 'Fetching HR' },
+    ],
+  };
+
   function rowHtml(name, st) {
     let badge = '';
     let extra = '';
@@ -60,13 +75,25 @@
       const pr = st.progress || {};
       let detail = st.message || '';
       if (st.phase && pr.total > 0) {
-        const lbl = { download: 'Downloading rides', hr: 'Fetching HR' }[st.phase] || st.phase;
-        detail = `${lbl} ${pr.done}/${pr.total}`;
+        const pipeline = PIPELINES[name] || [];
+        const idx = pipeline.findIndex(p => p.phase === st.phase);
+        const lbl = idx >= 0 ? pipeline[idx].label : st.phase;
+        const prefix = (idx >= 0 && pipeline.length > 1)
+          ? `Phase ${idx + 1}/${pipeline.length} · ` : '';
+        detail = `${prefix}${lbl} ${pr.done}/${pr.total}`;
       }
       extra = detail ? `<div style="color:#888;margin-top:2px">${esc(detail)}</div>` : '';
     } else if (st.ok === true) {
       badge = '<span style="color:#22c55e">✓</span>';
-      extra = `<div style="color:#888;margin-top:2px">${esc(st.message || 'done')}</div>`;
+      // When processing left a ready ride, make the result a one-click link
+      // straight to it; otherwise just show the message.
+      if (st.ready_url) {
+        extra = `<div style="margin-top:2px"><a href="${esc(st.ready_url)}" ` +
+                `style="color:#22c55e;text-decoration:underline;cursor:pointer">` +
+                `${esc(st.message || 'ready')} — open →</a></div>`;
+      } else {
+        extra = `<div style="color:#888;margin-top:2px">${esc(st.message || 'done')}</div>`;
+      }
     } else if (st.ok === false) {
       badge = '<span style="color:#ef4444">✗</span>';
       extra = `<div style="color:#ef4444;margin-top:2px">${esc(st.message || 'error')}</div>`;
@@ -84,14 +111,14 @@
     clearTimeout(hideTimer);
   }
 
-  function scheduleHide() {
+  function scheduleHide(delay) {
     clearTimeout(hideTimer);
     hideTimer = setTimeout(() => {
       const el = document.getElementById(TOAST_ID);
       if (!el) return;
       el.style.opacity = '0';
       setTimeout(() => { el.style.display = 'none'; }, 250);
-    }, HIDE_AFTER_MS);
+    }, delay || HIDE_AFTER_MS);
   }
 
   async function tick() {
@@ -116,7 +143,10 @@
           if (s.strava.finished_at) lastSeenFinish.strava = s.strava.finished_at;
           if (s.garmin.finished_at) lastSeenFinish.garmin = s.garmin.finished_at;
           persistSeen();
-          scheduleHide();
+          // A "ready" result is clickable — give it a longer dwell so there's
+          // time to click through before it fades.
+          const hasReady = (showStrava && s.strava.ready_url) || (showGarmin && s.garmin.ready_url);
+          scheduleHide(hasReady ? 20000 : HIDE_AFTER_MS);
         }
       }
       nextDelay = anyRunning ? POLL_MS_ACTIVE : POLL_MS_IDLE;

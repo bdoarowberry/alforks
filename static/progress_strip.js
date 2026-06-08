@@ -63,11 +63,20 @@
       show(`Preparing ${b.done}/${b.total} rides…`, b.done, b.total);
       return schedule(POLL_MS);
     }
-    // 2) Trail-match prewarm — re-snapping rides against OSM at startup.
+    // 2) Trail-match prewarm — re-snapping rides against OSM, then rebuilding
+    //    the route leaderboards (phase 'routes') so /routes is warm.
     const t = await status('/api/trail-match/status');
     if (t && t.running && t.total > 0) {
       seenActive = true; idle = 0;
-      show(`Matching trails ${t.done}/${t.total}…`, t.done, t.total);
+      // The trail-match prewarm is a 2-phase pipeline (snap rides → rebuild
+      // route leaderboards); prefix "Phase n/2 ·" so the strip shows overall
+      // position, not just the within-phase count.
+      const PHASES = ['matching', 'routes'];
+      const LABELS = { matching: 'Matching trails', routes: 'Updating routes' };
+      const idx = PHASES.indexOf(t.phase);
+      const lbl = LABELS[t.phase] || 'Matching trails';
+      const prefix = idx >= 0 ? `Phase ${idx + 1}/${PHASES.length} · ` : '';
+      show(`${prefix}${lbl} ${t.done}/${t.total}…`, t.done, t.total);
       return schedule(POLL_MS);
     }
     // Nothing active.
