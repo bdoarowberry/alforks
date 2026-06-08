@@ -117,7 +117,9 @@
       "PowerShell($j = Invoke-WebRequest -Uri \"http://localhost:5000/api/comparison\" -UseBasicParsing -TimeoutSec 8 | Select-Object -ExpandProperty Content | ConvertFrom-Json; $fn = $j.activities[0].filename; if \\(-not $fn\\) { $fn = $j[0].filename }; Write-Output \"filename: $fn\"; $u = \"http://localhost:5000/log/\" + [uri]::EscapeDataString\\($fn\\); $r = Invoke-WebRequest -Uri $u -UseBasicParsing -TimeoutSec 8; Write-Output \"/log HTTP $\\($r.StatusCode\\); has makeDrawerCloser=$\\($r.Content -match 'makeDrawerCloser'\\); has renderRunStats=$\\($r.Content -match 'renderRunStats'\\)\")",
       "Bash(xargs -I{} basename {})",
       "PowerShell($r = Invoke-WebRequest -Uri \"http://localhost:5000/log/6088824766.gpx\" -UseBasicParsing -TimeoutSec 10; Write-Output \"/log HTTP $\\($r.StatusCode\\); has makeDrawerCloser=$\\($r.Content -match 'makeDrawerCloser'\\); has renderTrailStats=$\\($r.Content -match 'renderTrailStats'\\); has eachHeatPoint-leak=$\\($r.Content -match 'eachHeatPoint'\\)\")",
-      "Bash(awk -F. 'NF>1{print $NF}')"
+      "Bash(awk -F. 'NF>1{print $NF}')",
+      "PowerShell(node --check \"static/progress_strip.js\"; if \\($?\\) { \"progress_strip.js OK\" }; node --check \"static/sync_toast.js\"; if \\($?\\) { \"sync_toast.js OK\" })",
+      "Bash(wsl.exe -e bash -lc 'which node; node --version')"
     ]
   }
 }
