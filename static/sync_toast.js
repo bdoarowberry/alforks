@@ -1,4 +1,6 @@
-// Bottom-right toast that surfaces background sync progress on every page.
+// Top-right toast that surfaces background sync progress on every page.
+// Sits over the header's Sync button (far-right of the 52px header) so the
+// progress reads as belonging to the action that kicked it off.
 // Polls /api/sync/status — only paints when a sync is active or recently
 // finished (so quiet pages stay visually quiet).
 
@@ -32,7 +34,7 @@
     el = document.createElement('div');
     el.id = TOAST_ID;
     el.style.cssText = `
-      position: fixed; right: 18px; bottom: 18px; z-index: 99999;
+      position: fixed; right: 18px; top: 10px; z-index: 99999;
       background: #12151a; border: 1px solid #2a2d35; border-radius: 8px;
       padding: 12px 16px; min-width: 240px; max-width: 360px;
       box-shadow: 0 6px 24px rgba(0,0,0,0.5);
