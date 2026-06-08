@@ -119,7 +119,12 @@
       "PowerShell($r = Invoke-WebRequest -Uri \"http://localhost:5000/log/6088824766.gpx\" -UseBasicParsing -TimeoutSec 10; Write-Output \"/log HTTP $\\($r.StatusCode\\); has makeDrawerCloser=$\\($r.Content -match 'makeDrawerCloser'\\); has renderTrailStats=$\\($r.Content -match 'renderTrailStats'\\); has eachHeatPoint-leak=$\\($r.Content -match 'eachHeatPoint'\\)\")",
       "Bash(awk -F. 'NF>1{print $NF}')",
       "PowerShell(node --check \"static/progress_strip.js\"; if \\($?\\) { \"progress_strip.js OK\" }; node --check \"static/sync_toast.js\"; if \\($?\\) { \"sync_toast.js OK\" })",
-      "Bash(wsl.exe -e bash -lc 'which node; node --version')"
+      "Bash(wsl.exe -e bash -lc 'which node; node --version')",
+      "Bash(cat sync/.tokens/strava_status.json)",
+      "Bash(find . -name strava_status.json)",
+      "Bash(ls -la sync/*.json sync/.tokens/*.json)",
+      "Bash(find . -name \"strava_status.json\" -not -path \"*/node_modules/*\")",
+      "Read(//c/Users/arowberry/.alforks/**)"
     ]
   }
 }
