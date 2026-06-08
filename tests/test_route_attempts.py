@@ -8,10 +8,13 @@ Run with:
 
 from __future__ import annotations
 
+import json
 import os
 import sys
+import tempfile
 import unittest
 from datetime import datetime, timedelta
+from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -240,6 +243,68 @@ class TestAccumulationAndNoise(unittest.TestCase):
         self.assertEqual(len(route_attempts._scan_one_ride(segs, tl, pts)), 1)
         # And with only ONE entry it must NOT complete the two-segment route.
         self.assertEqual(len(route_attempts._scan_one_ride(segs, tl[:1], pts)), 0)
+
+
+class TestRouteAttemptsDiskCache(unittest.TestCase):
+    """Regression: the route_attempts disk-cache key embeds a NESTED tuple
+    (the trail_match dir fingerprint). It must survive the JSON round-trip so
+    the disk cache HITS across restarts.
+
+    The old read compared `tuple(stored_key) == key`, which only un-tupled the
+    OUTER level — the nested fingerprint stayed a list, so the compare missed
+    every time and every restart recomputed all leaderboards from scratch.
+    """
+
+    def setUp(self):
+        import app  # heavyweight; import lazily so the pure-logic tests above stay light
+        self.app = app
+        self._tmp = tempfile.TemporaryDirectory()
+        self._orig_dir = app.ROUTE_ATTEMPTS_CACHE_DIR
+        app.ROUTE_ATTEMPTS_CACHE_DIR = Path(self._tmp.name)
+        app._invalidate_route_attempts()
+
+    def tearDown(self):
+        self.app.ROUTE_ATTEMPTS_CACHE_DIR = self._orig_dir
+        self._tmp.cleanup()
+        self.app._invalidate_route_attempts()
+
+    def test_disk_cache_hits_after_json_round_trip(self):
+        app = self.app
+        route = {"id": "deadbeef0001", "region_id": "no-such-region-xyz",
+                 "modified": "2026-06-08T00:00:00", "segments": []}
+        fp = (3, 1234567.5)   # nested tuple — the crux of the bug
+        key = app._route_attempts_cache_key(route, trail_match_fp=fp)
+        payload = {"version": route_attempts.ROUTE_ATTEMPTS_VERSION,
+                   "attempts": [], "attempt_count": 7,
+                   "best_duration_sec": 3661, "best_filename": "x.gpx",
+                   "best_date": "2026-06-01"}
+        disk = app.ROUTE_ATTEMPTS_CACHE_DIR / f"{route['id']}.json"
+        disk.write_text(json.dumps({"key": list(key), "payload": payload}),
+                        encoding="utf-8")
+
+        # Mem cache is empty (= fresh process / restart). A correct read returns
+        # the stored payload via a disk HIT. Under the old bug it would miss,
+        # recompute against the (unknown) region, and yield an empty leaderboard
+        # — so asserting on the stored count distinguishes hit from recompute.
+        result = app._get_route_attempts(route["id"], route=route, trail_match_fp=fp)
+        self.assertEqual(result, payload)
+        self.assertEqual(result["attempt_count"], 7)
+
+    def test_changed_fingerprint_misses(self):
+        # Sanity the other way: a stored key with a STALE fingerprint must NOT
+        # hit — otherwise the fix would mask genuine invalidation.
+        app = self.app
+        route = {"id": "deadbeef0002", "region_id": "no-such-region-xyz",
+                 "modified": "2026-06-08T00:00:00", "segments": []}
+        stale_key = app._route_attempts_cache_key(route, trail_match_fp=(1, 1.0))
+        payload = {"attempt_count": 99}
+        disk = app.ROUTE_ATTEMPTS_CACHE_DIR / f"{route['id']}.json"
+        disk.write_text(json.dumps({"key": list(stale_key), "payload": payload}),
+                        encoding="utf-8")
+        # Ask with a DIFFERENT fingerprint → stored key no longer matches → the
+        # disk entry must be ignored (recompute yields an empty leaderboard).
+        result = app._get_route_attempts(route["id"], route=route, trail_match_fp=(2, 2.0))
+        self.assertNotEqual(result.get("attempt_count"), 99)
 
 
 if __name__ == "__main__":

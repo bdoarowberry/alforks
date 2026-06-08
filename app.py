@@ -2231,7 +2231,12 @@ def _get_route_attempts(route_id: str, route: dict | None = None,
         if disk.exists():
             try:
                 entry = json.loads(disk.read_text(encoding="utf-8"))
-                if tuple(entry.get("key") or ()) == key:
+                # Compare in JSON-normalized form: the key has a nested tuple
+                # (the trail_match dir fingerprint) that serializes to a list,
+                # so `tuple(...)` only un-tuples the OUTER level — the nested
+                # element stays a list and a raw compare always missed, so the
+                # disk cache never hit across restarts. Mirror _suggestions_from_cache.
+                if entry.get("key") == json.loads(json.dumps(key)):
                     payload = entry.get("payload") or {}
                     _route_attempts_mem_cache[route_id] = payload
                     _route_attempts_keys[route_id]      = key
