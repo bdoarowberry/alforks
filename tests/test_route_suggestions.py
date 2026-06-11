@@ -249,6 +249,23 @@ class TestClusterRides(unittest.TestCase):
         self.assertEqual(len(clusters), 1)
         self.assertEqual(clusters[0]["members"], ["a", "b"])
 
+    def test_short_rides_dropped_below_floor(self):
+        # Two geometrically identical, same-distance rides that WOULD cluster,
+        # but both sit under the 1 km floor -> dropped before pairing.
+        rides = [_ride("a", dist=0.6), _ride("b", dist=0.6)]
+        load, loaded = self._loader({"a": _cells(0, 60), "b": _cells(0, 60)})
+        self.assertEqual(rs.cluster_rides(rides, load), [])
+        # Filtered up front, so the cell loader is never asked for them.
+        self.assertEqual(loaded, [])
+
+    def test_floor_keeps_rides_at_threshold(self):
+        # Exactly at the floor still qualifies (>=, not >).
+        rides = [_ride("a", dist=1.0), _ride("b", dist=1.0)]
+        load, _ = self._loader({"a": _cells(0, 60), "b": _cells(0, 60)})
+        clusters = rs.cluster_rides(rides, load)
+        self.assertEqual(len(clusters), 1)
+        self.assertEqual(clusters[0]["members"], ["a", "b"])
+
     def test_disjoint_bbox_no_pair(self):
         rides = [_ride("a"), _ride("b", bbox=(9.0, 9.0, 10.0, 10.0))]
         load, _ = self._loader({"a": _cells(0, 60), "b": _cells(0, 60)})

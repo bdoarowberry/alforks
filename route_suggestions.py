@@ -31,7 +31,8 @@ from typing import Callable, Iterable
 
 # Bump to invalidate cache/route_suggestions/clusters.json when the
 # clustering math or tuning changes.
-SUGGESTIONS_VERSION = 1
+# v2: added MIN_RIDE_DISTANCE_KM floor (drops sub-1km tracks before pairing).
+SUGGESTIONS_VERSION = 2
 
 # ── Tuning knobs (the canary oracle pins these; see tests) ────────────
 # Grid cell edge in meters. GPS noise is ~5-15 m, so a cell comfortably
@@ -82,6 +83,13 @@ COVERAGE_SIM_METRIC = "containment"
 COVERAGE_SIM_THRESHOLD = 0.55
 
 MIN_CLUSTER_SIZE = 2
+
+# Floor on a ride's total distance before it can seed a suggestion. Very
+# short tracks (loops around a parking lot, a GPS still warming up, a
+# dropped-then-resumed recording) cluster trivially — their footprints are
+# tiny so a handful of shared cells clears Jaccard — but they're never a
+# route worth saving. Drop anything under this before pairing.
+MIN_RIDE_DISTANCE_KM = 1.0
 
 
 # ── Geometry primitives ───────────────────────────────────────────────
@@ -219,6 +227,7 @@ def cluster_rides(
     sim_threshold: float = CLUSTER_SIM_THRESHOLD,
     sim_metric: str = CLUSTER_SIM_METRIC,
     min_cluster_size: int = MIN_CLUSTER_SIZE,
+    min_distance_km: float = MIN_RIDE_DISTANCE_KM,
 ) -> list[dict]:
     """Group rides that are the same loop into clusters.
 
@@ -235,7 +244,11 @@ def cluster_rides(
         {region_id, members:[fn,...], size, representative,
          representative_cells}
     sorted largest-first. Saved-route exclusion is applied separately by
-    the caller via `cluster_covered_by_route`."""
+    the caller via `cluster_covered_by_route`.
+
+    Rides shorter than `min_distance_km` are dropped up front so trivially
+    short tracks can't seed a suggestion (see `MIN_RIDE_DISTANCE_KM`)."""
+    rides = [r for r in rides if (r.get("distance_km") or 0) >= min_distance_km]
     by_fn = {r["filename"]: r for r in rides}
 
     # Bucket by region so pairing is O(rides_per_region^2), not O(all^2).
