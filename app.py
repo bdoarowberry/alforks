@@ -22,6 +22,7 @@ from pathlib import Path
 
 import gpxpy
 from flask import Flask, Response, abort, jsonify, redirect, render_template, request
+from werkzeug.utils import secure_filename
 
 from cache_utils import LRUCache, _atomic_write, init_backup_tracking
 import osm_breaker
@@ -180,6 +181,14 @@ app = Flask(__name__)
 # need a Flask restart. Independent of debug mode (which still gates the
 # Python reloader and traceback verbosity).
 app.config["TEMPLATES_AUTO_RELOAD"] = True
+# Hard ceiling on request body size. Without it, a multipart upload to
+# /api/upload-track is fully received (Werkzeug spools each part to a temp
+# file) before the route's per-file 30 MB check ever runs — so a flooded
+# connection could exhaust disk before a single byte is rejected. 200 MB
+# comfortably covers a manual batch of real GPX tracks (~1-5 MB each) while
+# capping the blast radius. Applies to every route, but all others post
+# tiny JSON bodies, so the limit only ever bites the upload path.
+app.config["MAX_CONTENT_LENGTH"] = 200 * 1024 * 1024
 
 
 # ─── Response compression ─────────────────────────────────────────────────────
@@ -4176,6 +4185,126 @@ def api_bulk_delete():
     filenames = body.get("filenames", [])
     moved = sum(1 for fn in filenames if _archive_activity(fn))
     return jsonify({"ok": True, "archived": moved})
+
+
+# --- Manual track upload ----------------------------------------------------
+# Personal-use, single-user: the user explicitly wanted a clear "Upload" button
+# (not drag-and-drop) to add .gpx tracks the sync pipelines don't cover — a
+# one-off ride from a friend's device, an older export, a manually trimmed
+# file. Each upload is validated by actually parsing it (a non-GPX or corrupt
+# file is rejected and not left behind in tracks/), then its sidebar entry is
+# built surgically via _update_activity_entry so the track appears without the
+# ~40s full rebuild. Type/notes are set afterwards through the existing
+# per-track metadata editor.
+_UPLOAD_MAX_BYTES = 30 * 1024 * 1024  # 30 MB — generous for a single GPX track
+# Serializes filename allocation + write so two concurrent uploads can't both
+# claim the same _unique_gpx_name candidate and have the second silently
+# clobber the first (check-then-write race). Single-user, so contention is nil.
+_upload_lock = threading.Lock()
+
+
+def _allocate_upload_path(stem: str) -> Path | None:
+    """Reserve and create an empty '<stem>.gpx' (or _2/_3/… on clash) inside
+    GPX_DIR, atomically, returning the created Path — or None if the resolved
+    path escapes GPX_DIR. Holds _upload_lock and uses exclusive-create so the
+    name is claimed on disk before we return, closing the TOCTOU window."""
+    with _upload_lock:
+        n = None
+        for _ in range(1000):
+            candidate = f"{stem}.gpx" if n is None else f"{stem}_{n}.gpx"
+            dest = _safe_gpx_path(candidate)
+            if dest is None:
+                return None
+            try:
+                dest.touch(exist_ok=False)   # claim it; fails if it already exists
+                return dest
+            except FileExistsError:
+                n = 2 if n is None else n + 1
+        return None
+
+
+@app.route("/api/upload-track", methods=["POST"])
+def api_upload_track():
+    global _summary_data_cache, _summary_data_key
+    files = request.files.getlist("file")
+    if not files:
+        return jsonify({"ok": False, "message": "no file provided"}), 400
+
+    added, errors = [], []
+    for fs in files:
+        orig = fs.filename or ""
+        if not orig.lower().endswith(".gpx"):
+            errors.append({"name": orig or "(unnamed)", "error": "not a .gpx file"})
+            continue
+        # Read with a hard size cap so a giant upload can't exhaust memory/disk.
+        # (The app-wide MAX_CONTENT_LENGTH already bounds the whole request; this
+        # is the per-file gate.) Done before claiming a filename so a rejected
+        # oversize file doesn't leave an empty stub behind.
+        blob = fs.read(_UPLOAD_MAX_BYTES + 1)
+        if len(blob) > _UPLOAD_MAX_BYTES:
+            errors.append({"name": orig, "error": "file too large (>30 MB)"})
+            continue
+        # Namespace manual uploads with an `upload_` prefix so they never collide
+        # with sync naming (strava_*, ridelog_*) and read as user-added at a glance.
+        safe = secure_filename(orig) or "track.gpx"
+        stem = safe[:-4] if safe.lower().endswith(".gpx") else safe
+        dest = _allocate_upload_path(f"upload_{stem}" if stem else "upload_track")
+        if dest is None:
+            errors.append({"name": orig, "error": "invalid filename"})
+            continue
+        name = dest.name
+        try:
+            dest.write_bytes(blob)
+        except Exception as e:
+            try:
+                dest.unlink()
+            except OSError:
+                pass
+            errors.append({"name": orig, "error": f"write failed: {e}"})
+            continue
+        # Validate by parsing. A file that yields no usable track — or whose
+        # XML is malformed (parse_gpx raises GPXXMLSyntaxException) — is removed
+        # so we never leave an unparseable stub behind in tracks/.
+        try:
+            data = get_activity(name)
+        except Exception:
+            data = None
+        if not data or not data.get("points"):
+            try:
+                dest.unlink()
+            except OSError:
+                pass
+            _mem_cache.evict(name)  # drop the _UNPARSEABLE marker get_activity set
+            errors.append({"name": orig,
+                           "error": "could not parse GPX (no track points)"})
+            continue
+        # Build the sidebar entry now so the track shows up immediately. Bust the
+        # throttled activities-key cache first so _update_activity_entry's
+        # re-anchored fingerprint reflects the just-written file (mirrors
+        # save_metadata's ordering) — otherwise a stale throttled key would make
+        # the next all_activities() fall back to a full ~40s rebuild.
+        _invalidate_acts_key_cache()
+        _update_activity_entry(name)
+        added.append({"filename": name, "name": data.get("name") or name,
+                      "date": (data.get("date") or "")[:10]})
+
+    if added:
+        # New tracks change Summary aggregates (ride count, distance, streaks).
+        # The summary cache key piggybacks on the activities key, which the
+        # re-anchor above already refreshed, but null it explicitly too so the
+        # next /summary recomputes regardless of throttle timing.
+        with _summary_data_lock:
+            _summary_data_cache = None
+            _summary_data_key   = None
+        # Surface new MTB rides on the trail + route leaderboards without a
+        # restart, mirroring the Strava sync-completion path (async, non-blocking).
+        _prewarm_trail_matches_async()
+
+    ready_url = (f"/log/{added[0]['filename']}"
+                 if len(added) == 1 and not errors else None)
+    return (jsonify({"ok": bool(added), "added": added, "errors": errors,
+                     "ready_url": ready_url}),
+            200 if added else 400)
 
 
 @app.route("/api/bulk-metadata", methods=["PATCH"])
