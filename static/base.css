@@ -133,6 +133,31 @@ nav a.active .nav-pill { background: #fbbf24; }
 .nav-sync-btn:hover { color: var(--text-primary); background: var(--accent-soft); border-color: var(--accent); }
 .nav-sync-btn:active { transform: translateY(1px); }
 
+/* Upload trigger — same action treatment as the Sync button, injected just
+   AFTER it by upload.js so the two read as a paired action group at the
+   far-right of the header. Sync keeps its own `margin-left:auto`, which
+   floats the whole trailing group right; the header's 20px gap spaces them. */
+.nav-upload-btn {
+  font-size: 0.7rem;
+  padding: 5px 14px;
+  border-radius: 3px;
+  border: 1px solid var(--border-row);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.12s;
+  font-family: var(--font-mono);
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.nav-upload-btn::before { content: '↥'; font-size: 0.95rem; line-height: 1; transform: translateY(-1px); }
+.nav-upload-btn:hover { color: var(--text-primary); background: var(--accent-soft); border-color: var(--accent); }
+.nav-upload-btn:active { transform: translateY(1px); }
+.nav-upload-btn[disabled] { opacity: 0.55; cursor: default; }
+
 
 /* Filter chip (canonical) — neutral-white active state. Used by
    Summary, Heatmap, archived Summary, anywhere a year/type/preset
