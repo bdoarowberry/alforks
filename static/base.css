@@ -77,6 +77,8 @@ header h1 {
   letter-spacing: 0.03em;
   margin-right: 8px;
 }
+/* Brand wordmark: orange "Al" + white "Forks" (markup: <h1><span>Al</span>Forks</h1>) */
+header h1 span { color: #fc4c02; }
 nav {
   display: flex;
 }
