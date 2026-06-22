@@ -174,9 +174,19 @@ function toggleMapFullscreen(targetId) {
 // of 'map' selects the street layer, anything else the satellite layer. Both
 // layers must already exist (see makeStreetLayer / makeSatelliteLayer).
 function swapLeafletBasemap(map, view, streetLayer, satelliteLayer) {
+  // Preserve the camera across the swap. invalidateSize() is needed in case the
+  // map was hidden (e.g. returning from the 3D view), but with the leaflet-rotate
+  // plugin active it can otherwise snap the map back to its initial view — which
+  // is the "map jumps to default location on style change" bug. Capture the
+  // center/zoom/bearing and restore them after.
+  const center  = map.getCenter();
+  const zoom    = map.getZoom();
+  const bearing = (typeof map.getBearing === 'function') ? map.getBearing() : null;
   map.removeLayer(view === 'map' ? satelliteLayer : streetLayer);
   (view === 'map' ? streetLayer : satelliteLayer).addTo(map);
   map.invalidateSize();
+  map.setView(center, zoom, { animate: false });
+  if (bearing !== null && typeof map.setBearing === 'function') map.setBearing(bearing);
 }
 
 // A non-interactive Leaflet mini-map on element `el`: every pan/zoom/keyboard
