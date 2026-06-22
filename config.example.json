@@ -1,0 +1,8 @@
+{
+  "mapbox_token": "",
+  "sync_settings": {
+    "auto_strava": false,
+    "auto_garmin": false,
+    "strava_after": ""
+  }
+}

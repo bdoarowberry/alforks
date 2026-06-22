@@ -393,6 +393,110 @@
 
   <!-- Sync panel -->
   <div id="sync-panel" class="tab-panel" style="flex-direction: column; padding: 18px 22px 32px; overflow-y: auto;">
+    <style>
+      .strava-details { margin: 4px 0 14px; border: 1px solid var(--border-hair); border-radius: 4px; padding: 10px 14px; background: rgba(255,255,255,0.03); max-width: 560px; }
+      .strava-details summary { cursor: pointer; color: var(--text-secondary); font-size: 0.85rem; }
+      .strava-steps { margin: 10px 0; padding-left: 20px; color: var(--text-secondary); font-size: 0.82rem; line-height: 1.55; }
+      .strava-steps code { background: rgba(255,255,255,0.08); padding: 1px 5px; border-radius: 3px; }
+      .strava-creds-grid { display: flex; flex-direction: column; gap: 10px; max-width: 420px; margin: 12px 0; }
+      .strava-creds-grid label, .sx-field label { display: flex; flex-direction: column; gap: 4px; font-size: 0.78rem; color: var(--text-muted); }
+      .strava-creds-grid input, .sx-field input { padding: 6px 8px; background: var(--bg-card); border: 1px solid var(--border-row); border-radius: 3px; color: var(--text-primary); font-family: inherit; }
+      #strava-connect-card, #mapbox-card, #garmin-connect-card { max-width: 560px; }
+      #strava-connect-card button, #mapbox-card button, #garmin-connect-card button { padding: 7px 16px; border-radius: 3px; border: 1px solid var(--accent); background: var(--accent-soft); color: var(--accent); font-size: 0.82rem; cursor: pointer; font-family: inherit; transition: all 0.12s; }
+      #strava-connect-card button:hover:not(:disabled), #mapbox-card button:hover:not(:disabled), #garmin-connect-card button:hover:not(:disabled) { background: var(--accent); color: #fff; }
+      #strava-connect-card button:disabled, #garmin-connect-card button:disabled { opacity: 0.5; cursor: not-allowed; }
+      #strava-connect-btn { margin-top: 8px; background: #fc4c02; border-color: #fc4c02; color: #fff; }
+      #strava-connect-btn:hover:not(:disabled) { background: #e34402; border-color: #e34402; }
+      .strava-conn-row { display: flex; align-items: center; justify-content: space-between; max-width: 420px; }
+      .strava-confirm { margin-left: 10px; font-size: 0.78rem; }
+      .strava-banner { padding: 9px 12px; border-radius: 4px; margin-bottom: 12px; font-size: 0.82rem; }
+      .strava-banner.ok  { background: rgba(34,197,94,0.12); color: var(--success); }
+      .strava-banner.err { background: rgba(239,68,68,0.12); color: var(--danger); }
+      .sx-field { max-width: 420px; margin: 10px 0; }
+      .sx-hint { font-size: 0.76rem; color: var(--text-muted); margin-top: 4px; line-height: 1.5; }
+      .guide-link { display: inline-block; margin-bottom: 14px; color: var(--accent); text-decoration: none; font-size: 0.85rem; }
+      .guide-link:hover { text-decoration: underline; }
+    </style>
+
+    <a class="guide-link" href="/guide" target="_blank" rel="noopener">📖 Setup &amp; Help Guide</a>
+
+    <h2 class="panel-section-h2">Connect Strava</h2>
+    <div class="fit-card" id="strava-connect-card">
+      <div id="strava-conn-banner" class="strava-banner" style="display:none"></div>
+      <div class="strava-conn-row">
+        <span class="sync-name">Strava account</span>
+        <span class="sync-state" id="strava-conn-state">—</span>
+      </div>
+      <div class="sync-meta" id="strava-conn-meta">Checking…</div>
+
+      <details id="strava-creds-details" class="strava-details">
+        <summary>Set up Strava access (one time)</summary>
+        <ol class="strava-steps">
+          <li>Open <a href="https://www.strava.com/settings/api" target="_blank" rel="noopener">strava.com/settings/api</a> and create an app with these values:
+            <ul>
+              <li><b>Application Name:</b> AlForks (or anything)</li>
+              <li><b>Category:</b> Personal</li>
+              <li><b>Website:</b> http://localhost</li>
+              <li><b>Authorization Callback Domain:</b> <code>localhost</code></li>
+            </ul>
+          </li>
+          <li>Copy the <b>Client ID</b> and <b>Client Secret</b> Strava shows you, paste them below, and Save.</li>
+        </ol>
+        <div class="strava-creds-grid">
+          <label>Client ID<input id="strava-client-id" type="text" placeholder="e.g. 12345" autocomplete="off"></label>
+          <label>Client Secret<input id="strava-client-secret" type="password" placeholder="paste secret" autocomplete="off"></label>
+        </div>
+        <button onclick="saveStravaCreds()" id="strava-creds-btn">Save credentials</button>
+        <span id="strava-creds-confirm" class="strava-confirm"></span>
+      </details>
+
+      <div class="sx-field">
+        <label>Import rides from
+          <input id="strava-after" type="date" onchange="saveStravaAfter()">
+        </label>
+        <div class="sx-hint">Leave blank to import your whole history. Tip: set this before your first sync so it doesn't pull years of rides at once.</div>
+        <span id="strava-after-confirm" class="strava-confirm"></span>
+      </div>
+
+      <button onclick="connectStrava()" id="strava-connect-btn" disabled>Connect Strava</button>
+    </div>
+
+    <h2 class="panel-section-h2">Connect Garmin (optional)</h2>
+    <div class="fit-card" id="garmin-connect-card">
+      <div class="strava-conn-row">
+        <span class="sync-name">Garmin account</span>
+        <span class="sync-state" id="garmin-conn-state">—</span>
+      </div>
+      <div class="sync-meta" id="garmin-conn-meta">Only needed if you have a Garmin &mdash; it adds heart-rate to your rides. Strava already brings in the rides themselves.</div>
+
+      <div class="strava-creds-grid">
+        <label>Garmin email<input id="garmin-email" type="email" placeholder="you@example.com" autocomplete="off"></label>
+        <label>Garmin password<input id="garmin-password" type="password" placeholder="your Garmin password" autocomplete="off"></label>
+      </div>
+      <div id="garmin-mfa-row" class="sx-field" style="display:none">
+        <label>Verification code (Garmin just sent this to you)
+          <input id="garmin-mfa-code" type="text" inputmode="numeric" placeholder="6-digit code" autocomplete="off">
+        </label>
+        <button onclick="garminMfa()" id="garmin-mfa-btn">Verify code</button>
+      </div>
+      <div>
+        <button onclick="garminConnect()" id="garmin-connect-btn">Connect Garmin</button>
+        <span id="garmin-msg" class="strava-confirm"></span>
+      </div>
+    </div>
+
+    <h2 class="panel-section-h2">Maps (optional)</h2>
+    <div class="fit-card" id="mapbox-card">
+      <div class="sx-field">
+        <label>Mapbox token
+          <input id="mapbox-token" type="password" placeholder="pk...." autocomplete="off">
+        </label>
+        <div class="sx-hint">Optional &mdash; enables 3D terrain maps. Get a free token at <a href="https://account.mapbox.com/" target="_blank" rel="noopener">mapbox.com</a>. 2D maps work without it.</div>
+      </div>
+      <button onclick="saveMapboxToken()" id="mapbox-btn">Save token</button>
+      <span id="mapbox-confirm" class="strava-confirm"></span>
+    </div>
+
     <h2 class="panel-section-h2">Data Sync</h2>
     <div class="sync-grid">
       <div class="sync-card" id="sync-card-strava">
@@ -1466,6 +1570,8 @@ async function loadAutoSync() {
     const s = await r.json();
     document.getElementById('auto-strava').checked = s.auto_strava;
     document.getElementById('auto-garmin').checked = s.auto_garmin;
+    const af = document.getElementById('strava-after');
+    if (af) af.value = s.strava_after || '';
   } catch (e) {}
 }
 
@@ -1479,8 +1585,201 @@ async function saveAutoSync() {
   setTimeout(() => document.getElementById('autosync-confirm').textContent = '', 1500);
 }
 
+// ─── Strava connection ───────────────────────────────────────────────────────
+async function loadStravaStatus() {
+  try {
+    const s = await (await fetch('/api/strava/status')).json();
+    const stateEl = document.getElementById('strava-conn-state');
+    const metaEl  = document.getElementById('strava-conn-meta');
+    const connBtn = document.getElementById('strava-connect-btn');
+    const details = document.getElementById('strava-creds-details');
+    stateEl.classList.remove('ok', 'idle', 'err');
+    if (s.connected) {
+      stateEl.textContent = 'connected'; stateEl.classList.add('ok');
+      metaEl.textContent = s.athlete
+        ? `Connected as ${s.athlete}. Use "Sync now" below to import your rides.`
+        : 'Connected. Use "Sync now" below to import your rides.';
+      connBtn.textContent = 'Reconnect Strava';
+    } else {
+      stateEl.textContent = s.has_creds ? 'not connected' : 'setup needed';
+      stateEl.classList.add(s.has_creds ? 'idle' : 'err');
+      metaEl.textContent = s.has_creds
+        ? 'Credentials saved. Click "Connect Strava" to authorize your account.'
+        : 'Add your Strava app credentials below, then connect.';
+      connBtn.textContent = 'Connect Strava';
+      if (!s.has_creds && details) details.open = true;
+    }
+    connBtn.disabled = !s.has_creds;
+  } catch (e) {}
+}
+
+async function saveStravaCreds() {
+  const cid    = document.getElementById('strava-client-id').value.trim();
+  const secret = document.getElementById('strava-client-secret').value.trim();
+  const confirm = document.getElementById('strava-creds-confirm');
+  if (!cid || !secret) {
+    confirm.style.color = 'var(--danger)'; confirm.textContent = 'Both fields required';
+    setTimeout(() => confirm.textContent = '', 2500);
+    return;
+  }
+  try {
+    const r = await fetch('/api/strava/creds', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ client_id: cid, client_secret: secret }),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (r.ok && j.ok) {
+      confirm.style.color = 'var(--success)'; confirm.textContent = 'Saved';
+      document.getElementById('strava-client-secret').value = '';
+      loadStravaStatus();
+    } else {
+      confirm.style.color = 'var(--danger)'; confirm.textContent = j.error || 'Save failed';
+    }
+  } catch (e) {
+    confirm.style.color = 'var(--danger)'; confirm.textContent = 'Save failed';
+  }
+  setTimeout(() => confirm.textContent = '', 2500);
+}
+
+async function saveStravaAfter() {
+  const v = document.getElementById('strava-after').value || '';
+  const confirm = document.getElementById('strava-after-confirm');
+  try {
+    await fetch('/api/sync/settings', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ strava_after: v }),
+    });
+    confirm.style.color = 'var(--success)'; confirm.textContent = 'Saved';
+  } catch (e) {
+    confirm.style.color = 'var(--danger)'; confirm.textContent = 'Save failed';
+  }
+  setTimeout(() => confirm.textContent = '', 1800);
+}
+
+function connectStrava() {
+  // Full-page redirect into Strava's OAuth; Strava returns to /setup?strava=…
+  window.location.href = '/oauth/strava/start';
+}
+
+function showStravaBanner() {
+  const code = new URLSearchParams(window.location.search).get('strava');
+  if (!code) return;
+  const banner = document.getElementById('strava-conn-banner');
+  const map = {
+    ok:             ['ok',  'Strava connected! Click "Sync now" below to import your activities.'],
+    denied:         ['err', 'Authorization was declined. Click "Connect Strava" to try again.'],
+    nocode:         ['err', 'No authorization code came back from Strava. Please try again.'],
+    nocreds:        ['err', 'Add your Strava credentials first, then connect.'],
+    exchangefailed: ['err', 'Could not finish connecting. Double-check your Client ID / Secret and try again.'],
+  };
+  const [kind, msg] = map[code] || ['err', 'Unexpected Strava response.'];
+  banner.className = 'strava-banner ' + kind;
+  banner.textContent = msg;
+  banner.style.display = 'block';
+  if (typeof showTab === 'function') showTab('sync');
+  history.replaceState(null, '', window.location.pathname);  // don't re-show on refresh
+}
+
+// ─── Mapbox token ────────────────────────────────────────────────────────────
+async function loadMapboxStatus() {
+  try {
+    const s = await (await fetch('/api/config')).json();  // {mapbox_token: bool}
+    const inp = document.getElementById('mapbox-token');
+    if (inp && s.mapbox_token) inp.placeholder = 'token saved — paste a new one to replace';
+  } catch (e) {}
+}
+
+async function saveMapboxToken() {
+  const v = document.getElementById('mapbox-token').value.trim();
+  const confirm = document.getElementById('mapbox-confirm');
+  try {
+    await fetch('/api/config', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mapbox_token: v }),
+    });
+    confirm.style.color = 'var(--success)'; confirm.textContent = 'Saved (reload maps to apply)';
+    document.getElementById('mapbox-token').value = '';
+    loadMapboxStatus();
+  } catch (e) {
+    confirm.style.color = 'var(--danger)'; confirm.textContent = 'Save failed';
+  }
+  setTimeout(() => confirm.textContent = '', 2500);
+}
+
+// ─── Garmin connection ───────────────────────────────────────────────────────
+async function loadGarminStatus() {
+  try {
+    const s = await (await fetch('/api/garmin/status')).json();
+    const st = document.getElementById('garmin-conn-state');
+    const meta = document.getElementById('garmin-conn-meta');
+    st.classList.remove('ok', 'idle', 'err');
+    if (s.connected) {
+      st.textContent = 'connected'; st.classList.add('ok');
+      meta.textContent = (s.user ? `Connected as ${s.user}. ` : 'Connected. ') + 'Use "Sync now" below to pull heart-rate.';
+    } else {
+      st.textContent = 'not connected'; st.classList.add('idle');
+      meta.textContent = 'Only needed if you have a Garmin — it adds heart-rate to your rides. Strava already brings in the rides themselves.';
+    }
+  } catch (e) {}
+}
+
+async function garminConnect() {
+  const email = document.getElementById('garmin-email').value.trim();
+  const pw = document.getElementById('garmin-password').value;
+  const m = document.getElementById('garmin-msg');
+  m.style.color = '';
+  if (!email || !pw) { m.style.color = 'var(--danger)'; m.textContent = 'Email and password are required'; return; }
+  const btn = document.getElementById('garmin-connect-btn'); const old = btn.textContent;
+  btn.disabled = true; btn.textContent = 'Connecting…';
+  try {
+    const r = await fetch('/api/garmin/connect', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password: pw }) });
+    const j = await r.json().catch(() => ({}));
+    if (j.ok) {
+      m.style.color = 'var(--success)'; m.textContent = 'Connected!';
+      document.getElementById('garmin-password').value = '';
+      document.getElementById('garmin-mfa-row').style.display = 'none';
+      loadGarminStatus();
+    } else if (j.mfa_required) {
+      window._garminTicket = j.ticket;
+      document.getElementById('garmin-mfa-row').style.display = 'block';
+      m.style.color = 'var(--text-muted)'; m.textContent = 'Enter the code Garmin just sent you.';
+    } else {
+      m.style.color = 'var(--danger)'; m.textContent = j.error || 'Login failed';
+    }
+  } catch (e) {
+    m.style.color = 'var(--danger)'; m.textContent = 'Login failed';
+  }
+  btn.disabled = false; btn.textContent = old;
+}
+
+async function garminMfa() {
+  const code = document.getElementById('garmin-mfa-code').value.trim();
+  const m = document.getElementById('garmin-msg');
+  if (!code) { m.style.color = 'var(--danger)'; m.textContent = 'Enter the code'; return; }
+  const btn = document.getElementById('garmin-mfa-btn'); btn.disabled = true;
+  try {
+    const r = await fetch('/api/garmin/mfa', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ticket: window._garminTicket || '', code }) });
+    const j = await r.json().catch(() => ({}));
+    if (j.ok) {
+      m.style.color = 'var(--success)'; m.textContent = 'Connected!';
+      document.getElementById('garmin-mfa-row').style.display = 'none';
+      document.getElementById('garmin-password').value = '';
+      loadGarminStatus();
+    } else {
+      m.style.color = 'var(--danger)'; m.textContent = j.error || 'Verification failed';
+    }
+  } catch (e) {
+    m.style.color = 'var(--danger)'; m.textContent = 'Verification failed';
+  }
+  btn.disabled = false;
+}
+
 loadSyncStatus();
 loadAutoSync();
+loadStravaStatus();
+loadMapboxStatus();
+loadGarminStatus();
+showStravaBanner();
 </script>
 </body>
 </html>

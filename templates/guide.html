@@ -1,0 +1,582 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AlForks — Field Guide</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    /* ============ Tokens (self-contained, offline-proof) ============ */
+    :root{
+      --bg:#0a0c0c; --bg-1:#0f1313; --bg-2:#141b1b; --bg-3:#19201f;
+      --ink:#f4f7f6; --ink-2:rgba(244,247,246,.74); --ink-3:rgba(244,247,246,.5); --ink-4:rgba(244,247,246,.34);
+      --hair:rgba(255,255,255,.09); --hair-2:rgba(255,255,255,.16);
+      --blue:#3b82f6; --blue-2:#60a5fa; --green:#22c55e; --orange:#fc4c02; --amber:#f59e0b;
+      --display:'Bricolage Grotesque','Segoe UI',system-ui,sans-serif;
+      --body:'Segoe UI',system-ui,-apple-system,Roboto,sans-serif;
+      --mono:'JetBrains Mono','Cascadia Code','Consolas',ui-monospace,monospace;
+      --maxw:880px;
+    }
+    *{box-sizing:border-box}
+    html{scroll-behavior:smooth}
+    body{
+      margin:0; background:var(--bg); color:var(--ink-2);
+      font-family:var(--body); font-size:16px; line-height:1.65;
+      -webkit-font-smoothing:antialiased;
+    }
+    a{color:var(--blue-2); text-decoration:none}
+    a:hover{text-decoration:underline}
+
+    /* ============ Atmosphere: topo contours + glow + grain ============ */
+    .bg{position:fixed; inset:0; z-index:-2; overflow:hidden; pointer-events:none}
+    .bg::before{ /* two "peaks" of contour rings */
+      content:""; position:absolute; inset:-20%;
+      background:
+        repeating-radial-gradient(circle at 18% 12%, transparent 0 46px, rgba(96,165,250,.05) 46px 47px),
+        repeating-radial-gradient(circle at 88% 78%, transparent 0 54px, rgba(252,76,2,.045) 54px 55px);
+      mask-image:radial-gradient(120% 90% at 50% 0%, #000 35%, transparent 90%);
+    }
+    .bg::after{ /* warm/cool glows */
+      content:""; position:absolute; inset:0;
+      background:
+        radial-gradient(60% 50% at 78% -5%, rgba(252,76,2,.10), transparent 70%),
+        radial-gradient(70% 60% at 8% 0%, rgba(59,130,246,.12), transparent 70%);
+    }
+    .grain{position:fixed; inset:0; z-index:-1; pointer-events:none; opacity:.5;
+      background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.025'/%3E%3C/svg%3E");}
+
+    /* ============ Scroll progress ============ */
+    .progress{position:fixed; top:0; left:0; height:2px; width:0%; z-index:50;
+      background:linear-gradient(90deg,var(--blue),var(--orange)); box-shadow:0 0 12px rgba(252,76,2,.5);}
+
+    /* ============ Sticky topbar ============ */
+    .topbar{position:sticky; top:0; z-index:40; backdrop-filter:blur(10px);
+      background:linear-gradient(180deg, rgba(10,12,12,.92), rgba(10,12,12,.62));
+      border-bottom:1px solid var(--hair);}
+    .topbar-in{max-width:var(--maxw); margin:0 auto; padding:13px 24px; display:flex; align-items:center; gap:16px}
+    .brand{display:flex; align-items:baseline; gap:9px; font-family:var(--display); font-weight:800; color:var(--ink); letter-spacing:-.02em; font-size:1.02rem}
+    .brand .mk{color:var(--orange)}
+    .brand small{font-family:var(--mono); font-weight:500; font-size:.62rem; letter-spacing:.22em; text-transform:uppercase; color:var(--ink-3)}
+    .navlinks{margin-left:auto; display:flex; gap:4px}
+    .navlinks a{font-family:var(--mono); font-size:.72rem; color:var(--ink-3); padding:5px 9px; border-radius:7px; text-decoration:none; transition:.15s}
+    .navlinks a:hover{color:var(--ink); background:var(--bg-2)}
+    .navlinks a.active{color:var(--orange); background:rgba(252,76,2,.10)}
+    @media(max-width:720px){ .navlinks{display:none} }
+
+    /* ============ Hero ============ */
+    .wrap{max-width:var(--maxw); margin:0 auto; padding:0 24px}
+    .hero{padding:64px 0 26px; position:relative}
+    .eyebrow{font-family:var(--mono); font-size:.7rem; letter-spacing:.28em; text-transform:uppercase; color:var(--orange); display:flex; align-items:center; gap:10px}
+    .eyebrow::before{content:""; width:26px; height:1px; background:var(--orange)}
+    .hero h1{font-family:var(--display); font-weight:800; color:var(--ink); letter-spacing:-.035em; line-height:.98;
+      font-size:clamp(2.6rem,7vw,4.6rem); margin:.32em 0 .26em;}
+    .hero h1 .accent{color:transparent; background:linear-gradient(100deg,var(--blue-2),var(--orange)); -webkit-background-clip:text; background-clip:text}
+    .hero p{font-size:1.08rem; color:var(--ink-2); max-width:54ch; margin:0}
+    .meta{margin-top:26px; display:flex; flex-wrap:wrap; gap:10px}
+    .chip{font-family:var(--mono); font-size:.72rem; color:var(--ink-3); border:1px solid var(--hair-2);
+      padding:6px 11px; border-radius:999px; display:inline-flex; align-items:center; gap:7px; background:rgba(255,255,255,.02)}
+    .chip b{color:var(--ink); font-weight:600}
+    .dotpulse{width:7px; height:7px; border-radius:50%; background:var(--green); box-shadow:0 0 0 0 rgba(34,197,94,.5); animation:pulse 2.4s infinite}
+    @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(34,197,94,.45)}70%{box-shadow:0 0 0 9px rgba(34,197,94,0)}100%{box-shadow:0 0 0 0 rgba(34,197,94,0)}}
+
+    /* ============ Route / waypoints ============ */
+    .route{position:relative; padding:30px 0 10px; margin:0; list-style:none}
+    .route::before{content:""; position:absolute; left:23px; top:40px; bottom:90px; width:2px;
+      background:linear-gradient(180deg,var(--blue) 0%, var(--orange) 60%, rgba(252,76,2,.15) 100%);}
+    .wp{position:relative; padding:0 0 40px 70px; opacity:0; transform:translateY(22px); transition:opacity .6s ease, transform .6s ease}
+    .wp.seen{opacity:1; transform:none}
+    .wp .marker{position:absolute; left:0; top:0; width:48px; height:48px; border-radius:50%;
+      display:grid; place-items:center; font-family:var(--mono); font-weight:600; font-size:.95rem; color:var(--ink);
+      background:radial-gradient(circle at 35% 30%, var(--bg-3), var(--bg-1)); border:1.5px solid var(--blue);
+      box-shadow:0 0 0 5px var(--bg), 0 0 22px rgba(59,130,246,.35); z-index:1}
+    .wp.strava .marker{border-color:var(--orange); box-shadow:0 0 0 5px var(--bg), 0 0 26px rgba(252,76,2,.5)}
+    .wp .tag{font-family:var(--mono); font-size:.66rem; letter-spacing:.2em; text-transform:uppercase; color:var(--ink-4)}
+    .wp h2{font-family:var(--display); font-weight:700; color:var(--ink); letter-spacing:-.02em;
+      font-size:1.55rem; margin:.18em 0 .5em; line-height:1.1}
+    .wp.strava h2{color:#ff6a33}
+    .card{background:linear-gradient(180deg,var(--bg-1),rgba(15,19,19,.6)); border:1px solid var(--hair);
+      border-radius:16px; padding:22px 24px; box-shadow:0 18px 40px -28px rgba(0,0,0,.9)}
+    .card + .card{margin-top:14px}
+    .card p{margin:0 0 .7em} .card p:last-child{margin-bottom:0}
+    .card ul{margin:.3em 0; padding-left:1.15em} .card li{margin:.3em 0}
+    .lead{color:var(--ink-2)}
+
+    /* numbered sub-steps */
+    .steps{counter-reset:s; list-style:none; padding:0; margin:.4em 0 0}
+    .steps>li{counter-increment:s; position:relative; padding:0 0 14px 40px; margin:0}
+    .steps>li::before{content:counter(s); position:absolute; left:0; top:-1px; width:25px; height:25px; border-radius:8px;
+      background:var(--bg-3); border:1px solid var(--hair-2); color:var(--ink); font-family:var(--mono); font-size:.8rem;
+      display:grid; place-items:center}
+    .steps>li:last-child{padding-bottom:0}
+
+    /* monospace value chips + paths */
+    code, .kbd{font-family:var(--mono); font-size:.85em; background:var(--bg-3); border:1px solid var(--hair);
+      padding:1.5px 7px; border-radius:6px; color:var(--ink); white-space:nowrap}
+    .kbd{box-shadow:0 1.5px 0 rgba(0,0,0,.5)}
+
+    /* faux Strava form preview */
+    .formcard{margin:14px 0; border:1px solid var(--hair-2); border-radius:13px; overflow:hidden; background:var(--bg)}
+    .formcard-head{display:flex; align-items:center; gap:10px; padding:11px 16px; background:rgba(252,76,2,.09);
+      border-bottom:1px solid var(--hair); font-family:var(--mono); font-size:.74rem; letter-spacing:.12em; text-transform:uppercase; color:#ff7a47}
+    .formcard-head .sd{width:9px;height:9px;border-radius:50%;background:var(--orange);box-shadow:0 0 10px var(--orange)}
+    .frow{display:flex; align-items:center; gap:12px; padding:11px 16px; border-bottom:1px solid var(--hair); flex-wrap:wrap}
+    .frow:last-child{border-bottom:0}
+    .frow .fl{flex:0 0 200px; color:var(--ink-3); font-size:.84rem}
+    .frow .fv{font-family:var(--mono); font-size:.86rem; color:var(--ink)}
+    .frow.hl{background:rgba(34,197,94,.06)}
+    .frow.hl .fv{color:#7ef0a6}
+    .req{margin-left:auto; font-family:var(--mono); font-size:.6rem; letter-spacing:.14em; text-transform:uppercase;
+      color:var(--green); border:1px solid rgba(34,197,94,.4); padding:3px 8px; border-radius:999px}
+    @media(max-width:560px){ .frow .fl{flex-basis:100%} .req{margin-left:0} }
+
+    /* callouts */
+    .call{display:flex; gap:13px; padding:13px 16px; border-radius:12px; margin:14px 0 0; font-size:.92rem; line-height:1.55;
+      border:1px solid var(--hair); background:var(--bg-2)}
+    .call .ic{flex:0 0 22px; height:22px; margin-top:1px}
+    .call.note{border-color:rgba(59,130,246,.32); background:rgba(59,130,246,.07)}
+    .call.tip{border-color:rgba(34,197,94,.30); background:rgba(34,197,94,.06)}
+    .call.warn{border-color:rgba(245,158,11,.34); background:rgba(245,158,11,.07)}
+    .call b{color:var(--ink)}
+    .ext{display:inline-flex; align-items:center; gap:4px; font-weight:600}
+    .ext svg{width:12px; height:12px}
+
+    /* buttons */
+    .btn{display:inline-flex; align-items:center; gap:9px; font-family:var(--body); font-weight:600; font-size:.92rem;
+      padding:11px 20px; border-radius:11px; cursor:pointer; text-decoration:none; transition:transform .12s, box-shadow .2s, background .2s; border:1px solid transparent}
+    .btn:hover{text-decoration:none; transform:translateY(-2px)}
+    .btn-primary{background:linear-gradient(100deg,var(--orange),#ff7a3c); color:#fff; box-shadow:0 12px 30px -12px rgba(252,76,2,.7)}
+    .btn-ghost{background:var(--bg-2); color:var(--ink); border-color:var(--hair-2)}
+
+    /* reference grid */
+    .ref-h{font-family:var(--mono); font-size:.72rem; letter-spacing:.26em; text-transform:uppercase; color:var(--ink-4);
+      display:flex; align-items:center; gap:12px; margin:36px 0 18px}
+    .ref-h::after{content:""; flex:1; height:1px; background:var(--hair)}
+    .grid{display:grid; grid-template-columns:1fr 1fr; gap:14px}
+    @media(max-width:680px){ .grid{grid-template-columns:1fr} }
+    .refcard{background:var(--bg-1); border:1px solid var(--hair); border-radius:14px; padding:20px 22px;
+      opacity:0; transform:translateY(18px); transition:opacity .55s, transform .55s, border-color .2s}
+    .refcard.seen{opacity:1; transform:none}
+    .refcard:hover{border-color:var(--hair-2)}
+    .refcard h3{font-family:var(--display); font-weight:700; color:var(--ink); font-size:1.12rem; margin:.1em 0 .55em; display:flex; align-items:center; gap:10px}
+    .refcard h3 .ic{width:18px; height:18px; color:var(--blue-2)}
+    .refcard p, .refcard li{font-size:.9rem; color:var(--ink-2)} .refcard p{margin:.4em 0}
+    .refcard ul{padding-left:1.05em; margin:.3em 0}
+
+    /* finish */
+    .finish{margin:46px 0 70px; text-align:center; padding:42px 24px; border:1px solid var(--hair);
+      border-radius:20px; background:radial-gradient(120% 140% at 50% 0%, rgba(252,76,2,.10), transparent 60%), var(--bg-1)}
+    .finish .eyebrow{justify-content:center}
+    .finish .eyebrow::before{display:none}
+    .finish h2{font-family:var(--display); font-weight:800; color:var(--ink); font-size:2rem; letter-spacing:-.02em; margin:.3em 0 .2em}
+    .finish p{color:var(--ink-3); margin:0 auto 22px; max-width:42ch}
+    .cta{display:flex; gap:12px; justify-content:center; flex-wrap:wrap}
+    .foot{text-align:center; color:var(--ink-4); font-family:var(--mono); font-size:.72rem; letter-spacing:.1em; padding-bottom:46px}
+
+    svg.i{display:block}
+
+    /* ============ Interactive controls (do it right here) ============ */
+    .live{margin-top:16px; border:1px solid var(--hair-2); border-radius:14px; padding:18px;
+      background:linear-gradient(180deg,var(--bg),var(--bg-1)); position:relative}
+    .live::before{content:"DO IT HERE"; position:absolute; top:-9px; left:16px; font-family:var(--mono);
+      font-size:.56rem; letter-spacing:.2em; color:#1a0c05; background:var(--orange); padding:3px 9px; border-radius:999px; font-weight:700}
+    .live.cool::before{content:"DO IT HERE"; background:var(--blue); color:#06101f}
+    .sv-banner{display:none; padding:11px 14px; border-radius:10px; margin-bottom:14px; font-size:.9rem}
+    .sv-banner.ok{background:rgba(34,197,94,.12); color:#7ef0a6; border:1px solid rgba(34,197,94,.3)}
+    .sv-banner.err{background:rgba(252,76,2,.12); color:#ff9c7d; border:1px solid rgba(252,76,2,.35)}
+    .live-status{font-size:.84rem; font-family:var(--mono); display:flex; align-items:center; gap:9px; margin-bottom:14px}
+    .live-status::before{content:""; width:9px; height:9px; border-radius:50%; background:var(--ink-4); flex:0 0 auto}
+    .live-status.ok{color:#7ef0a6} .live-status.ok::before{background:var(--green); box-shadow:0 0 9px var(--green)}
+    .live-status.idle{color:var(--blue-2)} .live-status.idle::before{background:var(--blue)}
+    .live-status.todo{color:var(--amber)} .live-status.todo::before{background:var(--amber)}
+    .fgrid{display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:14px}
+    @media(max-width:560px){ .fgrid{grid-template-columns:1fr} }
+    .field{display:flex; flex-direction:column; gap:6px}
+    .field label{font-family:var(--mono); font-size:.66rem; letter-spacing:.12em; text-transform:uppercase; color:var(--ink-3)}
+    .field input{font-family:var(--mono); font-size:.9rem; color:var(--ink); background:var(--bg); border:1px solid var(--hair-2);
+      border-radius:9px; padding:9px 11px; transition:border-color .15s, box-shadow .15s; width:100%}
+    .field input:focus{outline:none; border-color:var(--blue); box-shadow:0 0 0 3px rgba(59,130,246,.18)}
+    .field input::-webkit-calendar-picker-indicator{filter:invert(.8)}
+    .actions{display:flex; align-items:center; gap:12px; flex-wrap:wrap}
+    .ibtn{font-family:var(--body); font-weight:600; font-size:.86rem; padding:9px 17px; border-radius:10px; cursor:pointer;
+      border:1px solid var(--hair-2); background:var(--bg-2); color:var(--ink); transition:transform .12s, background .15s, box-shadow .2s}
+    .ibtn:hover:not(:disabled){transform:translateY(-1px); background:var(--bg-3)}
+    .ibtn:disabled{opacity:.45; cursor:not-allowed}
+    .ibtn.strava{background:linear-gradient(100deg,var(--orange),#ff7a3c); color:#fff; border-color:transparent; box-shadow:0 10px 26px -14px rgba(252,76,2,.8)}
+    .ibtn.go{background:linear-gradient(100deg,var(--blue),#5b9bff); color:#fff; border-color:transparent}
+    .msg{font-family:var(--mono); font-size:.76rem; color:var(--ink-3)}
+    .msg.ok{color:#7ef0a6} .msg.err{color:#ff9c7d}
+    .live-row{display:flex; align-items:flex-end; gap:14px; flex-wrap:wrap}
+    .live-row .field{min-width:170px}
+  </style>
+</head>
+<body>
+  <div class="bg"></div><div class="grain"></div>
+  <div class="progress" id="progress"></div>
+
+  <div class="topbar">
+    <div class="topbar-in">
+      <div class="brand">Al<span class="mk">Forks</span> <small>Field Guide</small></div>
+      <nav class="navlinks">
+        <a href="#s1">Launch</a><a href="#s2">Strava</a><a href="#s3">Import</a>
+        <a href="#s4">Maps</a><a href="#s5">Garmin</a><a href="#ref">Reference</a>
+      </nav>
+    </div>
+  </div>
+
+  <header class="wrap hero">
+    <div class="eyebrow">Setup &amp; Help</div>
+    <h1>Get rolling with <span class="accent">AlForks</span>.</h1>
+    <p>A local app for browsing, mapping, and analysing your GPS rides &mdash; running entirely on your own
+       computer. Follow the waypoints below; the whole setup takes about five minutes.</p>
+    <div class="meta">
+      <span class="chip"><span class="dotpulse"></span> Runs at <b>localhost:5000</b></span>
+      <span class="chip">Version <b>{{ version }}</b></span>
+      <span class="chip">Windows &middot; Python 3.10+</span>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <ol class="route">
+
+      <!-- 1 -->
+      <li class="wp" id="s1">
+        <div class="marker">01</div>
+        <div class="tag">Waypoint 01</div>
+        <h2>Launch AlForks</h2>
+        <div class="card">
+          <p class="lead">Double-click <span class="kbd">start.bat</span>. The first run quietly sets up a small
+             Python environment (about a minute); after that it&rsquo;s instant. Your browser opens automatically to
+             <span class="kbd">http://localhost:5000</span>.</p>
+          <ul>
+            <li>A black command window stays open while you use AlForks &mdash; <b>that window <em>is</em> the app.</b></li>
+            <li>Close the window to stop it. Run <span class="kbd">start.bat</span> again any time to start back up.</li>
+          </ul>
+          <div class="call note">
+            <svg class="i ic" viewBox="0 0 24 24" fill="none" stroke="#60a5fa" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v4h1"/></svg>
+            <div><b>First time on Windows?</b> If you see <b>&ldquo;Windows protected your PC&rdquo;</b>, click
+              <b>More info &rarr; Run anyway</b>. If a <b>Firewall</b> prompt appears, Allow it (or Cancel &mdash; localhost
+              works either way). If it says Python is missing, install <b>Python 3.10+</b> from
+              <a class="ext" href="https://www.python.org/downloads/" target="_blank" rel="noopener">python.org<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 17 17 7M9 7h8v8"/></svg></a>
+              and tick <b>&ldquo;Add Python to PATH&rdquo;</b> during install.</div>
+          </div>
+        </div>
+      </li>
+
+      <!-- 2 -->
+      <li class="wp strava" id="s2">
+        <div class="marker">02</div>
+        <div class="tag">Waypoint 02 &middot; the main step</div>
+        <h2>Connect your Strava</h2>
+        <div class="card">
+          <p class="lead">This is what pulls <b>your own rides</b> into AlForks &mdash; Strava provides the GPS tracks
+             themselves (Garmin, in step&nbsp;5, is optional and only adds heart-rate on top). You create a small
+             personal Strava &ldquo;API application&rdquo; once &mdash; about two minutes &mdash; then connect it.</p>
+          <ol class="steps">
+            <li>Open
+              <a class="ext" href="https://www.strava.com/settings/api" target="_blank" rel="noopener">strava.com/settings/api<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 17 17 7M9 7h8v8"/></svg></a>
+              and create an application with exactly these values:</li>
+          </ol>
+          <div class="formcard">
+            <div class="formcard-head"><span class="sd"></span> Strava &middot; My API Application</div>
+            <div class="frow"><span class="fl">Application Name</span><span class="fv">AlForks</span></div>
+            <div class="frow"><span class="fl">Category</span><span class="fv">Personal</span></div>
+            <div class="frow"><span class="fl">Website</span><span class="fv">http://localhost</span></div>
+            <div class="frow hl"><span class="fl">Authorization Callback Domain</span><span class="fv">localhost</span><span class="req">exactly this</span></div>
+          </div>
+          <ol class="steps" start="2" style="counter-reset:s 1">
+            <li>Strava shows you a <b>Client ID</b> and <b>Client Secret</b>. Paste them straight into the box
+              below and click <b>Save credentials</b> &mdash; no need to leave this page.</li>
+            <li>Click <b>Connect Strava</b>, authorize on Strava, and you&rsquo;ll come right back here, connected.</li>
+          </ol>
+
+          <div class="live" id="liveStrava">
+            <div class="sv-banner" id="sv-banner"></div>
+            <div class="live-status todo" id="sv-status">Checking&hellip;</div>
+            <div class="fgrid">
+              <div class="field"><label for="sv-id">Client ID</label><input id="sv-id" type="text" placeholder="e.g. 12345" autocomplete="off"></div>
+              <div class="field"><label for="sv-secret">Client Secret</label><input id="sv-secret" type="password" placeholder="paste secret" autocomplete="off"></div>
+            </div>
+            <div class="actions">
+              <button class="ibtn" id="sv-save" onclick="svSaveCreds()">Save credentials</button>
+              <button class="ibtn strava" id="sv-connect" onclick="svConnect()" disabled>Connect Strava</button>
+              <span class="msg" id="sv-msg"></span>
+            </div>
+          </div>
+          <div class="call tip">
+            <svg class="i ic" viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="2"><path d="M20 6 9 17l-5-5"/></svg>
+            <div><b>Not connecting?</b> Double-check the Client ID / Secret were pasted cleanly and that the Callback
+              Domain is exactly <code>localhost</code> (no <code>http://</code>, no port).</div>
+          </div>
+        </div>
+      </li>
+
+      <!-- 3 -->
+      <li class="wp" id="s3">
+        <div class="marker">03</div>
+        <div class="tag">Waypoint 03</div>
+        <h2>Choose how far back to import</h2>
+        <div class="card">
+          <p class="lead">Pick a start date so your first sync only pulls rides from then onward &mdash; then
+             sync, right here. Leave the date blank to import your entire history.</p>
+          <div class="live cool" id="liveImport">
+            <div class="live-row">
+              <div class="field"><label for="sv-after">Import rides from</label><input id="sv-after" type="date" onchange="svSaveAfter()"></div>
+              <button class="ibtn go" id="sv-sync" onclick="svSync()">Sync now</button>
+              <span class="msg" id="sv-sync-msg"></span>
+            </div>
+            <p style="margin:13px 0 0; font-size:.84rem; color:var(--ink-3)">Connect Strava (step&nbsp;2) first. When the sync finishes, your rides appear throughout the app.</p>
+          </div>
+          <div class="call warn">
+            <svg class="i ic" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2"><path d="M12 9v4m0 4h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/></svg>
+            <div><b>Big Strava history?</b> Importing years of rides at once can take several minutes (and very large
+              libraries may time out). Setting a start date keeps that first sync quick.</div>
+          </div>
+        </div>
+      </li>
+
+      <!-- 4 -->
+      <li class="wp" id="s4">
+        <div class="marker">04</div>
+        <div class="tag">Waypoint 04 &middot; optional</div>
+        <h2>3D maps with Mapbox</h2>
+        <div class="card">
+          <p class="lead">The standard 2D maps work out of the box. For the <b>3D terrain view</b>, add a free Mapbox token:</p>
+          <ol class="steps">
+            <li>Create a free account at
+              <a class="ext" href="https://account.mapbox.com/" target="_blank" rel="noopener">mapbox.com<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 17 17 7M9 7h8v8"/></svg></a>
+              and copy your default public token (it starts with <code>pk.</code>).</li>
+            <li>Paste it below and save &mdash; that&rsquo;s it.</li>
+          </ol>
+          <div class="live cool" id="liveMapbox">
+            <div class="live-row">
+              <div class="field" style="flex:1; min-width:240px"><label for="mb-token">Mapbox token</label><input id="mb-token" type="password" placeholder="pk...." autocomplete="off"></div>
+              <button class="ibtn go" id="mb-save" onclick="mbSave()">Save token</button>
+              <span class="msg" id="mb-msg"></span>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <!-- 5 -->
+      <li class="wp" id="s5">
+        <div class="marker">05</div>
+        <div class="tag">Waypoint 05 &middot; optional</div>
+        <h2>Garmin (if you have one)</h2>
+        <div class="card">
+          <p class="lead">AlForks works fully on Strava alone. <b>Garmin is optional and adds heart-rate</b> to your
+             rides (matched up by time) &mdash; Strava already brings in the rides themselves, so a ride recorded
+             <em>only</em> on a Garmin won&rsquo;t show up as a track. If you have a Garmin, connect it right here:</p>
+          <div class="live cool" id="liveGarmin">
+            <div class="live-status todo" id="gm-status">Checking&hellip;</div>
+            <div class="fgrid">
+              <div class="field"><label for="gm-email">Garmin email</label><input id="gm-email" type="email" placeholder="you@example.com" autocomplete="off"></div>
+              <div class="field"><label for="gm-password">Garmin password</label><input id="gm-password" type="password" placeholder="your Garmin password" autocomplete="off"></div>
+            </div>
+            <div id="gm-mfa-row" style="display:none; margin-bottom:14px">
+              <div class="field"><label for="gm-code">Verification code (Garmin just sent it to you)</label><input id="gm-code" type="text" inputmode="numeric" placeholder="6-digit code" autocomplete="off"></div>
+              <button class="ibtn go" id="gm-verify" onclick="gmMfa()" style="margin-top:10px">Verify code</button>
+            </div>
+            <div class="actions">
+              <button class="ibtn go" id="gm-connect" onclick="gmConnect()">Connect Garmin</button>
+              <span class="msg" id="gm-msg"></span>
+            </div>
+          </div>
+        </div>
+      </li>
+    </ol>
+
+    <!-- Reference -->
+    <div class="ref-h" id="ref">Reference</div>
+    <div class="grid">
+      <div class="refcard">
+        <h3><svg class="i ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-3-6.7M21 4v5h-5"/></svg> Keeping up to date</h3>
+        <p>When you receive an <code>alforks-update-*.zip</code>:</p>
+        <ul>
+          <li><b>Close AlForks first</b> (close the command window).</li>
+          <li>Drop the zip into your AlForks folder and double-click <span class="kbd">update.bat</span>.</li>
+          <li>Restart with <span class="kbd">start.bat</span>. The first launch after a big update may rebuild its cache for up to a minute &mdash; that&rsquo;s normal.</li>
+        </ul>
+        <p style="color:var(--ink-3)">Updates only replace program files &mdash; your rides, settings, and login are untouched.</p>
+      </div>
+
+      <div class="refcard">
+        <h3><svg class="i ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3 4 7v5c0 5 3.5 7.5 8 9 4.5-1.5 8-4 8-9V7l-8-4Z"/></svg> Your data &amp; privacy</h3>
+        <ul>
+          <li>Everything lives in your AlForks folder: your rides, settings, and Strava login.</li>
+          <li>Nothing leaves your computer except your own requests to Strava and (if enabled) Mapbox.</li>
+          <li><b>Don&rsquo;t zip up and re-share your whole folder</b> &mdash; it contains your Strava login.</li>
+        </ul>
+      </div>
+
+      <div class="refcard">
+        <h3><svg class="i ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg> Troubleshooting</h3>
+        <ul>
+          <li><b>Browser says &ldquo;can&rsquo;t connect&rdquo;:</b> give it a few seconds after launch, then refresh &mdash; the app may still be starting.</li>
+          <li><b>Still nothing:</b> make sure only <b>one</b> copy of AlForks is running (they all share <code>localhost:5000</code>).</li>
+          <li><b>Sync seems stuck:</b> a first sync of a large history just takes a while &mdash; set an &ldquo;Import rides from&rdquo; date to shrink it.</li>
+        </ul>
+      </div>
+
+      <div class="refcard">
+        <h3><svg class="i ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg> Good to know</h3>
+        <ul>
+          <li>Tick <b>&ldquo;Run Strava sync when AlForks starts&rdquo;</b> on the Sync tab to auto-import new rides each launch.</li>
+          <li>Your activity types and regions come pre-loaded as starting points &mdash; edit or delete them freely.</li>
+          <li>This guide lives at <code>/guide</code> &mdash; reachable any time from the Setup page.</li>
+        </ul>
+      </div>
+    </div>
+
+    <section class="finish">
+      <div class="eyebrow" style="color:var(--green)">You&rsquo;re set</div>
+      <h2>Ready to ride.</h2>
+      <p>Head to Setup to connect Strava, or jump straight into the app once your rides are in.</p>
+      <div class="cta">
+        <a class="btn btn-primary" href="/setup">Go to Setup
+          <svg class="i" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
+        <a class="btn btn-ghost" href="/">Open the app</a>
+      </div>
+    </section>
+    <div class="foot">AlForks &middot; v{{ version }} &middot; runs locally on your machine</div>
+  </main>
+
+  <script>
+    // scroll progress bar
+    var bar = document.getElementById('progress');
+    function onScroll(){
+      var h = document.documentElement;
+      var sc = h.scrollTop / (h.scrollHeight - h.clientHeight || 1);
+      bar.style.width = (sc * 100) + '%';
+    }
+    addEventListener('scroll', onScroll, {passive:true}); onScroll();
+
+    // reveal waypoints + refcards on scroll
+    var io = new IntersectionObserver(function(es){
+      es.forEach(function(e){ if(e.isIntersecting){ e.target.classList.add('seen'); io.unobserve(e.target); } });
+    }, {threshold:0.12, rootMargin:'0px 0px -8% 0px'});
+    document.querySelectorAll('.wp, .refcard').forEach(function(el){ io.observe(el); });
+
+    // scrollspy for the top nav
+    var links = {}; document.querySelectorAll('.navlinks a').forEach(function(a){ links[a.getAttribute('href').slice(1)] = a; });
+    var spy = new IntersectionObserver(function(es){
+      es.forEach(function(e){
+        var a = links[e.target.id]; if(!a) return;
+        if(e.isIntersecting){ Object.values(links).forEach(function(x){x.classList.remove('active');}); a.classList.add('active'); }
+      });
+    }, {rootMargin:'-45% 0px -50% 0px'});
+    document.querySelectorAll('#s1,#s2,#s3,#s4,#s5,#ref').forEach(function(el){ spy.observe(el); });
+
+    /* ===== interactive setup: Strava connect, import + sync, Mapbox ===== */
+    async function svStatus(){
+      try{
+        var s = await (await fetch('/api/strava/status')).json();
+        var st = document.getElementById('sv-status'), conn = document.getElementById('sv-connect');
+        st.classList.remove('ok','idle','todo');
+        if(s.connected){ st.classList.add('ok'); st.textContent = s.athlete ? ('Connected as ' + s.athlete) : 'Connected to Strava'; conn.textContent = 'Reconnect Strava'; }
+        else if(s.has_creds){ st.classList.add('idle'); st.textContent = 'Credentials saved — click Connect Strava'; conn.textContent = 'Connect Strava'; }
+        else { st.classList.add('todo'); st.textContent = 'Not connected yet — add your credentials below'; conn.textContent = 'Connect Strava'; }
+        conn.disabled = !s.has_creds;
+      }catch(e){}
+    }
+    async function svSaveCreds(){
+      var id = document.getElementById('sv-id').value.trim(), sec = document.getElementById('sv-secret').value.trim(), m = document.getElementById('sv-msg');
+      m.className = 'msg';
+      if(!id || !sec){ m.className = 'msg err'; m.textContent = 'Both fields are required'; return; }
+      try{
+        var r = await fetch('/api/strava/creds', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({client_id:id, client_secret:sec})});
+        var j = await r.json().catch(function(){ return {}; });
+        if(r.ok && j.ok){ m.className = 'msg ok'; m.textContent = 'Saved — now click Connect Strava'; document.getElementById('sv-secret').value = ''; svStatus(); }
+        else { m.className = 'msg err'; m.textContent = j.error || 'Save failed'; }
+      }catch(e){ m.className = 'msg err'; m.textContent = 'Save failed'; }
+      setTimeout(function(){ m.textContent = ''; }, 4000);
+    }
+    function svConnect(){ window.location.href = '/oauth/strava/start?return=/guide'; }
+
+    async function svLoadAfter(){
+      try{ var s = await (await fetch('/api/sync/settings')).json(); var a = document.getElementById('sv-after'); if(a) a.value = s.strava_after || ''; }catch(e){}
+    }
+    async function svSaveAfter(){
+      var v = document.getElementById('sv-after').value || '', m = document.getElementById('sv-sync-msg');
+      try{ await fetch('/api/sync/settings', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({strava_after:v})}); m.className = 'msg ok'; m.textContent = 'Start date saved'; }
+      catch(e){ m.className = 'msg err'; m.textContent = 'Save failed'; }
+      setTimeout(function(){ m.textContent = ''; }, 1800);
+    }
+    var svPoll = null;
+    async function svSync(){
+      var m = document.getElementById('sv-sync-msg');
+      try{ await fetch('/api/sync/strava', {method:'POST'}); }catch(e){}
+      m.className = 'msg'; m.textContent = 'Sync started…';
+      if(svPoll) clearInterval(svPoll);
+      svPoll = setInterval(async function(){
+        try{
+          var s = await (await fetch('/api/sync/status')).json(); var st = s.strava || {};
+          if(st.running){ m.className = 'msg'; m.textContent = 'Syncing' + (st.phase ? (' — ' + st.phase) : '') + '…'; }
+          else { clearInterval(svPoll); svPoll = null; m.className = 'msg ok'; m.textContent = st.message || 'Sync finished'; }
+        }catch(e){}
+      }, 2000);
+    }
+
+    async function mbLoad(){ try{ var s = await (await fetch('/api/config')).json(); if(s.mapbox_token){ document.getElementById('mb-token').placeholder = 'token saved — paste a new one to replace'; } }catch(e){} }
+    async function mbSave(){
+      var v = document.getElementById('mb-token').value.trim(), m = document.getElementById('mb-msg');
+      try{ await fetch('/api/config', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({mapbox_token:v})}); m.className = 'msg ok'; m.textContent = 'Saved — reload a map to apply'; document.getElementById('mb-token').value = ''; mbLoad(); }
+      catch(e){ m.className = 'msg err'; m.textContent = 'Save failed'; }
+      setTimeout(function(){ m.textContent = ''; }, 3000);
+    }
+
+    function svBanner(){
+      var code = new URLSearchParams(location.search).get('strava'); if(!code) return;
+      var map = { ok:['ok','Strava connected! Set an import date and Sync now in the next step.'],
+        denied:['err','Authorization was declined — click Connect Strava to try again.'],
+        nocode:['err','No authorization code came back from Strava — please try again.'],
+        nocreds:['err','Save your Client ID and Secret first, then Connect.'],
+        exchangefailed:['err','Could not finish connecting — double-check your Client ID / Secret and try again.'] };
+      var pair = map[code] || ['err','Unexpected response from Strava.'];
+      var b = document.getElementById('sv-banner'); b.className = 'sv-banner ' + pair[0]; b.textContent = pair[1]; b.style.display = 'block';
+      history.replaceState(null, '', location.pathname);
+      var el = document.getElementById('s2'); if(el) el.scrollIntoView({behavior:'smooth', block:'start'});
+    }
+
+    /* ===== interactive Garmin connect (optional, HR only) ===== */
+    async function gmStatus(){
+      try{
+        var s = await (await fetch('/api/garmin/status')).json();
+        var st = document.getElementById('gm-status');
+        st.classList.remove('ok','idle','todo');
+        if(s.connected){ st.classList.add('ok'); st.textContent = s.user ? ('Connected as ' + s.user) : 'Connected to Garmin'; }
+        else { st.classList.add('todo'); st.textContent = 'Not connected (optional)'; }
+      }catch(e){}
+    }
+    async function gmConnect(){
+      var email = document.getElementById('gm-email').value.trim(), pw = document.getElementById('gm-password').value, m = document.getElementById('gm-msg');
+      m.className = 'msg';
+      if(!email || !pw){ m.className = 'msg err'; m.textContent = 'Email and password are required'; return; }
+      var btn = document.getElementById('gm-connect'); var old = btn.textContent; btn.disabled = true; btn.textContent = 'Connecting…';
+      try{
+        var r = await fetch('/api/garmin/connect', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({email:email, password:pw})});
+        var j = await r.json().catch(function(){ return {}; });
+        if(j.ok){ m.className = 'msg ok'; m.textContent = 'Connected!'; document.getElementById('gm-password').value = ''; document.getElementById('gm-mfa-row').style.display = 'none'; gmStatus(); }
+        else if(j.mfa_required){ window._gmTicket = j.ticket; document.getElementById('gm-mfa-row').style.display = 'block'; m.className = 'msg'; m.textContent = 'Enter the code Garmin just sent you.'; }
+        else { m.className = 'msg err'; m.textContent = j.error || 'Login failed'; }
+      }catch(e){ m.className = 'msg err'; m.textContent = 'Login failed'; }
+      btn.disabled = false; btn.textContent = old;
+    }
+    async function gmMfa(){
+      var code = document.getElementById('gm-code').value.trim(), m = document.getElementById('gm-msg');
+      if(!code){ m.className = 'msg err'; m.textContent = 'Enter the code'; return; }
+      var btn = document.getElementById('gm-verify'); btn.disabled = true;
+      try{
+        var r = await fetch('/api/garmin/mfa', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ticket:window._gmTicket||'', code:code})});
+        var j = await r.json().catch(function(){ return {}; });
+        if(j.ok){ m.className = 'msg ok'; m.textContent = 'Connected!'; document.getElementById('gm-mfa-row').style.display = 'none'; document.getElementById('gm-password').value = ''; gmStatus(); }
+        else { m.className = 'msg err'; m.textContent = j.error || 'Verification failed'; }
+      }catch(e){ m.className = 'msg err'; m.textContent = 'Verification failed'; }
+      btn.disabled = false;
+    }
+
+    svStatus(); svLoadAfter(); mbLoad(); svBanner(); gmStatus();
+  </script>
+</body>
+</html>

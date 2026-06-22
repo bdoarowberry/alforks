@@ -35,6 +35,18 @@ htmlcov/
 cache/
 backups/
 
+# In-app credential/token dir — created by start.bat via ALFORKS_HOME.
+# NEVER commit: it holds the user's Strava/Garmin login tokens.
+.alforks/
+
+# Friend-copy / update + local verification artifacts
+alforks-update-*.zip
+update.bat.new
+_startlog.txt
+_starterr.txt
+_verify_*
+_guide_shot.png
+
 # OS
 .DS_Store
 Thumbs.db

@@ -27,6 +27,7 @@ display, HR alignment, and merge logic consistent with the rest of the app.
 import argparse
 import http.server
 import json
+import os
 import re
 import shutil
 import socketserver
@@ -48,7 +49,7 @@ _ROOT             = Path(__file__).resolve().parent.parent
 GPX_DIR           = _ROOT / "tracks"
 ARCHIVE_DIR       = GPX_DIR / "_archive_dedup"
 
-TOKEN_DIR         = Path.home() / ".alforks"
+TOKEN_DIR         = Path(os.environ.get("ALFORKS_HOME") or (Path.home() / ".alforks"))
 CREDS_FILE        = TOKEN_DIR / "strava_creds.txt"
 TOKENS_FILE       = TOKEN_DIR / "strava_tokens.json"
 STATUS_FILE       = TOKEN_DIR / "strava_status.json"
@@ -378,10 +379,24 @@ def _emit_progress(phase: str, done: int, total: int) -> None:
           flush=True)
 
 
-def cmd_sync(only_new: bool = True) -> None:
+def _after_epoch(s: str) -> int:
+    """Parse 'YYYY-MM-DD' to a local-midnight UNIX epoch, or 0 if blank/invalid."""
+    s = (s or "").strip()
+    if not s:
+        return 0
+    try:
+        return int(datetime.strptime(s, "%Y-%m-%d").timestamp())
+    except ValueError:
+        return 0
+
+
+def cmd_sync(only_new: bool = True, after_floor: int = 0) -> None:
     token  = get_access_token()
     status = load_status()
-    after  = int(status.get("last_activity_epoch", 0)) if only_new else 0
+    # Incremental syncs floor at the newest cached ride; `after_floor` (the
+    # user's chosen start date) additionally bounds the *first* sync so a fresh
+    # copy doesn't pull a whole multi-year history at once.
+    after  = max(int(status.get("last_activity_epoch", 0)) if only_new else 0, after_floor)
     if after:
         print(f"Pulling activities after {datetime.fromtimestamp(after).isoformat()}")
     else:
@@ -393,6 +408,9 @@ def cmd_sync(only_new: bool = True) -> None:
 
     GPX_DIR.mkdir(parents=True, exist_ok=True)
     written = skipped = empty = 0
+    # Seed the watermark at `after` (which already folds in the start-date floor)
+    # so a sync that finds zero new rides still advances last_activity_epoch to the
+    # floor — we never re-scan pre-floor history on the next run.
     newest_epoch = after
 
     for i, a in enumerate(acts):
@@ -530,11 +548,13 @@ def main():
     ap.add_argument("--status", action="store_true")
     ap.add_argument("--dedup",  action="store_true")
     ap.add_argument("--dry-run", action="store_true", help="Used with --dedup to preview matches")
+    ap.add_argument("--after", default="",
+                    help="Earliest ride date to import, YYYY-MM-DD (used with --sync/--resync)")
     args = ap.parse_args()
 
     if args.login:    cmd_login()
-    elif args.resync: cmd_sync(only_new=False)
-    elif args.sync:   cmd_sync(only_new=True)
+    elif args.resync: cmd_sync(only_new=False, after_floor=_after_epoch(args.after))
+    elif args.sync:   cmd_sync(only_new=True, after_floor=_after_epoch(args.after))
     elif args.dedup:  cmd_dedup(dry_run=args.dry_run)
     elif args.status: cmd_status()
     else:

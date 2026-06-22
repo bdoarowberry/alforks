@@ -284,6 +284,16 @@ def _inject_asset_helper():
     return {"asset_v": _asset_version}
 
 
+def _app_version() -> str:
+    """Read the VERSION stamp shipped next to app.py; 'dev' if absent.
+    Bumped per release by the owner; shown in the in-app guide so recipients
+    can see which build they're running."""
+    try:
+        return (_ROOT / "VERSION").read_text(encoding="utf-8").strip() or "dev"
+    except OSError:
+        return "dev"
+
+
 # ─── Config ───────────────────────────────────────────────────────────────────
 
 def load_config() -> dict:
@@ -4517,7 +4527,10 @@ def api_compare_algorithms(filename):
 # reads the on-disk HR cache and merges samples into activity data.
 
 HR_CACHE_DIR = CACHE_DIR / "hr"
-_TOKEN_DIR   = Path.home() / ".alforks"
+# Credential/token dir. Overridable via ALFORKS_HOME so a distributed copy can
+# keep its Strava login inside its own folder (portable + lets the owner preview
+# a recipient's blank first-run). Default unchanged when the env var is unset.
+_TOKEN_DIR   = Path(os.environ.get("ALFORKS_HOME") or (Path.home() / ".alforks"))
 _STATUS_FILE = _TOKEN_DIR / "garmin_status.json"
 
 # In-memory LRU cache for HR-merged activity stats. Keyed by everything that
@@ -5472,6 +5485,7 @@ def _garmin_status() -> dict:
     status["has_library_auth"] = has_tokens
     status["has_curl_auth"]    = has_curl
     status["configured"]       = has_tokens or has_curl
+    status["connected"]        = bool(has_tokens or has_curl)  # for the in-app UI
     if _STATUS_FILE.exists():
         try:
             s = json.loads(_STATUS_FILE.read_text(encoding="utf-8"))
@@ -5514,6 +5528,161 @@ def debug_hr_day(date_str):
 @app.route("/api/garmin/status")
 def api_garmin_status():
     return jsonify(_garmin_status())
+
+
+# ─── Garmin connection (in-app login) ─────────────────────────────────────────
+# Unlike Strava (browser OAuth), Garmin authenticates with email + password via
+# the garminconnect library, and many accounts also require an MFA code. So this
+# is a two-step, in-process flow: POST creds → (maybe) POST the MFA code. We use
+# the password once to log in and persist ONLY the resulting tokens (the same
+# token files sync/garmin_sync.py --sync already consumes) — never the password.
+# garminconnect is imported lazily so Strava-only copies don't need it installed.
+_garmin_mfa_pending: dict = {}          # ticket -> (client, state, created_ts)
+_garmin_mfa_lock = threading.Lock()
+
+
+def _garmin_prune_pending() -> None:
+    cutoff = time.time() - 600  # drop half-finished logins after 10 min
+    with _garmin_mfa_lock:
+        for k in [k for k, v in _garmin_mfa_pending.items() if v[2] < cutoff]:
+            _garmin_mfa_pending.pop(k, None)
+
+
+def _garmin_friendly_error(e: Exception) -> str:
+    msg = (str(e) or e.__class__.__name__).strip()
+    low = msg.lower()
+    if "rate" in low or "429" in low or "too many" in low:
+        return "Garmin is rate-limiting sign-ins from this network — wait a few minutes and try again."
+    if any(t in low for t in ("401", "unauthor", "invalid", "credential", "password", "403")):
+        return "Garmin rejected those credentials — double-check your email and password."
+    return "Garmin login failed: " + msg[:200]
+
+
+def _garmin_dump_tokens(g) -> None:
+    """Persist the authenticated session to _TOKEN_DIR in the format
+    garmin_sync.py reads. Newer garminconnect exposes `.garth`, older `.client`."""
+    _TOKEN_DIR.mkdir(parents=True, exist_ok=True)
+    try:
+        g.garth.dump(str(_TOKEN_DIR))
+    except AttributeError:
+        g.client.dump(str(_TOKEN_DIR))
+
+
+def _garmin_user_name(g, fallback: str) -> str:
+    try:
+        v = g.get_full_name()
+        if v:
+            return v
+    except Exception:
+        pass
+    for attr in ("full_name", "display_name"):
+        try:
+            v = getattr(g, attr, None)
+            if v:
+                return v
+        except Exception:
+            pass
+    return fallback or "Garmin user"
+
+
+def _garmin_write_status(user: str) -> None:
+    _TOKEN_DIR.mkdir(parents=True, exist_ok=True)
+    data = {}
+    if _STATUS_FILE.exists():
+        try:
+            data = json.loads(_STATUS_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            data = {}
+    data.update({"user": user, "last_login": int(time.time()), "method": "in-app"})
+    try:
+        _atomic_write(_STATUS_FILE, json.dumps(data, indent=2))
+    except Exception as e:
+        logger.warning("Garmin status write failed: %s", e)
+
+
+def _garmin_login_attempt(email: str, password: str):
+    """Return ('ok', client) | ('mfa', (client, state)) | ('error', message).
+    Uses garminconnect's MFA-capable mode so login never blocks on input()."""
+    from garminconnect import Garmin
+    try:
+        g = Garmin(email=email, password=password, return_on_mfa=True)
+        mfa_capable = True
+    except TypeError:
+        # Older garminconnect without return_on_mfa: works for non-MFA accounts;
+        # an MFA account would otherwise try to prompt — we surface that as error.
+        g = Garmin(email=email, password=password)
+        mfa_capable = False
+    try:
+        res = g.login()
+    except Exception as e:
+        return ("error", _garmin_friendly_error(e))
+    if mfa_capable and isinstance(res, tuple) and len(res) == 2 and \
+       str(res[0]).lower().replace("-", "_") in ("needs_mfa", "need_mfa", "mfa"):
+        return ("mfa", (g, res[1]))
+    return ("ok", g)
+
+
+@app.route("/api/garmin/connect", methods=["POST"])
+def api_garmin_connect():
+    """Step 1: log in with Garmin email + password. Returns ok, or mfa_required
+    with a ticket to complete via /api/garmin/mfa."""
+    body = request.get_json(force=True) or {}
+    email = str(body.get("email", "")).strip()
+    password = str(body.get("password", ""))
+    if not email or not password:
+        return jsonify({"ok": False, "error": "Email and password are required"}), 400
+    try:
+        import garminconnect  # noqa: F401
+    except Exception:
+        return jsonify({"ok": False,
+                        "error": "Garmin support isn't installed on this copy "
+                                 "(run: pip install garminconnect)."})
+    _garmin_prune_pending()
+    kind, payload = _garmin_login_attempt(email, password)
+    if kind == "error":
+        return jsonify({"ok": False, "error": payload})
+    if kind == "mfa":
+        g, state = payload
+        ticket = secrets.token_hex(16)
+        with _garmin_mfa_lock:
+            _garmin_mfa_pending[ticket] = (g, state, time.time())
+        return jsonify({"ok": False, "mfa_required": True, "ticket": ticket})
+    g = payload
+    try:
+        _garmin_dump_tokens(g)
+    except Exception as e:
+        logger.warning("Garmin token dump failed: %s", e)
+        return jsonify({"ok": False, "error": "Signed in, but couldn't save the session — try again."})
+    user = _garmin_user_name(g, email)
+    _garmin_write_status(user)
+    return jsonify({"ok": True, "user": user})
+
+
+@app.route("/api/garmin/mfa", methods=["POST"])
+def api_garmin_mfa():
+    """Step 2: finish a login that required an MFA code."""
+    body = request.get_json(force=True) or {}
+    ticket = str(body.get("ticket", "")).strip()
+    code = str(body.get("code", "")).strip()
+    if not ticket or not code:
+        return jsonify({"ok": False, "error": "Enter the verification code Garmin sent you"}), 400
+    with _garmin_mfa_lock:
+        entry = _garmin_mfa_pending.pop(ticket, None)
+    if not entry:
+        return jsonify({"ok": False, "error": "That sign-in expired — please start again."})
+    g, state, _ = entry
+    try:
+        g.resume_login(state, code)
+    except Exception as e:
+        return jsonify({"ok": False, "error": _garmin_friendly_error(e)})
+    try:
+        _garmin_dump_tokens(g)
+    except Exception as e:
+        logger.warning("Garmin token dump failed: %s", e)
+        return jsonify({"ok": False, "error": "Code accepted, but couldn't save the session — try again."})
+    user = _garmin_user_name(g, "")
+    _garmin_write_status(user)
+    return jsonify({"ok": True, "user": user})
 
 
 # ─── Historical weather (Open-Meteo) ─────────────────────────────────────────
@@ -6552,8 +6721,15 @@ def _run_sync_subprocess(source: str, script: str) -> None:
         # live per-phase status. A daemon reader thread parses progress and
         # buffers the rest for the final message; the main thread enforces the
         # timeout via wait().
+        cmd = [sys.executable, str(_ROOT / "sync" / script), "--sync"]
+        if source == "strava":
+            # Bound the import to the user's chosen start date (mainly limits the
+            # *first* sync; incremental syncs already floor at last_activity_epoch).
+            after = (load_config().get("sync_settings") or {}).get("strava_after") or ""
+            if after:
+                cmd += ["--after", after]
         proc = subprocess.Popen(
-            [sys.executable, str(_ROOT / "sync" / script), "--sync"],
+            cmd,
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1,
         )
         tail: list[str] = []
@@ -6690,17 +6866,186 @@ def api_sync_settings():
     if request.method == "POST":
         body = request.get_json(force=True) or {}
         cfg = load_config()
-        cfg["sync_settings"] = {
-            "auto_strava": bool(body.get("auto_strava")),
-            "auto_garmin": bool(body.get("auto_garmin")),
-        }
+        # Merge into existing settings so saving the autosync checkboxes and
+        # saving the Strava start-date (separate UI controls) don't clobber
+        # each other.
+        ss = dict(cfg.get("sync_settings") or {})
+        if "auto_strava" in body:
+            ss["auto_strava"] = bool(body.get("auto_strava"))
+        if "auto_garmin" in body:
+            ss["auto_garmin"] = bool(body.get("auto_garmin"))
+        if "strava_after" in body:
+            # Optional "YYYY-MM-DD" floor for the Strava import. Store "" for
+            # blank/garbage so the sync floors at 0 (import everything).
+            after = str(body.get("strava_after") or "").strip()
+            if after:
+                try:
+                    datetime.strptime(after, "%Y-%m-%d")
+                except ValueError:
+                    after = ""
+            ss["strava_after"] = after
+        cfg["sync_settings"] = ss
         save_config(cfg)
     cfg = load_config()
     s = cfg.get("sync_settings") or {}
     return jsonify({
-        "auto_strava": bool(s.get("auto_strava")),
-        "auto_garmin": bool(s.get("auto_garmin")),
+        "auto_strava":  bool(s.get("auto_strava")),
+        "auto_garmin":  bool(s.get("auto_garmin")),
+        "strava_after": s.get("strava_after") or "",
     })
+
+
+# ─── Strava connection (in-app OAuth) ─────────────────────────────────────────
+# The CLI sync (sync/strava_sync.py --sync) reads credentials + tokens from
+# ALFORKS_HOME (default ~/.alforks). These routes let a user connect their own
+# Strava from the browser instead of the terminal: POST their app creds, then a
+# one-click OAuth redirect whose callback lands back here and writes the same
+# token file the CLI sync already consumes. File formats mirror strava_sync.py
+# exactly so the two stay interchangeable.
+_STRAVA_CREDS_FILE   = _TOKEN_DIR / "strava_creds.txt"
+_STRAVA_TOKENS_FILE  = _TOKEN_DIR / "strava_tokens.json"
+_STRAVA_SCOPE        = "activity:read_all"
+_STRAVA_REDIRECT_URI = "http://localhost:5000/oauth/strava/callback"
+
+
+def _strava_read_creds() -> tuple[str, str]:
+    """Return (client_id, client_secret) from strava_creds.txt, or ("", "") if
+    missing/incomplete. Same parser/format as sync/strava_sync.py."""
+    if not _STRAVA_CREDS_FILE.exists():
+        return "", ""
+    creds: dict = {}
+    for line in _STRAVA_CREDS_FILE.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        k, _, v = line.partition("=")
+        creds[k.strip().lower()] = v.strip()
+    return creds.get("client_id", ""), creds.get("client_secret", "")
+
+
+def _strava_write_creds(client_id: str, client_secret: str) -> None:
+    _TOKEN_DIR.mkdir(parents=True, exist_ok=True)
+    _STRAVA_CREDS_FILE.write_text(
+        f"client_id={client_id}\nclient_secret={client_secret}\n", encoding="utf-8")
+    try:
+        os.chmod(_STRAVA_CREDS_FILE, 0o600)
+    except OSError:
+        pass  # best-effort; chmod is a no-op on Windows
+
+
+def _strava_load_tokens() -> dict | None:
+    if not _STRAVA_TOKENS_FILE.exists():
+        return None
+    try:
+        return json.loads(_STRAVA_TOKENS_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+
+def _strava_save_tokens(tok: dict) -> None:
+    _TOKEN_DIR.mkdir(parents=True, exist_ok=True)
+    _STRAVA_TOKENS_FILE.write_text(json.dumps(tok, indent=2), encoding="utf-8")
+    try:
+        os.chmod(_STRAVA_TOKENS_FILE, 0o600)
+    except OSError:
+        pass
+
+
+@app.route("/api/strava/status")
+def api_strava_status():
+    """Connection state for the setup page: creds present? authorized? who?"""
+    cid, secret = _strava_read_creds()
+    tok = _strava_load_tokens()
+    athlete = (tok or {}).get("athlete") or {}
+    name = " ".join(p for p in (athlete.get("firstname"), athlete.get("lastname")) if p)
+    return jsonify({
+        "has_creds": bool(cid and secret),
+        "connected": bool(tok and tok.get("access_token")),
+        "athlete":   name or None,
+    })
+
+
+@app.route("/api/strava/creds", methods=["POST"])
+def api_strava_creds():
+    """Save the user's own Strava API app credentials (client_id/secret)."""
+    body = request.get_json(force=True) or {}
+    cid    = str(body.get("client_id", "")).strip()
+    secret = str(body.get("client_secret", "")).strip()
+    if not cid or not secret:
+        return jsonify({"ok": False, "error": "client_id and client_secret are required"}), 400
+    _strava_write_creds(cid, secret)
+    return jsonify({"ok": True})
+
+
+def _safe_local_path(p: str, default: str) -> str:
+    """Only allow a same-app relative path like '/guide' (no scheme, no '//')
+    so the OAuth return target can't be turned into an open redirect."""
+    if isinstance(p, str) and p.startswith("/") and not p.startswith("//") and "://" not in p:
+        return p
+    return default
+
+
+@app.route("/oauth/strava/start")
+def oauth_strava_start():
+    """Redirect the browser to Strava's authorize page. Requires creds saved.
+    redirect_uri is hard-coded to localhost:5000 (Strava's callback domain is
+    'localhost'); deriving it from request.url_root would break on 127.0.0.1.
+    The `?return=` page (e.g. /guide or /setup) round-trips through Strava's
+    `state` param so the callback can send the user back where they started."""
+    ret = _safe_local_path(request.args.get("return", ""), "/setup")
+    cid, _ = _strava_read_creds()
+    if not cid:
+        return redirect(f"{ret}?strava=nocreds")
+    import urllib.parse
+    auth_url = "https://www.strava.com/oauth/authorize?" + urllib.parse.urlencode({
+        "client_id":       cid,
+        "redirect_uri":    _STRAVA_REDIRECT_URI,
+        "response_type":   "code",
+        "approval_prompt": "auto",
+        "scope":           _STRAVA_SCOPE,
+        "state":           ret,
+    })
+    return redirect(auth_url)
+
+
+@app.route("/oauth/strava/callback")
+def oauth_strava_callback():
+    """Strava redirects here with ?code=… — exchange it for tokens and save,
+    then return to the page that started the flow (carried in `state`)."""
+    ret = _safe_local_path(request.args.get("state", ""), "/setup")
+    if request.args.get("error"):
+        return redirect(f"{ret}?strava=denied")
+    code = request.args.get("code")
+    if not code:
+        return redirect(f"{ret}?strava=nocode")
+    cid, secret = _strava_read_creds()
+    if not (cid and secret):
+        return redirect(f"{ret}?strava=nocreds")
+    import urllib.error
+    import urllib.parse
+    import urllib.request
+    body = urllib.parse.urlencode({
+        "client_id":     cid,
+        "client_secret": secret,
+        "code":          code,
+        "grant_type":    "authorization_code",
+    }).encode()
+    try:
+        req = urllib.request.Request("https://www.strava.com/oauth/token",
+                                     data=body, method="POST")
+        with urllib.request.urlopen(req, timeout=20) as r:
+            tok = json.loads(r.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode("utf-8", "replace")[:500]
+        logger.warning("Strava token exchange HTTP %s: %s", e.code, detail)
+        return redirect(f"{ret}?strava=exchangefailed")
+    except Exception as e:
+        logger.warning("Strava token exchange failed: %s", e)
+        return redirect(f"{ret}?strava=exchangefailed")
+    if "access_token" not in tok:
+        return redirect(f"{ret}?strava=exchangefailed")
+    _strava_save_tokens(tok)
+    return redirect(f"{ret}?strava=ok")
 
 
 def _maybe_autosync_on_startup():
@@ -6710,6 +7055,11 @@ def _maybe_autosync_on_startup():
         _kick_sync("strava")
     if s.get("auto_garmin"):
         _kick_sync("garmin")
+
+
+@app.route("/guide")
+def guide_page():
+    return render_template("guide.html", version=_app_version())
 
 
 @app.route("/setup")

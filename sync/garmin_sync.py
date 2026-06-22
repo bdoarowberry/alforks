@@ -16,6 +16,7 @@ at ~/.alforks/, so they won't be pushed to any cloud.
 import argparse
 import getpass
 import json
+import os
 import re
 import sys
 import time
@@ -34,7 +35,7 @@ CACHE_DIR     = _ROOT / "cache"
 HR_CACHE_DIR  = CACHE_DIR / "hr"
 
 # Outside the OneDrive folder so tokens don't sync to the cloud
-TOKEN_DIR        = Path.home() / ".alforks"
+TOKEN_DIR        = Path(os.environ.get("ALFORKS_HOME") or (Path.home() / ".alforks"))
 STATUS_FILE      = TOKEN_DIR / "garmin_status.json"
 GARMIN_CREDS_FILE = TOKEN_DIR / "garmin_creds.txt"
 
