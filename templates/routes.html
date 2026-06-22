@@ -121,6 +121,9 @@
     .routes-table tbody tr:last-child td { border-bottom: none; }
     .routes-table tbody tr.active-route td { background: rgba(147, 197, 253, 0.08); }
     .routes-table tbody tr.active-route td.name-cell { box-shadow: inset 2px 0 0 var(--link); }
+    .stale-pill { display: inline-block; margin-left: 7px; padding: 1px 7px; font-size: 9px;
+      font-family: var(--font-mono); letter-spacing: 0.06em; text-transform: uppercase; border-radius: 8px;
+      background: var(--warn-soft); color: var(--warn); border: 1px solid var(--warn-border); vertical-align: middle; }
 
     .region-pill {
       display: inline-block; padding: 1px 7px; border-radius: 2px;
@@ -251,6 +254,7 @@
       <input id="route-search" type="text" placeholder="route or region name…" />
     </div>
     <div class="spacer"></div>
+    <button id="rebuild-stale-btn" class="btn btn-mono" onclick="rebuildStale()" title="Re-snap stale routes to the current region geometry" style="display:none"></button>
     <button id="rescan-btn" class="btn btn-mono" title="Re-snap every ride against the latest matcher (background)">Rescan all logs</button>
     <a href="/routes/edit" class="btn btn-mono">+ New Route</a>
   </div>
@@ -413,6 +417,50 @@ async function loadRoutes() {
     return;
   }
   await render();
+  updateStaleBtn();
+}
+
+// Show/label the bulk "Rebuild stale (N)" button from the loaded route set.
+function updateStaleBtn() {
+  const btn = document.getElementById("rebuild-stale-btn");
+  if (!btn) return;
+  const n = (routes || []).filter(r => r.stale).length;
+  if (n > 0) { btn.style.display = ""; btn.disabled = false; btn.textContent = `Rebuild stale (${n})`; }
+  else { btn.style.display = "none"; }
+}
+
+// Re-snap one route's segments to current region geometry.
+async function rebuildRoute(rid) {
+  try {
+    const r = await fetch(`/api/routes/${encodeURIComponent(rid)}/rebuild`, { method: "POST" });
+    const j = await r.json().catch(() => ({}));
+    if (j.ok) {
+      const m = { fresh: "Already up to date", exact: "Rebuilt to current geometry",
+                  approximate: "Rebuilt (approximate — partials filled to full trail)" };
+      toast(m[j.status] || "Rebuilt");
+      await loadRoutes();
+    } else {
+      toast(j.error || "Rebuild failed", true);
+    }
+  } catch (e) { toast(`Rebuild failed: ${_esc(e.message)}`, true); }
+}
+
+// Re-snap every stale route.
+async function rebuildStale() {
+  const btn = document.getElementById("rebuild-stale-btn");
+  if (btn) { btn.disabled = true; btn.textContent = "Rebuilding…"; }
+  try {
+    const r = await fetch("/api/routes/rebuild-stale", { method: "POST" });
+    const j = await r.json().catch(() => ({}));
+    const c = j.counts || {};
+    const unresolved = (c.failed || 0) + (c.noregion || 0);
+    toast(`Rebuilt ${j.rebuilt || 0}: ${c.exact || 0} exact, ${c.approximate || 0} approximate`
+          + (unresolved ? `, ${unresolved} need manual fix` : ""));
+    await loadRoutes();
+  } catch (e) {
+    toast(`Rebuild failed: ${_esc(e.message)}`, true);
+    updateStaleBtn();
+  }
 }
 
 // Render race guard — a filter change or layout toggle mid-fetch.
@@ -524,6 +572,7 @@ function actionsHtml() {
   return `
     <div class="row-actions">
       <a data-act="edit" title="Open builder">Edit</a>
+      <button data-act="rebuild" title="Re-snap this route's segments to the current region geometry">Rebuild</button>
       <button data-act="dup" title="Duplicate">Duplicate</button>
       <button class="del" data-act="del" title="Delete">Delete</button>
     </div>`;
@@ -543,7 +592,7 @@ function renderTable(view) {
     return `
       <tr data-rid="${_esc(r.id)}">
         <td class="map-cell"><div class="route-map" data-rid="${_esc(r.id)}" data-polyline="${poly}"></div></td>
-        <td class="name-cell">${_esc(r.name)}</td>
+        <td class="name-cell">${_esc(r.name)}${r.stale ? ` <span class="stale-pill" title="Some segments no longer resolve to the current region geometry — click Rebuild.">stale</span>` : ``}</td>
         <td class="num-col">${distCell}</td>
         <td class="num-col">${b.climbTxt}</td>
         <td class="num-col">${b.descentTxt}</td>
@@ -582,6 +631,9 @@ function wireRows() {
     el.querySelector("[data-act='edit']")?.addEventListener("click", (e) => {
       e.stopPropagation();
       location.href = `/routes/edit?id=${encodeURIComponent(rid)}`;
+    });
+    el.querySelector("[data-act='rebuild']")?.addEventListener("click", (e) => {
+      e.stopPropagation(); rebuildRoute(rid);
     });
     el.querySelector("[data-act='dup']")?.addEventListener("click", (e) => {
       e.stopPropagation(); duplicateRoute(rid);

@@ -605,3 +605,106 @@ def get_region_artifact(region: dict, *,
         except OSError as exc:
             logger.warning("Failed to persist region artifact %s: %s", ap, exc)
         return artifact
+
+
+# ─── Rebuild (re-snap a saved route to the current artifact) ─────────────────
+# Saved routes reference edge_ids / junction ids that orphan when a region's
+# artifact is rebuilt (version bump, OSM change, junction re-clustering), so the
+# /routes distance shows "—" and the preview renders as disjoint pieces. These
+# helpers re-resolve a route's segments against the current geometry.
+
+_REBUILD_RANK = {"fresh": 0, "exact": 1, "approximate": 2, "failed": 3}
+
+
+def _merge_status(a: str, b: str) -> str:
+    return a if _REBUILD_RANK[a] >= _REBUILD_RANK[b] else b
+
+
+def _resolve_run(run, trail_name, kind, direction, trail_edges, edge_ids):
+    """Resolve one same-(trail, kind, direction) run against `trail_edges`."""
+    # Tier 1 — already fresh.
+    if all(s.get("edge_id") in edge_ids for s in run):
+        return list(run), "fresh"
+
+    # Tier 2 — re-map each stale segment by its (start, end) junction ids. This
+    # recovers edges whose hash changed (e.g. a component_idx shift) while their
+    # junctions stayed put. Both orientations are accepted.
+    endpt_to_edge: dict = {}
+    for e in trail_edges:
+        a, b = e.get("start_node"), e.get("end_node")
+        endpt_to_edge[(a, b)] = e
+        endpt_to_edge[(b, a)] = e
+    remapped = []
+    for s in run:
+        if s.get("edge_id") in edge_ids:
+            remapped.append(dict(s))
+            continue
+        e = endpt_to_edge.get((s.get("start_junction"), s.get("end_junction")))
+        if e is None:
+            remapped = None
+            break
+        remapped.append({"trail_name": trail_name, "kind": kind, "direction": direction,
+                         "edge_id": e["id"], "start_junction": e.get("start_node"),
+                         "end_junction": e.get("end_node")})
+    if remapped is not None:
+        return remapped, "exact"
+
+    # Tier 3 — approximate: replace the run with the trail's full current edge
+    # set (connected; may over-include a deliberate partial whose junctions are gone).
+    full = [{"trail_name": trail_name, "kind": kind, "direction": direction,
+             "edge_id": e["id"], "start_junction": e.get("start_node"),
+             "end_junction": e.get("end_node")} for e in trail_edges]
+    return full, "approximate"
+
+
+def rebuild_route_segments(route: dict, artifact: dict):
+    """Re-snap a saved route's segments to the CURRENT region `artifact`.
+
+    Pure function. Returns (new_segments, status):
+      - "fresh"       every segment already resolves; segments returned unchanged.
+      - "exact"       some stale segments re-mapped by matching their
+                      (start_junction, end_junction) to a current edge.
+      - "approximate" a run's junctions vanished; that run was replaced with the
+                      trail's full current edge set.
+      - "failed"      a segment's trail_name is absent from the artifact
+                      (renamed/removed) — caller should NOT write; route unchanged.
+    """
+    segs = route.get("segments") or []
+    if not segs:
+        return segs, "fresh"
+
+    trails_by_name: dict = {}     # name -> ordered current edges
+    trail_kind: dict = {}         # name -> "trail" | "road"
+    edge_ids: set = set()         # all current edge ids
+    for kind_label, collection in (("trail", artifact.get("trails") or []),
+                                   ("road",  artifact.get("roads") or [])):
+        for entry in collection:
+            name = entry.get("name")
+            elist = entry.get("edges") or []
+            trails_by_name.setdefault(name, []).extend(elist)
+            trail_kind.setdefault(name, kind_label)
+            for e in elist:
+                edge_ids.add(e["id"])
+
+    # If any segment names a trail that no longer exists, bail without mangling.
+    for s in segs:
+        if s.get("trail_name") not in trails_by_name:
+            return segs, "failed"
+
+    out: list = []
+    status = "fresh"
+    i, n = 0, len(segs)
+    while i < n:
+        tn = segs[i].get("trail_name")
+        kd = segs[i].get("kind") or trail_kind.get(tn) or "trail"
+        dr = segs[i].get("direction") or "forward"
+        j = i
+        while (j < n and segs[j].get("trail_name") == tn
+               and (segs[j].get("kind") or trail_kind.get(tn) or "trail") == kd
+               and (segs[j].get("direction") or "forward") == dr):
+            j += 1
+        run_out, run_status = _resolve_run(segs[i:j], tn, kd, dr, trails_by_name[tn], edge_ids)
+        out.extend(run_out)
+        status = _merge_status(status, run_status)
+        i = j
+    return out, status

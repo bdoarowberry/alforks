@@ -3191,12 +3191,20 @@ def api_routes_list():
         # Per-route distance, summed server-side from the edge map we already
         # built for the preview polyline — saves the client an edges-summary
         # round-trip per region on every render.
-        distance_m = sum(lengths.get(seg.get("edge_id"), 0.0)
-                         for seg in (r.get("segments") or []))
+        segs = r.get("segments") or []
+        distance_m = sum(lengths.get(seg.get("edge_id"), 0.0) for seg in segs)
+        # A route is "stale" when some of its edge_ids no longer exist in the
+        # current region artifact (geometry rebuilt). Only flag when the artifact
+        # is actually available (non-empty `lengths`) so a temporarily-unreachable
+        # region doesn't mark every route stale.
+        resolved = sum(1 for seg in segs if seg.get("edge_id") in lengths)
         out.append({
             **r,
             "polyline":          _route_preview_polyline(r, edge_cache[region_id]),
             "distance_m":        distance_m,
+            "stale":             bool(segs) and bool(lengths) and resolved < len(segs),
+            "resolved_segments": resolved,
+            "total_segments":    len(segs),
             "attempts":          stats.get("attempt_count", 0),
             "best_duration_sec": stats.get("best_duration_sec"),
             "best_filename":     stats.get("best_filename"),
@@ -3270,6 +3278,74 @@ def api_routes_delete(route_id: str):
         try: disk.unlink()
         except OSError: pass
     return jsonify({"ok": True})
+
+
+def _rebuild_one_route(route: dict) -> tuple[dict | None, str]:
+    """Re-snap one route's segments to its region's current artifact. Writes the
+    route (bumping `modified`) and busts its attempts cache when something changed.
+    Returns (route_or_None, status); status ∈ fresh|exact|approximate|failed|noregion."""
+    region = _region_by_id(route.get("region_id"))
+    if region is None:
+        return None, "noregion"
+    try:
+        artifact = route_builder.get_region_artifact(
+            region,
+            artifacts_dir=REGION_TRAILS_CACHE_DIR,
+            osm_paths_dir=OSM_PATHS_CACHE_DIR,
+            osm_roads_dir=OSM_ROADS_CACHE_DIR,
+        )
+    except Exception as exc:
+        logger.warning("Rebuild: artifact unavailable for route %s: %s", route.get("id"), exc)
+        return None, "noregion"
+    new_segs, status = route_builder.rebuild_route_segments(route, artifact)
+    if status in ("fresh", "failed"):
+        return route, status                      # nothing to write (current, or unrecoverable)
+    rid = route["id"]
+    new_route = {**route, "segments": new_segs,
+                 "modified": datetime.now(timezone.utc).isoformat()}
+    _atomic_write(ROUTES_DIR / f"{rid}.json", json.dumps(new_route, ensure_ascii=False))
+    _invalidate_route_attempts(rid)
+    disk = ROUTE_ATTEMPTS_CACHE_DIR / f"{rid}.json"
+    if disk.exists():
+        try: disk.unlink()
+        except OSError: pass
+    return new_route, status
+
+
+@app.route("/api/routes/<route_id>/rebuild", methods=["POST"])
+def api_routes_rebuild(route_id: str):
+    """Re-snap a single route's segments to the current region geometry."""
+    route = _load_route(route_id)
+    if route is None:
+        abort(404)
+    new_route, status = _rebuild_one_route(route)
+    if status == "noregion":
+        return jsonify({"ok": False, "status": status,
+                        "error": "Region geometry is unavailable — cannot rebuild."})
+    if status == "failed":
+        return jsonify({"ok": False, "status": status,
+                        "error": "A trail in this route no longer exists in the region — open it in the builder to fix."})
+    lengths = _region_edge_lengths(new_route.get("region_id"))
+    distance_m = sum(lengths.get(s.get("edge_id"), 0.0) for s in (new_route.get("segments") or []))
+    return jsonify({"ok": True, "status": status, "route_id": route_id,
+                    "distance_m": distance_m, "segments": new_route.get("segments")})
+
+
+@app.route("/api/routes/rebuild-stale", methods=["POST"])
+def api_routes_rebuild_stale():
+    """Rebuild every route whose edge_ids no longer resolve against current
+    geometry. Synchronous — region artifacts are cached, so no Overpass calls."""
+    results = []
+    counts = {"exact": 0, "approximate": 0, "failed": 0, "noregion": 0}
+    for route in _all_routes():
+        lengths = _region_edge_lengths(route.get("region_id"))
+        segs = route.get("segments") or []
+        if not (segs and lengths and any(s.get("edge_id") not in lengths for s in segs)):
+            continue                              # fresh, or artifact unavailable — skip
+        _new, status = _rebuild_one_route(route)
+        counts[status] = counts.get(status, 0) + 1
+        results.append({"id": route["id"], "name": route.get("name"), "status": status})
+    return jsonify({"ok": True, "rebuilt": len(results), "counts": counts, "results": results})
 
 
 @app.route("/api/routes/<route_id>/attempts", methods=["GET"])
