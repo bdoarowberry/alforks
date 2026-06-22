@@ -5605,16 +5605,17 @@ def _garmin_login_attempt(email: str, password: str):
     Uses garminconnect's MFA-capable mode so login never blocks on input()."""
     from garminconnect import Garmin
     try:
-        g = Garmin(email=email, password=password, return_on_mfa=True)
-        mfa_capable = True
-    except TypeError:
-        # Older garminconnect without return_on_mfa: works for non-MFA accounts;
-        # an MFA account would otherwise try to prompt — we surface that as error.
-        g = Garmin(email=email, password=password)
-        mfa_capable = False
-    try:
+        try:
+            g = Garmin(email=email, password=password, return_on_mfa=True)
+            mfa_capable = True
+        except TypeError:
+            # Older garminconnect without return_on_mfa: works for non-MFA accounts;
+            # an MFA account would otherwise try to prompt — we surface that as error.
+            g = Garmin(email=email, password=password)
+            mfa_capable = False
         res = g.login()
     except Exception as e:
+        # Constructor or login can raise auth/network/library errors — all → friendly JSON.
         return ("error", _garmin_friendly_error(e))
     if mfa_capable and isinstance(res, tuple) and len(res) == 2 and \
        str(res[0]).lower().replace("-", "_") in ("needs_mfa", "need_mfa", "mfa"):
@@ -6863,9 +6864,9 @@ def api_sync_trigger(source):
 
 @app.route("/api/sync/settings", methods=["GET", "POST"])
 def api_sync_settings():
+    cfg = load_config()
     if request.method == "POST":
         body = request.get_json(force=True) or {}
-        cfg = load_config()
         # Merge into existing settings so saving the autosync checkboxes and
         # saving the Strava start-date (separate UI controls) don't clobber
         # each other.
@@ -6886,7 +6887,6 @@ def api_sync_settings():
             ss["strava_after"] = after
         cfg["sync_settings"] = ss
         save_config(cfg)
-    cfg = load_config()
     s = cfg.get("sync_settings") or {}
     return jsonify({
         "auto_strava":  bool(s.get("auto_strava")),

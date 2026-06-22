@@ -14,5 +14,5 @@
   sync, and add a Mapbox token right from the guide.
 - Self-contained copies: each copy keeps its Strava login in its own folder
   (`ALFORKS_HOME`), so copies are portable.
-- Owner tooling: `make_friend_copy.py` (clean copy / `--package` update bundle)
-  and `update.bat` for recipients to apply updates.
+- Distributed via **GitHub**: `git clone` to install, and `start.bat` checks for
+  and pulls updates automatically on launch (`git pull --ff-only`).

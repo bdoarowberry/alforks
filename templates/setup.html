@@ -1547,6 +1547,7 @@ async function loadSyncStatus() {
       if (st.message)     lines.push(st.message);
       metaEl.textContent = lines.length ? lines.join(' · ') : 'Never run.';
     }
+    return s;
   } catch (e) {}
 }
 
@@ -1558,9 +1559,8 @@ async function kickSync(source) {
   // Sync All, or a re-click mid-sync) don't stack overlapping 2s intervals.
   if (_syncPoll) clearInterval(_syncPoll);
   _syncPoll = setInterval(async () => {
-    await loadSyncStatus();
-    const r = await fetch('/api/sync/status'); const s = await r.json();
-    if (!s.strava.running && !s.garmin.running) { clearInterval(_syncPoll); _syncPoll = null; }
+    const s = await loadSyncStatus();
+    if (s && !s.strava.running && !s.garmin.running) { clearInterval(_syncPoll); _syncPoll = null; }
   }, 2000);
 }
 

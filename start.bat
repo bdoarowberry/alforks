@@ -15,6 +15,9 @@ echo This window shows each step. Your data + Strava login live in:
 echo   %ALFORKS_HOME%
 echo.
 
+rem --- Check GitHub for updates (only when launched from a git clone) -----
+call :check_updates
+
 rem --- [1/4] Detect Python (py launcher first, then python) ---------------
 echo [1 of 4] Checking that Python is installed...
 set "PYCMD="
@@ -95,3 +98,27 @@ echo ============================================================
 echo.
 pause
 endlocal
+exit /b 0
+
+rem === Subroutine: auto-update from GitHub ================================
+rem Only acts when launched from a git clone; never blocks the app launch.
+:check_updates
+if not exist ".git\HEAD" goto :eof
+git --version >nul 2>&1 || goto :eof
+echo Checking GitHub for updates...
+for /f %%H in ('git rev-parse HEAD 2^>nul') do set "OLDREV=%%H"
+git -c http.lowSpeedLimit=1 -c http.lowSpeedTime=15 pull --ff-only --quiet
+if errorlevel 1 (
+    echo   Could not check for updates ^(offline, or you have local changes^) - using the current version.
+    echo.
+    goto :eof
+)
+for /f %%H in ('git rev-parse HEAD 2^>nul') do set "NEWREV=%%H"
+if not "%OLDREV%"=="%NEWREV%" (
+    echo   Updated to the latest version - restarting...
+    start "" "%~f0"
+    exit
+)
+echo   You're on the latest version.
+echo.
+goto :eof

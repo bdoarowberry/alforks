@@ -39,9 +39,7 @@ backups/
 # NEVER commit: it holds the user's Strava/Garmin login tokens.
 .alforks/
 
-# Friend-copy / update + local verification artifacts
-alforks-update-*.zip
-update.bat.new
+# Local verification / temp artifacts
 _startlog.txt
 _starterr.txt
 _verify_*
