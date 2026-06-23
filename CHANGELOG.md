@@ -1,5 +1,18 @@
 # AlForks — Changelog
 
+## 2026.06.23.5
+- **New Training page** — rebuilt around plain questions instead of jargon:
+  *What should I do next? · Am I getting fitter? · Am I overdoing it? · Am I
+  training right?* Each gives a one-line answer with the trends behind it.
+- **Every ride counts** — your training load works with or without heart rate,
+  so the picture isn't blank just because a ride had no HR.
+- **More with a Garmin** — if you wear one, it folds in VO₂max, resting HR, Body
+  Battery and sleep for a "should I go hard today?" read, and reminds you to keep
+  your weight up to date.
+- Sharper heart-rate zones, a "fresh or buried?" fitness-vs-fatigue chart, your
+  easy-effort-HR fitness trend, and a body-weight tracker (log it from Settings →
+  Fitness or the Training page).
+
 ## 2026.06.23.4
 - **Heart rate shows immediately after updating** — the previous fix restored
   heart rate, but pages you'd already viewed could still be cached without it.
