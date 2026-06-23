@@ -540,8 +540,28 @@
       </div>
       <div id="hr-save-confirm"></div>
     </div>
+
+    <h2 class="panel-section-h2">Body Weight</h2>
+    <div class="fit-card">
+      <div class="fit-row">
+        <div>
+          <div class="fit-stat-label">Latest logged</div>
+          <div id="wt-latest" class="fit-stat-val accent">—</div>
+          <div id="wt-latest-sub" class="fit-stat-sub">no entries yet</div>
+        </div>
+      </div>
+      <div class="fit-override-row">
+        <label>Today:</label>
+        <input id="wt-st" type="number" min="0" max="40" step="1" placeholder="st" style="width:64px">
+        <input id="wt-lb" type="number" min="0" max="13.9" step="0.1" placeholder="lb" style="width:64px">
+        <button onclick="saveWeight()">Save</button>
+      </div>
+      <div id="wt-save-confirm"></div>
+      <div class="fit-stat-sub" style="margin-top:10px;">Tracked as a weight trend on the Training page (one entry per day). The bell reminds you when it's gone stale.</div>
+    </div>
+
     <div class="fit-zones">
-      <strong>Heart-rate zones</strong> are computed as percentages of your effective max HR:
+      <strong>Heart-rate zones</strong> are computed from your heart-rate reserve — effective max HR minus your resting HR:
       <ul>
         <li>Z1 Recovery — &lt; 60%</li>
         <li>Z2 Endurance — 60–70%</li>
@@ -1504,7 +1524,50 @@ async function saveMaxHr() {
   loadMaxHr();
 }
 
+// ─── Fitness: body weight ────────────────────────────────────────────────────
+const LB_PER_KG = 2.2046226218;
+
+async function loadWeight() {
+  try {
+    const r = await fetch('/api/weights', { cache: 'no-store' });
+    const list = await r.json();
+    if (!Array.isArray(list) || !list.length) return;
+    const w = list[list.length - 1];               // oldest-first → last is newest
+    const totalLb = w.weight_kg * LB_PER_KG;
+    const st = Math.floor(totalLb / 14), lb = totalLb - st * 14;
+    document.getElementById('wt-latest').textContent = `${w.weight_kg.toFixed(1)} kg`;
+    document.getElementById('wt-latest-sub').textContent = `${st} st ${lb.toFixed(1)} lb · logged ${w.date}`;
+    document.getElementById('wt-st').value = st;
+    document.getElementById('wt-lb').value = lb.toFixed(1);
+  } catch (e) {}
+}
+
+async function saveWeight() {
+  const st = Number(document.getElementById('wt-st').value || 0);
+  const lb = Number(document.getElementById('wt-lb').value || 0);
+  const kg = ((st * 14) + lb) / LB_PER_KG;
+  const conf = document.getElementById('wt-save-confirm');
+  if (!Number.isFinite(kg) || kg < 20 || kg > 300) {
+    conf.textContent = 'Enter a weight (≈ 3–47 st).';
+    return;
+  }
+  const today = new Date().toISOString().slice(0, 10);
+  try {
+    const r = await fetch('/api/weights', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ date: today, weight_kg: kg }),
+    });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    conf.textContent = 'Saved ✓';
+    setTimeout(() => conf.textContent = '', 2000);
+    loadWeight();
+  } catch (e) {
+    conf.textContent = 'Could not save weight.';
+  }
+}
+
 loadMaxHr();
+loadWeight();
 
 // ─── Sync tab ────────────────────────────────────────────────────────────────
 function fmtAgo(unixSec) {
