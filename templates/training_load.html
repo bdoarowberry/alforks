@@ -184,11 +184,12 @@
        breathe; the 10 metric cards fit in a compact 2-col × 5-row
        grid on the right with horizontal value+sparkline cards so
        each row is short enough to match hero height. */
-    .tl-fitness-row { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr); gap: 8px; align-items: start; }
+    /* Two fitness charts side by side (Z2 trend + fresh/buried balance). */
+    .tl-fitness-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; align-items: stretch; }
+    @media (max-width: 820px) { .tl-fitness-row { grid-template-columns: 1fr; } }
     /* Left column stacks the Z2 hero and the TRIMP load chart so the
        column matches the height of the metrics grid on the right
        (avoids the empty space we used to have under the hero). */
-    .tl-fitness-left { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 
     /* Training-load (TRIMP) chart panel */
     .tl-trimp-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; margin-bottom: 12px; flex-wrap: wrap; }
@@ -198,9 +199,9 @@
     .tl-trimp-legend .item { display: flex; align-items: center; gap: 5px; }
     .tl-trimp-legend .swatch { width: 14px; height: 2px; border-radius: 1px; }
     .tl-trimp-svg { display: block; width: 100%; height: 180px; }
-    /* Single-column rail of 5 keeper tiles (was a 2-col grid sized for 10). */
-    .tl-metrics-grid { display: grid; grid-template-columns: 1fr; gap: 8px; align-content: start; }
-    @media (max-width: 1100px) { .tl-metrics-grid { grid-template-columns: repeat(2, 1fr); } }
+    /* Horizontal KPI strip — 5 keeper tiles across the top of "The record". */
+    .tl-metrics-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
+    @media (max-width: 820px) { .tl-metrics-grid { grid-template-columns: repeat(2, 1fr); } }
 
     /* Compact metric card — label / (value · sparkline) / sub. */
     .tl-load-card { background: var(--tl-panel); border: 1px solid var(--tl-line);
@@ -424,36 +425,33 @@
   <h2 class="tl-section-q">Fitness &amp; freshness<span class="sub">the trends behind the answers above</span></h2>
   <!-- Z2 hero + Training load chart (left column) | metrics grid (right) -->
   <div class="tl-fitness-row">
-    <div class="tl-fitness-left">
-      <div class="tl-panel tl-panel-hero" id="tl-hero">
-        <div class="tl-hero-row">
-          <div>
-            <div class="tl-eyebrow">Aerobic fitness<span class="tl-info-icon" data-tip="An indirect aerobic-fitness indicator from your Z2 HR data.&#10;&#10;As fitness improves, your HR at any given intensity drops — so the line trending DOWN over months means you're getting fitter.&#10;&#10;Read the trend, not the points: single-week wiggles are noise from sleep, hydration, weather, or caffeine. Requires consistent Z2 efforts to be reliable.">?</span></div>
-            <h2 class="tl-hero-title">28-day Z2 heart-rate average <span class="suffix">lower = fitter</span></h2>
-          </div>
-          <div class="tl-hero-right">
-            <div class="tl-eyebrow tight">Latest</div>
-            <div class="tl-hero-latest" id="tl-hero-latest">—<span class="unit">bpm</span></div>
-            <div class="tl-hero-delta" id="tl-hero-delta">&nbsp;</div>
-          </div>
+    <div class="tl-panel tl-panel-hero" id="tl-hero">
+      <div class="tl-hero-row">
+        <div>
+          <div class="tl-eyebrow">Aerobic fitness<span class="tl-info-icon" data-tip="An indirect aerobic-fitness indicator from your Z2 HR data.&#10;&#10;As fitness improves, your HR at any given intensity drops — so the line trending DOWN over months means you're getting fitter.&#10;&#10;Read the trend, not the points: single-week wiggles are noise from sleep, hydration, weather, or caffeine. Requires consistent Z2 efforts to be reliable.">?</span></div>
+          <h2 class="tl-hero-title">Easy-effort heart rate <span class="suffix">lower = fitter</span></h2>
         </div>
-        <div id="tl-hero-chart"></div>
-      </div>
-      <div class="tl-panel" id="tl-trimp-panel">
-        <div class="tl-trimp-head">
-          <div>
-            <div class="tl-eyebrow">Training load · intensity-weighted<span class="tl-info-icon" data-tip="Banister TRIMP per week — intensity-weighted training load.&#10;&#10;Z1×1 + Z2×2 + Z3×3 + Z4×4 + Z5×5, summed in zone-minutes. Bars are the raw weekly TRIMP.&#10;&#10;When acute (amber) crosses ABOVE chronic (purple) you're overloading; below = recovering or detraining. The gap between them is your training stress balance.">?</span></div>
-            <h3 class="tl-trimp-title">Acute vs chronic TRIMP <span class="tl-trimp-suffix">zone-min/wk</span></h3>
-          </div>
-          <div class="tl-trimp-legend">
-            <span class="item"><span class="swatch" style="background:var(--tl-amber)"></span>Acute · 4 wk</span>
-            <span class="item"><span class="swatch" style="background:var(--tl-purple)"></span>Chronic · 8 wk</span>
-          </div>
+        <div class="tl-hero-right">
+          <div class="tl-eyebrow tight">Latest</div>
+          <div class="tl-hero-latest" id="tl-hero-latest">—<span class="unit">bpm</span></div>
+          <div class="tl-hero-delta" id="tl-hero-delta">&nbsp;</div>
         </div>
-        <div id="tl-trimp-chart"></div>
       </div>
+      <div id="tl-hero-chart"></div>
     </div>
-    <div class="tl-metrics-grid" id="tl-metrics-cards"></div>
+    <div class="tl-panel" id="tl-trimp-panel">
+      <div class="tl-trimp-head">
+        <div>
+          <div class="tl-eyebrow">Training balance<span class="tl-info-icon" data-tip="Your built-up fitness (slow purple line) vs recent fatigue (fast amber line).&#10;&#10;When fatigue sits below fitness you're fresh; when it spikes above, you're buried. The shaded gap is your freshness — green when fresh, red when buried.">?</span></div>
+          <h3 class="tl-trimp-title">Fresh or buried? <span class="tl-trimp-suffix">fitness vs fatigue</span></h3>
+        </div>
+        <div class="tl-trimp-legend">
+          <span class="item"><span class="swatch" style="background:var(--tl-purple)"></span>Fitness</span>
+          <span class="item"><span class="swatch" style="background:var(--tl-amber)"></span>Fatigue</span>
+        </div>
+      </div>
+      <div id="tl-trimp-chart"></div>
+    </div>
   </div>
 
   <h2 class="tl-section-q">Training mix<span class="sub">where your effort goes — easy vs hard</span></h2>
@@ -480,6 +478,8 @@
   </div>
 
   <h2 class="tl-section-q">The record<span class="sub">what you've actually done</span></h2>
+  <!-- KPI strip: habit + window totals + body weight -->
+  <div class="tl-metrics-grid" id="tl-metrics-cards" style="margin-bottom:8px;"></div>
   <!-- Weekly volume + climbing -->
   <div class="tl-vc-grid" style="margin-bottom:8px;">
     <div class="tl-panel">
