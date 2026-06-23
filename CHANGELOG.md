@@ -1,5 +1,11 @@
 # AlForks — Changelog
 
+## 2026.06.23.4
+- **Heart rate shows immediately after updating** — the previous fix restored
+  heart rate, but pages you'd already viewed could still be cached without it.
+  This clears those stale views so HR appears right away on your rides and
+  summaries (no manual refresh needed).
+
 ## 2026.06.23.3
 - **Heart rate is back** — on Windows, missing timezone data was making heart
   rate (and HR zones, training load and weather) silently disappear from rides.

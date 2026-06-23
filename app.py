@@ -2120,7 +2120,9 @@ def _make_etag(*parts) -> str:
 
 # Bump when changing the shape/contents of /api/activity responses so clients
 # refetch even if all input files are unchanged.
-_ACTIVITY_RESPONSE_VERSION = 13
+# v14: force refetch after the tzdata fix — responses cached while tzdata was
+# missing have no HR, and no input mtime changed to invalidate the ETag.
+_ACTIVITY_RESPONSE_VERSION = 14
 
 # Trail-matching is now applied to every MTB activity, regardless of
 # region. (Originally gated to Moose Mountain while the snap algorithm

@@ -44,7 +44,9 @@ def hr_file_mtime(hr_cache_dir: Path, date_str: str) -> float:
 # detection-algorithm *output* changes — a schema change is not an algo change.
 #   1: baseline (hr_avg/hr_max baked)
 #   2: + hr_zones baked into stats (saves a per-ride HR re-merge in fitness rollups)
-ENTRY_SCHEMA_VERSION = 2
+#   3: force rebuild — entries baked while tzdata was missing have no HR (the tz
+#      lookup failed silently), and no input mtime changed to invalidate them.
+ENTRY_SCHEMA_VERSION = 3
 
 
 def sidebar_fingerprint(*, gpx_mtime: float, file_meta: dict,
