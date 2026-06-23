@@ -8,9 +8,11 @@
   its boundary. It only moves the camera; your rides and filters stay put.
 - **What's New** page (this one, at `/whatsnew`) — the version shown in the top
   corner links here, and a banner points it out after an update.
-- **Smarter duplicate detection** — two different rides on the same day are no
-  longer flagged as possible duplicates just because they're a similar length;
-  the check now confirms the two tracks actually overlap on the map.
+- **Smarter duplicate detection** — possible duplicates are now matched by where
+  the tracks actually go on the map. So two recordings of the *same* ride are caught
+  even when their distance or time differ (gaps, pauses, different sources), while
+  two *different* rides on the same day are no longer flagged just for being a
+  similar length.
 - Fixed the **"Not duplicates"** button, which could fail to save on some setups.
 
 ## 2026.06.21
