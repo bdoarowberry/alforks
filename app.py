@@ -806,7 +806,7 @@ def _sidebar_fingerprint(gpx_mtime: float, file_meta: dict,
         gpx_mtime=gpx_mtime, file_meta=file_meta,
         regions_mtime=regions_mtime, types_mtime=types_mtime,
         algo_sig=ALGO_SIG, region_match_version=_REGION_MATCH_VERSION,
-        max_hr=_effective_max_hr(),
+        max_hr=_effective_max_hr(), resting_hr=_effective_resting_hr(),
     )
 
 
@@ -4744,7 +4744,7 @@ def _merge_hr_into_data(data: dict) -> dict:
             hr_mtime = (HR_CACHE_DIR / f"{date_str}.json").stat().st_mtime
         except OSError:
             hr_mtime = 0
-        cache_key = (fname, gpx_mtime, hr_mtime, _effective_max_hr())
+        cache_key = (fname, gpx_mtime, hr_mtime, _effective_max_hr(), _effective_resting_hr())
         cached = _hr_merge_cache_get(cache_key)
         if cached is not None:
             data = {**data, "hr_samples": cached["hr_samples"]}
@@ -4836,14 +4836,18 @@ def _merge_hr_into_data(data: dict) -> dict:
     if not bpms:
         return data
 
-    # Time in HR zones based on the user's effective max HR. Walk consecutive
-    # samples (skipping gaps over 5 min) and accumulate the average-bpm interval
-    # into the matching zone. Restricted to the exact activity window — the
-    # 2-min buffer used for hr_avg/hr_max would count trailhead resting HR as
-    # zone time, which skews the distribution.
+    # Time in HR zones using HR RESERVE (Karvonen): pct = (HR - rest)/(max - rest).
+    # More accurate per-person than raw %max — raw %max systematically over-rates
+    # intensity (shoves time into high zones) for anyone with a normal resting HR.
+    # Walk consecutive samples (skipping gaps over 5 min) and accumulate the
+    # average-bpm interval into the matching zone. Restricted to the exact
+    # activity window — the 2-min buffer used for hr_avg/hr_max would count
+    # trailhead resting HR as zone time, which skews the distribution.
     max_hr = _effective_max_hr()
+    rest_hr = _effective_resting_hr()
+    hrr = (max_hr - rest_hr) if max_hr else 0
     zones = [0, 0, 0, 0, 0]
-    if max_hr:
+    if hrr > 0:
         ordered = [(ms, bpm) for ms, bpm in in_window
                    if bpm is not None and first_ms <= ms <= last_ms]
         ordered.sort(key=lambda x: x[0])
@@ -4854,7 +4858,7 @@ def _merge_hr_into_data(data: dict) -> dict:
             if dt <= 0 or dt > 300:
                 continue
             avg_bpm = (bpm_prev + bpm_cur) / 2
-            pct = avg_bpm / max_hr
+            pct = (avg_bpm - rest_hr) / hrr
             if   pct < 0.6: z = 0
             elif pct < 0.7: z = 1
             elif pct < 0.8: z = 2
@@ -4926,6 +4930,37 @@ def _effective_max_hr() -> int | None:
     if isinstance(override, (int, float)) and override > 0:
         return int(override)
     return _observed_max_hr()
+
+
+_RESTING_HR_DEFAULT = 60
+_resting_hr_memo = None
+
+
+def _effective_resting_hr() -> int:
+    """The rider's typical resting HR, for HR-reserve (Karvonen) zones — more
+    accurate per-person than raw %max. Config override, else the median of the
+    Garmin daily resting-HR cache, else a sane default. Memoized per process
+    (resting HR is stable within a session)."""
+    global _resting_hr_memo
+    override = load_config().get("resting_hr_override")
+    if isinstance(override, (int, float)) and override > 0:
+        return int(override)
+    if _resting_hr_memo is not None:
+        return _resting_hr_memo
+    vals = []
+    try:
+        for fp in WELLNESS_CACHE_DIR.glob("*.json"):
+            try:
+                v = json.loads(fp.read_text(encoding="utf-8")).get("resting_hr")
+                if v:
+                    vals.append(int(v))
+            except Exception:
+                pass
+    except OSError:
+        pass
+    vals.sort()
+    _resting_hr_memo = vals[len(vals) // 2] if vals else _RESTING_HR_DEFAULT
+    return _resting_hr_memo
 
 
 def _downsample_polyline(points: list, n: int = 50) -> list:

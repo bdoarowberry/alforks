@@ -52,12 +52,12 @@ ENTRY_SCHEMA_VERSION = 3
 def sidebar_fingerprint(*, gpx_mtime: float, file_meta: dict,
                         regions_mtime: float, types_mtime: float,
                         algo_sig: str, region_match_version: int,
-                        max_hr: float | int | None = None) -> str:
+                        max_hr: float | int | None = None,
+                        resting_hr: float | int | None = None) -> str:
     """Hash of every input that can change a sidebar entry's contents.
 
-    `max_hr` is included because the baked HR zones are computed against the
-    effective max HR — changing it (the override, or a new observed peak) must
-    re-bake every entry's zones."""
+    `max_hr` and `resting_hr` are included because the baked HR zones are computed
+    against them (HR-reserve / Karvonen) — changing either must re-bake the zones."""
     payload = json.dumps({
         "gpx_mtime":     round(gpx_mtime,     3),
         "regions_mtime": round(regions_mtime, 3),
@@ -67,6 +67,7 @@ def sidebar_fingerprint(*, gpx_mtime: float, file_meta: dict,
         "region_match_version": region_match_version,
         "entry_schema":  ENTRY_SCHEMA_VERSION,
         "max_hr":        max_hr,
+        "resting_hr":    resting_hr,
     }, sort_keys=True, ensure_ascii=False)
     return hashlib.md5(payload.encode("utf-8")).hexdigest()[:16]
 
