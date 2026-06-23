@@ -1476,7 +1476,10 @@ loadUntagged();
 // If linked from an activity, switch to regions tab and zoom map to track bounds
 (function applyDeepLink() {
   const params = new URLSearchParams(window.location.search);
-  if (params.get('tab') === 'regions') showTab('regions');
+  // Honor ?tab=<name> for any panel so onboarding links (e.g. the empty-state
+  // "Connect Strava" → /setup?tab=sync) land on the right tab, not Regions.
+  const wantTab = params.get('tab');
+  if (wantTab && ['regions', 'types', 'fitness', 'sync'].includes(wantTab)) showTab(wantTab);
   const bbox = params.get('bbox');
   if (bbox) {
     const [w, s, e, n] = bbox.split(',').map(Number);

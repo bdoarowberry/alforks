@@ -57,6 +57,7 @@ GPX_DIR       = _ROOT / "tracks"
 CACHE_DIR     = _ROOT / "cache"
 METADATA_FILE = _ROOT / "metadata.json"
 CONFIG_FILE   = _ROOT / "config.json"
+CONFIG_EXAMPLE_FILE = _ROOT / "config.example.json"
 REGIONS_FILE  = _ROOT / "regions.json"
 TYPES_FILE    = _ROOT / "types.json"
 DUP_DISMISSALS_FILE = _ROOT / "dup_dismissals.json"
@@ -337,6 +338,24 @@ def _parse_changelog() -> list[dict]:
 
 
 # ─── Config ───────────────────────────────────────────────────────────────────
+
+def bootstrap_config() -> None:
+    """Create config.json from config.example.json if it's missing.
+
+    start.bat normally does this on first run, but a user who launches app.py
+    directly (or whose copy step failed silently) would otherwise run with no
+    settings file and no in-GUI way to recover. Make the app self-sufficient
+    regardless of how it was launched. Best-effort: a read-only folder just
+    leaves us with the existing in-memory defaults.
+    """
+    if CONFIG_FILE.exists() or not CONFIG_EXAMPLE_FILE.exists():
+        return
+    try:
+        _atomic_write(CONFIG_FILE, CONFIG_EXAMPLE_FILE.read_text(encoding="utf-8"))
+        logger.info("Created config.json from config.example.json (first run).")
+    except Exception as e:
+        logger.warning("Could not create config.json: %s", e)
+
 
 def load_config() -> dict:
     cfg: dict = {}
@@ -6831,8 +6850,16 @@ def _friendly_sync_message(source: str, raw: str) -> str:
     low = (raw or "").lower()
     if any(k in low for k in ("not logged in", "auth not available", "--login",
                               "username and password are required", "no tokens",
-                              "not configured", "no credentials", "log in")):
-        return f"Not connected to {label}. Open the Setup page to connect."
+                              "not configured", "no credentials", "log in",
+                              "login expired", "token refresh failed")):
+        return f"Not connected to {label}. Open the Setup page to reconnect."
+    # A network / server-side failure (timeout, 5xx, DNS) — not the user's fault
+    # and not a stale login. Give a plain next step instead of leaking the line.
+    if any(k in low for k in ("timed out", "timeout", "connection", "temporarily",
+                              "service unavailable", "http error 5", " 500", " 502",
+                              " 503", " 504", "max retries", "name or service")):
+        return (f"Couldn't reach {label} — check your internet connection and "
+                f"try again in a minute.")
     # Otherwise show the most specific line, stripped of "RuntimeError:"-style
     # prefixes and any trailing "Run `python … --login`" CLI hint.
     last = next((ln for ln in reversed((raw or "").splitlines()) if ln.strip()), "")
@@ -8242,6 +8269,8 @@ if __name__ == "__main__":
         datefmt="%H:%M:%S",
     )
     logger.info("Starting GPX viewer at http://localhost:5000")
+    # Self-heal: ensure config.json exists even if launched without start.bat.
+    bootstrap_config()
     # Trail-match prewarm: in a daemon thread so startup isn't blocked.
     # The worker iterates MTB+Moose-Mountain rides and computes any
     # missing trail-match results so the leaderboard is populated by the

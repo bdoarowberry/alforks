@@ -183,6 +183,21 @@
     .s2-recent a.row:hover, .s2-prs a.row:hover { background: rgba(255,255,255,0.03); }
 
     .s2-loading { padding: 40px; text-align: center; color: var(--text-tertiary); font-family: var(--mono); font-size: 12px; }
+
+    /* Zero-rides empty state — the first thing a brand-new user sees before
+       any activities have synced. Give them a clear next step, not a wall of
+       zeros. */
+    .s2-empty { max-width: 540px; margin: 64px auto; padding: 32px; text-align: center;
+                background: var(--surface, rgba(255,255,255,0.03)); border: 1px solid var(--border, rgba(255,255,255,0.08));
+                border-radius: 12px; }
+    .s2-empty h2 { margin: 0 0 8px; font-size: 20px; }
+    .s2-empty p { margin: 0 0 24px; color: var(--text-secondary, #aaa); font-size: 14px; line-height: 1.5; }
+    .s2-empty .cta-row { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+    .s2-empty a.btn { display: inline-block; padding: 10px 18px; border-radius: 8px; font-size: 14px;
+                      text-decoration: none; border: 1px solid var(--border, rgba(255,255,255,0.12)); }
+    .s2-empty a.btn.primary { background: var(--accent, #f26b21); color: #fff; border-color: transparent; }
+    .s2-empty a.btn.secondary { color: var(--text-secondary, #ccc); }
+    .s2-empty a.btn:hover { filter: brightness(1.08); }
   </style>
 </head>
 <body>
@@ -269,11 +284,32 @@ function rangeLabel(d) {
 function render() {
   const root = document.getElementById('root');
   root.innerHTML = '';
+  if (!DATA.activities || DATA.activities.length === 0) {
+    root.appendChild(renderEmptyState());
+    return;
+  }
   root.appendChild(renderHead());
   root.appendChild(renderKpi());
   root.appendChild(renderRibbon());
   root.appendChild(renderActivitiesHeader());
   root.appendChild(renderActivities());
+}
+
+function renderEmptyState() {
+  // No rides synced yet. A new user lands here first — point them at the one
+  // thing that matters (connect Strava) rather than a dashboard full of zeros.
+  const wrap = document.createElement('div');
+  wrap.className = 's2-empty';
+  wrap.innerHTML = `
+    <h2>No rides yet</h2>
+    <p>Connect Strava to import your activities, then your stats, maps and
+       trails will show up here. New here? The guide walks you through it in
+       about five minutes.</p>
+    <div class="cta-row">
+      <a class="btn primary" href="/setup?tab=sync">Connect Strava</a>
+      <a class="btn secondary" href="/guide">Open the guide</a>
+    </div>`;
+  return wrap;
 }
 
 function renderActivitiesHeader() {

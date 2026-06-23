@@ -3,16 +3,17 @@ setlocal
 cd /d "%~dp0"
 
 rem === AlForks launcher ====================================================
-rem Self-contained: keep this copy's Strava login inside its own .alforks
-rem folder (so copies are portable and don't read another install's login).
-set "ALFORKS_HOME=%~dp0.alforks"
+rem Login + tokens live in your home folder (%USERPROFILE%\.alforks), so every
+rem way you launch AlForks (start.bat, python app.py, a test copy) shares the
+rem one login and they can't drift out of sync. To give a copy its OWN separate
+rem login instead, set ALFORKS_HOME to a folder yourself before running.
 
 echo ============================================================
 echo   AlForks - starting up
 echo ============================================================
 echo.
-echo This window shows each step. Your data + Strava login live in:
-echo   %ALFORKS_HOME%
+echo This window shows each step. Your Strava + Garmin login lives in:
+echo   %USERPROFILE%\.alforks
 echo.
 
 rem --- Check GitHub for updates (only when launched from a git clone) -----
@@ -69,8 +70,13 @@ if not exist "config.json" (
 )
 
 rem --- [4/4] Start the server + open the browser -------------------------
+rem Open the guide on a genuine first run: either there was no settings file,
+rem OR the user has never connected Strava (no saved tokens). This catches the
+rem case where a shared copy already ships a config.json but no account is
+rem connected yet, so a new user still gets the walkthrough.
 set "OPENURL=http://localhost:5000/"
 if defined FIRSTRUN set "OPENURL=http://localhost:5000/guide"
+if not exist "%USERPROFILE%\.alforks\strava_tokens.json" set "OPENURL=http://localhost:5000/guide"
 echo [4 of 4] Starting AlForks...
 echo          Your browser will open at %OPENURL% in a few seconds.
 echo          If it does not, open that address yourself.
