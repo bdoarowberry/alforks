@@ -1256,52 +1256,48 @@ function renderAnswers(p) {
     tlAnswerCard('Am I training right?',  ms, mt, msub);
 }
 
-// Training balance — fitness (slow) vs fatigue (fast). Repurposes the old
-// TRIMP panel with plain-language labels + the correct EWMA series.
+// Training balance — fitness (slow) vs fatigue (fast), sampled WEEKLY so it
+// shares the exact x-axis + geometry of the Z2 hero chart beside it. The band
+// between the lines = freshness (green when fresh, red when buried).
 function renderLoadBalance(payload) {
-  const panel = document.getElementById('tl-trimp-panel');
-  if (panel) {
-    const eb = panel.querySelector('.tl-eyebrow');
-    if (eb) eb.childNodes[0] && (eb.childNodes[0].nodeValue = 'Training balance');
-    const title = panel.querySelector('.tl-trimp-title');
-    if (title) title.innerHTML = 'Fresh or buried? <span class="tl-trimp-suffix">fitness vs fatigue</span>';
-    const legend = panel.querySelector('.tl-trimp-legend');
-    if (legend) legend.innerHTML =
-      '<span class="item"><span class="swatch" style="background:var(--tl-purple)"></span>Fitness</span>' +
-      '<span class="item"><span class="swatch" style="background:var(--tl-amber)"></span>Fatigue</span>';
-  }
   const host = document.getElementById('tl-trimp-chart');
   if (!host) return;
-  const s = payload.series || [];
-  if (s.length < 2) { host.innerHTML = '<div style="padding:30px;text-align:center;color:var(--text-muted);font-size:12px">Not enough history yet — keep riding and syncing.</div>'; return; }
-  const W = 720, H = 180, padL = 44, padR = 14, padT = 12, padB = 22;
-  const max = Math.max(1, ...s.map(d => Math.max(d.fitness, d.fatigue)));
-  const X = i => padL + (W - padL - padR) * i / (s.length - 1);
-  const Y = v => (H - padB) - (H - padT - padB) * v / max;
-  const fresh = s[s.length-1].fitness >= s[s.length-1].fatigue;   // current state colours the band
-  // Gridlines + right-anchored y labels.
+  const weeks = payload.weeks || [];
+  const have = weeks.map((w, i) => ({ w, i })).filter(o => o.w.fitness != null);
+  if (have.length < 2 || weeks.length < 2) {
+    host.innerHTML = '<div style="padding:30px;text-align:center;color:var(--text-muted);font-size:12px">Not enough history yet — keep riding and syncing.</div>';
+    return;
+  }
+  // Identical geometry to renderHero so the two charts line up exactly.
+  const W = 720, H = 220, padL = 44, padR = 16, padT = 16, padB = 28;
+  const vals = have.flatMap(o => [o.w.fitness, o.w.fatigue]);
+  const max = Math.max(1, ...vals);
+  const X = i => padL + (i / (weeks.length - 1)) * (W - padL - padR);
+  const Y = v => (H - padB) - (H - padT - padB) * (v / max);
+  const lastWk = have[have.length - 1].w;
+  const fresh = lastWk.fitness >= lastWk.fatigue;
+
   let grid = '';
   for (let g = 0; g <= 4; g++) {
     const v = max * g / 4, y = Y(v);
-    grid += `<line x1="${padL}" y1="${y.toFixed(1)}" x2="${W-padR}" y2="${y.toFixed(1)}" stroke="var(--tl-line)" stroke-width="1" vector-effect="non-scaling-stroke"/>`;
-    grid += `<text x="${padL-8}" y="${(y+3).toFixed(1)}" text-anchor="end" font-family="var(--tl-mono)" font-size="9" fill="var(--text-faint)">${Math.round(v)}</text>`;
+    grid += `<line x1="${padL}" y1="${y.toFixed(1)}" x2="${W-padR}" y2="${y.toFixed(1)}" stroke="rgba(255,255,255,0.05)" stroke-dasharray="2,4"/>`;
+    grid += `<text x="${padL-8}" y="${(y+3).toFixed(1)}" text-anchor="end" font-family="JetBrains Mono" font-size="10" fill="rgba(255,255,255,0.32)">${Math.round(v)}</text>`;
   }
-  // Sparse x labels (week start dates).
+  // X labels every other week — identical cadence + dates to the Z2 hero.
   let xlab = '';
-  const step = Math.ceil(s.length / 6);
-  s.forEach((p,i) => { if (i % step === 0) xlab += `<text x="${X(i).toFixed(1)}" y="${H-6}" text-anchor="middle" font-family="var(--tl-mono)" font-size="9" fill="var(--text-faint)">${(p.date||'').slice(5)}</text>`; });
-  // Band between the two lines = your freshness, tinted by current state.
-  const top = s.map((p,i)=>`${i?'L':'M'}${X(i).toFixed(1)},${Y(p.fitness).toFixed(1)}`).join('');
-  const bot = s.map((p,i)=>`L${X(s.length-1-i).toFixed(1)},${Y(s[s.length-1-i].fatigue).toFixed(1)}`).join('');
-  const band = `<path d="${top}${bot}Z" fill="${fresh?'var(--success)':'var(--danger)'}" fill-opacity="0.12"/>`;
-  const line = (key, col) =>
-    `<path d="${s.map((p,i)=>`${i?'L':'M'}${X(i).toFixed(1)},${Y(p[key]).toFixed(1)}`).join('')}" fill="none" stroke="${col}" stroke-width="2" vector-effect="non-scaling-stroke"/>`;
-  const dot = (key,col)=>`<circle cx="${X(s.length-1).toFixed(1)}" cy="${Y(s[s.length-1][key]).toFixed(1)}" r="3" fill="${col}" stroke="var(--bg-card)" stroke-width="2"/>`;
+  weeks.forEach((w, i) => { if (i % 2 === 0) xlab += `<text x="${X(i).toFixed(1)}" y="${H-8}" text-anchor="middle" font-family="JetBrains Mono" font-size="10" fill="rgba(255,255,255,0.32)">${fmtMonthDay(w.start)}</text>`; });
+
+  const seg = (key) => have.map((o, k) => `${k ? 'L' : 'M'}${X(o.i).toFixed(1)},${Y(o.w[key]).toFixed(1)}`).join('');
+  const fitP = seg('fitness'), fatP = seg('fatigue');
+  const top = have.map((o, k) => `${k ? 'L' : 'M'}${X(o.i).toFixed(1)},${Y(o.w.fitness).toFixed(1)}`).join('');
+  const bot = have.slice().reverse().map(o => `L${X(o.i).toFixed(1)},${Y(o.w.fatigue).toFixed(1)}`).join('');
+  const band = `<path d="${top}${bot}Z" fill="${fresh ? 'var(--success)' : 'var(--danger)'}" fill-opacity="0.13"/>`;
+  const line = (d, col) => `<path d="${d}" fill="none" stroke="${col}" stroke-width="2" vector-effect="non-scaling-stroke"/>`;
+  const dot = (key, col) => { const o = have[have.length-1]; return `<circle cx="${X(o.i).toFixed(1)}" cy="${Y(o.w[key]).toFixed(1)}" r="3" fill="${col}" stroke="#0d1115" stroke-width="2"/>`; };
   host.innerHTML =
-    `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:180px;display:block">` +
-    grid + xlab + band +
-    line('fitness', 'var(--tl-purple)') + line('fatigue', 'var(--tl-amber)') +
-    dot('fitness','var(--tl-purple)') + dot('fatigue','var(--tl-amber)') +
+    `<svg class="tl-hero-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">` +
+    grid + xlab + band + line(fitP, 'var(--tl-purple)') + line(fatP, 'var(--tl-amber)') +
+    dot('fitness', 'var(--tl-purple)') + dot('fatigue', 'var(--tl-amber)') +
     `</svg>`;
 }
 

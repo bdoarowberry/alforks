@@ -5419,6 +5419,19 @@ def _training_answers(n_weeks: int, type_filter, weeks=None) -> dict:
     if not dates:
         return {"answers": None}
     fitness, fatigue, form = training.fitness_fatigue_form(loads)
+    # Sample the daily fitness/fatigue/form onto each week (at its last day) so
+    # the Training-balance chart can share the SAME weekly x-axis as the Z2 chart.
+    _didx = {d: i for i, d in enumerate(dates)}
+    for w in (weeks or []):
+        wk_end = (datetime.fromisoformat(w["start"]).date() + timedelta(days=6)).isoformat()
+        idx = _didx.get(wk_end)
+        if idx is None:
+            prior = [i for d, i in _didx.items() if d <= wk_end]
+            idx = max(prior) if prior else None
+        if idx is not None:
+            w["fitness"] = round(fitness[idx], 1)
+            w["fatigue"] = round(fatigue[idx], 1)
+            w["form"] = round(form[idx], 1)
     acwr_today = training.acwr(loads, len(loads) - 1)
     well = _load_wellness(dates)
 
