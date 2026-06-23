@@ -12,8 +12,8 @@ class TestChangelogParse(unittest.TestCase):
         versions = [r["version"] for r in releases]
         # Versions are now per-release (date + sequence) so multiple releases on
         # one day aren't lumped under a single heading.
-        self.assertEqual(versions[0], "2026.06.23.4")    # newest first (file order)
-        self.assertIn("2026.06.23.3", versions)
+        self.assertEqual(versions[0], "2026.06.23.5")    # newest first (file order)
+        self.assertIn("2026.06.23.4", versions)
         self.assertIn("2026.06.23.1", versions)
         self.assertIn("2026.06.21", versions)
         self.assertTrue(all(r["items"] for r in releases))

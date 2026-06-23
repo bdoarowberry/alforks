@@ -19,12 +19,13 @@
       --tl-dim:     var(--text-secondary);
       --tl-dimmer:  var(--text-muted);
       --tl-ink:     var(--text-primary);
-      /* Semantic accents — chart fills, delta good/bad, hero border. */
-      --tl-green:   oklch(0.78 0.15 145);
-      --tl-red:     oklch(0.7  0.20  25);
-      --tl-blue:    oklch(0.78 0.13 230);
-      --tl-amber:   oklch(0.78 0.16  60);
-      --tl-purple:  oklch(0.72 0.13 305);
+      /* Semantic accents — alias the app's base.css tokens so good/warn/bad
+         read identically to the rest of the app (no parallel palette). */
+      --tl-green:   var(--success);
+      --tl-red:     var(--danger);
+      --tl-blue:    var(--accent);
+      --tl-amber:   var(--warn);
+      --tl-purple:  oklch(0.72 0.13 305);   /* the one genuinely page-local accent */
       /* HR-zone colours. */
       --tl-z1:      oklch(0.6  0.02 240);
       --tl-z2:      oklch(0.78 0.13 230);
@@ -73,11 +74,13 @@
     /* Generic panel */
     .tl-panel { background: var(--tl-panel); border: 1px solid var(--tl-line);
                 border-radius: 4px; padding: 20px 22px; }
-    .tl-panel-hero { padding: 22px 28px; border-left: 3px solid var(--tl-red); }
+    .tl-panel-hero { padding: 22px 28px; }
 
-    .tl-eyebrow { font-size: 9px; color: var(--tl-dimmer); letter-spacing: 0.22em;
-                  text-transform: uppercase; font-weight: 600; }
-    .tl-eyebrow.tight { letter-spacing: 0.18em; }
+    /* One eyebrow spec, matching the app (Summary's .s2-eyebrow): 10px / 0.14em
+       / tertiary. Was 9px/0.22em and too dim — a big part of the "rubbish" feel. */
+    .tl-eyebrow { font-size: 10px; color: var(--text-tertiary); letter-spacing: 0.14em;
+                  text-transform: uppercase; font-weight: 600; font-family: var(--tl-mono); }
+    .tl-eyebrow.tight { letter-spacing: 0.14em; }
 
     /* Info bubble next to chart eyebrows / metric labels.
        — Filled subtle background so it doesn't read as a hollow checkbox
@@ -181,23 +184,25 @@
        breathe; the 10 metric cards fit in a compact 2-col × 5-row
        grid on the right with horizontal value+sparkline cards so
        each row is short enough to match hero height. */
-    .tl-fitness-row { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); gap: 8px; align-items: stretch; }
+    /* Two fitness charts side by side (Z2 trend + fresh/buried balance). */
+    .tl-fitness-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; align-items: stretch; }
+    @media (max-width: 820px) { .tl-fitness-row { grid-template-columns: 1fr; } }
     /* Left column stacks the Z2 hero and the TRIMP load chart so the
        column matches the height of the metrics grid on the right
        (avoids the empty space we used to have under the hero). */
-    .tl-fitness-left { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 
     /* Training-load (TRIMP) chart panel */
-    .tl-trimp-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; margin-bottom: 12px; flex-wrap: wrap; }
-    .tl-trimp-title { font-size: 16px; font-weight: 500; color: #fff; letter-spacing: -0.01em; margin: 4px 0 0; }
-    .tl-trimp-suffix { color: var(--tl-dimmer); font-size: 11px; font-weight: 400; margin-left: 6px; }
-    .tl-trimp-legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 10px; font-family: var(--tl-mono); color: var(--tl-dim); }
+    /* Match the Z2 hero header exactly so the two charts line up. */
+    .tl-trimp-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; margin-bottom: 18px; flex-wrap: wrap; }
+    .tl-trimp-title { font-size: 22px; font-weight: 500; color: #fff; letter-spacing: -0.02em; margin: 6px 0 0; }
+    .tl-trimp-suffix { color: var(--tl-dimmer); font-size: 13px; font-weight: 400; margin-left: 6px; }
+    .tl-trimp-legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 10px; font-family: var(--tl-mono); color: var(--tl-dim); margin-top: 8px; }
     .tl-trimp-legend .item { display: flex; align-items: center; gap: 5px; }
     .tl-trimp-legend .swatch { width: 14px; height: 2px; border-radius: 1px; }
     .tl-trimp-svg { display: block; width: 100%; height: 180px; }
-    .tl-metrics-grid { display: grid; grid-template-columns: 1fr 1fr; grid-auto-rows: 1fr; gap: 6px; }
-    @media (max-width: 1100px) { .tl-metrics-grid { grid-template-columns: repeat(3, 1fr); } }
-    @media (max-width: 600px)  { .tl-metrics-grid { grid-template-columns: 1fr 1fr; } }
+    /* Horizontal KPI strip — 5 keeper tiles across the top of "The record". */
+    .tl-metrics-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
+    @media (max-width: 820px) { .tl-metrics-grid { grid-template-columns: repeat(2, 1fr); } }
 
     /* Compact metric card — label / (value · sparkline) / sub. */
     .tl-load-card { background: var(--tl-panel); border: 1px solid var(--tl-line);
@@ -280,8 +285,7 @@
                         display: flex; justify-content: space-between;
                         font-size: 10px; color: var(--tl-dimmer); font-family: var(--tl-mono); }
 
-    /* ─── Volume / Climbing / Donut row ───────────────────────────── */
-    .tl-vcd-row { display: grid; grid-template-columns: 1.6fr 1fr; gap: 8px; }
+    /* ─── Volume / Climbing charts ────────────────────────────────── */
     .tl-vc-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
     .tl-vc-area { position: relative; height: 140px; display: flex; align-items: flex-end;
                   gap: 6px; padding-left: 36px; padding-bottom: 20px; margin-top: 14px; }
@@ -358,14 +362,10 @@
     @media (max-width: 1100px) {
       .tl-fitness-row { grid-template-columns: 1fr; }
     }
-    @media (max-width: 1000px) {
-      .tl-vcd-row   { grid-template-columns: 1fr; }
-    }
     @media (max-width: 900px) {
       .tl-rt-row    { grid-template-columns: 1fr; }
     }
-    @media (max-width: 600px) {
-      .tl-load-grid { grid-template-columns: 1fr; }
+    @media (max-width: 760px) {
       .tl-vc-grid   { grid-template-columns: 1fr; }
     }
   </style>
@@ -399,44 +399,122 @@
     <div id="tl-type-chips" class="tl-chip-row"></div>
   </div>
 
+  <!-- Plain-language answers (verdict-led). The detailed charts below back them up. -->
+  <style>
+    .tl-answers { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin:0 0 6px; }
+    @media (max-width:760px){ .tl-answers{ grid-template-columns:1fr; } }
+    .tl-answer-card { background:var(--bg-card); border:1px solid var(--border-hair);
+                      border-left:4px solid var(--text-faint); border-radius:4px; padding:16px 18px; }
+    /* "What should I do next?" is the hero — spans the row, larger answer. */
+    .tl-answer-card:first-child { grid-column:1 / -1; padding:20px 22px; }
+    .tl-answer-card:first-child .tl-answer-v { font-size:1.45rem; line-height:1.3; }
+    .tl-answer-card.good { border-left-color:var(--success); background:color-mix(in oklab, var(--success) 8%, var(--bg-card)); }
+    .tl-answer-card.warn { border-left-color:var(--warn);    background:color-mix(in oklab, var(--warn) 8%, var(--bg-card)); }
+    .tl-answer-card.bad  { border-left-color:var(--danger);  background:color-mix(in oklab, var(--danger) 8%, var(--bg-card)); }
+    .tl-answer-card.dim  { border-left-color:var(--text-faint); }
+    .tl-answer-q { font-size:10px; text-transform:uppercase; letter-spacing:0.14em; color:var(--text-tertiary); margin-bottom:8px; font-family:var(--font-mono); font-weight:600; }
+    .tl-answer-v { font-size:1.05rem; color:var(--text-primary); line-height:1.45; font-weight:500; }
+    .tl-answer-sub { margin-top:10px; font-size:0.74rem; color:var(--text-secondary); font-family:var(--font-mono); }
+    .tl-read-eyebrow { font-size:10px; text-transform:uppercase; letter-spacing:0.14em; color:var(--text-tertiary); font-family:var(--font-mono); font-weight:600; margin:4px 0 10px; }
+    .tl-section-q { font-size:1.4rem; color:var(--text-primary); font-weight:500; letter-spacing:-0.02em;
+                    margin:26px 0 8px; padding-top:22px; border-top:1px solid var(--border-hair); }
+    .tl-section-q .sub { display:block; font-size:0.74rem; color:var(--text-tertiary); font-weight:400; margin-top:4px; letter-spacing:0; }
+  </style>
+  <div class="tl-read-eyebrow">Your training read</div>
+  <div id="tl-answers" class="tl-answers"></div>
+
+  <h2 class="tl-section-q">Fitness &amp; freshness<span class="sub">the trends behind the answers above</span></h2>
   <!-- Z2 hero + Training load chart (left column) | metrics grid (right) -->
   <div class="tl-fitness-row">
-    <div class="tl-fitness-left">
-      <div class="tl-panel tl-panel-hero" id="tl-hero">
-        <div class="tl-hero-row">
-          <div>
-            <div class="tl-eyebrow">Aerobic fitness<span class="tl-info-icon" data-tip="An indirect aerobic-fitness indicator from your Z2 HR data.&#10;&#10;As fitness improves, your HR at any given intensity drops — so the line trending DOWN over months means you're getting fitter.&#10;&#10;Read the trend, not the points: single-week wiggles are noise from sleep, hydration, weather, or caffeine. Requires consistent Z2 efforts to be reliable.">?</span></div>
-            <h2 class="tl-hero-title">28-day Z2 heart-rate average <span class="suffix">lower = fitter</span></h2>
-          </div>
-          <div class="tl-hero-right">
-            <div class="tl-eyebrow tight">Latest</div>
-            <div class="tl-hero-latest" id="tl-hero-latest">—<span class="unit">bpm</span></div>
-            <div class="tl-hero-delta" id="tl-hero-delta">&nbsp;</div>
-          </div>
+    <div class="tl-panel tl-panel-hero" id="tl-hero">
+      <div class="tl-hero-row">
+        <div>
+          <div class="tl-eyebrow">Aerobic fitness<span class="tl-info-icon" data-tip="An indirect aerobic-fitness indicator from your Z2 HR data.&#10;&#10;As fitness improves, your HR at any given intensity drops — so the line trending DOWN over months means you're getting fitter.&#10;&#10;Read the trend, not the points: single-week wiggles are noise from sleep, hydration, weather, or caffeine. Requires consistent Z2 efforts to be reliable.">?</span></div>
+          <h2 class="tl-hero-title">Easy-effort heart rate <span class="suffix">lower = fitter</span></h2>
         </div>
-        <div id="tl-hero-chart"></div>
-      </div>
-      <div class="tl-panel" id="tl-trimp-panel">
-        <div class="tl-trimp-head">
-          <div>
-            <div class="tl-eyebrow">Training load · intensity-weighted<span class="tl-info-icon" data-tip="Banister TRIMP per week — intensity-weighted training load.&#10;&#10;Z1×1 + Z2×2 + Z3×3 + Z4×4 + Z5×5, summed in zone-minutes. Bars are the raw weekly TRIMP.&#10;&#10;When acute (amber) crosses ABOVE chronic (purple) you're overloading; below = recovering or detraining. The gap between them is your training stress balance.">?</span></div>
-            <h3 class="tl-trimp-title">Acute vs chronic TRIMP <span class="tl-trimp-suffix">zone-min/wk</span></h3>
-          </div>
-          <div class="tl-trimp-legend">
-            <span class="item"><span class="swatch" style="background:var(--tl-amber)"></span>Acute · 4 wk</span>
-            <span class="item"><span class="swatch" style="background:var(--tl-purple)"></span>Chronic · 8 wk</span>
-          </div>
+        <div class="tl-hero-right">
+          <div class="tl-eyebrow tight">Latest</div>
+          <div class="tl-hero-latest" id="tl-hero-latest">—<span class="unit">bpm</span></div>
+          <div class="tl-hero-delta" id="tl-hero-delta">&nbsp;</div>
         </div>
-        <div id="tl-trimp-chart"></div>
       </div>
+      <div id="tl-hero-chart"></div>
     </div>
-    <div class="tl-metrics-grid" id="tl-metrics-cards"></div>
+    <div class="tl-panel" id="tl-trimp-panel">
+      <div class="tl-trimp-head">
+        <div>
+          <div class="tl-eyebrow">Training balance<span class="tl-info-icon" data-tip="Your built-up fitness (slow purple line) vs recent fatigue (fast amber line).&#10;&#10;When fatigue sits below fitness you're fresh; when it spikes above, you're buried. The shaded gap is your freshness — green when fresh, red when buried.">?</span></div>
+          <h3 class="tl-trimp-title">Fresh or buried? <span class="tl-trimp-suffix">fitness vs fatigue</span></h3>
+          <div class="tl-trimp-legend">
+            <span class="item"><span class="swatch" style="background:var(--tl-purple)"></span>Fitness</span>
+            <span class="item"><span class="swatch" style="background:var(--tl-amber)"></span>Fatigue</span>
+          </div>
+        </div>
+        <div class="tl-hero-right">
+          <div class="tl-eyebrow tight">Freshness</div>
+          <div class="tl-hero-latest" id="tl-balance-now">—</div>
+          <div class="tl-hero-delta" id="tl-balance-state">&nbsp;</div>
+        </div>
+      </div>
+      <div id="tl-trimp-chart"></div>
+    </div>
   </div>
 
-  <!-- Weight log strip — triggered by clicking the Weight metric card
-       above. Form is hidden until the card is clicked; the entries
-       collapsible is always available for editing/deleting history. -->
-  <div class="tl-weight-strip">
+  <h2 class="tl-section-q">Training mix<span class="sub">where your effort goes — easy vs hard</span></h2>
+  <!-- HR zone stack -->
+  <div class="tl-panel" id="tl-hrstack-panel">
+    <div class="tl-hrstack-head">
+      <div>
+        <div class="tl-eyebrow">Weekly HR-zone time<span class="tl-info-icon" data-tip="Time spent in each heart-rate zone, per week.&#10;&#10;Z1 = recovery, Z2 = endurance / base, Z3 = tempo, Z4 = threshold, Z5 = VO2max.&#10;&#10;Most aerobic gains come from a lot of Z2 with limited Z3-Z5 — the classic 80/20 rule says ~80% of training time should be easy.">?</span></div>
+        <div class="tl-hrstack-subtitle">Where you spend your minutes</div>
+      </div>
+      <div class="tl-hrstack-legend" id="tl-hrstack-legend"></div>
+    </div>
+    <div id="tl-hrstack-area"></div>
+  </div>
+
+  <!-- Zone composition (stays with the mix) -->
+  <div class="tl-panel" id="tl-donut">
+    <div class="tl-eyebrow" id="tl-donut-eyebrow">Last 4 weeks · zone composition<span class="tl-info-icon" data-tip="How your last 4 weeks broke down across HR zones.&#10;&#10;Z2 share is the headline number for base season — the classic 60-80% Z2 target.&#10;&#10;Too much Z3 ('grey zone') is the most common mistake: hard enough to fatigue you, not hard enough to drive top-end gains.">?</span></div>
+    <div class="tl-donut-bar"  id="tl-donut-bar"></div>
+    <div class="tl-donut-legend" id="tl-donut-legend"></div>
+    <div class="tl-donut-footer" id="tl-donut-footer">
+      Z2 share is <span class="v" id="tl-donut-z2">—%</span> — aim for 60–80% in base season.
+    </div>
+  </div>
+
+  <h2 class="tl-section-q">The record<span class="sub">what you've actually done</span></h2>
+  <!-- KPI strip: habit + window totals + body weight -->
+  <div class="tl-metrics-grid" id="tl-metrics-cards" style="margin-bottom:8px;"></div>
+  <!-- Weekly volume + climbing -->
+  <div class="tl-vc-grid" style="margin-bottom:8px;">
+    <div class="tl-panel">
+      <div class="tl-eyebrow">Weekly volume<span class="tl-info-icon" data-tip="Total moving hours per week.&#10;&#10;Trend up = building, flat = maintaining, down = backing off.">?</span></div>
+      <div id="tl-volume-chart"></div>
+    </div>
+    <div class="tl-panel">
+      <div class="tl-eyebrow">Weekly climbing<span class="tl-info-icon" data-tip="Total elevation gain per week.&#10;&#10;Excludes lift-assisted segments where automatic detection identifies them.">?</span></div>
+      <div id="tl-climbing-chart"></div>
+    </div>
+  </div>
+  <!-- Records + Activity totals -->
+  <div class="tl-rt-row">
+    <div class="tl-panel" id="tl-records">
+      <div class="tl-records-head">
+        <div class="tl-eyebrow">Personal records · this window</div>
+        <div class="tl-records-range" id="tl-records-range">—</div>
+      </div>
+      <div id="tl-records-body"></div>
+    </div>
+    <div class="tl-panel" id="tl-totals">
+      <div class="tl-eyebrow" id="tl-totals-eyebrow">Activity totals · this window</div>
+      <div id="tl-totals-body" style="margin-top:14px;"></div>
+    </div>
+  </div>
+
+  <!-- Body weight log -->
+  <div class="tl-weight-strip" style="margin-top:10px;">
+    <button type="button" class="tl-weight-add-btn" onclick="openWeightForm()">+ Log weight</button>
     <details class="tl-weight-history" id="tl-weight-history-details">
       <summary>Weight log · <span id="tl-weight-count">0</span> entries</summary>
       <div id="tl-weight-history-body"></div>
@@ -459,55 +537,6 @@
         <button type="button" class="tl-weight-cancel-btn" onclick="closeWeightForm()">Cancel</button>
       </div>
     </form>
-  </div>
-
-  <!-- HR zone stack -->
-  <div class="tl-panel" id="tl-hrstack-panel">
-    <div class="tl-hrstack-head">
-      <div>
-        <div class="tl-eyebrow">Weekly HR-zone time<span class="tl-info-icon" data-tip="Time spent in each heart-rate zone, per week.&#10;&#10;Z1 = recovery, Z2 = endurance / base, Z3 = tempo, Z4 = threshold, Z5 = VO2max.&#10;&#10;Most aerobic gains come from a lot of Z2 with limited Z3-Z5 — the classic 80/20 rule says ~80% of training time should be easy.">?</span></div>
-        <div class="tl-hrstack-subtitle">Where you spend your minutes</div>
-      </div>
-      <div class="tl-hrstack-legend" id="tl-hrstack-legend"></div>
-    </div>
-    <div id="tl-hrstack-area"></div>
-  </div>
-
-  <!-- Volume / Climbing / Donut -->
-  <div class="tl-vcd-row">
-    <div class="tl-vc-grid">
-      <div class="tl-panel">
-        <div class="tl-eyebrow">Weekly volume<span class="tl-info-icon" data-tip="Total moving hours per week.&#10;&#10;Wall-clock duration of recorded activities — trend up = building, flat = maintaining, down = backing off.&#10;&#10;The Acute load card on the right averages the last 4 weeks of this.">?</span></div>
-        <div id="tl-volume-chart"></div>
-      </div>
-      <div class="tl-panel">
-        <div class="tl-eyebrow">Weekly climbing<span class="tl-info-icon" data-tip="Total elevation gain per week.&#10;&#10;Excludes lift-assisted segments where automatic detection identifies them — so a snowboard day shouldn't double-count chair lifts as climbing.">?</span></div>
-        <div id="tl-climbing-chart"></div>
-      </div>
-    </div>
-    <div class="tl-panel" id="tl-donut">
-      <div class="tl-eyebrow" id="tl-donut-eyebrow">Last 4 weeks · zone composition<span class="tl-info-icon" data-tip="How your last 4 weeks broke down across HR zones.&#10;&#10;Z2 share is the headline number for base season — the classic 60-80% Z2 target.&#10;&#10;Too much Z3 ('grey zone') is the most common mistake: hard enough to fatigue you, not hard enough to drive top-end gains.">?</span></div>
-      <div class="tl-donut-bar"  id="tl-donut-bar"></div>
-      <div class="tl-donut-legend" id="tl-donut-legend"></div>
-      <div class="tl-donut-footer" id="tl-donut-footer">
-        Z2 share is <span class="v" id="tl-donut-z2">—%</span> — aim for 60–80% in base season.
-      </div>
-    </div>
-  </div>
-
-  <!-- Records + Activity totals -->
-  <div class="tl-rt-row">
-    <div class="tl-panel" id="tl-records">
-      <div class="tl-records-head">
-        <div class="tl-eyebrow">Personal records · this window</div>
-        <div class="tl-records-range" id="tl-records-range">—</div>
-      </div>
-      <div id="tl-records-body"></div>
-    </div>
-    <div class="tl-panel" id="tl-totals">
-      <div class="tl-eyebrow" id="tl-totals-eyebrow">Activity totals · this window</div>
-      <div id="tl-totals-body" style="margin-top:14px;"></div>
-    </div>
   </div>
 </main>
 
@@ -887,39 +916,23 @@ function renderMetrics(weeks) {
   // → habit (Consistency) → body (Weight) → energy (Calories) → totals.
   // TRIMP load is now the dedicated chart panel below the hero — it
   // used to live here as a card.
+  // De-jargoned keeper set: habit + window totals + body weight. The old load
+  // tiles (Form / Acute / Chronic / Hard hrs / Hard share / Calories) are gone —
+  // they're answered by the verdict cards + the fitness-vs-fatigue chart above.
   const cards = [
-    { lbl: 'Form',         val: fmtSignedHours(tsb),     unit: 'h',    sub: tsbState.label,
-      color: tsbState.color,       spark: form_h_series,
-      tip: 'Chronic minus acute load — your readiness state.\n\nPositive (Fresh): under-trained recently, peak-ready.\nNegative (Fatigued): building, may need recovery.\n\nSlightly negative is normal during a build phase.' },
-    { lbl: 'Acute load',   val: atl.toFixed(1),          unit: 'h/wk', sub: 'avg, last 4 wk',
-      color: 'var(--tl-amber)',    spark: acute_h_series,
-      tip: 'Recent training stress.\n\nAverage weekly hours over the last 4 weeks — reflects what your body is currently absorbing.\n\nHours-based; for the intensity-weighted version see the TRIMP chart above.' },
-    { lbl: 'Chronic load', val: ctl.toFixed(1),          unit: 'h/wk', sub: 'avg, last 8 wk',
-      color: 'var(--tl-purple)',   spark: chronic_h_series,
-      tip: 'Sustained training stress.\n\nAverage weekly hours over the last 8 weeks — your aerobic baseline, what your body is built to absorb.' },
-    { lbl: 'Z2 hrs/wk',    val: z2_avg.toFixed(1),       unit: 'h',    sub: 'avg, last 4 wk',
-      color: 'var(--tl-green)',    spark: z2_h,
-      tip: 'Average hours per week in Zone 2 (endurance), last 4 weeks.\n\nDirect measure of base-aerobic volume — most aerobic adaptation comes from this.\n\nBuild-season target: 4–8+ h/wk.' },
-    { lbl: 'Hard hrs/wk',  val: hard_avg.toFixed(1),     unit: 'h',    sub: 'Z4+Z5, avg 4 wk',
-      color: 'var(--tl-red)',      spark: hard_h,
-      tip: 'Average hours per week in Z4 (threshold) + Z5 (VO2max), last 4 weeks.\n\nThe intensity dose — easy to overshoot without realising.' },
-    { lbl: 'Hard share',   val: hard_share.toFixed(0),   unit: '%',    sub: 'of Z2–Z5 time',
-      color: hardColor,            spark: hard_share_pct,
-      tip: 'Proportion of zoned time (Z2–Z5) spent at Z4+Z5 intensity.\n\nThe 80/20 rule says ~20% hard, ~80% easy.\n\nGreen = in range (10–20%), blue = under-stimulus for top-end gains, red = skewing too hard.' },
     { lbl: 'Consistency',  val: consistency_pct.toFixed(0), unit: '%', sub: `${consistent}/${weeks.length} wk ≥ 3 rides`,
       color: consColor,            spark: rides_series,
-      tip: 'Percentage of weeks in the window with ≥3 activities.\n\nConsistency over months matters more than peak weekly volume for amateur athletes.\n\nSparkline shows weekly ride count.' },
-    _weightCard(weeks),
-    _caloriesCard(weeks),
+      tip: 'Percentage of weeks with at least 3 rides.\n\nConsistency over months matters more than peak weekly volume. Sparkline = weekly ride count.' },
     { lbl: 'Volume',       val: totalH.toFixed(0),      unit: 'h',    sub: `${weeks.length} wk total`,
       color: 'var(--tl-blue)',     spark: volume_h,
       tip: 'Total moving hours across the selected window.' },
     { lbl: 'Distance',     val: Math.round(totalDist).toLocaleString(), unit: 'km', sub: `${(totalDist / Math.max(1, weeks.length)).toFixed(1)} km/wk avg`,
       color: 'var(--tl-purple)',   spark: dist_km,
-      tip: 'Total distance covered across the selected window.\n\nSub-line shows the per-week average.' },
+      tip: 'Total distance across the window.\n\nSub-line shows the per-week average.' },
     { lbl: 'Climbing',     val: Math.round(totalClimb).toLocaleString(), unit: 'm', sub: `${weeks.length} wk total`,
       color: 'var(--tl-amber)',    spark: climb_m,
-      tip: 'Total elevation gain across the window.\n\nExcludes lift-assisted segments where automatic detection identifies them.' },
+      tip: 'Total climbing across the window.\n\nExcludes lift-assisted segments where automatic detection identifies them.' },
+    _weightCard(weeks),
   ];
 
   renderMetricCards('tl-metrics-cards', cards);
@@ -1173,13 +1186,146 @@ function renderTotals(payload) {
   });
 }
 
+// ─── Plain-language answers (the question-led sections) ───────────────────
+const ANSWER_MAP = {
+  next: {
+    go_hard: ['good', "You're recovered — a good day for a hard or long ride."],
+    steady:  ['dim',  "Normal shape — train as planned, nothing's flagged."],
+    easy:    ['warn', "Carrying fatigue — keep it easy or take a rest day."],
+    unknown: ['dim',  "Wear your watch overnight and sync for a recovery read."],
+  },
+  fitter: {
+    rising:  ['good', "Yes — your fitness is trending up."],
+    steady:  ['dim',  "Holding steady — maintaining your fitness."],
+    falling: ['warn', "Slipping — fitness is drifting down."],
+    unknown: ['dim',  "Not enough data yet to call a trend."],
+  },
+  overdoing: {
+    safe:         ['good', "No — you're building at a sustainable rate."],
+    ramping_hard: ['bad',  "Your load jumped fast this week — consider an easier day."],
+    detraining:   ['warn', "Load is low right now — fine for a break, but fitness fades if it continues."],
+    unknown:      ['dim',  "Not enough load history yet."],
+  },
+  mix: {
+    balanced: ['good', "Good balance — roughly the classic 80/20 easy-to-hard."],
+    too_hard: ['warn', "You're skewing hard — add some easy Z2 miles."],
+    too_easy: ['dim',  "Lots of easy riding — add a little intensity for top-end."],
+    unknown:  ['dim',  "Not enough heart-rate data to judge your mix."],
+  },
+};
+function tlArrow(ch, goodDown) {
+  if (ch == null) return '';
+  if (ch > 0.01)  return goodDown ? ' ↑' : ' ↑';
+  if (ch < -0.01) return ' ↓';
+  return ' →';
+}
+function tlAnswerCard(q, state, text, sub) {
+  return `<div class="tl-answer-card ${state}"><div class="tl-answer-q">${q}</div>` +
+         `<div class="tl-answer-v">${text}</div>` +
+         (sub ? `<div class="tl-answer-sub">${sub}</div>` : '') + `</div>`;
+}
+function renderAnswers(p) {
+  const el = document.getElementById('tl-answers');
+  if (!el) return;
+  const a = p.answers, w = p.wellness || {};
+  if (!a) { el.innerHTML = '<div class="tl-answer-card dim"><div class="tl-answer-v">No rides yet — sync some activities to see your training read.</div></div>'; return; }
+  const pick = (grp, key) => ANSWER_MAP[grp][key] || ANSWER_MAP[grp].unknown;
+
+  const [ns, nt] = pick('next', a.next);
+  const nsub = [
+    w.body_battery != null ? `Body Battery ${w.body_battery}` : null,
+    w.resting_hr != null ? `resting HR ${w.resting_hr}${w.resting_hr_baseline ? ` (usual ${w.resting_hr_baseline})` : ''}` : null,
+    w.sleep_hours != null ? `slept ${w.sleep_hours}h` : null,
+    p.form_now != null ? `freshness ${p.form_now >= 0 ? '+' : ''}${p.form_now}` : null,
+  ].filter(Boolean).join('  ·  ');
+
+  const [fs, ft] = pick('fitter', a.fitter);
+  const fsub = [
+    p.est_vo2max != null ? `Est. VO₂max ${p.est_vo2max}${tlArrow(p.est_vo2max_change)}` : null,
+    w.resting_hr != null ? `resting HR ${w.resting_hr}${tlArrow(w.resting_hr_change, true)}` : null,
+    p.z2_hr != null ? `easy-effort HR ${p.z2_hr}${tlArrow(p.z2_change, true)}` : null,
+  ].filter(Boolean).join('  ·  ') || 'Not enough heart-rate history yet — keep riding and syncing.';
+
+  const [os, ot] = pick('overdoing', a.overdoing);
+  const osub = p.acwr != null ? `Load ratio (recent vs long-term) ${p.acwr.toFixed(2)}` : 'No load in the last week';
+
+  const [ms, mt] = pick('mix', a.mix);
+  const pol = p.polarization;
+  const msub = pol
+    ? `Easy ${Math.round(pol.easy*100)}%  ·  Moderate ${Math.round(pol.moderate*100)}%  ·  Hard ${Math.round(pol.hard*100)}%`
+    : '';
+
+  el.innerHTML =
+    tlAnswerCard('What should I do next?', ns, nt, nsub) +
+    tlAnswerCard('Am I getting fitter?',  fs, ft, fsub) +
+    tlAnswerCard('Am I overdoing it?',    os, ot, osub) +
+    tlAnswerCard('Am I training right?',  ms, mt, msub);
+}
+
+// Training balance — fitness (slow) vs fatigue (fast), sampled WEEKLY so it
+// shares the exact x-axis + geometry of the Z2 hero chart beside it. The band
+// between the lines = freshness (green when fresh, red when buried).
+function renderLoadBalance(payload) {
+  const host = document.getElementById('tl-trimp-chart');
+  if (!host) return;
+  // Header value block — mirrors the Z2 hero's "Latest" so the two headers
+  // (and therefore the charts below them) are the same height.
+  const f = payload.form_now;
+  const nowEl = document.getElementById('tl-balance-now');
+  const stateEl = document.getElementById('tl-balance-state');
+  if (nowEl)   nowEl.textContent = f == null ? '—' : `${f >= 0 ? '+' : ''}${f}`;
+  if (stateEl) {
+    const label = f == null ? '' : f > 1 ? 'Fresh' : f < -1 ? 'Buried' : 'Steady';
+    stateEl.textContent = label;
+    stateEl.className = 'tl-hero-delta ' + (f > 1 ? 'good' : f < -1 ? 'bad' : '');
+  }
+  const weeks = payload.weeks || [];
+  const have = weeks.map((w, i) => ({ w, i })).filter(o => o.w.fitness != null);
+  if (have.length < 2 || weeks.length < 2) {
+    host.innerHTML = '<div style="padding:30px;text-align:center;color:var(--text-muted);font-size:12px">Not enough history yet — keep riding and syncing.</div>';
+    return;
+  }
+  // Identical geometry to renderHero so the two charts line up exactly.
+  const W = 720, H = 220, padL = 44, padR = 16, padT = 16, padB = 28;
+  const vals = have.flatMap(o => [o.w.fitness, o.w.fatigue]);
+  const max = Math.max(1, ...vals);
+  const X = i => padL + (i / (weeks.length - 1)) * (W - padL - padR);
+  const Y = v => (H - padB) - (H - padT - padB) * (v / max);
+  const lastWk = have[have.length - 1].w;
+  const fresh = lastWk.fitness >= lastWk.fatigue;
+
+  let grid = '';
+  for (let g = 0; g <= 4; g++) {
+    const v = max * g / 4, y = Y(v);
+    grid += `<line x1="${padL}" y1="${y.toFixed(1)}" x2="${W-padR}" y2="${y.toFixed(1)}" stroke="rgba(255,255,255,0.05)" stroke-dasharray="2,4"/>`;
+    grid += `<text x="${padL-8}" y="${(y+3).toFixed(1)}" text-anchor="end" font-family="JetBrains Mono" font-size="10" fill="rgba(255,255,255,0.32)">${Math.round(v)}</text>`;
+  }
+  // X labels every other week — identical cadence + dates to the Z2 hero.
+  let xlab = '';
+  weeks.forEach((w, i) => { if (i % 2 === 0) xlab += `<text x="${X(i).toFixed(1)}" y="${H-8}" text-anchor="middle" font-family="JetBrains Mono" font-size="10" fill="rgba(255,255,255,0.32)">${fmtMonthDay(w.start)}</text>`; });
+
+  const seg = (key) => have.map((o, k) => `${k ? 'L' : 'M'}${X(o.i).toFixed(1)},${Y(o.w[key]).toFixed(1)}`).join('');
+  const fitP = seg('fitness'), fatP = seg('fatigue');
+  const top = have.map((o, k) => `${k ? 'L' : 'M'}${X(o.i).toFixed(1)},${Y(o.w.fitness).toFixed(1)}`).join('');
+  const bot = have.slice().reverse().map(o => `L${X(o.i).toFixed(1)},${Y(o.w.fatigue).toFixed(1)}`).join('');
+  const band = `<path d="${top}${bot}Z" fill="${fresh ? 'var(--success)' : 'var(--danger)'}" fill-opacity="0.13"/>`;
+  const line = (d, col) => `<path d="${d}" fill="none" stroke="${col}" stroke-width="2" vector-effect="non-scaling-stroke"/>`;
+  const dot = (key, col) => { const o = have[have.length-1]; return `<circle cx="${X(o.i).toFixed(1)}" cy="${Y(o.w[key]).toFixed(1)}" r="3" fill="${col}" stroke="#0d1115" stroke-width="2"/>`; };
+  host.innerHTML =
+    `<svg class="tl-hero-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">` +
+    grid + xlab + band + line(fitP, 'var(--tl-purple)') + line(fatP, 'var(--tl-amber)') +
+    dot('fitness', 'var(--tl-purple)') + dot('fatigue', 'var(--tl-amber)') +
+    `</svg>`;
+}
+
 // ─── Page render orchestration ────────────────────────────────────────────
 function render(payload) {
   CURRENT = payload;
   document.getElementById('tl-meta').textContent = `${payload.n_weeks} weeks of data`;
+  renderAnswers(payload);
   renderHero(payload.weeks);
-  renderTrimpChart(payload.weeks);
-  renderMetrics(payload.weeks);
+  renderLoadBalance(payload);   // correct fitness-vs-fatigue, replaces TRIMP jargon
+  renderMetrics(payload.weeks); // trimmed keeper tiles (consistency, totals, weight)
   renderHRStack(payload.weeks);
   renderBarChart('tl-volume-chart',   payload.weeks, 'hours',  'h', 'volume');
   renderBarChart('tl-climbing-chart', payload.weeks, 'gain_m', 'm', 'climbing');
@@ -1293,24 +1439,6 @@ function _weightCard(weeks) {
 // Backend (_compute_fitness_weeks) computes kcal per activity using
 // HR-zone-weighted METs when available, per-sport MET fallback otherwise,
 // and the most recent logged weight on or before each activity.
-function _caloriesCard(weeks) {
-  const kcal_per_week = weeks.map(w => w.kcal || 0);
-  const total = kcal_per_week.reduce((s, v) => s + v, 0);
-  const avg   = weeks.length ? total / weeks.length : 0;
-  const hasWeight = WEIGHTS && WEIGHTS.length > 0;
-  return {
-    lbl: 'Calories',
-    val: Math.round(total).toLocaleString(),
-    unit: 'kcal',
-    sub: hasWeight
-      ? `${Math.round(avg).toLocaleString()} kcal/wk avg`
-      : `assumes 75 kg — log your weight`,
-    color: 'var(--tl-amber)',
-    spark: kcal_per_week,
-    tip: 'Estimated calories burned across the visible window.\n\nPer-activity kcal uses HR-zone-weighted METs (Z1×3, Z2×5, Z3×8, Z4×11, Z5×14) when HR data is available — so a hard week scores higher than the same hours of easy spinning. Falls back to per-sport METs otherwise.\n\nMultiplied by your most recent logged weight on each activity\'s date. Defaults to 75 kg if you haven\'t logged anything.',
-  };
-}
-
 function renderWeight() {
   const countEl  = document.getElementById('tl-weight-count');
   const histBody = document.getElementById('tl-weight-history-body');

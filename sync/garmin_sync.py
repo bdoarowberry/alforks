@@ -330,6 +330,21 @@ def systemic_failure_message(failures: int, synced_ok: int,
             f"connection and try again. (last error: {last_err})")
 
 
+def _sync_wellness(client, throttle):
+    """Best-effort daily-wellness refresh (VO2max / Body Battery / resting HR /
+    sleep) for the Training page, reusing the logged-in client. Bounded via
+    max_new so a first-time backfill spreads over syncs and never blows the
+    app's 10-minute sync timeout. Never fails the HR sync."""
+    try:
+        import garmin_wellness
+        garmin_wellness.cmd_sync(days=90, max_new=30, throttle=max(throttle, 1.0),
+                                 client=client)
+    except SystemExit as e:
+        print(f"  (wellness: {e})")
+    except Exception as e:
+        print(f"  (wellness sync skipped: {type(e).__name__}: {e})")
+
+
 def cmd_sync(only_missing: bool = True, throttle: float = 1.0,
              retry_empty: bool = False):
     client = get_client(interactive=False)
@@ -347,6 +362,7 @@ def cmd_sync(only_missing: bool = True, throttle: float = 1.0,
     if not dates:
         print(f"Nothing to sync - all {len(all_dates)} activity dates fully covered.")
         update_status(last_sync=int(time.time()), last_synced=0, total_dates=len(all_dates))
+        _sync_wellness(client, throttle)
         return
 
     missing = sum(1 for d in dates if not hr_cache_path(d).exists())
@@ -391,6 +407,7 @@ def cmd_sync(only_missing: bool = True, throttle: float = 1.0,
     suffix = f" ({failures} failed)" if failures else ""
     print(f"\n[OK] Synced {synced_ok} / {len(dates)} dates "
           f"({total_samples:,} HR samples){suffix}.")
+    _sync_wellness(client, throttle)
 
 
 def cmd_retry_date(date_str: str):

@@ -31,6 +31,7 @@ import trail_match
 import route_builder
 import route_attempts
 import route_suggestions
+import training
 import secrets
 from geo import point_in_polygon as _point_in_polygon
 from detection import (
@@ -710,7 +711,11 @@ def _activities_cache_key_compute() -> tuple:
     # the old centroid-matched answers until the user touched a file.
     # hr_max_mtime invalidates when an existing HR file is overwritten by
     # an incomplete-date re-fetch; previously only count changes were caught.
+    # CONFIG_FILE mtime is included so changing max_hr_override (which shifts
+    # every baked HR zone) re-bakes the sidebar entries — otherwise the zones
+    # stay computed against the old max HR until a file is touched.
     return (_stat_mtime(GPX_DIR), _stat_mtime(METADATA_FILE), _stat_mtime(REGIONS_FILE), _stat_mtime(TYPES_FILE),
+            _stat_mtime(CONFIG_FILE),
             hr_count, hr_max_mtime, _REGION_MATCH_VERSION)
 
 
@@ -801,6 +806,7 @@ def _sidebar_fingerprint(gpx_mtime: float, file_meta: dict,
         gpx_mtime=gpx_mtime, file_meta=file_meta,
         regions_mtime=regions_mtime, types_mtime=types_mtime,
         algo_sig=ALGO_SIG, region_match_version=_REGION_MATCH_VERSION,
+        max_hr=_effective_max_hr(), resting_hr=_effective_resting_hr(),
     )
 
 
@@ -4738,7 +4744,7 @@ def _merge_hr_into_data(data: dict) -> dict:
             hr_mtime = (HR_CACHE_DIR / f"{date_str}.json").stat().st_mtime
         except OSError:
             hr_mtime = 0
-        cache_key = (fname, gpx_mtime, hr_mtime, _effective_max_hr())
+        cache_key = (fname, gpx_mtime, hr_mtime, _effective_max_hr(), _effective_resting_hr())
         cached = _hr_merge_cache_get(cache_key)
         if cached is not None:
             data = {**data, "hr_samples": cached["hr_samples"]}
@@ -4830,14 +4836,18 @@ def _merge_hr_into_data(data: dict) -> dict:
     if not bpms:
         return data
 
-    # Time in HR zones based on the user's effective max HR. Walk consecutive
-    # samples (skipping gaps over 5 min) and accumulate the average-bpm interval
-    # into the matching zone. Restricted to the exact activity window — the
-    # 2-min buffer used for hr_avg/hr_max would count trailhead resting HR as
-    # zone time, which skews the distribution.
+    # Time in HR zones using HR RESERVE (Karvonen): pct = (HR - rest)/(max - rest).
+    # More accurate per-person than raw %max — raw %max systematically over-rates
+    # intensity (shoves time into high zones) for anyone with a normal resting HR.
+    # Walk consecutive samples (skipping gaps over 5 min) and accumulate the
+    # average-bpm interval into the matching zone. Restricted to the exact
+    # activity window — the 2-min buffer used for hr_avg/hr_max would count
+    # trailhead resting HR as zone time, which skews the distribution.
     max_hr = _effective_max_hr()
+    rest_hr = _effective_resting_hr()
+    hrr = (max_hr - rest_hr) if max_hr else 0
     zones = [0, 0, 0, 0, 0]
-    if max_hr:
+    if hrr > 0:
         ordered = [(ms, bpm) for ms, bpm in in_window
                    if bpm is not None and first_ms <= ms <= last_ms]
         ordered.sort(key=lambda x: x[0])
@@ -4848,7 +4858,7 @@ def _merge_hr_into_data(data: dict) -> dict:
             if dt <= 0 or dt > 300:
                 continue
             avg_bpm = (bpm_prev + bpm_cur) / 2
-            pct = avg_bpm / max_hr
+            pct = (avg_bpm - rest_hr) / hrr
             if   pct < 0.6: z = 0
             elif pct < 0.7: z = 1
             elif pct < 0.8: z = 2
@@ -4920,6 +4930,37 @@ def _effective_max_hr() -> int | None:
     if isinstance(override, (int, float)) and override > 0:
         return int(override)
     return _observed_max_hr()
+
+
+_RESTING_HR_DEFAULT = 60
+_resting_hr_memo = None
+
+
+def _effective_resting_hr() -> int:
+    """The rider's typical resting HR, for HR-reserve (Karvonen) zones — more
+    accurate per-person than raw %max. Config override, else the median of the
+    Garmin daily resting-HR cache, else a sane default. Memoized per process
+    (resting HR is stable within a session)."""
+    global _resting_hr_memo
+    override = load_config().get("resting_hr_override")
+    if isinstance(override, (int, float)) and override > 0:
+        return int(override)
+    if _resting_hr_memo is not None:
+        return _resting_hr_memo
+    vals = []
+    try:
+        for fp in WELLNESS_CACHE_DIR.glob("*.json"):
+            try:
+                v = json.loads(fp.read_text(encoding="utf-8")).get("resting_hr")
+                if v:
+                    vals.append(int(v))
+            except Exception:
+                pass
+    except OSError:
+        pass
+    vals.sort()
+    _resting_hr_memo = vals[len(vals) // 2] if vals else _RESTING_HR_DEFAULT
+    return _resting_hr_memo
 
 
 def _downsample_polyline(points: list, n: int = 50) -> list:
@@ -5294,6 +5335,190 @@ def _fmt_hours_h_mm(hours: float) -> str:
     return f"{total_min // 60}:{total_min % 60:02d}"
 
 
+WELLNESS_CACHE_DIR = CACHE_DIR / "wellness"
+
+
+def _build_daily_loads(type_filter):
+    """Continuous per-day training load from the rider's FIRST ride to today
+    (0 on rest days), using the HR-optional calibrated model (training.py).
+    Returns (dates, loads, per_day_zone_seconds, k). Full history so the EWMA
+    series has converged by the time we display a window."""
+    pairs, recs = [], []
+    for a in all_activities():
+        if a.get("excluded"):
+            continue
+        date = (a.get("date") or "")[:10]
+        if not date:
+            continue
+        ttype = (a.get("meta") or {}).get("type") or a.get("effective_type") or ""
+        if type_filter and ttype not in type_filter:
+            continue
+        s = a.get("stats") or {}
+        zones = s.get("hr_zones")
+        has_hr = bool(a.get("has_hr") and zones and any(zones))
+        dur = int(s.get("duration_sec") or 0)
+        gain = float(s.get("elev_gain_m") or 0)
+        dist = float(s.get("distance_km") or 0)
+        met = _TYPE_METS.get(ttype, 6.0)
+        recs.append((date, has_hr, zones, dur, gain, dist, met))
+        if has_hr:
+            hl = training.hr_load(zones)
+            sl = training.surrogate_load(dur, gain, dist, met)
+            if hl > 0 and sl > 0:
+                pairs.append((hl, sl))
+    k = training.calibrate_k(pairs)
+    day_load: dict[str, float] = {}
+    day_zones: dict[str, list] = {}
+    for (date, has_hr, zones, dur, gain, dist, met) in recs:
+        day_load[date] = day_load.get(date, 0.0) + training.ride_load(
+            has_hr, zones, dur, gain, dist, met, k)
+        if has_hr and zones:
+            dz = day_zones.setdefault(date, [0] * 5)
+            for i in range(min(5, len(zones))):
+                dz[i] += int(zones[i])
+    if not day_load:
+        return [], [], {}, k
+    first = min(datetime.fromisoformat(d).date() for d in day_load)
+    today = datetime.now().date()
+    dates, loads, d = [], [], first
+    while d <= today:
+        ds = d.isoformat()
+        dates.append(ds)
+        loads.append(round(day_load.get(ds, 0.0), 1))
+        d += timedelta(days=1)
+    return dates, loads, day_zones, k
+
+
+def _load_wellness(dates):
+    """{date: summary} from cache/wellness for the given dates that exist."""
+    out = {}
+    for ds in dates:
+        fp = WELLNESS_CACHE_DIR / f"{ds}.json"
+        if fp.exists():
+            try:
+                out[ds] = json.loads(fp.read_text(encoding="utf-8"))
+            except Exception:
+                pass
+    return out
+
+
+def _latest_wellness(well, dates, field):
+    """Most-recent non-null value of `field`, scanning newest-first."""
+    for ds in reversed(dates):
+        v = (well.get(ds) or {}).get(field)
+        if v is not None:
+            return v, ds
+    return None, None
+
+
+def _training_answers(n_weeks: int, type_filter, weeks=None) -> dict:
+    """The question-section payload: the daily load/fitness/fatigue/form series,
+    ACWR, the latest Garmin wellness signals + their trends, polarization +
+    monotony, and the four plain-language section verdicts."""
+    dates, loads, day_zones, _k = _build_daily_loads(type_filter)
+    if not dates:
+        return {"answers": None}
+    fitness, fatigue, form = training.fitness_fatigue_form(loads)
+    # Sample the daily fitness/fatigue/form onto each week (at its last day) so
+    # the Training-balance chart can share the SAME weekly x-axis as the Z2 chart.
+    _didx = {d: i for i, d in enumerate(dates)}
+    for w in (weeks or []):
+        wk_end = (datetime.fromisoformat(w["start"]).date() + timedelta(days=6)).isoformat()
+        idx = _didx.get(wk_end)
+        if idx is None:
+            prior = [i for d, i in _didx.items() if d <= wk_end]
+            idx = max(prior) if prior else None
+        if idx is not None:
+            w["fitness"] = round(fitness[idx], 1)
+            w["fatigue"] = round(fatigue[idx], 1)
+            w["form"] = round(form[idx], 1)
+    acwr_today = training.acwr(loads, len(loads) - 1)
+    well = _load_wellness(dates)
+
+    vo2, vo2_date = _latest_wellness(well, dates, "vo2max")
+    rhr, _ = _latest_wellness(well, dates, "resting_hr")
+    # Readiness uses the day's PEAK Body Battery (the morning recharge after
+    # sleep), not bb_end which is always low at bedtime.
+    bb, bb_date = _latest_wellness(well, dates, "bb_high")
+    sleep_sec, sleep_date = _latest_wellness(well, dates, "sleep_sec")
+    tstatus, _ = _latest_wellness(well, dates, "training_status")
+    sleep_hours = round(sleep_sec / 3600, 1) if sleep_sec else None
+
+    # Weekly samples (last value per ISO week) for trend direction.
+    def weekly(field):
+        wk = {}
+        for ds in dates:
+            v = (well.get(ds) or {}).get(field)
+            if v is not None:
+                day = datetime.fromisoformat(ds).date()
+                wk[(day - timedelta(days=day.weekday())).isoformat()] = v
+        return [wk[m] for m in sorted(wk)]
+
+    vo2_change = training.trend(weekly("vo2max"), 4)
+    rhr_change = training.trend(weekly("resting_hr"), 4)
+    fit_change = training.trend(fitness, 7)
+    # Z2 aerobic-efficiency trend (avg HR at easy effort; down = fitter). From
+    # the weekly z2_hr_28d rollups — a power-free fitness signal that, unlike a
+    # running-only VO2max, actually reflects the rider's MTB aerobic base.
+    z2_series = [w.get("z2_hr_28d") for w in (weeks or []) if w.get("z2_hr_28d") is not None]
+    z2_change = training.trend(z2_series, 4)
+
+    recent_rhr = sorted(v for ds in dates[-30:]
+                        for v in [(well.get(ds) or {}).get("resting_hr")] if v is not None)
+    rhr_baseline = recent_rhr[len(recent_rhr) // 2] if recent_rhr else None
+
+    win_days = set(dates[-n_weeks * 7:])
+    ztot = [0] * 5
+    for ds, dz in day_zones.items():
+        if ds in win_days:
+            for i in range(5):
+                ztot[i] += dz[i]
+    pol = training.polarization(ztot)
+    mono = training.monotony(loads[-28:]) if len(loads) >= 28 else None
+
+    form_now = form[-1] if form else None
+    answers = {
+        "fitter":    training.fitness_verdict(rhr_change, z2_change, fit_change),
+        "next":      training.readiness_verdict(bb, rhr, rhr_baseline, sleep_hours, form_now),
+        "overdoing": training.load_risk_verdict(acwr_today),
+        "mix":       training.mix_verdict(pol[2] if pol else None),
+    }
+    slice_n = n_weeks * 7
+    series = [{"date": dates[i], "load": loads[i],
+               "fitness": round(fitness[i], 1), "fatigue": round(fatigue[i], 1),
+               "form": round(form[i], 1)}
+              for i in range(max(0, len(dates) - slice_n), len(dates))]
+
+    return {
+        "answers":   answers,
+        "series":    series,
+        "acwr":      round(acwr_today, 2) if acwr_today is not None else None,
+        "form_now":  round(form_now, 1) if form_now is not None else None,
+        "fitness_now": round(fitness[-1], 1) if fitness else None,
+        "polarization": ({"easy": round(pol[0], 3), "moderate": round(pol[1], 3),
+                          "hard": round(pol[2], 3)} if pol else None),
+        "monotony":  round(mono, 2) if mono is not None else None,
+        "z2_change": round(z2_change, 3) if z2_change is not None else None,
+        "z2_hr": (z2_series[-1] if z2_series else None),
+        # Homegrown VO2max estimate (Uth: 15.3*HRmax/HRrest) — our own number,
+        # from the rider's data, replacing the running-only Garmin one. It rises
+        # as resting HR falls, so its trend is the inverse of resting HR's.
+        "est_vo2max": training.est_vo2max(_effective_max_hr(), rhr),
+        "est_vo2max_change": (-rhr_change if rhr_change is not None else None),
+        "wellness": {
+            # VO2max kept for reference but flagged unreliable: a running-only
+            # Garmin ignores cycling + climbing, so it's not a valid MTB fitness
+            # signal. The page must not lead with it.
+            "vo2max": vo2, "vo2max_date": vo2_date, "vo2max_unreliable": True,
+            "resting_hr": rhr, "resting_hr_baseline": rhr_baseline,
+            "resting_hr_change": round(rhr_change, 3) if rhr_change is not None else None,
+            "body_battery": bb, "body_battery_date": bb_date,
+            "sleep_hours": sleep_hours, "sleep_date": sleep_date,
+            "training_status": tstatus,
+        },
+    }
+
+
 def _compute_training_load(n_weeks: int, type_filter: set | None = None) -> dict:
     """Build the Training Load page payload: N weeks of fitness rollups, the
     in-window activities for window-scoped PRs, and per-type totals rolled up
@@ -5401,6 +5626,10 @@ def _compute_training_load(n_weeks: int, type_filter: set | None = None) -> dict
         "window_start": win_start.isoformat(),
         "window_end":   win_end.isoformat(),
         "n_weeks":      n_weeks,
+        # Question-section payload: load/fitness/fatigue/form series, ACWR,
+        # Garmin wellness signals + trends, polarization/monotony, and the four
+        # plain-language verdicts.
+        **_training_answers(n_weeks, type_filter, weeks),
     }
 
 
