@@ -160,6 +160,49 @@ nav a.active .nav-pill { background: #fbbf24; }
 .nav-upload-btn:active { transform: translateY(1px); }
 .nav-upload-btn[disabled] { opacity: 0.55; cursor: default; }
 
+/* Version chip — injected into the header by whatsnew.js on every page. A
+   quiet mono label that links to the release notes; brightens on hover. */
+.app-version {
+  font-size: 0.66rem;
+  font-family: var(--font-mono);
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  text-decoration: none;
+  padding: 3px 8px;
+  border-radius: 3px;
+  white-space: nowrap;
+  transition: color 0.12s, background 0.12s;
+}
+.app-version:hover { color: var(--accent); background: var(--accent-soft); }
+
+/* Post-update banner — inserted as the first <body> child by whatsnew.js, so it
+   sits above the header and pushes content down (no overlap) on flow and
+   flex-column pages alike. Dismissible; reappears only on the next version bump. */
+.whatsnew-banner {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 9px 18px;
+  background: var(--accent-soft);
+  border-bottom: 1px solid var(--accent);
+  color: var(--text-primary);
+  font-size: 0.8rem;
+  flex-shrink: 0;
+}
+.whatsnew-banner a { color: var(--accent); font-weight: 600; text-decoration: none; }
+.whatsnew-banner a:hover { text-decoration: underline; }
+.whatsnew-banner .wn-dismiss {
+  margin-left: auto;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 1.05rem;
+  line-height: 1;
+  padding: 2px 6px;
+}
+.whatsnew-banner .wn-dismiss:hover { color: var(--text-primary); }
+
 
 /* Filter chip (canonical) — neutral-white active state. Used by
    Summary, Heatmap, archived Summary, anywhere a year/type/preset

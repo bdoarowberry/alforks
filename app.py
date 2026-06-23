@@ -22,6 +22,7 @@ from pathlib import Path
 
 import gpxpy
 from flask import Flask, Response, abort, jsonify, redirect, render_template, request
+from markupsafe import Markup, escape
 from werkzeug.utils import secure_filename
 
 from cache_utils import LRUCache, _atomic_write, init_backup_tracking
@@ -281,7 +282,9 @@ def _asset_version(filename: str) -> str:
 
 @app.context_processor
 def _inject_asset_helper():
-    return {"asset_v": _asset_version}
+    # `app_version` is injected globally so the shared _head.html can stamp the
+    # running version into every page (the What's New chip + update banner read it).
+    return {"asset_v": _asset_version, "app_version": _app_version()}
 
 
 def _app_version() -> str:
@@ -292,6 +295,45 @@ def _app_version() -> str:
         return (_ROOT / "VERSION").read_text(encoding="utf-8").strip() or "dev"
     except OSError:
         return "dev"
+
+
+def _md_inline(s: str) -> Markup:
+    """Render the small subset of inline markdown the changelog actually uses.
+    Escapes HTML first, then turns **bold** -> <strong> and `code` -> <code>.
+    Returns Markup so Jinja emits it without re-escaping."""
+    out = str(escape(s))
+    out = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", out)
+    out = re.sub(r"`(.+?)`", r"<code>\1</code>", out)
+    return Markup(out)
+
+
+def _parse_changelog() -> list[dict]:
+    """Parse CHANGELOG.md into [{version, items:[Markup, ...]}], newest first
+    (file order). A line `## X` opens a release; `- ...` is a bullet; a wrapped
+    continuation line (indented, non-bullet) is folded into the current bullet.
+    Raw text is accumulated per bullet and rendered once at the end so inline
+    markdown isn't double-processed. Returns [] if the file is missing."""
+    try:
+        text = (_ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    except OSError:
+        return []
+    releases: list[dict] = []
+    cur: dict | None = None     # {"version": str, "raw": [str, ...]}
+    for raw in text.splitlines():
+        head = re.match(r"^##\s+(.+?)\s*$", raw)
+        if head:
+            cur = {"version": head.group(1), "raw": []}
+            releases.append(cur)
+            continue
+        if cur is None:
+            continue
+        bullet = re.match(r"^-\s+(.*)$", raw)
+        if bullet:
+            cur["raw"].append(bullet.group(1).strip())
+        elif raw.strip() and cur["raw"]:
+            cur["raw"][-1] += " " + raw.strip()     # wrapped continuation
+    return [{"version": r["version"], "items": [_md_inline(b) for b in r["raw"]]}
+            for r in releases]
 
 
 # ─── Config ───────────────────────────────────────────────────────────────────
@@ -7136,6 +7178,14 @@ def _maybe_autosync_on_startup():
 @app.route("/guide")
 def guide_page():
     return render_template("guide.html", version=_app_version())
+
+
+@app.route("/whatsnew")
+def whatsnew_page():
+    """In-app release notes, rendered from CHANGELOG.md. Reached via the version
+    chip in the header (injected by whatsnew.js) and the post-update banner."""
+    return render_template("whatsnew.html",
+                           releases=_parse_changelog(), version=_app_version())
 
 
 @app.route("/setup")

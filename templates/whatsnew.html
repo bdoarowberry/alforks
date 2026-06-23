@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  {% include '_head.html' %}
+  <title>AlForks – What's New</title>
+  <link rel="stylesheet" href="/static/base.css?v={{ asset_v('base.css') }}">
+  <script src="/static/sync_toast.js?v={{ asset_v('sync_toast.js') }}" defer></script>
+  <style>
+    /* What's New — release notes rendered from CHANGELOG.md. Tokens, fonts and
+       the header/wordmark chrome come from base.css; this is just the column. */
+    body { min-height: 100vh; display: flex; flex-direction: column; }
+    .wn-main { flex: 1; width: 100%; max-width: 780px; margin: 0 auto; padding: 40px 24px 64px; }
+
+    .wn-head { margin-bottom: 30px; }
+    .wn-head h1 { font-size: 1.7rem; font-weight: 600; color: var(--text-primary); letter-spacing: -0.02em; margin: 0 0 8px; }
+    .wn-head p  { color: var(--text-secondary); font-size: 0.92rem; margin: 0; }
+
+    /* One card per release. The newest sits first (file order) and is badged. */
+    .rel { background: var(--bg-card); border: 1px solid var(--border-hair); border-radius: 10px;
+           padding: 20px 24px; margin-bottom: 18px; }
+    .rel-head { display: flex; align-items: center; gap: 12px; margin-bottom: 14px;
+                padding-bottom: 12px; border-bottom: 1px solid var(--border-hair); }
+    .rel-ver { font-family: var(--font-mono); font-size: 1.0rem; font-weight: 600; color: var(--text-primary);
+               letter-spacing: 0.02em; }
+    .rel-badge { font-family: var(--font-mono); font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.1em;
+                 color: #0b0d0c; background: var(--accent); padding: 2px 8px; border-radius: 8px; font-weight: 600; }
+
+    .rel ul { list-style: none; margin: 0; padding: 0; }
+    .rel li { position: relative; padding: 6px 0 6px 22px; color: var(--text-secondary); font-size: 0.9rem; line-height: 1.5; }
+    .rel li::before { content: '›'; position: absolute; left: 4px; top: 6px; color: var(--accent); font-weight: 700; }
+    .rel li strong { color: var(--text-primary); font-weight: 600; }
+    .rel li code { font-family: var(--font-mono); font-size: 0.84em; background: var(--surface-tint);
+                   padding: 1px 5px; border-radius: 4px; color: var(--text-primary); }
+
+    .wn-empty { color: var(--text-muted); font-size: 0.9rem; }
+    .foot { margin-top: 26px; color: var(--text-muted); font-size: 0.74rem; font-family: var(--font-mono);
+            text-align: center; letter-spacing: 0.04em; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1><span>Al</span>Forks</h1>
+    <nav>
+      <a href="/">Summary</a>
+      <a href="/logs">Logs</a>
+      <a href="/heatmap">Heat Map</a>
+      <a href="/training">Training</a>
+      <a href="/trails">Trails</a>
+      <a href="/review">Review</a>
+      <a href="/setup">Setup</a>
+    </nav>
+    <button class="nav-sync-btn" onclick="triggerSyncAll()" title="Sync Strava + Garmin now">Sync</button>
+  </header>
+
+  <main class="wn-main">
+    <div class="wn-head">
+      <h1>What's New</h1>
+      <p>Recent changes to AlForks. You're running <strong>v{{ version }}</strong>.</p>
+    </div>
+
+    {% for rel in releases %}
+    <section class="rel">
+      <div class="rel-head">
+        <span class="rel-ver">v{{ rel.version }}</span>
+        {% if rel.version == version %}<span class="rel-badge">Latest</span>{% endif %}
+      </div>
+      <ul>
+        {% for item in rel['items'] %}<li>{{ item }}</li>{% endfor %}
+      </ul>
+    </section>
+    {% else %}
+    <p class="wn-empty">No release notes are available yet.</p>
+    {% endfor %}
+
+    <div class="foot">AlForks &middot; v{{ version }} &middot; runs locally on your machine</div>
+  </main>
+</body>
+</html>

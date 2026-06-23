@@ -1,5 +1,14 @@
 # AlForks — Changelog
 
+## 2026.06.23
+- **Find a ride from the map** — the Heat Map page now has a ride list down the
+  right side (newest first). Hover a ride to light up its track on the map (and
+  vice-versa), and click to open that ride's log.
+- **Region zoom** on the Heat Map — pick a region to fly the map to it and outline
+  its boundary. It only moves the camera; your rides and filters stay put.
+- **What's New** page (this one, at `/whatsnew`) — the version shown in the top
+  corner links here, and a banner points it out after an update.
+
 ## 2026.06.21
 - One-click in-app **Connect Strava** — register your own Strava app, paste
   credentials, click Connect. No terminal needed.
