@@ -192,10 +192,11 @@
        (avoids the empty space we used to have under the hero). */
 
     /* Training-load (TRIMP) chart panel */
-    .tl-trimp-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; margin-bottom: 12px; flex-wrap: wrap; }
-    .tl-trimp-title { font-size: 16px; font-weight: 500; color: #fff; letter-spacing: -0.01em; margin: 4px 0 0; }
-    .tl-trimp-suffix { color: var(--tl-dimmer); font-size: 11px; font-weight: 400; margin-left: 6px; }
-    .tl-trimp-legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 10px; font-family: var(--tl-mono); color: var(--tl-dim); }
+    /* Match the Z2 hero header exactly so the two charts line up. */
+    .tl-trimp-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; margin-bottom: 18px; flex-wrap: wrap; }
+    .tl-trimp-title { font-size: 22px; font-weight: 500; color: #fff; letter-spacing: -0.02em; margin: 6px 0 0; }
+    .tl-trimp-suffix { color: var(--tl-dimmer); font-size: 13px; font-weight: 400; margin-left: 6px; }
+    .tl-trimp-legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 10px; font-family: var(--tl-mono); color: var(--tl-dim); margin-top: 8px; }
     .tl-trimp-legend .item { display: flex; align-items: center; gap: 5px; }
     .tl-trimp-legend .swatch { width: 14px; height: 2px; border-radius: 1px; }
     .tl-trimp-svg { display: block; width: 100%; height: 180px; }
@@ -444,10 +445,15 @@
         <div>
           <div class="tl-eyebrow">Training balance<span class="tl-info-icon" data-tip="Your built-up fitness (slow purple line) vs recent fatigue (fast amber line).&#10;&#10;When fatigue sits below fitness you're fresh; when it spikes above, you're buried. The shaded gap is your freshness — green when fresh, red when buried.">?</span></div>
           <h3 class="tl-trimp-title">Fresh or buried? <span class="tl-trimp-suffix">fitness vs fatigue</span></h3>
+          <div class="tl-trimp-legend">
+            <span class="item"><span class="swatch" style="background:var(--tl-purple)"></span>Fitness</span>
+            <span class="item"><span class="swatch" style="background:var(--tl-amber)"></span>Fatigue</span>
+          </div>
         </div>
-        <div class="tl-trimp-legend">
-          <span class="item"><span class="swatch" style="background:var(--tl-purple)"></span>Fitness</span>
-          <span class="item"><span class="swatch" style="background:var(--tl-amber)"></span>Fatigue</span>
+        <div class="tl-hero-right">
+          <div class="tl-eyebrow tight">Freshness</div>
+          <div class="tl-hero-latest" id="tl-balance-now">—</div>
+          <div class="tl-hero-delta" id="tl-balance-state">&nbsp;</div>
         </div>
       </div>
       <div id="tl-trimp-chart"></div>
@@ -1262,6 +1268,17 @@ function renderAnswers(p) {
 function renderLoadBalance(payload) {
   const host = document.getElementById('tl-trimp-chart');
   if (!host) return;
+  // Header value block — mirrors the Z2 hero's "Latest" so the two headers
+  // (and therefore the charts below them) are the same height.
+  const f = payload.form_now;
+  const nowEl = document.getElementById('tl-balance-now');
+  const stateEl = document.getElementById('tl-balance-state');
+  if (nowEl)   nowEl.textContent = f == null ? '—' : `${f >= 0 ? '+' : ''}${f}`;
+  if (stateEl) {
+    const label = f == null ? '' : f > 1 ? 'Fresh' : f < -1 ? 'Buried' : 'Steady';
+    stateEl.textContent = label;
+    stateEl.className = 'tl-hero-delta ' + (f > 1 ? 'good' : f < -1 ? 'bad' : '');
+  }
   const weeks = payload.weeks || [];
   const have = weeks.map((w, i) => ({ w, i })).filter(o => o.w.fitness != null);
   if (have.length < 2 || weeks.length < 2) {
