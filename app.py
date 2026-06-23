@@ -7524,9 +7524,9 @@ def _compute_duplicate_groups(detail: bool = True) -> list[dict]:
                 members.sort(key=lambda a: a["filename"])
                 groups.append({"date": d, "tracks": members})
 
-    # Hold the lock across the read so we don't witness a partial-write
-    # mid-flight from a concurrent /api/duplicates/dismiss POST. Path.write_text
-    # in `_save_dup_dismissals` is not atomic on Windows.
+    # Hold the lock across the read to pair with the write in
+    # `_save_dup_dismissals` (atomic via os.replace) so a concurrent
+    # /api/duplicates/dismiss POST can't be witnessed half-applied.
     with _dup_dismissals_lock:
         dismissed = _load_dup_dismissals()
     groups = [g for g in groups
@@ -7568,9 +7568,14 @@ def _load_dup_dismissals() -> set:
 
 
 def _save_dup_dismissals(s: set) -> None:
-    DUP_DISMISSALS_FILE.write_text(
+    # Atomic write (temp + os.replace), not raw write_text: os.replace overwrites
+    # the target even when it carries the Windows Hidden attribute, whereas
+    # open(path, 'w') raises PermissionError [Errno 13] truncating a hidden file
+    # (which is exactly what broke "Not duplicates"). Also matches every other
+    # persistence path in the app and clears the stray hidden bit going forward.
+    _atomic_write(
+        DUP_DISMISSALS_FILE,
         json.dumps([list(t) for t in sorted(s)], indent=2),
-        encoding="utf-8",
     )
 
 
