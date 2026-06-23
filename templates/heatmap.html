@@ -76,6 +76,14 @@
        the year filter to "All". */
     #year-lock-hint { font-size: 10px; color: var(--text-muted); font-family: var(--font-mono); letter-spacing: 0.04em; text-transform: none; margin-left: 6px; font-style: italic; }
 
+    /* Region zoom dropdown — sits in the filter bar; matches the chip surface. */
+    #region-select { background: var(--bg-card); color: var(--text-secondary);
+      border: 1px solid var(--border-hair); border-radius: 4px; padding: 4px 8px;
+      font-size: 11px; font-family: var(--font-mono); letter-spacing: 0.04em; cursor: pointer;
+      max-width: 220px; transition: color 0.12s, border-color 0.12s; }
+    #region-select:hover { color: var(--text-primary); border-color: var(--accent); }
+    #region-select:focus { outline: none; border-color: var(--accent); }
+
     /* Filter chips inherit the canonical .filter-btn from base.css.
        Year filter locked (Recency mode) — non-"All" chips are disabled
        so the user can see the full set but knows only "All" is selectable. */
@@ -195,6 +203,11 @@
   <div class="sep"></div>
   <label>Type</label>
   <div id="type-filters" style="display:flex;gap:6px;"></div>
+  <div class="sep"></div>
+  <label>Region</label>
+  <select id="region-select" onchange="onRegionChange(this.value)" title="Zoom the map to a region">
+    <option value="">All regions</option>
+  </select>
 </div>
 
 <div id="map-and-list">
@@ -684,6 +697,48 @@ function heatParamsForZoom(z) {
   return                { radius: 3, blur: 5  };
 }
 
+// ─── Region zoom (jump the camera to a named region + outline) ───────────────
+// Pure navigation: pick a region to fit the map to its bounds and draw its
+// boundary outline in the region's colour. Does NOT filter rides — every
+// activity stays visible; this is independent of the Year/Type filters.
+const regionsById = new Map();   // id -> { name, color, geometry }
+let regionOutline = null;        // L.GeoJSON outline of the selected region
+
+async function loadRegions() {
+  let regions;
+  try { regions = await (await fetch('/api/regions')).json(); }
+  catch (e) { return; }          // non-fatal — the control just stays empty
+  const sel = document.getElementById('region-select');
+  regions
+    .filter(r => r.geometry && r.geometry.coordinates && r.geometry.coordinates.length)
+    .sort((a, b) => (a.name || '').localeCompare(b.name || ''))
+    .forEach(r => {
+      regionsById.set(r.id, { name: r.name, color: r.color, geometry: r.geometry });
+      const opt = document.createElement('option');
+      opt.value = r.id;
+      opt.textContent = r.name;
+      sel.appendChild(opt);
+    });
+}
+
+function onRegionChange(id) {
+  if (regionOutline) { regionOutline.remove(); regionOutline = null; }
+  const region = id && regionsById.get(id);
+  if (!region) { fitAll(); return; }    // "All regions" — zoom back out to everything
+  regionOutline = L.geoJSON({ type: 'Feature', geometry: region.geometry }, {
+    style: { color: region.color, weight: 2, opacity: 0.9,
+             fill: true, fillColor: region.color, fillOpacity: 0.06, interactive: false }
+  }).addTo(map);
+  const bounds = regionOutline.getBounds();
+  map.fitBounds(bounds, { padding: [30, 30] });
+  // Best-effort recenter of the 3D camera when it's the active view (the Leaflet
+  // outline is 2D-only and reappears on return to Map/Satellite).
+  if (mapView === '3d' && typeof mb3d !== 'undefined' && mb3d) {
+    const sw = bounds.getSouthWest(), ne = bounds.getNorthEast();
+    mb3d.fitBounds([[sw.lng, sw.lat], [ne.lng, ne.lat]], { padding: 40, duration: 0 });
+  }
+}
+
 function updateStats() {
   const count = allActivities.length;
   const dist  = allActivities.reduce((s, a) => s + (a.distance_km || 0), 0);
@@ -1032,6 +1087,7 @@ async function initFilters() {
 }
 
 (async () => {
+  loadRegions();   // populate the region zoom dropdown (independent of the activity stream)
   const signature = await initFilters();
   const cached    = signature ? loadHeatmapCache() : null;
   if (cached && cached.signature === signature) {
