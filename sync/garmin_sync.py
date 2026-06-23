@@ -235,13 +235,18 @@ def incomplete_dates(windows: dict[str, list[tuple[int, int]]],
                   if not _date_is_complete(d, wins, trust_stale_empty))
 
 
-def fetch_and_cache_hr(client, date_str: str) -> tuple[bool, int]:
-    """Fetch HR for one date. Returns (success, sample_count)."""
+def fetch_and_cache_hr(client, date_str: str) -> tuple[bool, int, str | None]:
+    """Fetch HR for one date. Returns (success, sample_count, error_or_None).
+
+    The error string lets the caller tell a systemic failure (rate-limit, auth,
+    network) apart from an ordinary "no data" so a throttled run doesn't report
+    false success."""
     try:
         data = client.get_heart_rates(date_str)
     except Exception as e:
-        print(f"  {date_str}: fetch failed ({type(e).__name__}: {e})")
-        return False, 0
+        err = f"{type(e).__name__}: {e}"
+        print(f"  {date_str}: fetch failed ({err})")
+        return False, 0, err
 
     samples = (data or {}).get("heartRateValues") or []
     payload = {
@@ -257,7 +262,7 @@ def fetch_and_cache_hr(client, date_str: str) -> tuple[bool, int]:
     tmp = hr_cache_path(date_str).with_suffix(".tmp")
     tmp.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
     tmp.replace(hr_cache_path(date_str))
-    return True, len(samples)
+    return True, len(samples), None
 
 
 # ─── Status file ──────────────────────────────────────────────────────────────
@@ -304,6 +309,27 @@ def _emit_progress(phase: str, done: int, total: int) -> None:
           flush=True)
 
 
+def systemic_failure_message(failures: int, synced_ok: int,
+                             last_err: str) -> str | None:
+    """If EVERY date failed, return a user-facing reason classified from the last
+    error (rate-limit vs auth vs network) so the caller can exit non-zero. Returns
+    None when the run isn't a total failure (partial success is still success).
+    The wording embeds keywords the app's _friendly_sync_message routes on."""
+    if not (failures and synced_ok == 0):
+        return None
+    low = (last_err or "").lower()
+    if any(k in low for k in ("toomanyrequests", "too many requests", "429",
+                              "rate limit", "ratelimit")):
+        return ("Garmin is rate-limiting requests (HTTP 429 Too Many Requests) "
+                "— wait a few minutes and sync again.")
+    if any(k in low for k in ("auth", "401", "unauthorized", "login",
+                              "credential")):
+        return ("Garmin auth failed — not logged in. Reconnect Garmin on the "
+                "Setup page.")
+    return (f"Couldn't reach Garmin — all {failures} date(s) failed. Check your "
+            f"connection and try again. (last error: {last_err})")
+
+
 def cmd_sync(only_missing: bool = True, throttle: float = 1.0,
              retry_empty: bool = False):
     client = get_client(interactive=False)
@@ -333,13 +359,18 @@ def cmd_sync(only_missing: bool = True, throttle: float = 1.0,
     _emit_progress("hr", 0, len(dates))
     synced_ok = 0
     total_samples = 0
+    failures = 0
+    last_err = ""
     for i, d in enumerate(dates, 1):
-        ok, n = fetch_and_cache_hr(client, d)
+        ok, n, err = fetch_and_cache_hr(client, d)
         if ok:
             synced_ok += 1
             total_samples += n
             tag = f"{n} samples" if n else "no HR data"
             print(f"  [{i}/{len(dates)}] {d}  [OK] {tag}")
+        else:
+            failures += 1
+            last_err = err or last_err
         time.sleep(throttle)
         _emit_progress("hr", i, len(dates))
 
@@ -348,7 +379,18 @@ def cmd_sync(only_missing: bool = True, throttle: float = 1.0,
         last_synced  = synced_ok,
         total_dates  = len(all_dates),
     )
-    print(f"\n[OK] Synced {synced_ok} / {len(dates)} dates ({total_samples:,} HR samples).")
+
+    # A run where EVERY date failed is a systemic problem (rate-limit, expired
+    # auth, network) — not a successful "0 new dates". Exit non-zero so the GUI
+    # surfaces an error instead of a false success. Partial failures still count
+    # as success — some HR landed.
+    fail_msg = systemic_failure_message(failures, synced_ok, last_err)
+    if fail_msg:
+        sys.exit(fail_msg)
+
+    suffix = f" ({failures} failed)" if failures else ""
+    print(f"\n[OK] Synced {synced_ok} / {len(dates)} dates "
+          f"({total_samples:,} HR samples){suffix}.")
 
 
 def cmd_retry_date(date_str: str):
@@ -361,7 +403,7 @@ def cmd_retry_date(date_str: str):
         sys.exit(2)
     client = get_client(interactive=False)
     print(f"Re-fetching HR for {date_str}...")
-    ok, n = fetch_and_cache_hr(client, date_str)
+    ok, n, _err = fetch_and_cache_hr(client, date_str)
     if ok:
         tag = f"{n} samples" if n else "no HR data"
         print(f"  [OK] {tag}")

@@ -63,6 +63,15 @@ class TestFriendlySyncMessage(unittest.TestCase):
         self.assertNotIn("RuntimeError", msg)
         self.assertNotIn("Setup", msg)   # not an auth failure -> keep the real reason
 
+    def test_garmin_rate_limit_message(self):
+        # The Garmin sync now exits non-zero on an all-429 run; the GUI should
+        # tell the user to wait, not leak the 429 or claim success.
+        msg = app._friendly_sync_message(
+            "garmin", "Garmin is rate-limiting requests (HTTP 429 Too Many "
+                      "Requests) — wait a few minutes and sync again.")
+        self.assertIn("rate-limiting", msg.lower())
+        self.assertNotIn("Setup", msg)   # not an auth failure
+
     def test_empty_falls_back(self):
         self.assertEqual(app._friendly_sync_message("garmin", ""), "Garmin sync failed.")
 

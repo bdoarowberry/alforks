@@ -6853,6 +6853,11 @@ def _friendly_sync_message(source: str, raw: str) -> str:
                               "not configured", "no credentials", "log in",
                               "login expired", "token refresh failed")):
         return f"Not connected to {label}. Open the Setup page to reconnect."
+    # Rate-limiting (Garmin throttles aggressively) — tell the user to wait.
+    if any(k in low for k in ("too many requests", "429", "rate limit",
+                              "ratelimit", "rate-limiting", "throttle")):
+        return (f"{label} is rate-limiting requests right now — wait a few "
+                f"minutes and sync again.")
     # A network / server-side failure (timeout, 5xx, DNS) — not the user's fault
     # and not a stale login. Give a plain next step instead of leaking the line.
     if any(k in low for k in ("timed out", "timeout", "connection", "temporarily",

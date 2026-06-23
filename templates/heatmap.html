@@ -176,15 +176,8 @@
 
 <header>
   <h1><span>Al</span>Forks</h1>
-  <nav>
-    <a href="/">Summary</a>
-    <a href="/logs">Logs</a>
-    <a href="/heatmap" class="active">Heat Map</a>
-    <a href="/training">Training</a>
-    <a href="/trails">Trails</a>
-    <a href="/review">Review<span id="nav-review-badge" class="nav-pill" style="display:none;">0</span></a>
-    <a href="/setup">Setup</a>
-  </nav>
+  {% set nav_active = 'heatmap' %}
+  {% include '_nav.html' %}
   <button class="nav-sync-btn" onclick="triggerSyncAll()" title="Sync Strava + Garmin now">Sync</button>
 </header>
 
