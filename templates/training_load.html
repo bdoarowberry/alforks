@@ -455,10 +455,58 @@
     <div class="tl-metrics-grid" id="tl-metrics-cards"></div>
   </div>
 
-  <!-- Weight log strip — triggered by clicking the Weight metric card
-       above. Form is hidden until the card is clicked; the entries
-       collapsible is always available for editing/deleting history. -->
-  <div class="tl-weight-strip">
+  <h2 class="tl-section-q">Training mix<span class="sub">where your effort goes — easy vs hard</span></h2>
+  <!-- HR zone stack -->
+  <div class="tl-panel" id="tl-hrstack-panel">
+    <div class="tl-hrstack-head">
+      <div>
+        <div class="tl-eyebrow">Weekly HR-zone time<span class="tl-info-icon" data-tip="Time spent in each heart-rate zone, per week.&#10;&#10;Z1 = recovery, Z2 = endurance / base, Z3 = tempo, Z4 = threshold, Z5 = VO2max.&#10;&#10;Most aerobic gains come from a lot of Z2 with limited Z3-Z5 — the classic 80/20 rule says ~80% of training time should be easy.">?</span></div>
+        <div class="tl-hrstack-subtitle">Where you spend your minutes</div>
+      </div>
+      <div class="tl-hrstack-legend" id="tl-hrstack-legend"></div>
+    </div>
+    <div id="tl-hrstack-area"></div>
+  </div>
+
+  <!-- Zone composition (stays with the mix) -->
+  <div class="tl-panel" id="tl-donut">
+    <div class="tl-eyebrow" id="tl-donut-eyebrow">Last 4 weeks · zone composition<span class="tl-info-icon" data-tip="How your last 4 weeks broke down across HR zones.&#10;&#10;Z2 share is the headline number for base season — the classic 60-80% Z2 target.&#10;&#10;Too much Z3 ('grey zone') is the most common mistake: hard enough to fatigue you, not hard enough to drive top-end gains.">?</span></div>
+    <div class="tl-donut-bar"  id="tl-donut-bar"></div>
+    <div class="tl-donut-legend" id="tl-donut-legend"></div>
+    <div class="tl-donut-footer" id="tl-donut-footer">
+      Z2 share is <span class="v" id="tl-donut-z2">—%</span> — aim for 60–80% in base season.
+    </div>
+  </div>
+
+  <h2 class="tl-section-q">The record<span class="sub">what you've actually done</span></h2>
+  <!-- Weekly volume + climbing -->
+  <div class="tl-vc-grid" style="margin-bottom:8px;">
+    <div class="tl-panel">
+      <div class="tl-eyebrow">Weekly volume<span class="tl-info-icon" data-tip="Total moving hours per week.&#10;&#10;Trend up = building, flat = maintaining, down = backing off.">?</span></div>
+      <div id="tl-volume-chart"></div>
+    </div>
+    <div class="tl-panel">
+      <div class="tl-eyebrow">Weekly climbing<span class="tl-info-icon" data-tip="Total elevation gain per week.&#10;&#10;Excludes lift-assisted segments where automatic detection identifies them.">?</span></div>
+      <div id="tl-climbing-chart"></div>
+    </div>
+  </div>
+  <!-- Records + Activity totals -->
+  <div class="tl-rt-row">
+    <div class="tl-panel" id="tl-records">
+      <div class="tl-records-head">
+        <div class="tl-eyebrow">Personal records · this window</div>
+        <div class="tl-records-range" id="tl-records-range">—</div>
+      </div>
+      <div id="tl-records-body"></div>
+    </div>
+    <div class="tl-panel" id="tl-totals">
+      <div class="tl-eyebrow" id="tl-totals-eyebrow">Activity totals · this window</div>
+      <div id="tl-totals-body" style="margin-top:14px;"></div>
+    </div>
+  </div>
+
+  <!-- Body weight log -->
+  <div class="tl-weight-strip" style="margin-top:10px;">
     <button type="button" class="tl-weight-add-btn" onclick="openWeightForm()" style="background:transparent;border:1px solid var(--border-row);color:var(--text-secondary);border-radius:4px;padding:5px 12px;font-size:0.74rem;cursor:pointer;font-family:var(--font-mono);">+ Log weight</button>
     <details class="tl-weight-history" id="tl-weight-history-details">
       <summary>Weight log · <span id="tl-weight-count">0</span> entries</summary>
@@ -482,57 +530,6 @@
         <button type="button" class="tl-weight-cancel-btn" onclick="closeWeightForm()">Cancel</button>
       </div>
     </form>
-  </div>
-
-  <h2 class="tl-section-q">Training mix<span class="sub">where your effort goes — easy vs hard</span></h2>
-  <!-- HR zone stack -->
-  <div class="tl-panel" id="tl-hrstack-panel">
-    <div class="tl-hrstack-head">
-      <div>
-        <div class="tl-eyebrow">Weekly HR-zone time<span class="tl-info-icon" data-tip="Time spent in each heart-rate zone, per week.&#10;&#10;Z1 = recovery, Z2 = endurance / base, Z3 = tempo, Z4 = threshold, Z5 = VO2max.&#10;&#10;Most aerobic gains come from a lot of Z2 with limited Z3-Z5 — the classic 80/20 rule says ~80% of training time should be easy.">?</span></div>
-        <div class="tl-hrstack-subtitle">Where you spend your minutes</div>
-      </div>
-      <div class="tl-hrstack-legend" id="tl-hrstack-legend"></div>
-    </div>
-    <div id="tl-hrstack-area"></div>
-  </div>
-
-  <!-- Volume / Climbing / Donut -->
-  <div class="tl-vcd-row">
-    <div class="tl-vc-grid">
-      <div class="tl-panel">
-        <div class="tl-eyebrow">Weekly volume<span class="tl-info-icon" data-tip="Total moving hours per week.&#10;&#10;Wall-clock duration of recorded activities — trend up = building, flat = maintaining, down = backing off.&#10;&#10;The Acute load card on the right averages the last 4 weeks of this.">?</span></div>
-        <div id="tl-volume-chart"></div>
-      </div>
-      <div class="tl-panel">
-        <div class="tl-eyebrow">Weekly climbing<span class="tl-info-icon" data-tip="Total elevation gain per week.&#10;&#10;Excludes lift-assisted segments where automatic detection identifies them — so a snowboard day shouldn't double-count chair lifts as climbing.">?</span></div>
-        <div id="tl-climbing-chart"></div>
-      </div>
-    </div>
-    <div class="tl-panel" id="tl-donut">
-      <div class="tl-eyebrow" id="tl-donut-eyebrow">Last 4 weeks · zone composition<span class="tl-info-icon" data-tip="How your last 4 weeks broke down across HR zones.&#10;&#10;Z2 share is the headline number for base season — the classic 60-80% Z2 target.&#10;&#10;Too much Z3 ('grey zone') is the most common mistake: hard enough to fatigue you, not hard enough to drive top-end gains.">?</span></div>
-      <div class="tl-donut-bar"  id="tl-donut-bar"></div>
-      <div class="tl-donut-legend" id="tl-donut-legend"></div>
-      <div class="tl-donut-footer" id="tl-donut-footer">
-        Z2 share is <span class="v" id="tl-donut-z2">—%</span> — aim for 60–80% in base season.
-      </div>
-    </div>
-  </div>
-
-  <h2 class="tl-section-q">The record<span class="sub">what you've actually done</span></h2>
-  <!-- Records + Activity totals -->
-  <div class="tl-rt-row">
-    <div class="tl-panel" id="tl-records">
-      <div class="tl-records-head">
-        <div class="tl-eyebrow">Personal records · this window</div>
-        <div class="tl-records-range" id="tl-records-range">—</div>
-      </div>
-      <div id="tl-records-body"></div>
-    </div>
-    <div class="tl-panel" id="tl-totals">
-      <div class="tl-eyebrow" id="tl-totals-eyebrow">Activity totals · this window</div>
-      <div id="tl-totals-body" style="margin-top:14px;"></div>
-    </div>
   </div>
 </main>
 
