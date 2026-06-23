@@ -19,12 +19,13 @@
       --tl-dim:     var(--text-secondary);
       --tl-dimmer:  var(--text-muted);
       --tl-ink:     var(--text-primary);
-      /* Semantic accents — chart fills, delta good/bad, hero border. */
-      --tl-green:   oklch(0.78 0.15 145);
-      --tl-red:     oklch(0.7  0.20  25);
-      --tl-blue:    oklch(0.78 0.13 230);
-      --tl-amber:   oklch(0.78 0.16  60);
-      --tl-purple:  oklch(0.72 0.13 305);
+      /* Semantic accents — alias the app's base.css tokens so good/warn/bad
+         read identically to the rest of the app (no parallel palette). */
+      --tl-green:   var(--success);
+      --tl-red:     var(--danger);
+      --tl-blue:    var(--accent);
+      --tl-amber:   var(--warn);
+      --tl-purple:  oklch(0.72 0.13 305);   /* the one genuinely page-local accent */
       /* HR-zone colours. */
       --tl-z1:      oklch(0.6  0.02 240);
       --tl-z2:      oklch(0.78 0.13 230);
@@ -73,11 +74,13 @@
     /* Generic panel */
     .tl-panel { background: var(--tl-panel); border: 1px solid var(--tl-line);
                 border-radius: 4px; padding: 20px 22px; }
-    .tl-panel-hero { padding: 22px 28px; border-left: 3px solid var(--tl-red); }
+    .tl-panel-hero { padding: 22px 28px; }
 
-    .tl-eyebrow { font-size: 9px; color: var(--tl-dimmer); letter-spacing: 0.22em;
-                  text-transform: uppercase; font-weight: 600; }
-    .tl-eyebrow.tight { letter-spacing: 0.18em; }
+    /* One eyebrow spec, matching the app (Summary's .s2-eyebrow): 10px / 0.14em
+       / tertiary. Was 9px/0.22em and too dim — a big part of the "rubbish" feel. */
+    .tl-eyebrow { font-size: 10px; color: var(--text-tertiary); letter-spacing: 0.14em;
+                  text-transform: uppercase; font-weight: 600; font-family: var(--tl-mono); }
+    .tl-eyebrow.tight { letter-spacing: 0.14em; }
 
     /* Info bubble next to chart eyebrows / metric labels.
        — Filled subtle background so it doesn't read as a hollow checkbox
@@ -181,7 +184,7 @@
        breathe; the 10 metric cards fit in a compact 2-col × 5-row
        grid on the right with horizontal value+sparkline cards so
        each row is short enough to match hero height. */
-    .tl-fitness-row { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); gap: 8px; align-items: stretch; }
+    .tl-fitness-row { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr); gap: 8px; align-items: start; }
     /* Left column stacks the Z2 hero and the TRIMP load chart so the
        column matches the height of the metrics grid on the right
        (avoids the empty space we used to have under the hero). */
@@ -195,9 +198,9 @@
     .tl-trimp-legend .item { display: flex; align-items: center; gap: 5px; }
     .tl-trimp-legend .swatch { width: 14px; height: 2px; border-radius: 1px; }
     .tl-trimp-svg { display: block; width: 100%; height: 180px; }
-    .tl-metrics-grid { display: grid; grid-template-columns: 1fr 1fr; grid-auto-rows: 1fr; gap: 6px; }
-    @media (max-width: 1100px) { .tl-metrics-grid { grid-template-columns: repeat(3, 1fr); } }
-    @media (max-width: 600px)  { .tl-metrics-grid { grid-template-columns: 1fr 1fr; } }
+    /* Single-column rail of 5 keeper tiles (was a 2-col grid sized for 10). */
+    .tl-metrics-grid { display: grid; grid-template-columns: 1fr; gap: 8px; align-content: start; }
+    @media (max-width: 1100px) { .tl-metrics-grid { grid-template-columns: repeat(2, 1fr); } }
 
     /* Compact metric card — label / (value · sparkline) / sub. */
     .tl-load-card { background: var(--tl-panel); border: 1px solid var(--tl-line);
@@ -280,8 +283,7 @@
                         display: flex; justify-content: space-between;
                         font-size: 10px; color: var(--tl-dimmer); font-family: var(--tl-mono); }
 
-    /* ─── Volume / Climbing / Donut row ───────────────────────────── */
-    .tl-vcd-row { display: grid; grid-template-columns: 1.6fr 1fr; gap: 8px; }
+    /* ─── Volume / Climbing charts ────────────────────────────────── */
     .tl-vc-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
     .tl-vc-area { position: relative; height: 140px; display: flex; align-items: flex-end;
                   gap: 6px; padding-left: 36px; padding-bottom: 20px; margin-top: 14px; }
@@ -358,14 +360,10 @@
     @media (max-width: 1100px) {
       .tl-fitness-row { grid-template-columns: 1fr; }
     }
-    @media (max-width: 1000px) {
-      .tl-vcd-row   { grid-template-columns: 1fr; }
-    }
     @media (max-width: 900px) {
       .tl-rt-row    { grid-template-columns: 1fr; }
     }
-    @media (max-width: 600px) {
-      .tl-load-grid { grid-template-columns: 1fr; }
+    @media (max-width: 760px) {
       .tl-vc-grid   { grid-template-columns: 1fr; }
     }
   </style>
@@ -401,21 +399,24 @@
 
   <!-- Plain-language answers (verdict-led). The detailed charts below back them up. -->
   <style>
-    .tl-answers { display:grid; grid-template-columns:repeat(2,1fr); gap:14px; margin:18px 0 26px; }
+    .tl-answers { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin:0 0 6px; }
     @media (max-width:760px){ .tl-answers{ grid-template-columns:1fr; } }
     .tl-answer-card { background:var(--bg-card); border:1px solid var(--border-hair);
-                      border-left:3px solid var(--text-faint); border-radius:8px; padding:14px 16px; }
-    .tl-answer-card.good { border-left-color:var(--success); }
-    .tl-answer-card.warn { border-left-color:var(--warn); }
-    .tl-answer-card.bad  { border-left-color:var(--danger); }
+                      border-left:4px solid var(--text-faint); border-radius:4px; padding:16px 18px; }
+    /* "What should I do next?" is the hero — spans the row, larger answer. */
+    .tl-answer-card:first-child { grid-column:1 / -1; padding:20px 22px; }
+    .tl-answer-card:first-child .tl-answer-v { font-size:1.45rem; line-height:1.3; }
+    .tl-answer-card.good { border-left-color:var(--success); background:color-mix(in oklab, var(--success) 8%, var(--bg-card)); }
+    .tl-answer-card.warn { border-left-color:var(--warn);    background:color-mix(in oklab, var(--warn) 8%, var(--bg-card)); }
+    .tl-answer-card.bad  { border-left-color:var(--danger);  background:color-mix(in oklab, var(--danger) 8%, var(--bg-card)); }
     .tl-answer-card.dim  { border-left-color:var(--text-faint); }
-    .tl-answer-q { font-size:0.72rem; text-transform:uppercase; letter-spacing:0.08em; color:var(--text-tertiary); margin-bottom:6px; }
-    .tl-answer-v { font-size:1.0rem; color:var(--text-primary); line-height:1.4; font-weight:500; }
-    .tl-answer-sub { margin-top:9px; font-size:0.74rem; color:var(--text-secondary); font-family:var(--font-mono); }
-    .tl-read-eyebrow { font-size:0.7rem; text-transform:uppercase; letter-spacing:0.1em; color:var(--text-tertiary); margin:4px 0 -8px; }
-    .tl-section-q { font-size:1.05rem; color:var(--text-primary); font-weight:500;
-                    margin:34px 0 6px; padding-top:20px; border-top:1px solid var(--border-hair); }
-    .tl-section-q .sub { font-size:0.74rem; color:var(--text-tertiary); font-weight:400; margin-left:8px; }
+    .tl-answer-q { font-size:10px; text-transform:uppercase; letter-spacing:0.14em; color:var(--text-tertiary); margin-bottom:8px; font-family:var(--font-mono); font-weight:600; }
+    .tl-answer-v { font-size:1.05rem; color:var(--text-primary); line-height:1.45; font-weight:500; }
+    .tl-answer-sub { margin-top:10px; font-size:0.74rem; color:var(--text-secondary); font-family:var(--font-mono); }
+    .tl-read-eyebrow { font-size:10px; text-transform:uppercase; letter-spacing:0.14em; color:var(--text-tertiary); font-family:var(--font-mono); font-weight:600; margin:4px 0 10px; }
+    .tl-section-q { font-size:1.4rem; color:var(--text-primary); font-weight:500; letter-spacing:-0.02em;
+                    margin:26px 0 8px; padding-top:22px; border-top:1px solid var(--border-hair); }
+    .tl-section-q .sub { display:block; font-size:0.74rem; color:var(--text-tertiary); font-weight:400; margin-top:4px; letter-spacing:0; }
   </style>
   <div class="tl-read-eyebrow">Your training read</div>
   <div id="tl-answers" class="tl-answers"></div>
@@ -507,7 +508,7 @@
 
   <!-- Body weight log -->
   <div class="tl-weight-strip" style="margin-top:10px;">
-    <button type="button" class="tl-weight-add-btn" onclick="openWeightForm()" style="background:transparent;border:1px solid var(--border-row);color:var(--text-secondary);border-radius:4px;padding:5px 12px;font-size:0.74rem;cursor:pointer;font-family:var(--font-mono);">+ Log weight</button>
+    <button type="button" class="tl-weight-add-btn" onclick="openWeightForm()">+ Log weight</button>
     <details class="tl-weight-history" id="tl-weight-history-details">
       <summary>Weight log · <span id="tl-weight-count">0</span> entries</summary>
       <div id="tl-weight-history-body"></div>
@@ -1405,24 +1406,6 @@ function _weightCard(weeks) {
 // Backend (_compute_fitness_weeks) computes kcal per activity using
 // HR-zone-weighted METs when available, per-sport MET fallback otherwise,
 // and the most recent logged weight on or before each activity.
-function _caloriesCard(weeks) {
-  const kcal_per_week = weeks.map(w => w.kcal || 0);
-  const total = kcal_per_week.reduce((s, v) => s + v, 0);
-  const avg   = weeks.length ? total / weeks.length : 0;
-  const hasWeight = WEIGHTS && WEIGHTS.length > 0;
-  return {
-    lbl: 'Calories',
-    val: Math.round(total).toLocaleString(),
-    unit: 'kcal',
-    sub: hasWeight
-      ? `${Math.round(avg).toLocaleString()} kcal/wk avg`
-      : `assumes 75 kg — log your weight`,
-    color: 'var(--tl-amber)',
-    spark: kcal_per_week,
-    tip: 'Estimated calories burned across the visible window.\n\nPer-activity kcal uses HR-zone-weighted METs (Z1×3, Z2×5, Z3×8, Z4×11, Z5×14) when HR data is available — so a hard week scores higher than the same hours of easy spinning. Falls back to per-sport METs otherwise.\n\nMultiplied by your most recent logged weight on each activity\'s date. Defaults to 75 kg if you haven\'t logged anything.',
-  };
-}
-
 function renderWeight() {
   const countEl  = document.getElementById('tl-weight-count');
   const histBody = document.getElementById('tl-weight-history-body');
