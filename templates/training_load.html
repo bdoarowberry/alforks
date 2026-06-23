@@ -399,6 +399,22 @@
     <div id="tl-type-chips" class="tl-chip-row"></div>
   </div>
 
+  <!-- Plain-language answers (verdict-led). The detailed charts below back them up. -->
+  <style>
+    .tl-answers { display:grid; grid-template-columns:repeat(2,1fr); gap:14px; margin:18px 0 26px; }
+    @media (max-width:760px){ .tl-answers{ grid-template-columns:1fr; } }
+    .tl-answer-card { background:var(--bg-card); border:1px solid var(--border-hair);
+                      border-left:3px solid var(--text-faint); border-radius:8px; padding:14px 16px; }
+    .tl-answer-card.good { border-left-color:var(--success); }
+    .tl-answer-card.warn { border-left-color:var(--warn); }
+    .tl-answer-card.bad  { border-left-color:var(--danger); }
+    .tl-answer-card.dim  { border-left-color:var(--text-faint); }
+    .tl-answer-q { font-size:0.72rem; text-transform:uppercase; letter-spacing:0.08em; color:var(--text-tertiary); margin-bottom:6px; }
+    .tl-answer-v { font-size:1.0rem; color:var(--text-primary); line-height:1.4; font-weight:500; }
+    .tl-answer-sub { margin-top:9px; font-size:0.74rem; color:var(--text-secondary); font-family:var(--font-mono); }
+  </style>
+  <div id="tl-answers" class="tl-answers"></div>
+
   <!-- Z2 hero + Training load chart (left column) | metrics grid (right) -->
   <div class="tl-fitness-row">
     <div class="tl-fitness-left">
@@ -1173,10 +1189,86 @@ function renderTotals(payload) {
   });
 }
 
+// ─── Plain-language answers (the question-led sections) ───────────────────
+const ANSWER_MAP = {
+  next: {
+    go_hard: ['good', "You're recovered — a good day for a hard or long ride."],
+    steady:  ['dim',  "Normal shape — train as planned, nothing's flagged."],
+    easy:    ['warn', "Carrying fatigue — keep it easy or take a rest day."],
+    unknown: ['dim',  "Wear your watch overnight and sync for a recovery read."],
+  },
+  fitter: {
+    rising:  ['good', "Yes — your fitness is trending up."],
+    steady:  ['dim',  "Holding steady — maintaining your fitness."],
+    falling: ['warn', "Slipping — fitness is drifting down."],
+    unknown: ['dim',  "Not enough data yet to call a trend."],
+  },
+  overdoing: {
+    safe:         ['good', "No — you're building at a sustainable rate."],
+    ramping_hard: ['bad',  "Your load jumped fast this week — consider an easier day."],
+    detraining:   ['warn', "Load is low right now — fine for a break, but fitness fades if it continues."],
+    unknown:      ['dim',  "Not enough load history yet."],
+  },
+  mix: {
+    balanced: ['good', "Good balance — roughly the classic 80/20 easy-to-hard."],
+    too_hard: ['warn', "You're skewing hard — add some easy Z2 miles."],
+    too_easy: ['dim',  "Lots of easy riding — add a little intensity for top-end."],
+    unknown:  ['dim',  "Not enough heart-rate data to judge your mix."],
+  },
+};
+function tlArrow(ch, goodDown) {
+  if (ch == null) return '';
+  if (ch > 0.01)  return goodDown ? ' ↑' : ' ↑';
+  if (ch < -0.01) return ' ↓';
+  return ' →';
+}
+function tlAnswerCard(q, state, text, sub) {
+  return `<div class="tl-answer-card ${state}"><div class="tl-answer-q">${q}</div>` +
+         `<div class="tl-answer-v">${text}</div>` +
+         (sub ? `<div class="tl-answer-sub">${sub}</div>` : '') + `</div>`;
+}
+function renderAnswers(p) {
+  const el = document.getElementById('tl-answers');
+  if (!el) return;
+  const a = p.answers, w = p.wellness || {};
+  if (!a) { el.innerHTML = '<div class="tl-answer-card dim"><div class="tl-answer-v">No rides yet — sync some activities to see your training read.</div></div>'; return; }
+  const pick = (grp, key) => ANSWER_MAP[grp][key] || ANSWER_MAP[grp].unknown;
+
+  const [ns, nt] = pick('next', a.next);
+  const nsub = [
+    w.body_battery != null ? `Body Battery ${w.body_battery}` : null,
+    w.resting_hr != null ? `resting HR ${w.resting_hr}${w.resting_hr_baseline ? ` (usual ${w.resting_hr_baseline})` : ''}` : null,
+    w.sleep_hours != null ? `slept ${w.sleep_hours}h` : null,
+    p.form_now != null ? `freshness ${p.form_now >= 0 ? '+' : ''}${p.form_now}` : null,
+  ].filter(Boolean).join('  ·  ');
+
+  const [fs, ft] = pick('fitter', a.fitter);
+  const fsub = [
+    w.vo2max != null ? `VO₂max ${w.vo2max}${tlArrow(w.vo2max_change)}` : null,
+    w.resting_hr != null ? `resting HR ${w.resting_hr}${tlArrow(w.resting_hr_change, true)}` : null,
+  ].filter(Boolean).join('  ·  ') || 'Connect a Garmin for VO₂max + resting-HR trends.';
+
+  const [os, ot] = pick('overdoing', a.overdoing);
+  const osub = p.acwr != null ? `Load ratio (recent vs long-term) ${p.acwr.toFixed(2)}` : 'No load in the last week';
+
+  const [ms, mt] = pick('mix', a.mix);
+  const pol = p.polarization;
+  const msub = pol
+    ? `Easy ${Math.round(pol.easy*100)}%  ·  Moderate ${Math.round(pol.moderate*100)}%  ·  Hard ${Math.round(pol.hard*100)}%`
+    : '';
+
+  el.innerHTML =
+    tlAnswerCard('What should I do next?', ns, nt, nsub) +
+    tlAnswerCard('Am I getting fitter?',  fs, ft, fsub) +
+    tlAnswerCard('Am I overdoing it?',    os, ot, osub) +
+    tlAnswerCard('Am I training right?',  ms, mt, msub);
+}
+
 // ─── Page render orchestration ────────────────────────────────────────────
 function render(payload) {
   CURRENT = payload;
   document.getElementById('tl-meta').textContent = `${payload.n_weeks} weeks of data`;
+  renderAnswers(payload);
   renderHero(payload.weeks);
   renderTrimpChart(payload.weeks);
   renderMetrics(payload.weeks);

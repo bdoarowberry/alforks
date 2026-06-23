@@ -162,14 +162,20 @@ def _recent_dates(days: int) -> list[str]:
     return [(today - timedelta(days=n)).isoformat() for n in range(days, 0, -1)]
 
 
-def cmd_sync(days: int = 120, throttle: float = 1.2, refresh_recent: int = 3):
+def cmd_sync(days: int = 120, throttle: float = 1.2, refresh_recent: int = 3,
+            max_new: int | None = None, client=None):
     """Incrementally cache wellness for the trailing `days`. Skips dates already
     cached except the most recent `refresh_recent` (which may have filled in
-    after the fact). Throttled + rate-limit aware, mirroring garmin_sync."""
-    client = garmin_sync.get_client(interactive=False)
+    after the fact). `max_new` caps how many uncached dates are fetched in one
+    run (most-recent first) so a first-time backfill is spread over several syncs
+    and never blows the caller's timeout. Throttled + rate-limit aware."""
+    if client is None:
+        client = garmin_sync.get_client(interactive=False)
     dates = _recent_dates(days)
     recent_cut = set(dates[-refresh_recent:]) if refresh_recent else set()
     todo = [d for d in dates if d in recent_cut or not wellness_path(d).exists()]
+    if max_new is not None and len(todo) > max_new:
+        todo = todo[-max_new:]                 # newest first (todo is oldest-first)
     if not todo:
         print(f"Wellness up to date — {len(dates)} days cached.")
         return
