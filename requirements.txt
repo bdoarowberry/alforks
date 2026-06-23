@@ -14,5 +14,11 @@ gpxpy>=1.6,<2.0
 # Optional for the core viewer; required if you run --login / --sync.
 garminconnect>=0.3,<0.4
 
+# IANA timezone database for zoneinfo. REQUIRED on Windows (no system tz db),
+# which Python's zoneinfo needs to resolve names like "America/Edmonton". Without
+# it, ZoneInfo() raises and _merge_hr_into_data silently drops HR — i.e. heart
+# rate, HR zones, training load and weather all quietly disappear.
+tzdata>=2024.1
+
 # Tests use stdlib unittest and unittest.mock only — no test deps.
 # Strava sync uses stdlib http.server / urllib only — no third-party deps.

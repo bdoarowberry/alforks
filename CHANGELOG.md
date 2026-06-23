@@ -1,5 +1,11 @@
 # AlForks — Changelog
 
+## 2026.06.23.3
+- **Heart rate is back** — on Windows, missing timezone data was making heart
+  rate (and HR zones, training load and weather) silently disappear from rides.
+  Your HR was always safe on disk; this restores it. After updating, heart rate
+  shows up again on your activities.
+
 ## 2026.06.23.2
 - **Cleaner navigation** — the top bar is now five focused tabs (Dashboard,
   Activities, Map, Training, Trails & Routes), with a **⚙ menu** in the corner for
