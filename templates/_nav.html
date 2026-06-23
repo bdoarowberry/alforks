@@ -18,9 +18,22 @@
   <button class="nav-sync-btn" type="button" onclick="triggerSyncAll()"
           title="Sync Strava + Garmin now" aria-label="Sync Strava + Garmin now"></button>
   <span class="nav-divider" aria-hidden="true"></span>
+  {# Notifications bell — badge + dropdown panel of dismissible notices, filled
+     by static/notices.js (fed by whatsnew.js + review_nav.js). #}
+  <div class="nav-bell">
+    <button type="button" class="nav-bell-btn" aria-haspopup="true" aria-expanded="false" title="Notifications">
+      <svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor" aria-hidden="true"><path d="M8 1.4a.7.7 0 0 1 .7.7v.5a3.8 3.8 0 0 1 3.1 3.74v1.95l1.05 1.74a.5.5 0 0 1-.43.76H3.58a.5.5 0 0 1-.43-.76L4.2 8.29V6.34A3.8 3.8 0 0 1 7.3 2.6v-.5a.7.7 0 0 1 .7-.7Zm0 13.2a1.7 1.7 0 0 1-1.6-1.14h3.2A1.7 1.7 0 0 1 8 14.6Z"/></svg>
+      <span class="nav-bell-badge" hidden>0</span>
+    </button>
+    <div class="nav-bell-panel" role="menu">
+      <div class="nav-bell-head">Notifications</div>
+      <div class="nav-bell-rows" data-bell-rows></div>
+      <div class="nav-bell-empty">You’re all caught up ✓</div>
+    </div>
+  </div>
   <div class="nav-gear{% if _a in ['settings', 'cleanup', 'help', 'whatsnew'] %} active{% endif %}">
     <button type="button" class="nav-gear-btn" aria-haspopup="true" aria-expanded="false"
-            title="Settings, help &amp; more">⚙<span class="nav-gear-dot" hidden></span></button>
+            title="Settings, help &amp; more">⚙</button>
     <div class="nav-gear-menu" role="menu">
       <a href="/setup" role="menuitem"{% if _a == 'settings' %} class="active"{% endif %}>Settings</a>
       <a href="/review" role="menuitem"{% if _a == 'cleanup' %} class="active"{% endif %}>Clean-up<span id="nav-review-badge" class="nav-pill" style="display:none;">0</span></a>
@@ -31,18 +44,35 @@
   </div>
 </div>
 <script>
+{# One toggle for both dropdowns (bell + gear): open one closes the other;
+   outside-click / Escape close both. #}
 (function () {
-  var g = document.querySelector('.nav-gear');
-  if (!g || g.dataset.bound) return;
-  g.dataset.bound = '1';
-  var btn = g.querySelector('.nav-gear-btn');
-  function close() { g.classList.remove('open'); btn.setAttribute('aria-expanded', 'false'); }
-  btn.addEventListener('click', function (e) {
-    e.stopPropagation();
-    var open = g.classList.toggle('open');
-    btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+  var wrap = document.querySelector('.nav-actions');
+  if (!wrap || wrap.dataset.bound) return;
+  wrap.dataset.bound = '1';
+  var menus = [];
+  ['.nav-bell', '.nav-gear'].forEach(function (sel) {
+    var el = wrap.querySelector(sel);
+    if (el) menus.push({ el: el, btn: el.querySelector('button') });
   });
-  document.addEventListener('click', function (e) { if (!g.contains(e.target)) close(); });
-  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') close(); });
+  function closeAll(except) {
+    menus.forEach(function (m) {
+      if (m.el === except) return;
+      m.el.classList.remove('open');
+      m.btn.setAttribute('aria-expanded', 'false');
+    });
+  }
+  menus.forEach(function (m) {
+    m.btn.addEventListener('click', function (e) {
+      e.stopPropagation();
+      var open = m.el.classList.toggle('open');
+      m.btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+      if (open) closeAll(m.el);
+    });
+  });
+  document.addEventListener('click', function (e) {
+    if (!wrap.contains(e.target)) closeAll();
+  });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeAll(); });
 })();
 </script>

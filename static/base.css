@@ -132,13 +132,6 @@ nav a.active .nav-pill { background: #fbbf24; }
 .nav-gear-btn:hover { color: var(--text-primary); background: var(--surface-tint); }
 .nav-gear.active .nav-gear-btn,
 .nav-gear.open .nav-gear-btn { color: var(--accent); background: var(--accent-soft); }
-/* Small dot on the gear when Clean-up has pending items (so a collapsed menu
-   still signals there's something to do). Toggled by review_nav.js. */
-.nav-gear-dot {
-  position: absolute; top: 2px; right: 3px;
-  width: 6px; height: 6px; border-radius: 50%;
-  background: var(--warn);
-}
 .nav-gear-menu {
   display: none;
   position: absolute; top: calc(100% + 6px); right: 0;
@@ -196,24 +189,55 @@ nav a.active .nav-pill { background: #fbbf24; }
   color: var(--text-faint);
 }
 
-/* Notices strip — the dismissible message surface under the header, driven by
-   notices.js (fed by whatsnew.js + review_nav.js). One row per notice, each with
-   its own × ; notices.js hides the strip when it's empty. */
-.notice-strip { background: var(--bg-card); border-bottom: 1px solid var(--border-hair); flex-shrink: 0; }
-.notice-row {
-  display: flex; align-items: center; gap: 9px;
-  padding: 8px 18px;
-  font-size: 0.8rem; color: var(--text-secondary);
-  border-top: 1px solid var(--border-hair);
+/* Notifications bell — badge + dropdown panel of dismissible notices, filled by
+   notices.js (fed by whatsnew.js + review_nav.js). Borderless icon to match the
+   gear; the badge counts how many notices are waiting. */
+.nav-bell { position: relative; display: flex; align-items: center; }
+.nav-bell-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: 4px 7px; border-radius: 4px; border: none; background: transparent;
+  color: var(--text-secondary); cursor: pointer; transition: all 0.12s; position: relative;
 }
-.notice-row:first-child { border-top: none; }
-.notice-row .ndot { width: 6px; height: 6px; border-radius: 50%; background: var(--warn); flex-shrink: 0; }
-.notice-row .ntext { min-width: 0; }
-.notice-row .nl { color: var(--link); text-decoration: none; }
+.nav-bell-btn:hover { color: var(--text-primary); background: var(--surface-tint); }
+.nav-bell.open .nav-bell-btn { color: var(--accent); background: var(--accent-soft); }
+.nav-bell-badge {
+  position: absolute; top: -2px; right: -2px;
+  min-width: 15px; height: 15px; padding: 0 4px; box-sizing: border-box;
+  font-size: 9px; font-weight: 600; font-family: var(--font-mono);
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--warn); color: #0b0d0c; border-radius: 8px;
+  border: 1.5px solid var(--bg-card);   /* punch-out from the header background */
+}
+.nav-bell-panel {
+  display: none;
+  position: absolute; top: calc(100% + 6px); right: 0;
+  width: 290px;
+  background: var(--bg-card);
+  border: 1px solid rgba(255,255,255,0.10);
+  border-radius: 8px;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+  z-index: 1000; overflow: hidden;
+}
+.nav-bell.open .nav-bell-panel { display: block; }
+.nav-bell-head {
+  padding: 9px 12px; border-bottom: 1px solid var(--border-hair);
+  font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.10em; color: var(--text-tertiary);
+}
+.nav-bell-empty { padding: 18px 12px; text-align: center; color: var(--text-muted); font-size: 0.78rem; }
+
+/* One notice row in the bell panel — icon, text + link, and a × dismiss. */
+.notice-row {
+  display: flex; gap: 9px; align-items: flex-start;
+  padding: 10px 12px; border-bottom: 1px solid var(--border-hair);
+}
+.notice-row:last-child { border-bottom: none; }
+.notice-row .nicon { font-size: 0.9rem; line-height: 1.3; }
+.notice-row .ntext { flex: 1; min-width: 0; font-size: 0.8rem; color: var(--text-primary); line-height: 1.5; }
+.notice-row .nl { color: var(--link); text-decoration: none; font-size: 0.74rem; }
 .notice-row .nl:hover { color: var(--link-hover); text-decoration: underline; }
 .notice-row .nx {
-  margin-left: auto; background: transparent; border: none;
-  color: var(--text-faint); cursor: pointer; font-size: 1.05rem; line-height: 1; padding: 2px 6px;
+  background: transparent; border: none; color: var(--text-faint);
+  cursor: pointer; font-size: 1.05rem; line-height: 1; padding: 0 2px;
 }
 .notice-row .nx:hover { color: var(--text-primary); }
 
