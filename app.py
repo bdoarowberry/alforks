@@ -6844,7 +6844,7 @@ def _await_prewarm_into_sync(source: str, deadline_s: int = 600) -> None:
 def _friendly_sync_message(source: str, raw: str) -> str:
     """Translate a raw sync-script failure into a message that makes sense in the
     GUI. The CLI scripts tell you to `python strava_sync.py --login`, but a GUI
-    user connects on the Setup page — so surface that instead of a stack-trace
+    user connects on the Settings page — so surface that instead of a stack-trace
     line or a terminal command."""
     label = "Strava" if source == "strava" else "Garmin"
     low = (raw or "").lower()
@@ -6852,7 +6852,7 @@ def _friendly_sync_message(source: str, raw: str) -> str:
                               "username and password are required", "no tokens",
                               "not configured", "no credentials", "log in",
                               "login expired", "token refresh failed")):
-        return f"Not connected to {label}. Open the Setup page to reconnect."
+        return f"Not connected to {label}. Open the Settings page to reconnect."
     # Rate-limiting (Garmin throttles aggressively) — tell the user to wait.
     if any(k in low for k in ("too many requests", "429", "rate limit",
                               "ratelimit", "rate-limiting", "throttle")):

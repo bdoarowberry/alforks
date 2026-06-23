@@ -2,11 +2,9 @@
 <html lang="en">
 <head>
   {% include '_head.html' %}
-  <title>AlForks – Summary</title>
+  <title>AlForks – Dashboard</title>
   <link rel="stylesheet" href="/static/base.css?v={{ asset_v('base.css') }}">
   <script src="/static/utils.js?v={{ asset_v('utils.js') }}"></script>
-  <script src="/static/sync_toast.js?v={{ asset_v('sync_toast.js') }}" defer></script>
-  <script src="/static/review_nav.js?v={{ asset_v('review_nav.js') }}" defer></script>
   <style>
     /* ─────────────────────────────────────────────────────────────────────
        Summary — design tokens transcribed from design/summary/README.md
@@ -204,9 +202,8 @@
 
 <header>
   <h1><span>Al</span>Forks</h1>
-  {% set nav_active = 'summary' %}
+  {% set nav_active = 'dashboard' %}
   {% include '_nav.html' %}
-  <button class="nav-sync-btn" onclick="triggerSyncAll()" title="Sync Strava + Garmin now">Sync</button>
 </header>
 
 <main class="s2-stage">

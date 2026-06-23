@@ -2,9 +2,8 @@
 <html lang="en">
 <head>
   {% include '_head.html' %}
-  <title>AlForks – Setup &amp; Help</title>
+  <title>AlForks – Getting Started</title>
   <link rel="stylesheet" href="/static/base.css?v={{ asset_v('base.css') }}">
-  <script src="/static/sync_toast.js?v={{ asset_v('sync_toast.js') }}" defer></script>
   <style>
     /* Guide-specific layout. Tokens, fonts and chrome come from base.css
        (the orange "Al" + white "Forks" wordmark is now styled there). */
@@ -152,8 +151,8 @@
 <body>
   <header>
     <h1><span>Al</span>Forks</h1>
-    {% include '_nav.html' %}
-    <button class="nav-sync-btn" onclick="triggerSyncAll()" title="Sync Strava + Garmin now">Sync</button>
+    {% set nav_active = 'help' %}
+  {% include '_nav.html' %}
   </header>
 
   <div class="gprogress" id="progress"></div>
@@ -161,12 +160,12 @@
   <main class="guide-main">
     <div class="guide-head">
       <div>
-        <h2 class="page-title">Setup &amp; Help</h2>
+        <h2 class="page-title">Getting Started</h2>
         <p class="guide-sub">Connect your Strava (and optionally Garmin), then import your rides — about five minutes.
           Everything runs locally on your machine.</p>
       </div>
       <div class="guide-head-actions">
-        <a class="btn accent" href="/setup">Go to Setup</a>
+        <a class="btn accent" href="/setup">Go to Settings</a>
         <a class="btn" href="/">Open the app</a>
       </div>
     </div>
@@ -367,7 +366,7 @@
         <ul>
           <li>Tick <b>&ldquo;Run Strava sync when AlForks starts&rdquo;</b> on the Sync tab to auto-import new rides each launch.</li>
           <li>Your activity types and regions come pre-loaded as starting points &mdash; edit or delete them freely.</li>
-          <li>This guide lives at <code>/guide</code> &mdash; reachable any time from the Setup page.</li>
+          <li>This guide lives at <code>/guide</code> &mdash; reachable any time from the ⚙ menu (Help) on any page.</li>
         </ul>
       </div>
     </div>
@@ -375,9 +374,9 @@
     <section class="finish">
       <div class="finish-eyebrow">You&rsquo;re set</div>
       <h3>Ready to ride.</h3>
-      <p>Head to Setup to manage connections, or jump straight into the app once your rides are in.</p>
+      <p>Head to Settings to manage connections, or jump straight into the app once your rides are in.</p>
       <div class="cta">
-        <a class="btn accent" href="/setup">Go to Setup
+        <a class="btn accent" href="/setup">Go to Settings
           <svg class="i" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
         <a class="btn" href="/">Open the app</a>
       </div>

@@ -110,98 +110,139 @@ nav a .nav-pill {
 }
 nav a.active .nav-pill { background: #fbbf24; }
 
-/* Sync trigger — visually distinct from nav links so it reads as an
-   action, not navigation. Sits at the far-right corner of the header
-   via `margin-left: auto`. Subtle uppercase + monospace + hairline
-   border + small icon glyph keep it distinguishable but not loud. */
-.nav-sync-btn {
-  margin-left: auto;
-  font-size: 0.7rem;
-  padding: 5px 14px;
-  border-radius: 3px;
-  border: 1px solid var(--border-row);
-  background: transparent;
-  color: var(--text-secondary);
-  cursor: pointer;
-  transition: all 0.12s;
-  font-family: var(--font-mono);
-  letter-spacing: 0.10em;
-  text-transform: uppercase;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-.nav-sync-btn::before { content: '↻'; font-size: 0.95rem; line-height: 1; transform: translateY(-1px); }
-.nav-sync-btn:hover { color: var(--text-primary); background: var(--accent-soft); border-color: var(--accent); }
-.nav-sync-btn:active { transform: translateY(1px); }
+/* Right-hand action cluster: ↥ Upload · ↻ Sync · │ · ⚙ gear. Pushed to the
+   far right of the header as one unit via margin-left:auto. */
+.nav-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+.nav-divider { width: 1px; height: 18px; background: var(--border-row); margin: 0 2px; }
 
-/* Upload trigger — same action treatment as the Sync button, injected just
-   AFTER it by upload.js so the two read as a paired action group at the
-   far-right of the header. Sync keeps its own `margin-left:auto`, which
-   floats the whole trailing group right; the header's 20px gap spaces them. */
-.nav-upload-btn {
-  font-size: 0.7rem;
-  padding: 5px 14px;
-  border-radius: 3px;
-  border: 1px solid var(--border-row);
+/* Gear menu — the settings/help corner (rightmost in the cluster). */
+.nav-gear { position: relative; display: flex; align-items: center; }
+.nav-gear-btn {
+  font-size: 1rem;
+  line-height: 1;
+  padding: 4px 8px;
+  border-radius: 4px;
+  border: none;
   background: transparent;
   color: var(--text-secondary);
   cursor: pointer;
   transition: all 0.12s;
-  font-family: var(--font-mono);
-  letter-spacing: 0.10em;
-  text-transform: uppercase;
+  position: relative;
+}
+.nav-gear-btn:hover { color: var(--text-primary); background: var(--surface-tint); }
+.nav-gear.active .nav-gear-btn,
+.nav-gear.open .nav-gear-btn { color: var(--accent); background: var(--accent-soft); }
+.nav-gear-menu {
+  display: none;
+  position: absolute; top: calc(100% + 6px); right: 0;
+  min-width: 160px;
+  background: var(--bg-card);
+  border: 1px solid rgba(255,255,255,0.10);
+  border-radius: 6px;
+  padding: 4px;
+  box-shadow: 0 8px 28px rgba(0,0,0,0.45);
+  z-index: 1000;
+  flex-direction: column;
+}
+.nav-gear.open .nav-gear-menu { display: flex; }
+.nav-gear-menu a {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  text-decoration: none;
+  padding: 7px 12px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+.nav-gear-menu a:hover { color: var(--text-primary); background: var(--surface-tint); }
+.nav-gear-menu a.active { color: var(--accent); background: var(--accent-soft); }
+
+/* Action buttons (Sync, Upload) — icon-only and borderless to match the gear,
+   so the cluster reads as a clean icon row (↥ ↻ │ ⚙). The label lives in the
+   tooltip / aria-label. Sync gets an accent hover (it's the primary action);
+   Upload a neutral one. */
+.nav-sync-btn, .nav-upload-btn {
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.12s;
+  padding: 4px 8px;
+  border-radius: 4px;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  line-height: 1;
 }
-.nav-upload-btn::before { content: '↥'; font-size: 0.95rem; line-height: 1; transform: translateY(-1px); }
-.nav-upload-btn:hover { color: var(--text-primary); background: var(--accent-soft); border-color: var(--accent); }
-.nav-upload-btn:active { transform: translateY(1px); }
+.nav-sync-btn::before  { content: '↻'; font-size: 1.1rem; line-height: 1; }
+.nav-upload-btn::before { content: '↥'; font-size: 1.1rem; line-height: 1; }
+.nav-sync-btn:hover   { color: var(--accent); background: var(--accent-soft); }
+.nav-upload-btn:hover { color: var(--text-primary); background: var(--surface-tint); }
+.nav-sync-btn:active, .nav-upload-btn:active { transform: translateY(1px); }
 .nav-upload-btn[disabled] { opacity: 0.55; cursor: default; }
 
-/* Version chip — injected into the header by whatsnew.js on every page. A
-   quiet mono label that links to the release notes; brightens on hover. */
-.app-version {
-  font-size: 0.66rem;
+/* Version line at the foot of the gear menu (replaces the old header chip). */
+.nav-gear-ver {
+  padding: 7px 12px 4px;
+  margin-top: 2px;
+  border-top: 1px solid var(--border-hair);
+  font-size: 0.68rem;
   font-family: var(--font-mono);
-  letter-spacing: 0.06em;
-  color: var(--text-muted);
-  text-decoration: none;
-  padding: 3px 8px;
-  border-radius: 3px;
-  white-space: nowrap;
-  transition: color 0.12s, background 0.12s;
+  color: var(--text-faint);
 }
-.app-version:hover { color: var(--accent); background: var(--accent-soft); }
 
-/* Post-update banner — inserted as the first <body> child by whatsnew.js, so it
-   sits above the header and pushes content down (no overlap) on flow and
-   flex-column pages alike. Dismissible; reappears only on the next version bump. */
-.whatsnew-banner {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  padding: 9px 18px;
-  background: var(--accent-soft);
-  border-bottom: 1px solid var(--accent);
-  color: var(--text-primary);
-  font-size: 0.8rem;
-  flex-shrink: 0;
+/* Notifications bell — badge + dropdown panel of dismissible notices, filled by
+   notices.js (fed by whatsnew.js + review_nav.js). Borderless icon to match the
+   gear; the badge counts how many notices are waiting. */
+.nav-bell { position: relative; display: flex; align-items: center; }
+.nav-bell-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: 4px 7px; border-radius: 4px; border: none; background: transparent;
+  color: var(--text-secondary); cursor: pointer; transition: all 0.12s; position: relative;
 }
-.whatsnew-banner a { color: var(--accent); font-weight: 600; text-decoration: none; }
-.whatsnew-banner a:hover { text-decoration: underline; }
-.whatsnew-banner .wn-dismiss {
-  margin-left: auto;
-  background: transparent;
-  border: none;
-  color: var(--text-muted);
-  cursor: pointer;
-  font-size: 1.05rem;
-  line-height: 1;
-  padding: 2px 6px;
+.nav-bell-btn:hover { color: var(--text-primary); background: var(--surface-tint); }
+.nav-bell.open .nav-bell-btn { color: var(--accent); background: var(--accent-soft); }
+.nav-bell-badge {
+  position: absolute; top: -2px; right: -2px;
+  min-width: 15px; height: 15px; padding: 0 4px; box-sizing: border-box;
+  font-size: 9px; font-weight: 600; font-family: var(--font-mono);
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--warn); color: #0b0d0c; border-radius: 8px;
+  border: 1.5px solid var(--bg-card);   /* punch-out from the header background */
 }
-.whatsnew-banner .wn-dismiss:hover { color: var(--text-primary); }
+/* No badge when there's nothing pending — just the bell. (The class above sets
+   display:inline-flex, which would otherwise override the [hidden] attribute.) */
+.nav-bell-badge[hidden] { display: none; }
+.nav-bell-panel {
+  display: none;
+  position: absolute; top: calc(100% + 6px); right: 0;
+  width: 290px;
+  background: var(--bg-card);
+  border: 1px solid rgba(255,255,255,0.10);
+  border-radius: 8px;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+  z-index: 1000; overflow: hidden;
+}
+.nav-bell.open .nav-bell-panel { display: block; }
+.nav-bell-head {
+  padding: 9px 12px; border-bottom: 1px solid var(--border-hair);
+  font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.10em; color: var(--text-tertiary);
+}
+.nav-bell-empty { padding: 18px 12px; text-align: center; color: var(--text-muted); font-size: 0.78rem; }
+
+/* One notice row in the bell panel — icon, text + link, and a × dismiss. */
+.notice-row {
+  display: flex; gap: 9px; align-items: flex-start;
+  padding: 10px 12px; border-bottom: 1px solid var(--border-hair);
+}
+.notice-row:last-child { border-bottom: none; }
+.notice-row .nicon { font-size: 0.9rem; line-height: 1.3; }
+.notice-row .ntext { flex: 1; min-width: 0; font-size: 0.8rem; color: var(--text-primary); line-height: 1.5; }
+.notice-row .nl { color: var(--link); text-decoration: none; font-size: 0.74rem; }
+.notice-row .nl:hover { color: var(--link-hover); text-decoration: underline; }
+.notice-row .nx {
+  background: transparent; border: none; color: var(--text-faint);
+  cursor: pointer; font-size: 1.05rem; line-height: 1; padding: 0 2px;
+}
+.notice-row .nx:hover { color: var(--text-primary); }
 
 
 /* Filter chip (canonical) — neutral-white active state. Used by

@@ -23,11 +23,16 @@
 <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
 <link rel="preconnect" href="https://api.mapbox.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+{# Notices strip + gear dot — must load FIRST so window.AlNotices exists before
+   whatsnew.js / review_nav.js post to it. #}
+<script src="/static/notices.js?v={{ asset_v('notices.js') }}" defer></script>
 {# Top progress strip — shows the cold-load sidebar-cache build progress. #}
 <script src="/static/progress_strip.js?v={{ asset_v('progress_strip.js') }}" defer></script>
-{# Manual track upload — injects the header "Upload" button on every page. #}
+{# Manual track upload — prepends the icon Upload button into the action cluster. #}
 <script src="/static/upload.js?v={{ asset_v('upload.js') }}" defer></script>
-{# What's New — injects the version chip + shows the post-update banner. #}
+{# Sync button handler (window.triggerSyncAll) + sync progress toast. #}
+<script src="/static/sync_toast.js?v={{ asset_v('sync_toast.js') }}" defer></script>
+{# What's New — posts a dismissible "updated to vX" notice when the version moves. #}
 <script src="/static/whatsnew.js?v={{ asset_v('whatsnew.js') }}" defer></script>
-{# Guide — injects a persistent "Guide" link into the header nav. #}
-<script src="/static/help_link.js?v={{ asset_v('help_link.js') }}" defer></script>
+{# Clean-up badge + notice — fed by /api/review-counts. #}
+<script src="/static/review_nav.js?v={{ asset_v('review_nav.js') }}" defer></script>

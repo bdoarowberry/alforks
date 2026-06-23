@@ -2,12 +2,10 @@
 <html lang="en">
 <head>
   {% include '_head.html' %}
-  <title>AlForks – Logs</title>
+  <title>AlForks – Activities</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="/static/utils.js?v={{ asset_v('utils.js') }}"></script>
-  <script src="/static/sync_toast.js?v={{ asset_v('sync_toast.js') }}" defer></script>
-  <script src="/static/review_nav.js?v={{ asset_v('review_nav.js') }}" defer></script>
   <link rel="stylesheet" href="/static/base.css?v={{ asset_v('base.css') }}">
   <style>
     body { display: flex; flex-direction: column; min-height: 100vh; }
@@ -246,13 +244,12 @@
 
 <header>
   <h1><span>Al</span>Forks</h1>
-  {% set nav_active = 'logs' %}
+  {% set nav_active = 'activities' %}
   {% include '_nav.html' %}
-  <button class="nav-sync-btn" onclick="triggerSyncAll()" title="Sync Strava + Garmin now">Sync</button>
 </header>
 
 <main>
-  <h1 style="font-size: 1.4rem; font-weight: 500; letter-spacing: -0.02em; color: #fff; margin: 0 0 16px;">Logs Overview<span id="count-label" class="count-suffix"></span></h1>
+  <h1 style="font-size: 1.4rem; font-weight: 500; letter-spacing: -0.02em; color: #fff; margin: 0 0 16px;">Activities<span id="count-label" class="count-suffix"></span></h1>
 
   <div id="filters">
     <div class="filter-group">

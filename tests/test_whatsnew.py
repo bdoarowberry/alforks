@@ -10,7 +10,10 @@ class TestChangelogParse(unittest.TestCase):
         releases = app._parse_changelog()
         self.assertGreaterEqual(len(releases), 2)
         versions = [r["version"] for r in releases]
-        self.assertEqual(versions[0], "2026.06.23")      # newest first (file order)
+        # Versions are now per-release (date + sequence) so multiple releases on
+        # one day aren't lumped under a single heading.
+        self.assertEqual(versions[0], "2026.06.23.2")    # newest first (file order)
+        self.assertIn("2026.06.23.1", versions)
         self.assertIn("2026.06.21", versions)
         self.assertTrue(all(r["items"] for r in releases))
 
