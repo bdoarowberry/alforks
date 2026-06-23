@@ -6822,6 +6822,25 @@ def _await_prewarm_into_sync(source: str, deadline_s: int = 600) -> None:
         time.sleep(0.3)
 
 
+def _friendly_sync_message(source: str, raw: str) -> str:
+    """Translate a raw sync-script failure into a message that makes sense in the
+    GUI. The CLI scripts tell you to `python strava_sync.py --login`, but a GUI
+    user connects on the Setup page — so surface that instead of a stack-trace
+    line or a terminal command."""
+    label = "Strava" if source == "strava" else "Garmin"
+    low = (raw or "").lower()
+    if any(k in low for k in ("not logged in", "auth not available", "--login",
+                              "username and password are required", "no tokens",
+                              "not configured", "no credentials", "log in")):
+        return f"Not connected to {label}. Open the Setup page to connect."
+    # Otherwise show the most specific line, stripped of "RuntimeError:"-style
+    # prefixes and any trailing "Run `python … --login`" CLI hint.
+    last = next((ln for ln in reversed((raw or "").splitlines()) if ln.strip()), "")
+    last = re.sub(r"^[A-Za-z.]*Error:\s*", "", last.strip())
+    last = re.sub(r"\s*Run\s+[`']?python\s.*?--login.*$", "", last).strip()
+    return last or f"{label} sync failed."
+
+
 def _run_sync_subprocess(source: str, script: str) -> None:
     """Run a sync script as a subprocess and update _sync_state with results.
     Counts new files / dates added by diffing before/after."""
@@ -6896,7 +6915,7 @@ def _run_sync_subprocess(source: str, script: str) -> None:
             with _sync_state_lock:
                 _sync_state[source].update(
                     running=False, finished_at=int(time.time()), ok=False,
-                    message=(tail[-1] if tail else "sync failed"), added=added,
+                    message=_friendly_sync_message(source, "\n".join(tail)), added=added,
                     phase=None, progress={"done": 0, "total": 0}, ready_url=None)
             return
 
@@ -7568,6 +7587,8 @@ def _compute_duplicate_groups(detail: bool = True) -> list[dict]:
         for members in clusters.values():
             if len(members) >= 2:
                 members.sort(key=lambda a: a["filename"])
+                for m in members:
+                    m.pop("cells", None)   # internal-only; a set isn't JSON-serializable
                 groups.append({"date": d, "tracks": members})
 
     # Hold the lock across the read to pair with the write in

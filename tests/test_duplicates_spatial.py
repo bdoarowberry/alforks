@@ -91,6 +91,17 @@ class TestComputeGroups(unittest.TestCase):
              _act("b.gpx", [],   dist=5.05, dur=2620)])
         self.assertEqual(len(groups), 1)
 
+    def test_api_duplicates_serializes(self):
+        # Regression: the internal 'cells' set must not leak into the JSON
+        # response (a set isn't JSON-serializable -> /review "Failed to load").
+        app.all_activities = lambda: [_act("a.gpx", self.NEAR, date="2021-08-29"),
+                                      _act("b.gpx", self.NEAR, date="2021-08-29")]
+        r = app.app.test_client().get("/api/duplicates")
+        self.assertEqual(r.status_code, 200)
+        data = r.get_json()
+        self.assertTrue(any(g["date"] == "2021-08-29" for g in data["groups"]))
+        self.assertFalse(any("cells" in t for g in data["groups"] for t in g["tracks"]))
+
 
 if __name__ == "__main__":
     unittest.main()
