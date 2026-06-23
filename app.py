@@ -7451,7 +7451,46 @@ def api_track_coords(filename):
     return jsonify({"filename": filename, "coords": coords})
 
 
-_DUPLICATE_STAT_TOL = 0.05  # ±5% on distance and duration
+_DUPLICATE_STAT_TOL = 0.05      # ±5% on distance and duration
+_DUPLICATE_GEO_MIN_IOU = 0.30   # min bounding-box overlap for two tracks to count as the same ride
+
+
+def _track_bbox(polyline: list, pad_m: float = 75.0) -> tuple | None:
+    """Bounding box (min_lat, min_lon, max_lat, max_lon) of a polyline, padded
+    ~pad_m metres on every side (lon scaled by cos(lat)). Padding gives thin
+    out-and-back tracks real area so the IoU below stays meaningful. None when
+    the polyline is empty."""
+    if not polyline:
+        return None
+    las = [p[0] for p in polyline]
+    los = [p[1] for p in polyline]
+    clat = sum(las) / len(las)
+    dlat = pad_m / 111_000.0
+    dlon = pad_m / (111_000.0 * max(math.cos(math.radians(clat)), 1e-6))
+    return (min(las) - dlat, min(los) - dlon, max(las) + dlat, max(los) + dlon)
+
+
+def _bbox_iou(a: tuple, b: tuple) -> float:
+    """Intersection-over-union of two (min_lat, min_lon, max_lat, max_lon) boxes;
+    0.0 when they don't overlap."""
+    iw = max(0.0, min(a[2], b[2]) - max(a[0], b[0]))
+    ih = max(0.0, min(a[3], b[3]) - max(a[1], b[1]))
+    inter = iw * ih
+    area_a = (a[2] - a[0]) * (a[3] - a[1])
+    area_b = (b[2] - b[0]) * (b[3] - b[1])
+    union = area_a + area_b - inter
+    return inter / union if union > 0 else 0.0
+
+
+def _tracks_colocated(pl_a: list, pl_b: list,
+                      min_iou: float = _DUPLICATE_GEO_MIN_IOU) -> bool:
+    """True if two tracks cover enough of the same ground to be the same ride.
+    Falls back to True when either polyline is missing so a real duplicate is
+    never dropped purely for lack of geometry — the stat checks still gate it."""
+    ba, bb = _track_bbox(pl_a), _track_bbox(pl_b)
+    if ba is None or bb is None:
+        return True
+    return _bbox_iou(ba, bb) >= min_iou
 
 
 def _values_within_tol(a: float, b: float, tol: float) -> bool:
@@ -7467,10 +7506,14 @@ def _values_within_tol(a: float, b: float, tol: float) -> bool:
 
 def _compute_duplicate_groups(detail: bool = True) -> list[dict]:
     """Return duplicate groups across all_activities(), already filtered for
-    user-dismissed signatures. `detail=True` includes every per-track field
-    the /review page needs; `detail=False` keeps only enough to count and
-    identify each group (used by /api/review-counts to keep the badge
-    snappy).
+    user-dismissed signatures. A pair is a duplicate when it shares a calendar
+    date, distance and duration within ±5%, AND the two tracks overlap on the
+    map (`_tracks_colocated`) — the spatial gate rejects different rides on the
+    same day that merely happen to be similar lengths (start time is not used:
+    it's unreliable across sources due to timezone offsets). `detail=True`
+    includes every per-track field the /review page needs; `detail=False` keeps
+    only enough to count and identify each group (used by /api/review-counts to
+    keep the badge snappy).
     """
     by_date: dict[str, list[dict]] = {}
     for a in all_activities():
@@ -7482,6 +7525,7 @@ def _compute_duplicate_groups(detail: bool = True) -> list[dict]:
             "filename":     a["filename"],
             "distance_km":  s.get("distance_km"),
             "duration_sec": s.get("duration_sec"),
+            "polyline":     a.get("polyline"),   # spatial-overlap gate (both detail modes)
         }
         if detail:
             entry.update({
@@ -7514,7 +7558,8 @@ def _compute_duplicate_groups(detail: bool = True) -> list[dict]:
         for i in range(len(acts)):
             for j in range(i + 1, len(acts)):
                 if _values_within_tol(acts[i]["distance_km"],  acts[j]["distance_km"],  _DUPLICATE_STAT_TOL) \
-                   and _values_within_tol(acts[i]["duration_sec"], acts[j]["duration_sec"], _DUPLICATE_STAT_TOL):
+                   and _values_within_tol(acts[i]["duration_sec"], acts[j]["duration_sec"], _DUPLICATE_STAT_TOL) \
+                   and _tracks_colocated(acts[i]["polyline"], acts[j]["polyline"]):
                     union(i, j)
         clusters: dict[int, list[dict]] = {}
         for i, a in enumerate(acts):
@@ -7540,9 +7585,9 @@ def api_duplicates():
     """Surface likely-duplicate activities so the user can clean up imports
     that came in from multiple sources (e.g. the same ride synced from both
     Strava and Garmin). Heuristic per pair: same calendar date AND
-    distance_km within ±5% AND duration_sec within ±5%. Groups the user
-    has dismissed via "Not duplicates" are filtered out — see
-    `_compute_duplicate_groups`."""
+    distance_km within ±5% AND duration_sec within ±5% AND the tracks overlap
+    on the map. Groups the user has dismissed via "Not duplicates" are filtered
+    out — see `_compute_duplicate_groups`."""
     groups = _compute_duplicate_groups(detail=True)
     return jsonify({"groups": groups, "total_pairs": sum(len(g["tracks"]) for g in groups)})
 
