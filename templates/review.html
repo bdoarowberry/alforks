@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   {% include '_head.html' %}
-  <title>AlForks – Review</title>
+  <title>AlForks – Clean-up</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
@@ -196,13 +196,13 @@
 
 <header>
   <h1><span>Al</span>Forks</h1>
-  {% set nav_active = 'review' %}
+  {% set nav_active = 'cleanup' %}
   {% include '_nav.html' %}
   <button class="nav-sync-btn" onclick="triggerSyncAll()" title="Sync Strava + Garmin now">Sync</button>
 </header>
 
 <main class="rv-stage">
-  <h1 class="rv-page-title">Review</h1>
+  <h1 class="rv-page-title">Clean-up</h1>
 
   <div id="rv-tabs">
     <button class="rv-tab active" data-tab="duplicates" onclick="rvShowTab('duplicates')">

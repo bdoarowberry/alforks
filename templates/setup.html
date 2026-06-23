@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   {% include '_head.html' %}
-  <title>AlForks – Setup</title>
+  <title>AlForks – Settings</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
   <link rel="stylesheet" href="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.css"/>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -231,12 +231,12 @@
 
 <header>
   <h1><span>Al</span>Forks</h1>
-  {% set nav_active = 'setup' %}
+  {% set nav_active = 'settings' %}
   {% include '_nav.html' %}
   <button class="nav-sync-btn" onclick="triggerSyncAll()" title="Sync Strava + Garmin now">Sync</button>
 </header>
 
-<h1 class="page-title" style="margin: 18px 22px 12px;">Setup</h1>
+<h1 class="page-title" style="margin: 18px 22px 12px;">Settings</h1>
 
 <div id="tab-bar">
   <button class="tab-btn active" onclick="showTab('regions')">Regions</button>
@@ -411,7 +411,7 @@
       .guide-link:hover { text-decoration: underline; }
     </style>
 
-    <a class="guide-link" href="/guide" target="_blank" rel="noopener">📖 Setup &amp; Help Guide</a>
+    <a class="guide-link" href="/guide" target="_blank" rel="noopener">📖 Getting-started guide</a>
 
     <h2 class="panel-section-h2">Connect Strava</h2>
     <div class="fit-card" id="strava-connect-card">

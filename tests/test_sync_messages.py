@@ -15,7 +15,7 @@ class TestFriendlySyncMessage(unittest.TestCase):
         msg = app._friendly_sync_message(
             "strava", "Not logged in. Run: python strava_sync.py --login")
         self.assertIn("Strava", msg)
-        self.assertIn("Setup", msg)
+        self.assertIn("Settings", msg)
         self.assertNotIn("python", msg)
 
     def test_strava_token_refresh_failure_routes_to_reconnect(self):
@@ -23,7 +23,7 @@ class TestFriendlySyncMessage(unittest.TestCase):
         raw = ("Strava login expired — please reconnect on the Setup page. "
                "(token refresh failed: {'message': 'Bad Request', 'errors': [...]})")
         msg = app._friendly_sync_message("strava", raw)
-        self.assertIn("Setup", msg)
+        self.assertIn("Settings", msg)
         self.assertNotIn("Bad Request", msg)
         self.assertNotIn("{", msg)
 
@@ -32,7 +32,7 @@ class TestFriendlySyncMessage(unittest.TestCase):
                "required). Run `python garmin_sync.py --login` first.")
         msg = app._friendly_sync_message("garmin", raw)
         self.assertIn("Garmin", msg)
-        self.assertIn("Setup", msg)
+        self.assertIn("Settings", msg)
         self.assertNotIn("RuntimeError", msg)
         self.assertNotIn("--login", msg)
 
@@ -46,7 +46,7 @@ class TestFriendlySyncMessage(unittest.TestCase):
         self.assertNotIn("timed out", msg)
         self.assertIn("Strava", msg)
         self.assertIn("try again", msg.lower())
-        self.assertNotIn("Setup", msg)   # not an auth failure
+        self.assertNotIn("Settings", msg)   # not an auth failure
 
     def test_server_5xx_gets_friendly_connection_message(self):
         msg = app._friendly_sync_message(
@@ -61,7 +61,7 @@ class TestFriendlySyncMessage(unittest.TestCase):
             "strava", "Traceback...\nRuntimeError: could not write GPX file: disk full")
         self.assertIn("disk full", msg)
         self.assertNotIn("RuntimeError", msg)
-        self.assertNotIn("Setup", msg)   # not an auth failure -> keep the real reason
+        self.assertNotIn("Settings", msg)   # not an auth failure -> keep the real reason
 
     def test_garmin_rate_limit_message(self):
         # The Garmin sync now exits non-zero on an all-429 run; the GUI should
@@ -70,7 +70,7 @@ class TestFriendlySyncMessage(unittest.TestCase):
             "garmin", "Garmin is rate-limiting requests (HTTP 429 Too Many "
                       "Requests) — wait a few minutes and sync again.")
         self.assertIn("rate-limiting", msg.lower())
-        self.assertNotIn("Setup", msg)   # not an auth failure
+        self.assertNotIn("Settings", msg)   # not an auth failure
 
     def test_empty_falls_back(self):
         self.assertEqual(app._friendly_sync_message("garmin", ""), "Garmin sync failed.")

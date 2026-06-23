@@ -114,8 +114,57 @@ nav a.active .nav-pill { background: #fbbf24; }
    action, not navigation. Sits at the far-right corner of the header
    via `margin-left: auto`. Subtle uppercase + monospace + hairline
    border + small icon glyph keep it distinguishable but not loud. */
+/* Gear menu — the settings/help/admin corner. Pushed to the right of the
+   core nav via margin-left:auto (it's the single right-pusher now; the Sync
+   button and injected controls cluster after it). */
+.nav-gear { margin-left: auto; position: relative; display: flex; align-items: center; }
+.nav-gear-btn {
+  font-size: 1rem;
+  line-height: 1;
+  padding: 4px 8px;
+  border-radius: 4px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.12s;
+  position: relative;
+}
+.nav-gear-btn:hover { color: var(--text-primary); background: var(--surface-tint); }
+.nav-gear.active .nav-gear-btn,
+.nav-gear.open .nav-gear-btn { color: var(--accent); background: var(--accent-soft); }
+/* Small dot on the gear when Clean-up has pending items (so a collapsed menu
+   still signals there's something to do). Toggled by review_nav.js. */
+.nav-gear-dot {
+  position: absolute; top: 2px; right: 3px;
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--warn);
+}
+.nav-gear-menu {
+  display: none;
+  position: absolute; top: calc(100% + 6px); right: 0;
+  min-width: 160px;
+  background: var(--bg-card);
+  border: 1px solid rgba(255,255,255,0.10);
+  border-radius: 6px;
+  padding: 4px;
+  box-shadow: 0 8px 28px rgba(0,0,0,0.45);
+  z-index: 1000;
+  flex-direction: column;
+}
+.nav-gear.open .nav-gear-menu { display: flex; }
+.nav-gear-menu a {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  text-decoration: none;
+  padding: 7px 12px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+.nav-gear-menu a:hover { color: var(--text-primary); background: var(--surface-tint); }
+.nav-gear-menu a.active { color: var(--accent); background: var(--accent-soft); }
+
 .nav-sync-btn {
-  margin-left: auto;
   font-size: 0.7rem;
   padding: 5px 14px;
   border-radius: 3px;

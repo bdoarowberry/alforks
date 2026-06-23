@@ -40,7 +40,8 @@
 <body>
   <header>
     <h1><span>Al</span>Forks</h1>
-    {% include '_nav.html' %}
+    {% set nav_active = 'whatsnew' %}
+  {% include '_nav.html' %}
     <button class="nav-sync-btn" onclick="triggerSyncAll()" title="Sync Strava + Garmin now">Sync</button>
   </header>
 

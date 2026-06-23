@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   {% include '_head.html' %}
-  <title>AlForks – Heat Map</title>
+  <title>AlForks – Map</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="https://unpkg.com/leaflet-rotate@0.2.8/dist/leaflet-rotate-src.js"></script>
@@ -176,13 +176,13 @@
 
 <header>
   <h1><span>Al</span>Forks</h1>
-  {% set nav_active = 'heatmap' %}
+  {% set nav_active = 'map' %}
   {% include '_nav.html' %}
   <button class="nav-sync-btn" onclick="triggerSyncAll()" title="Sync Strava + Garmin now">Sync</button>
 </header>
 
 <div id="page-head">
-  <h1>Heat Map</h1>
+  <h1>Map</h1>
   <div id="mode-group">
     <button class="mode-btn"        id="btn-heat"    onclick="setMode('heat')">Heat</button>
     <button class="mode-btn active" id="btn-routes"  onclick="setMode('routes')">Routes</button>
