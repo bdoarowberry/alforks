@@ -912,39 +912,23 @@ function renderMetrics(weeks) {
   // → habit (Consistency) → body (Weight) → energy (Calories) → totals.
   // TRIMP load is now the dedicated chart panel below the hero — it
   // used to live here as a card.
+  // De-jargoned keeper set: habit + window totals + body weight. The old load
+  // tiles (Form / Acute / Chronic / Hard hrs / Hard share / Calories) are gone —
+  // they're answered by the verdict cards + the fitness-vs-fatigue chart above.
   const cards = [
-    { lbl: 'Form',         val: fmtSignedHours(tsb),     unit: 'h',    sub: tsbState.label,
-      color: tsbState.color,       spark: form_h_series,
-      tip: 'Chronic minus acute load — your readiness state.\n\nPositive (Fresh): under-trained recently, peak-ready.\nNegative (Fatigued): building, may need recovery.\n\nSlightly negative is normal during a build phase.' },
-    { lbl: 'Acute load',   val: atl.toFixed(1),          unit: 'h/wk', sub: 'avg, last 4 wk',
-      color: 'var(--tl-amber)',    spark: acute_h_series,
-      tip: 'Recent training stress.\n\nAverage weekly hours over the last 4 weeks — reflects what your body is currently absorbing.\n\nHours-based; for the intensity-weighted version see the TRIMP chart above.' },
-    { lbl: 'Chronic load', val: ctl.toFixed(1),          unit: 'h/wk', sub: 'avg, last 8 wk',
-      color: 'var(--tl-purple)',   spark: chronic_h_series,
-      tip: 'Sustained training stress.\n\nAverage weekly hours over the last 8 weeks — your aerobic baseline, what your body is built to absorb.' },
-    { lbl: 'Z2 hrs/wk',    val: z2_avg.toFixed(1),       unit: 'h',    sub: 'avg, last 4 wk',
-      color: 'var(--tl-green)',    spark: z2_h,
-      tip: 'Average hours per week in Zone 2 (endurance), last 4 weeks.\n\nDirect measure of base-aerobic volume — most aerobic adaptation comes from this.\n\nBuild-season target: 4–8+ h/wk.' },
-    { lbl: 'Hard hrs/wk',  val: hard_avg.toFixed(1),     unit: 'h',    sub: 'Z4+Z5, avg 4 wk',
-      color: 'var(--tl-red)',      spark: hard_h,
-      tip: 'Average hours per week in Z4 (threshold) + Z5 (VO2max), last 4 weeks.\n\nThe intensity dose — easy to overshoot without realising.' },
-    { lbl: 'Hard share',   val: hard_share.toFixed(0),   unit: '%',    sub: 'of Z2–Z5 time',
-      color: hardColor,            spark: hard_share_pct,
-      tip: 'Proportion of zoned time (Z2–Z5) spent at Z4+Z5 intensity.\n\nThe 80/20 rule says ~20% hard, ~80% easy.\n\nGreen = in range (10–20%), blue = under-stimulus for top-end gains, red = skewing too hard.' },
     { lbl: 'Consistency',  val: consistency_pct.toFixed(0), unit: '%', sub: `${consistent}/${weeks.length} wk ≥ 3 rides`,
       color: consColor,            spark: rides_series,
-      tip: 'Percentage of weeks in the window with ≥3 activities.\n\nConsistency over months matters more than peak weekly volume for amateur athletes.\n\nSparkline shows weekly ride count.' },
-    _weightCard(weeks),
-    _caloriesCard(weeks),
+      tip: 'Percentage of weeks with at least 3 rides.\n\nConsistency over months matters more than peak weekly volume. Sparkline = weekly ride count.' },
     { lbl: 'Volume',       val: totalH.toFixed(0),      unit: 'h',    sub: `${weeks.length} wk total`,
       color: 'var(--tl-blue)',     spark: volume_h,
       tip: 'Total moving hours across the selected window.' },
     { lbl: 'Distance',     val: Math.round(totalDist).toLocaleString(), unit: 'km', sub: `${(totalDist / Math.max(1, weeks.length)).toFixed(1)} km/wk avg`,
       color: 'var(--tl-purple)',   spark: dist_km,
-      tip: 'Total distance covered across the selected window.\n\nSub-line shows the per-week average.' },
+      tip: 'Total distance across the window.\n\nSub-line shows the per-week average.' },
     { lbl: 'Climbing',     val: Math.round(totalClimb).toLocaleString(), unit: 'm', sub: `${weeks.length} wk total`,
       color: 'var(--tl-amber)',    spark: climb_m,
-      tip: 'Total elevation gain across the window.\n\nExcludes lift-assisted segments where automatic detection identifies them.' },
+      tip: 'Total climbing across the window.\n\nExcludes lift-assisted segments where automatic detection identifies them.' },
+    _weightCard(weeks),
   ];
 
   renderMetricCards('tl-metrics-cards', cards);
@@ -1310,8 +1294,7 @@ function render(payload) {
   renderAnswers(payload);
   renderHero(payload.weeks);
   renderLoadBalance(payload);   // correct fitness-vs-fatigue, replaces TRIMP jargon
-  const _grid = document.getElementById('tl-metrics-cards');
-  if (_grid) _grid.style.display = 'none';   // jargon metric cards -> verdict cards
+  renderMetrics(payload.weeks); // trimmed keeper tiles (consistency, totals, weight)
   renderHRStack(payload.weeks);
   renderBarChart('tl-volume-chart',   payload.weeks, 'hours',  'h', 'volume');
   renderBarChart('tl-climbing-chart', payload.weeks, 'gain_m', 'm', 'climbing');
