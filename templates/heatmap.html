@@ -31,6 +31,47 @@
     #filter-bar label { font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.14em; font-family: var(--font-mono); }
     .sep { width: 1px; height: 18px; background: var(--border-hair); flex-shrink: 0; }
 
+    /* ── Map + ride list split ──────────────────────────────────────────
+       The map and the "Rides" side list sit in a flex row that fills the
+       remaining viewport height. The map shrinks by the panel width so the
+       list sits beside it (never covering it); overlays stay absolute
+       inside #map-wrap and are unaffected. */
+    #map-and-list { flex: 1; min-height: 0; display: flex; }
+    #map-wrap { min-width: 0; }
+
+    #ride-panel { flex: 0 0 300px; min-width: 0; display: flex; flex-direction: column;
+      background: var(--bg-card); border-left: 1px solid var(--border-hair);
+      transition: flex-basis 0.16s ease; overflow: hidden; }
+    #ride-panel.collapsed { flex-basis: 34px; }
+    .rp-head { display: flex; align-items: center; justify-content: space-between;
+      gap: 8px; padding: 11px 13px; border-bottom: 1px solid var(--border-hair); flex-shrink: 0; }
+    .rp-title { font-size: 11px; text-transform: uppercase; letter-spacing: 0.12em;
+      color: var(--text-secondary); font-family: var(--font-mono); white-space: nowrap; }
+    .rp-count { color: var(--text-muted); }
+    .rp-toggle { background: transparent; border: 1px solid var(--border-hair);
+      color: var(--text-muted); border-radius: 4px; cursor: pointer; width: 22px; height: 22px;
+      font-size: 12px; line-height: 1; flex-shrink: 0; transition: color 0.12s, border-color 0.12s; }
+    .rp-toggle:hover { color: var(--text-primary); border-color: var(--accent); }
+    .rp-list { flex: 1; overflow-y: auto; overflow-x: hidden; }
+    .rp-row { display: flex; align-items: center; gap: 9px; padding: 8px 13px;
+      border-bottom: 1px solid var(--border-hair); cursor: pointer; transition: background 0.1s; }
+    .rp-row:hover, .rp-row.active { background: rgba(255,255,255,0.05); }
+    .rp-row.active { box-shadow: inset 2px 0 0 var(--accent); }
+    .rp-dot { width: 9px; height: 9px; border-radius: 2px; flex-shrink: 0; }
+    .rp-main { flex: 1; min-width: 0; }
+    .rp-name { font-size: 0.82rem; color: var(--text-primary);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .rp-meta { font-size: 0.66rem; color: var(--text-muted); font-family: var(--font-mono);
+      margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .rp-hint { padding: 8px 13px; font-size: 0.6rem; line-height: 1.4; color: var(--text-muted);
+      border-top: 1px solid var(--border-hair); font-family: var(--font-mono); flex-shrink: 0; }
+    /* Collapsed: thin rail showing only the toggle (▸ to re-expand). */
+    #ride-panel.collapsed .rp-list,
+    #ride-panel.collapsed .rp-title,
+    #ride-panel.collapsed .rp-hint { display: none; }
+    #ride-panel.collapsed .rp-head { justify-content: center; padding: 11px 4px; }
+    @media (max-width: 760px) { #ride-panel { display: none; } }
+
     /* Inline hint shown next to the Year label when Recency mode locks
        the year filter to "All". */
     #year-lock-hint { font-size: 10px; color: var(--text-muted); font-family: var(--font-mono); letter-spacing: 0.04em; text-transform: none; margin-left: 6px; font-style: italic; }
@@ -156,6 +197,7 @@
   <div id="type-filters" style="display:flex;gap:6px;"></div>
 </div>
 
+<div id="map-and-list">
 <div id="map-wrap">
   <div id="map"></div>
   <div id="map-3d"></div>
@@ -199,6 +241,17 @@
   </div>
 </div>
 
+<aside id="ride-panel">
+  <div class="rp-head">
+    <span class="rp-title">Rides <span id="rp-count" class="rp-count"></span></span>
+    <button id="rp-toggle" class="rp-toggle" onclick="toggleRidePanel()"
+            title="Hide / show ride list" aria-label="Hide or show ride list">◂</button>
+  </div>
+  <div id="rp-list" class="rp-list"></div>
+  <div class="rp-hint">Hover a ride to find it on the map · click to open the log</div>
+</aside>
+</div><!-- /map-and-list -->
+
 <script>
 const TYPES = {{ types_json | safe }};
 const TYPE_LABELS = Object.fromEntries(TYPES.map(t => [t.id, t.label]));
@@ -208,6 +261,11 @@ const MAPBOX_TOKEN   = '{{ mapbox_token }}';
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
 let allActivities = [];
+// Ride-list ↔ map association. filename -> { act, visible:L.Polyline|null, baseStyle }.
+// Rebuilt every render(); `visible` is the thin per-track line (Routes/Recency) we
+// restyle on highlight, null in Heat mode (no per-track lines — we draw a transient one).
+const byFilename = new Map();
+let _transientHi = null;   // transient highlight polyline used in Heat mode
 let activeYear = 'all';
 let activeTypes = new Set();   // empty Set = "All" (no type filter)
 // Two independent axes:
@@ -412,8 +470,16 @@ map.on('zoomend', () => {
 
 function addRouteLayer(act) {
   const color = TYPE_COLORS[act.type] || UNTAGGED_COLOR;
-  L.polyline(act.polyline, { color, weight: 5, opacity: 0.12, interactive: false }).addTo(routeGroup);
-  L.polyline(act.polyline, { color, weight: 2, opacity: 0.65, interactive: false }).addTo(routeGroup);
+  // Fat underline is the hover/click hit target (wider = easier to hit); the thin
+  // visible line is what we restyle on highlight, so it stays non-interactive.
+  L.polyline(act.polyline, { color, weight: 5, opacity: 0.12, interactive: true })
+    .on('mouseover', () => highlightRide(act.filename, true,  true))
+    .on('mouseout',  () => highlightRide(act.filename, false, true))
+    .on('click',     () => openLog(act.filename))
+    .addTo(routeGroup);
+  const baseStyle = { color, weight: 2, opacity: 0.65 };
+  const vis = L.polyline(act.polyline, { ...baseStyle, interactive: false }).addTo(routeGroup);
+  byFilename.set(act.filename, { act, visible: vis, baseStyle });
 }
 
 function renderRoutes() {
@@ -518,8 +584,14 @@ function renderRecency() {
   for (const act of sorted) {
     const days = (today - new Date(act.date).getTime()) / DAY_MS;
     const { color } = bucketForDays(days);
-    L.polyline(act.polyline, { color, weight: 5, opacity: 0.12, interactive: false }).addTo(routeGroup);
-    L.polyline(act.polyline, { color, weight: 2, opacity: 0.75, interactive: false }).addTo(routeGroup);
+    L.polyline(act.polyline, { color, weight: 5, opacity: 0.12, interactive: true })
+      .on('mouseover', () => highlightRide(act.filename, true,  true))
+      .on('mouseout',  () => highlightRide(act.filename, false, true))
+      .on('click',     () => openLog(act.filename))
+      .addTo(routeGroup);
+    const baseStyle = { color, weight: 2, opacity: 0.75 };
+    const vis = L.polyline(act.polyline, { ...baseStyle, interactive: false }).addTo(routeGroup);
+    byFilename.set(act.filename, { act, visible: vis, baseStyle });
   }
   updateRouteLegend();
 }
@@ -636,13 +708,100 @@ function applyFilter({ refit = true } = {}) {
 }
 
 function render({ refit = false } = {}) {
+  byFilename.clear();
+  if (_transientHi) { _transientHi.remove(); _transientHi = null; }
   if (mapView === '3d')             render3D();
   else if (viewMode === 'heat')     renderHeat();
   else if (viewMode === 'recency')  renderRecency();
   else                              renderRoutes();
   if (refit) autoFit();
   updateStats();
+  renderRideList();
 }
+
+// ─── Ride list (find a log via the map) ──────────────────────────────────────
+// A right-side list mirrors the filtered set (allActivities), newest first.
+// Hovering a row highlights its track on the map and vice-versa; clicking opens
+// the log. Built fresh each render() so it always tracks the year/type filters.
+
+function openLog(fn) { location.href = '/log/' + encodeURIComponent(fn); }
+
+function rideRowHtml(act) {
+  const color = TYPE_COLORS[act.type] || UNTAGGED_COLOR;
+  const name  = escapeHtml(act.title || TYPE_LABELS[act.type] || 'Ride');
+  const tl    = TYPE_LABELS[act.type] || act.type || '';
+  const dist  = (act.distance_km != null) ? `${fmtNum(act.distance_km, 1)} km` : '';
+  const meta  = [fmtDate(act.date), escapeHtml(tl), dist].filter(Boolean).join(' · ');
+  return `<div class="rp-row" data-fn="${escapeHtml(act.filename)}">`
+       + `<span class="rp-dot" style="background:${color}"></span>`
+       + `<span class="rp-main"><div class="rp-name">${name}</div>`
+       + `<div class="rp-meta">${meta}</div></span></div>`;
+}
+
+function renderRideList() {
+  const listEl = document.getElementById('rp-list');
+  if (!listEl) return;
+  document.getElementById('rp-count').textContent = `(${allActivities.length})`;
+  const sorted = [...allActivities].sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+  listEl.innerHTML = sorted.map(rideRowHtml).join('');
+  // Heat mode draws no per-track lines, so ensure every ride still has an entry
+  // (act only) — row hover then paints a transient highlight from act.polyline.
+  for (const a of allActivities) {
+    if (!byFilename.has(a.filename)) byFilename.set(a.filename, { act: a, visible: null, baseStyle: null });
+  }
+}
+
+function highlightRide(fn, on, fromMap) {
+  const sel = (window.CSS && CSS.escape) ? CSS.escape(fn) : fn.replace(/"/g, '\\"');
+  const row = document.querySelector(`.rp-row[data-fn="${sel}"]`);
+  if (row) {
+    row.classList.toggle('active', on);
+    if (on && fromMap) row.scrollIntoView({ block: 'nearest' });
+  }
+  const rec = byFilename.get(fn);
+  if (!rec) return;
+  if (rec.visible) {
+    if (on) { rec.visible.setStyle({ color: '#ffffff', weight: 4, opacity: 1 }); rec.visible.bringToFront(); }
+    else    { rec.visible.setStyle(rec.baseStyle); }
+  } else if (rec.act && rec.act.polyline) {
+    // Heat mode: no persistent per-track line — draw/remove a transient highlight.
+    if (on) {
+      if (_transientHi) _transientHi.remove();
+      _transientHi = L.polyline(rec.act.polyline, { color: '#ffffff', weight: 4, opacity: 0.95, interactive: false }).addTo(map);
+    } else if (_transientHi) {
+      _transientHi.remove(); _transientHi = null;
+    }
+  }
+}
+
+// Delegated list events (wired once; #rp-list is rebuilt in place).
+(function wireRideList() {
+  const listEl = document.getElementById('rp-list');
+  if (!listEl) return;
+  listEl.addEventListener('mouseover', e => { const r = e.target.closest('.rp-row'); if (r) highlightRide(r.dataset.fn, true,  false); });
+  listEl.addEventListener('mouseout',  e => { const r = e.target.closest('.rp-row'); if (r) highlightRide(r.dataset.fn, false, false); });
+  listEl.addEventListener('click',     e => { const r = e.target.closest('.rp-row'); if (r) openLog(r.dataset.fn); });
+})();
+
+function toggleRidePanel() {
+  const p = document.getElementById('ride-panel');
+  const collapsed = p.classList.toggle('collapsed');
+  localStorage.setItem('heatmap_ridepanel', collapsed ? 'closed' : 'open');
+  document.getElementById('rp-toggle').textContent = collapsed ? '▸' : '◂';
+  // Map width changed — let Leaflet (and Mapbox in 3D) re-measure after the transition.
+  setTimeout(() => {
+    if (typeof map !== 'undefined' && map) map.invalidateSize();
+    if (typeof mb3d !== 'undefined' && mb3d) mb3d.resize();
+  }, 200);
+}
+
+// Restore the collapsed/open choice on load (before any map sizing happens).
+(function initRidePanel() {
+  if (localStorage.getItem('heatmap_ridepanel') === 'closed') {
+    document.getElementById('ride-panel').classList.add('collapsed');
+    document.getElementById('rp-toggle').textContent = '▸';
+  }
+})();
 
 // ─── Mode toggle (Heat / Routes / Recency — 2D visualization) ────────────────
 function setMode(mode) {
