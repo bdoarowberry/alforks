@@ -110,12 +110,14 @@ class TestDerivedMetrics(unittest.TestCase):
 
 
 class TestVerdicts(unittest.TestCase):
-    def test_fitness_vo2_dominates(self):
-        self.assertEqual(T.fitness_verdict(0.05, 0.0, 0.0), "rising")    # vo2 up alone
-        self.assertEqual(T.fitness_verdict(-0.05, 0.0, 0.0), "falling")
-        self.assertEqual(T.fitness_verdict(0.05, 0.05, -0.1), "steady")  # offsetting
+    def test_fitness_verdict_no_vo2(self):
+        # (resting_hr_change, z2_change, fitness_change): rhr & z2 down + fit up = rising
+        self.assertEqual(T.fitness_verdict(-0.05, -0.05, 0.1), "rising")
+        self.assertEqual(T.fitness_verdict(0.05, 0.05, -0.1), "falling")
         self.assertEqual(T.fitness_verdict(0.0, 0.0, 0.0), "steady")
         self.assertEqual(T.fitness_verdict(None, None, None), "unknown")
+        # a single good signal (resting HR dropping) is enough to read rising
+        self.assertEqual(T.fitness_verdict(-0.05, None, None), "rising")
 
     def test_readiness(self):
         self.assertEqual(T.readiness_verdict(15, 65, 58, 5.0, -2), "easy")   # all tired

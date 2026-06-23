@@ -175,17 +175,22 @@ def trend(values, n: int = 4):
 
 # ─── Section verdicts (pure; the page renders plain sentences from these) ────
 
-def fitness_verdict(vo2_change, rhr_change, fitness_change) -> str:
-    """'rising' / 'steady' / 'falling' / 'unknown'. VO2max (up=good) is weighted
-    most as it's measured; resting HR (down=good) and load-fitness (up=good)
-    refine it. Each *_change is a signed relative change (from trend()) or None."""
+def fitness_verdict(rhr_change, z2_change, fitness_change) -> str:
+    """'rising' / 'steady' / 'falling' / 'unknown' for an MTB athlete, from the
+    signals that are valid WITHOUT a power meter:
+      - resting HR (down = good),
+      - Z2 aerobic efficiency, i.e. avg HR at easy effort (down = good),
+      - load-derived fitness / chronic load (up = good).
+    VO2max is deliberately NOT used: on a running-only Garmin (e.g. FR245) it
+    ignores cycling and climbing, so it's unreliable for a mountain biker.
+    Each *_change is a signed relative change (from trend()) or None."""
     score = have = 0
-    if vo2_change is not None:
-        have += 1
-        score += 2 if vo2_change > 0.01 else -2 if vo2_change < -0.01 else 0
     if rhr_change is not None:
         have += 1
         score += 1 if rhr_change < -0.02 else -1 if rhr_change > 0.02 else 0
+    if z2_change is not None:
+        have += 1
+        score += 1 if z2_change < -0.02 else -1 if z2_change > 0.02 else 0
     if fitness_change is not None:
         have += 1
         score += 1 if fitness_change > 0.05 else -1 if fitness_change < -0.05 else 0

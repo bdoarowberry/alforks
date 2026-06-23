@@ -1244,9 +1244,9 @@ function renderAnswers(p) {
 
   const [fs, ft] = pick('fitter', a.fitter);
   const fsub = [
-    w.vo2max != null ? `VO₂max ${w.vo2max}${tlArrow(w.vo2max_change)}` : null,
     w.resting_hr != null ? `resting HR ${w.resting_hr}${tlArrow(w.resting_hr_change, true)}` : null,
-  ].filter(Boolean).join('  ·  ') || 'Connect a Garmin for VO₂max + resting-HR trends.';
+    p.z2_hr != null ? `easy-effort HR ${p.z2_hr}${tlArrow(p.z2_change, true)}` : null,
+  ].filter(Boolean).join('  ·  ') || 'Not enough heart-rate history yet — keep riding and syncing.';
 
   const [os, ot] = pick('overdoing', a.overdoing);
   const osub = p.acwr != null ? `Load ratio (recent vs long-term) ${p.acwr.toFixed(2)}` : 'No load in the last week';
@@ -1264,14 +1264,44 @@ function renderAnswers(p) {
     tlAnswerCard('Am I training right?',  ms, mt, msub);
 }
 
+// Training balance — fitness (slow) vs fatigue (fast). Repurposes the old
+// TRIMP panel with plain-language labels + the correct EWMA series.
+function renderLoadBalance(payload) {
+  const panel = document.getElementById('tl-trimp-panel');
+  if (panel) {
+    const eb = panel.querySelector('.tl-eyebrow');
+    if (eb) eb.childNodes[0] && (eb.childNodes[0].nodeValue = 'Training balance');
+    const title = panel.querySelector('.tl-trimp-title');
+    if (title) title.innerHTML = 'Fresh or buried? <span class="tl-trimp-suffix">fitness vs fatigue</span>';
+    const legend = panel.querySelector('.tl-trimp-legend');
+    if (legend) legend.innerHTML =
+      '<span class="item"><span class="swatch" style="background:var(--tl-purple)"></span>Fitness</span>' +
+      '<span class="item"><span class="swatch" style="background:var(--tl-amber)"></span>Fatigue</span>';
+  }
+  const host = document.getElementById('tl-trimp-chart');
+  if (!host) return;
+  const s = payload.series || [];
+  if (s.length < 2) { host.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text-muted);font-size:12px">Not enough history yet — keep riding and syncing.</div>'; return; }
+  const W = 720, H = 150, pad = 8;
+  const max = Math.max(1, ...s.map(d => Math.max(d.fitness, d.fatigue)));
+  const X = i => pad + (W - 2*pad) * i / (s.length - 1);
+  const Y = v => H - pad - (H - 2*pad) * v / max;
+  const line = (key, col) =>
+    `<path d="${s.map((p,i)=>`${i?'L':'M'}${X(i).toFixed(1)},${Y(p[key]).toFixed(1)}`).join('')}" fill="none" stroke="${col}" stroke-width="2"/>`;
+  host.innerHTML =
+    `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="width:100%;height:150px;display:block">` +
+    line('fitness', 'var(--tl-purple)') + line('fatigue', 'var(--tl-amber)') + `</svg>`;
+}
+
 // ─── Page render orchestration ────────────────────────────────────────────
 function render(payload) {
   CURRENT = payload;
   document.getElementById('tl-meta').textContent = `${payload.n_weeks} weeks of data`;
   renderAnswers(payload);
   renderHero(payload.weeks);
-  renderTrimpChart(payload.weeks);
-  renderMetrics(payload.weeks);
+  renderLoadBalance(payload);   // correct fitness-vs-fatigue, replaces TRIMP jargon
+  const _grid = document.getElementById('tl-metrics-cards');
+  if (_grid) _grid.style.display = 'none';   // jargon metric cards -> verdict cards
   renderHRStack(payload.weeks);
   renderBarChart('tl-volume-chart',   payload.weeks, 'hours',  'h', 'volume');
   renderBarChart('tl-climbing-chart', payload.weeks, 'gain_m', 'm', 'climbing');

@@ -5376,7 +5376,7 @@ def _latest_wellness(well, dates, field):
     return None, None
 
 
-def _training_answers(n_weeks: int, type_filter) -> dict:
+def _training_answers(n_weeks: int, type_filter, weeks=None) -> dict:
     """The question-section payload: the daily load/fitness/fatigue/form series,
     ACWR, the latest Garmin wellness signals + their trends, polarization +
     monotony, and the four plain-language section verdicts."""
@@ -5409,6 +5409,11 @@ def _training_answers(n_weeks: int, type_filter) -> dict:
     vo2_change = training.trend(weekly("vo2max"), 4)
     rhr_change = training.trend(weekly("resting_hr"), 4)
     fit_change = training.trend(fitness, 7)
+    # Z2 aerobic-efficiency trend (avg HR at easy effort; down = fitter). From
+    # the weekly z2_hr_28d rollups — a power-free fitness signal that, unlike a
+    # running-only VO2max, actually reflects the rider's MTB aerobic base.
+    z2_series = [w.get("z2_hr_28d") for w in (weeks or []) if w.get("z2_hr_28d") is not None]
+    z2_change = training.trend(z2_series, 4)
 
     recent_rhr = sorted(v for ds in dates[-30:]
                         for v in [(well.get(ds) or {}).get("resting_hr")] if v is not None)
@@ -5425,7 +5430,7 @@ def _training_answers(n_weeks: int, type_filter) -> dict:
 
     form_now = form[-1] if form else None
     answers = {
-        "fitter":    training.fitness_verdict(vo2_change, rhr_change, fit_change),
+        "fitter":    training.fitness_verdict(rhr_change, z2_change, fit_change),
         "next":      training.readiness_verdict(bb, rhr, rhr_baseline, sleep_hours, form_now),
         "overdoing": training.load_risk_verdict(acwr_today),
         "mix":       training.mix_verdict(pol[2] if pol else None),
@@ -5445,9 +5450,13 @@ def _training_answers(n_weeks: int, type_filter) -> dict:
         "polarization": ({"easy": round(pol[0], 3), "moderate": round(pol[1], 3),
                           "hard": round(pol[2], 3)} if pol else None),
         "monotony":  round(mono, 2) if mono is not None else None,
+        "z2_change": round(z2_change, 3) if z2_change is not None else None,
+        "z2_hr": (z2_series[-1] if z2_series else None),
         "wellness": {
-            "vo2max": vo2, "vo2max_date": vo2_date,
-            "vo2max_change": round(vo2_change, 3) if vo2_change is not None else None,
+            # VO2max kept for reference but flagged unreliable: a running-only
+            # Garmin ignores cycling + climbing, so it's not a valid MTB fitness
+            # signal. The page must not lead with it.
+            "vo2max": vo2, "vo2max_date": vo2_date, "vo2max_unreliable": True,
             "resting_hr": rhr, "resting_hr_baseline": rhr_baseline,
             "resting_hr_change": round(rhr_change, 3) if rhr_change is not None else None,
             "body_battery": bb, "body_battery_date": bb_date,
@@ -5567,7 +5576,7 @@ def _compute_training_load(n_weeks: int, type_filter: set | None = None) -> dict
         # Question-section payload: load/fitness/fatigue/form series, ACWR,
         # Garmin wellness signals + trends, polarization/monotony, and the four
         # plain-language verdicts.
-        **_training_answers(n_weeks, type_filter),
+        **_training_answers(n_weeks, type_filter, weeks),
     }
 
 
