@@ -4,7 +4,6 @@
   {% include '_head.html' %}
   <title>AlForks – What's New</title>
   <link rel="stylesheet" href="/static/base.css?v={{ asset_v('base.css') }}">
-  <script src="/static/sync_toast.js?v={{ asset_v('sync_toast.js') }}" defer></script>
   <style>
     /* What's New — release notes rendered from CHANGELOG.md. Tokens, fonts and
        the header/wordmark chrome come from base.css; this is just the column. */
@@ -42,7 +41,6 @@
     <h1><span>Al</span>Forks</h1>
     {% set nav_active = 'whatsnew' %}
   {% include '_nav.html' %}
-    <button class="nav-sync-btn" onclick="triggerSyncAll()" title="Sync Strava + Garmin now">Sync</button>
   </header>
 
   <main class="wn-main">

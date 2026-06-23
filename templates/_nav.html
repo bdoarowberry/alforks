@@ -1,10 +1,10 @@
-{# Shared top navigation. Each page sets the active item before including:
-     {% set nav_active = 'activities' %}{% include '_nav.html' %}
+{# Shared top navigation + right-hand action cluster. Each page sets the active
+   item before including:  {% set nav_active = 'activities' %}{% include '_nav.html' %}
    Core keys: dashboard | activities | map | training | trailsroutes.
    Gear-menu keys: settings | cleanup | help | whatsnew.
-   Pages with no nav home (compare uses 'activities'; archived passes nothing).
-   The Sync/Upload buttons + version chip are injected on top of this by the
-   static/*.js loaded in _head.html. #}
+   Right cluster (icon-only): ↥ Upload · ↻ Sync · │ · ⚙. Upload is prepended by
+   static/upload.js; the notices strip + gear dot are driven by static/notices.js
+   (fed by whatsnew.js + review_nav.js). #}
 {% set _a = nav_active | default('') %}
 <nav>
   <a href="/"{% if _a == 'dashboard' %} class="active"{% endif %}>Dashboard</a>
@@ -13,16 +13,21 @@
   <a href="/training"{% if _a == 'training' %} class="active"{% endif %}>Training</a>
   <a href="/trails"{% if _a == 'trailsroutes' %} class="active"{% endif %}>Trails &amp; Routes</a>
 </nav>
-{# Settings / help / admin corner — collapsed under a gear so the main bar
-   stays focused on viewing your data. #}
-<div class="nav-gear{% if _a in ['settings', 'cleanup', 'help', 'whatsnew'] %} active{% endif %}">
-  <button type="button" class="nav-gear-btn" aria-haspopup="true" aria-expanded="false"
-          title="Settings, help &amp; more">⚙<span class="nav-gear-dot" hidden></span></button>
-  <div class="nav-gear-menu" role="menu">
-    <a href="/setup" role="menuitem"{% if _a == 'settings' %} class="active"{% endif %}>Settings</a>
-    <a href="/review" role="menuitem"{% if _a == 'cleanup' %} class="active"{% endif %}>Clean-up<span id="nav-review-badge" class="nav-pill" style="display:none;">0</span></a>
-    <a href="/guide" role="menuitem"{% if _a == 'help' %} class="active"{% endif %}>Help</a>
-    <a href="/whatsnew" role="menuitem"{% if _a == 'whatsnew' %} class="active"{% endif %}>What's New</a>
+<div class="nav-actions">
+  {# ↥ Upload is prepended here by static/upload.js #}
+  <button class="nav-sync-btn" type="button" onclick="triggerSyncAll()"
+          title="Sync Strava + Garmin now" aria-label="Sync Strava + Garmin now"></button>
+  <span class="nav-divider" aria-hidden="true"></span>
+  <div class="nav-gear{% if _a in ['settings', 'cleanup', 'help', 'whatsnew'] %} active{% endif %}">
+    <button type="button" class="nav-gear-btn" aria-haspopup="true" aria-expanded="false"
+            title="Settings, help &amp; more">⚙<span class="nav-gear-dot" hidden></span></button>
+    <div class="nav-gear-menu" role="menu">
+      <a href="/setup" role="menuitem"{% if _a == 'settings' %} class="active"{% endif %}>Settings</a>
+      <a href="/review" role="menuitem"{% if _a == 'cleanup' %} class="active"{% endif %}>Clean-up<span id="nav-review-badge" class="nav-pill" style="display:none;">0</span></a>
+      <a href="/guide" role="menuitem"{% if _a == 'help' %} class="active"{% endif %}>Help</a>
+      <a href="/whatsnew" role="menuitem"{% if _a == 'whatsnew' %} class="active"{% endif %}>What's New</a>
+      <div class="nav-gear-ver">v{{ app_version }}</div>
+    </div>
   </div>
 </div>
 <script>

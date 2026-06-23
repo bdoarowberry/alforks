@@ -89,8 +89,11 @@
   }
 
   function inject() {
-    const header = document.querySelector('header');
-    if (!header || document.querySelector('.nav-upload-btn')) return;
+    // The action cluster (↥ Upload · ↻ Sync · │ · ⚙) is rendered by _nav.html.
+    // We prepend the icon-only Upload button as its first item, so the header
+    // reads ↥ ↻ │ ⚙. Icon-only: the label lives in the tooltip/aria-label.
+    const actions = document.querySelector('.nav-actions');
+    if (!actions || document.querySelector('.nav-upload-btn')) return;
 
     const input = document.createElement('input');
     input.type = 'file';
@@ -105,14 +108,12 @@
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'nav-upload-btn';
-    btn.title = 'Upload one or more .gpx tracks';
-    btn.textContent = 'Upload';
+    btn.title = 'Add activities from a file (.gpx)';
+    btn.setAttribute('aria-label', 'Add activities from a file');
     btn.addEventListener('click', () => input.click());
 
-    const sync = header.querySelector('.nav-sync-btn');
-    if (sync) sync.insertAdjacentElement('afterend', btn);
-    else header.appendChild(btn);
-    header.appendChild(input);
+    actions.insertAdjacentElement('afterbegin', btn);
+    actions.appendChild(input);
   }
 
   if (document.readyState === 'loading') {

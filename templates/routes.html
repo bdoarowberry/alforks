@@ -6,8 +6,6 @@
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="/static/utils.js?v={{ asset_v('utils.js') }}"></script>
-  <script src="/static/sync_toast.js?v={{ asset_v('sync_toast.js') }}" defer></script>
-  <script src="/static/review_nav.js?v={{ asset_v('review_nav.js') }}" defer></script>
   <link rel="stylesheet" href="/static/base.css?v={{ asset_v('base.css') }}">
   <style>
     body { display: flex; flex-direction: column; min-height: 100vh; }
@@ -228,7 +226,6 @@
   <h1><span>Al</span>Forks</h1>
   {% set nav_active = 'trailsroutes' %}
   {% include '_nav.html' %}
-  <button class="nav-sync-btn" onclick="triggerSyncAll()" title="Sync Strava + Garmin now">Sync</button>
 </header>
 
 <main>

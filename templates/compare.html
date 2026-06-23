@@ -10,8 +10,6 @@
   <script src="https://api.mapbox.com/mapbox-gl-js/v3.3.0/mapbox-gl.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <script src="/static/utils.js?v={{ asset_v('utils.js') }}"></script>
-  <script src="/static/sync_toast.js?v={{ asset_v('sync_toast.js') }}" defer></script>
-  <script src="/static/review_nav.js?v={{ asset_v('review_nav.js') }}" defer></script>
   <link rel="stylesheet" href="/static/base.css?v={{ asset_v('base.css') }}">
   <style>
     /* Page fits the viewport. The previous attempts using flex / grid
@@ -146,7 +144,6 @@
   <h1><span>Al</span>Forks</h1>
   {% set nav_active = 'activities' %}
   {% include '_nav.html' %}
-  <button class="nav-sync-btn" onclick="triggerSyncAll()" title="Sync Strava + Garmin now">Sync</button>
 </header>
 
 <main>

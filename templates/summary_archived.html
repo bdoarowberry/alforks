@@ -5,7 +5,6 @@
   <title>AlForks – Summary (archived)</title>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <script src="/static/utils.js?v={{ asset_v('utils.js') }}"></script>
-  <script src="/static/sync_toast.js?v={{ asset_v('sync_toast.js') }}" defer></script>
   <link rel="stylesheet" href="/static/base.css?v={{ asset_v('base.css') }}">
   <style>
     body { min-height: 100vh; display: flex; flex-direction: column; }
@@ -102,7 +101,6 @@
 <header>
   <h1><span>Al</span>Forks</h1>
   {% include '_nav.html' %}
-  <button class="nav-sync-btn" onclick="triggerSyncAll()" title="Sync Strava + Garmin now">Sync</button>
 </header>
 
 <div style="padding: 14px 22px 0;">

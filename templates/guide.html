@@ -4,7 +4,6 @@
   {% include '_head.html' %}
   <title>AlForks – Getting Started</title>
   <link rel="stylesheet" href="/static/base.css?v={{ asset_v('base.css') }}">
-  <script src="/static/sync_toast.js?v={{ asset_v('sync_toast.js') }}" defer></script>
   <style>
     /* Guide-specific layout. Tokens, fonts and chrome come from base.css
        (the orange "Al" + white "Forks" wordmark is now styled there). */
@@ -154,7 +153,6 @@
     <h1><span>Al</span>Forks</h1>
     {% set nav_active = 'help' %}
   {% include '_nav.html' %}
-    <button class="nav-sync-btn" onclick="triggerSyncAll()" title="Sync Strava + Garmin now">Sync</button>
   </header>
 
   <div class="gprogress" id="progress"></div>

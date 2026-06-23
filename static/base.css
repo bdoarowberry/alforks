@@ -110,14 +110,13 @@ nav a .nav-pill {
 }
 nav a.active .nav-pill { background: #fbbf24; }
 
-/* Sync trigger — visually distinct from nav links so it reads as an
-   action, not navigation. Sits at the far-right corner of the header
-   via `margin-left: auto`. Subtle uppercase + monospace + hairline
-   border + small icon glyph keep it distinguishable but not loud. */
-/* Gear menu — the settings/help/admin corner. Pushed to the right of the
-   core nav via margin-left:auto (it's the single right-pusher now; the Sync
-   button and injected controls cluster after it). */
-.nav-gear { margin-left: auto; position: relative; display: flex; align-items: center; }
+/* Right-hand action cluster: ↥ Upload · ↻ Sync · │ · ⚙ gear. Pushed to the
+   far right of the header as one unit via margin-left:auto. */
+.nav-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+.nav-divider { width: 1px; height: 18px; background: var(--border-row); margin: 0 2px; }
+
+/* Gear menu — the settings/help corner (rightmost in the cluster). */
+.nav-gear { position: relative; display: flex; align-items: center; }
 .nav-gear-btn {
   font-size: 1rem;
   line-height: 1;
@@ -164,93 +163,59 @@ nav a.active .nav-pill { background: #fbbf24; }
 .nav-gear-menu a:hover { color: var(--text-primary); background: var(--surface-tint); }
 .nav-gear-menu a.active { color: var(--accent); background: var(--accent-soft); }
 
-.nav-sync-btn {
-  font-size: 0.7rem;
-  padding: 5px 14px;
-  border-radius: 3px;
-  border: 1px solid var(--border-row);
+/* Action buttons (Sync, Upload) — icon-only and borderless to match the gear,
+   so the cluster reads as a clean icon row (↥ ↻ │ ⚙). The label lives in the
+   tooltip / aria-label. Sync gets an accent hover (it's the primary action);
+   Upload a neutral one. */
+.nav-sync-btn, .nav-upload-btn {
+  border: none;
   background: transparent;
   color: var(--text-secondary);
   cursor: pointer;
   transition: all 0.12s;
-  font-family: var(--font-mono);
-  letter-spacing: 0.10em;
-  text-transform: uppercase;
+  padding: 4px 8px;
+  border-radius: 4px;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  line-height: 1;
 }
-.nav-sync-btn::before { content: '↻'; font-size: 0.95rem; line-height: 1; transform: translateY(-1px); }
-.nav-sync-btn:hover { color: var(--text-primary); background: var(--accent-soft); border-color: var(--accent); }
-.nav-sync-btn:active { transform: translateY(1px); }
-
-/* Upload trigger — same action treatment as the Sync button, injected just
-   AFTER it by upload.js so the two read as a paired action group at the
-   far-right of the header. Sync keeps its own `margin-left:auto`, which
-   floats the whole trailing group right; the header's 20px gap spaces them. */
-.nav-upload-btn {
-  font-size: 0.7rem;
-  padding: 5px 14px;
-  border-radius: 3px;
-  border: 1px solid var(--border-row);
-  background: transparent;
-  color: var(--text-secondary);
-  cursor: pointer;
-  transition: all 0.12s;
-  font-family: var(--font-mono);
-  letter-spacing: 0.10em;
-  text-transform: uppercase;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-.nav-upload-btn::before { content: '↥'; font-size: 0.95rem; line-height: 1; transform: translateY(-1px); }
-.nav-upload-btn:hover { color: var(--text-primary); background: var(--accent-soft); border-color: var(--accent); }
-.nav-upload-btn:active { transform: translateY(1px); }
+.nav-sync-btn::before  { content: '↻'; font-size: 1.1rem; line-height: 1; }
+.nav-upload-btn::before { content: '↥'; font-size: 1.1rem; line-height: 1; }
+.nav-sync-btn:hover   { color: var(--accent); background: var(--accent-soft); }
+.nav-upload-btn:hover { color: var(--text-primary); background: var(--surface-tint); }
+.nav-sync-btn:active, .nav-upload-btn:active { transform: translateY(1px); }
 .nav-upload-btn[disabled] { opacity: 0.55; cursor: default; }
 
-/* Version chip — injected into the header by whatsnew.js on every page. A
-   quiet mono label that links to the release notes; brightens on hover. */
-.app-version {
-  font-size: 0.66rem;
+/* Version line at the foot of the gear menu (replaces the old header chip). */
+.nav-gear-ver {
+  padding: 7px 12px 4px;
+  margin-top: 2px;
+  border-top: 1px solid var(--border-hair);
+  font-size: 0.68rem;
   font-family: var(--font-mono);
-  letter-spacing: 0.06em;
-  color: var(--text-muted);
-  text-decoration: none;
-  padding: 3px 8px;
-  border-radius: 3px;
-  white-space: nowrap;
-  transition: color 0.12s, background 0.12s;
+  color: var(--text-faint);
 }
-.app-version:hover { color: var(--accent); background: var(--accent-soft); }
 
-/* Post-update banner — inserted as the first <body> child by whatsnew.js, so it
-   sits above the header and pushes content down (no overlap) on flow and
-   flex-column pages alike. Dismissible; reappears only on the next version bump. */
-.whatsnew-banner {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  padding: 9px 18px;
-  background: var(--accent-soft);
-  border-bottom: 1px solid var(--accent);
-  color: var(--text-primary);
-  font-size: 0.8rem;
-  flex-shrink: 0;
+/* Notices strip — the dismissible message surface under the header, driven by
+   notices.js (fed by whatsnew.js + review_nav.js). One row per notice, each with
+   its own × ; notices.js hides the strip when it's empty. */
+.notice-strip { background: var(--bg-card); border-bottom: 1px solid var(--border-hair); flex-shrink: 0; }
+.notice-row {
+  display: flex; align-items: center; gap: 9px;
+  padding: 8px 18px;
+  font-size: 0.8rem; color: var(--text-secondary);
+  border-top: 1px solid var(--border-hair);
 }
-.whatsnew-banner a { color: var(--accent); font-weight: 600; text-decoration: none; }
-.whatsnew-banner a:hover { text-decoration: underline; }
-.whatsnew-banner .wn-dismiss {
-  margin-left: auto;
-  background: transparent;
-  border: none;
-  color: var(--text-muted);
-  cursor: pointer;
-  font-size: 1.05rem;
-  line-height: 1;
-  padding: 2px 6px;
+.notice-row:first-child { border-top: none; }
+.notice-row .ndot { width: 6px; height: 6px; border-radius: 50%; background: var(--warn); flex-shrink: 0; }
+.notice-row .ntext { min-width: 0; }
+.notice-row .nl { color: var(--link); text-decoration: none; }
+.notice-row .nl:hover { color: var(--link-hover); text-decoration: underline; }
+.notice-row .nx {
+  margin-left: auto; background: transparent; border: none;
+  color: var(--text-faint); cursor: pointer; font-size: 1.05rem; line-height: 1; padding: 2px 6px;
 }
-.whatsnew-banner .wn-dismiss:hover { color: var(--text-primary); }
+.notice-row .nx:hover { color: var(--text-primary); }
 
 
 /* Filter chip (canonical) — neutral-white active state. Used by
