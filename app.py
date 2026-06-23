@@ -711,7 +711,11 @@ def _activities_cache_key_compute() -> tuple:
     # the old centroid-matched answers until the user touched a file.
     # hr_max_mtime invalidates when an existing HR file is overwritten by
     # an incomplete-date re-fetch; previously only count changes were caught.
+    # CONFIG_FILE mtime is included so changing max_hr_override (which shifts
+    # every baked HR zone) re-bakes the sidebar entries — otherwise the zones
+    # stay computed against the old max HR until a file is touched.
     return (_stat_mtime(GPX_DIR), _stat_mtime(METADATA_FILE), _stat_mtime(REGIONS_FILE), _stat_mtime(TYPES_FILE),
+            _stat_mtime(CONFIG_FILE),
             hr_count, hr_max_mtime, _REGION_MATCH_VERSION)
 
 
@@ -802,6 +806,7 @@ def _sidebar_fingerprint(gpx_mtime: float, file_meta: dict,
         gpx_mtime=gpx_mtime, file_meta=file_meta,
         regions_mtime=regions_mtime, types_mtime=types_mtime,
         algo_sig=ALGO_SIG, region_match_version=_REGION_MATCH_VERSION,
+        max_hr=_effective_max_hr(),
     )
 
 
