@@ -5452,6 +5452,11 @@ def _training_answers(n_weeks: int, type_filter, weeks=None) -> dict:
         "monotony":  round(mono, 2) if mono is not None else None,
         "z2_change": round(z2_change, 3) if z2_change is not None else None,
         "z2_hr": (z2_series[-1] if z2_series else None),
+        # Homegrown VO2max estimate (Uth: 15.3*HRmax/HRrest) — our own number,
+        # from the rider's data, replacing the running-only Garmin one. It rises
+        # as resting HR falls, so its trend is the inverse of resting HR's.
+        "est_vo2max": training.est_vo2max(_effective_max_hr(), rhr),
+        "est_vo2max_change": (-rhr_change if rhr_change is not None else None),
         "wellness": {
             # VO2max kept for reference but flagged unreliable: a running-only
             # Garmin ignores cycling + climbing, so it's not a valid MTB fitness

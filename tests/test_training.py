@@ -88,6 +88,12 @@ class TestSeries(unittest.TestCase):
 
 
 class TestDerivedMetrics(unittest.TestCase):
+    def test_est_vo2max(self):
+        self.assertEqual(T.est_vo2max(171, 59), round(15.3 * 171 / 59, 1))
+        self.assertIsNone(T.est_vo2max(171, 0))
+        self.assertIsNone(T.est_vo2max(None, 59))
+        self.assertIsNone(T.est_vo2max(171, None))
+
     def test_polarization_three_zone(self):
         # easy = b0+b1, moderate = b2, hard = b3+b4
         e, m, h = T.polarization([100, 100, 100, 50, 50])

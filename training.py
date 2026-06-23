@@ -130,6 +130,16 @@ def fitness_fatigue_form(daily_loads):
     return fitness, fatigue, form
 
 
+def est_vo2max(max_hr, resting_hr):
+    """Rough field VO2max estimate (Uth-Sorensen-Overgaard): 15.3 * HRmax/HRrest.
+    A proxy from max + resting HR — not a lab value, but it rises as resting HR
+    falls with fitness, and (unlike a running-only Garmin estimate) reflects the
+    rider's whole-body aerobic fitness. None if inputs are missing/invalid."""
+    if not max_hr or not resting_hr or resting_hr <= 0:
+        return None
+    return round(15.3 * max_hr / resting_hr, 1)
+
+
 def polarization(zones_sec):
     """(easy, moderate, hard) fractions from the 5-bucket zone-seconds, using a
     3-zone model: easy <70% HRmax (buckets 0+1), moderate 70-80% (bucket 2),

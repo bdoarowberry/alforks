@@ -453,6 +453,7 @@
        above. Form is hidden until the card is clicked; the entries
        collapsible is always available for editing/deleting history. -->
   <div class="tl-weight-strip">
+    <button type="button" class="tl-weight-add-btn" onclick="openWeightForm()" style="background:transparent;border:1px solid var(--border-row);color:var(--text-secondary);border-radius:4px;padding:5px 12px;font-size:0.74rem;cursor:pointer;font-family:var(--font-mono);">+ Log weight</button>
     <details class="tl-weight-history" id="tl-weight-history-details">
       <summary>Weight log · <span id="tl-weight-count">0</span> entries</summary>
       <div id="tl-weight-history-body"></div>
@@ -1244,6 +1245,7 @@ function renderAnswers(p) {
 
   const [fs, ft] = pick('fitter', a.fitter);
   const fsub = [
+    p.est_vo2max != null ? `Est. VO₂max ${p.est_vo2max}${tlArrow(p.est_vo2max_change)}` : null,
     w.resting_hr != null ? `resting HR ${w.resting_hr}${tlArrow(w.resting_hr_change, true)}` : null,
     p.z2_hr != null ? `easy-effort HR ${p.z2_hr}${tlArrow(p.z2_change, true)}` : null,
   ].filter(Boolean).join('  ·  ') || 'Not enough heart-rate history yet — keep riding and syncing.';
