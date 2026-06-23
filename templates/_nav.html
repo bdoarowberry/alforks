@@ -1,0 +1,17 @@
+{# Shared top navigation. Each page sets the active tab before including:
+     {% set nav_active = 'logs' %}{% include '_nav.html' %}
+   Keys: summary | logs | heatmap | training | trails | routes | review | setup.
+   Pages with no nav home (compare, guide, whatsnew, archived) just omit the
+   set — no tab highlights. The "Guide" link + version chip are injected on top
+   of this by static/help_link.js + whatsnew.js. #}
+{% set _a = nav_active | default('') %}
+<nav>
+  <a href="/"{% if _a == 'summary' %} class="active"{% endif %}>Summary</a>
+  <a href="/logs"{% if _a == 'logs' %} class="active"{% endif %}>Logs</a>
+  <a href="/heatmap"{% if _a == 'heatmap' %} class="active"{% endif %}>Heat Map</a>
+  <a href="/training"{% if _a == 'training' %} class="active"{% endif %}>Training</a>
+  <a href="/trails"{% if _a == 'trails' %} class="active"{% endif %}>Trails</a>
+  <a href="/routes"{% if _a == 'routes' %} class="active"{% endif %}>Routes</a>
+  <a href="/review"{% if _a == 'review' %} class="active"{% endif %}>Review<span id="nav-review-badge" class="nav-pill" style="display:none;">0</span></a>
+  <a href="/setup"{% if _a == 'setup' %} class="active"{% endif %}>Setup</a>
+</nav>
