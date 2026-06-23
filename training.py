@@ -130,6 +130,130 @@ def fitness_fatigue_form(daily_loads):
     return fitness, fatigue, form
 
 
+def polarization(zones_sec):
+    """(easy, moderate, hard) fractions from the 5-bucket zone-seconds, using a
+    3-zone model: easy <70% HRmax (buckets 0+1), moderate 70-80% (bucket 2),
+    hard >=80% (buckets 3+4). Returns None when there's no zoned time."""
+    if not zones_sec:
+        return None
+    z = list(zones_sec) + [0] * (5 - len(zones_sec))
+    total = sum(z[:5])
+    if total <= 0:
+        return None
+    return ((z[0] + z[1]) / total, z[2] / total, (z[3] + z[4]) / total)
+
+
+def monotony(daily_loads):
+    """Foster training monotony = mean / population-stddev of daily load over a
+    window (include rest days as 0). Higher = more samey = less recovery
+    variation. None if <2 days or zero variance (e.g. all rest)."""
+    n = len(daily_loads)
+    if n < 2:
+        return None
+    mean = sum(daily_loads) / n
+    sd = (sum((x - mean) ** 2 for x in daily_loads) / n) ** 0.5
+    if sd == 0:
+        return None
+    return mean / sd
+
+
+def trend(values, n: int = 4):
+    """Signed relative change between the mean of the last `n` non-None values
+    and the `n` before them. None if there isn't enough data. Positive = the
+    metric is rising; the caller decides whether rising is good."""
+    pts = [v for v in values if v is not None]
+    if len(pts) < 2:
+        return None
+    recent = pts[-n:]
+    prior = pts[-2 * n:-n] or pts[:-len(recent)] or [pts[0]]
+    ra = sum(recent) / len(recent)
+    pa = sum(prior) / len(prior)
+    if pa == 0:
+        return None
+    return (ra - pa) / abs(pa)
+
+
+# ─── Section verdicts (pure; the page renders plain sentences from these) ────
+
+def fitness_verdict(vo2_change, rhr_change, fitness_change) -> str:
+    """'rising' / 'steady' / 'falling' / 'unknown'. VO2max (up=good) is weighted
+    most as it's measured; resting HR (down=good) and load-fitness (up=good)
+    refine it. Each *_change is a signed relative change (from trend()) or None."""
+    score = have = 0
+    if vo2_change is not None:
+        have += 1
+        score += 2 if vo2_change > 0.01 else -2 if vo2_change < -0.01 else 0
+    if rhr_change is not None:
+        have += 1
+        score += 1 if rhr_change < -0.02 else -1 if rhr_change > 0.02 else 0
+    if fitness_change is not None:
+        have += 1
+        score += 1 if fitness_change > 0.05 else -1 if fitness_change < -0.05 else 0
+    if not have:
+        return "unknown"
+    return "rising" if score >= 1 else "falling" if score <= -1 else "steady"
+
+
+def readiness_verdict(bb_end, rhr, rhr_baseline, sleep_hours, form) -> str:
+    """'go_hard' / 'steady' / 'easy' / 'unknown' from recovery signals (Body
+    Battery, resting HR vs baseline, last night's sleep) plus training Form."""
+    have = tired = fresh = 0
+    if bb_end is not None:
+        have += 1
+        if bb_end < 25:
+            tired += 1
+        elif bb_end >= 60:
+            fresh += 1
+    if rhr is not None and rhr_baseline:
+        have += 1
+        if rhr >= rhr_baseline + 5:
+            tired += 1
+        elif rhr <= rhr_baseline - 1:
+            fresh += 1
+    if sleep_hours is not None:
+        have += 1
+        if sleep_hours < 6:
+            tired += 1
+        elif sleep_hours >= 7.5:
+            fresh += 1
+    if form is not None:
+        have += 1
+        if form < -1:
+            tired += 1
+        elif form > 1:
+            fresh += 1
+    if have == 0:                      # no signals at all
+        return "unknown"
+    if tired >= 2 and tired > fresh:
+        return "easy"
+    if fresh >= 2 and fresh > tired:
+        return "go_hard"
+    return "steady"                    # have data, but middling
+
+
+def load_risk_verdict(acwr_val) -> str:
+    """'ramping_hard' / 'safe' / 'detraining' / 'unknown' from the ACWR."""
+    if acwr_val is None:
+        return "unknown"
+    if acwr_val > 1.5:
+        return "ramping_hard"
+    if acwr_val >= 0.8:
+        return "safe"
+    return "detraining"
+
+
+def mix_verdict(hard_frac) -> str:
+    """'too_hard' / 'balanced' / 'too_easy' / 'unknown' from the hard fraction
+    of a 3-zone polarization (aim ~80/20, so >25% hard is skewed hot)."""
+    if hard_frac is None:
+        return "unknown"
+    if hard_frac > 0.25:
+        return "too_hard"
+    if hard_frac < 0.08:
+        return "too_easy"
+    return "balanced"
+
+
 def acwr(daily_loads, idx: int, acute: int = 7, chronic: int = 28):
     """Acute:chronic workload ratio at day `idx` — acute-window average daily
     load over chronic-window average daily load. None until there's a full

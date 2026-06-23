@@ -87,5 +87,54 @@ class TestSeries(unittest.TestCase):
         self.assertGreater(T.acwr(loads, len(loads) - 1), 1.3)
 
 
+class TestDerivedMetrics(unittest.TestCase):
+    def test_polarization_three_zone(self):
+        # easy = b0+b1, moderate = b2, hard = b3+b4
+        e, m, h = T.polarization([100, 100, 100, 50, 50])
+        self.assertAlmostEqual(e, 200 / 400)
+        self.assertAlmostEqual(m, 100 / 400)
+        self.assertAlmostEqual(h, 100 / 400)
+
+    def test_polarization_empty(self):
+        self.assertIsNone(T.polarization([0, 0, 0, 0, 0]))
+        self.assertIsNone(T.polarization(None))
+
+    def test_monotony(self):
+        self.assertIsNone(T.monotony([5, 5, 5, 5]))     # zero variance
+        self.assertGreater(T.monotony([10, 0, 8, 0, 9, 0, 7]), 0)
+
+    def test_trend_direction(self):
+        self.assertGreater(T.trend([1, 1, 1, 1, 2, 2, 2, 2]), 0)   # rising
+        self.assertLess(T.trend([2, 2, 2, 2, 1, 1, 1, 1]), 0)      # falling
+        self.assertIsNone(T.trend([5]))
+
+
+class TestVerdicts(unittest.TestCase):
+    def test_fitness_vo2_dominates(self):
+        self.assertEqual(T.fitness_verdict(0.05, 0.0, 0.0), "rising")    # vo2 up alone
+        self.assertEqual(T.fitness_verdict(-0.05, 0.0, 0.0), "falling")
+        self.assertEqual(T.fitness_verdict(0.05, 0.05, -0.1), "steady")  # offsetting
+        self.assertEqual(T.fitness_verdict(0.0, 0.0, 0.0), "steady")
+        self.assertEqual(T.fitness_verdict(None, None, None), "unknown")
+
+    def test_readiness(self):
+        self.assertEqual(T.readiness_verdict(15, 65, 58, 5.0, -2), "easy")   # all tired
+        self.assertEqual(T.readiness_verdict(70, 56, 58, 8.0, 2), "go_hard") # all fresh
+        self.assertEqual(T.readiness_verdict(None, None, None, None, None), "unknown")
+        self.assertEqual(T.readiness_verdict(45, 59, 58, 7.0, 0), "steady")
+
+    def test_load_risk(self):
+        self.assertEqual(T.load_risk_verdict(1.7), "ramping_hard")
+        self.assertEqual(T.load_risk_verdict(1.0), "safe")
+        self.assertEqual(T.load_risk_verdict(0.6), "detraining")
+        self.assertEqual(T.load_risk_verdict(None), "unknown")
+
+    def test_mix(self):
+        self.assertEqual(T.mix_verdict(0.30), "too_hard")
+        self.assertEqual(T.mix_verdict(0.15), "balanced")
+        self.assertEqual(T.mix_verdict(0.05), "too_easy")
+        self.assertEqual(T.mix_verdict(None), "unknown")
+
+
 if __name__ == "__main__":
     unittest.main()
