@@ -168,7 +168,9 @@
   window.triggerSyncAll = async function () {
     try {
       const resp = await fetch('/api/sync/all', { method: 'POST' });
-      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      if (!resp.ok) throw new Error(resp.status >= 500
+        ? 'Something went wrong starting the sync — try again in a moment.'
+        : 'Couldn’t start the sync — try reopening AlForks.');
       const data = await resp.json();
       // Show an immediate "syncing" hint even before the next poll fires.
       const started = (data.started || []);
@@ -188,7 +190,11 @@
       }
       return data;
     } catch (e) {
-      show('<div style="color:#ef4444">Sync trigger failed: ' + esc(e.message) + '</div>');
+      // Our own throws end in punctuation; a raw fetch failure (offline /
+      // server down) does not — show a plain "is it running?" hint for those.
+      let msg = (e && e.message) || '';
+      if (!/[.!?]$/.test(msg)) msg = 'Couldn’t reach AlForks — is it still running?';
+      show('<div style="color:#ef4444">' + esc(msg) + '</div>');
       scheduleHide();
       return null;
     }

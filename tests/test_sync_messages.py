@@ -18,6 +18,15 @@ class TestFriendlySyncMessage(unittest.TestCase):
         self.assertIn("Setup", msg)
         self.assertNotIn("python", msg)
 
+    def test_strava_token_refresh_failure_routes_to_reconnect(self):
+        # A revoked/expired refresh token must not leak the raw API dict.
+        raw = ("Strava login expired — please reconnect on the Setup page. "
+               "(token refresh failed: {'message': 'Bad Request', 'errors': [...]})")
+        msg = app._friendly_sync_message("strava", raw)
+        self.assertIn("Setup", msg)
+        self.assertNotIn("Bad Request", msg)
+        self.assertNotIn("{", msg)
+
     def test_garmin_runtime_error(self):
         raw = ("RuntimeError: Garmin auth not available (Username and password are "
                "required). Run `python garmin_sync.py --login` first.")
@@ -27,11 +36,31 @@ class TestFriendlySyncMessage(unittest.TestCase):
         self.assertNotIn("RuntimeError", msg)
         self.assertNotIn("--login", msg)
 
-    def test_generic_error_is_cleaned_but_preserved(self):
+    def test_network_error_gets_friendly_connection_message(self):
+        # A timeout / connection failure is not the user's fault and not a stale
+        # login — surface a plain "couldn't reach" hint instead of leaking the
+        # raw "ConnectionError: timed out ..." line.
         msg = app._friendly_sync_message(
             "strava", "Traceback...\nConnectionError: timed out reading from api.strava.com")
-        self.assertIn("timed out", msg)
         self.assertNotIn("ConnectionError", msg)
+        self.assertNotIn("timed out", msg)
+        self.assertIn("Strava", msg)
+        self.assertIn("try again", msg.lower())
+        self.assertNotIn("Setup", msg)   # not an auth failure
+
+    def test_server_5xx_gets_friendly_connection_message(self):
+        msg = app._friendly_sync_message(
+            "strava", "list activities page 1 failed: HTTP Error 503: Service Unavailable")
+        self.assertNotIn("503", msg)
+        self.assertIn("Strava", msg)
+        self.assertIn("try again", msg.lower())
+
+    def test_generic_error_is_cleaned_but_preserved(self):
+        # A non-auth, non-network failure still shows its real reason (cleaned).
+        msg = app._friendly_sync_message(
+            "strava", "Traceback...\nRuntimeError: could not write GPX file: disk full")
+        self.assertIn("disk full", msg)
+        self.assertNotIn("RuntimeError", msg)
         self.assertNotIn("Setup", msg)   # not an auth failure -> keep the real reason
 
     def test_empty_falls_back(self):

@@ -49,7 +49,9 @@
     try {
       const resp = await fetch('/api/upload-track', { method: 'POST', body: fd });
       const data = await resp.json().catch(() => null);
-      if (!data) throw new Error('HTTP ' + resp.status);
+      if (!data) throw new Error(resp.status >= 500
+        ? 'Something went wrong on the server — please try again.'
+        : 'That upload couldn’t be processed — check the file and try again.');
 
       const added = data.added || [];
       const errors = data.errors || [];
@@ -78,7 +80,11 @@
         setTimeout(() => window.location.reload(), errors.length ? holdMs : 1200);
       }
     } catch (e) {
-      toast('<div style="color:#ef4444">Upload failed: ' + esc(e.message) + '</div>', 9000);
+      // Self-thrown messages end in punctuation; a raw fetch failure (offline /
+      // server down) does not — give those a plain "is it running?" hint.
+      let msg = (e && e.message) || '';
+      if (!/[.!?]$/.test(msg)) msg = 'Upload failed — is AlForks still running?';
+      toast('<div style="color:#ef4444">' + esc(msg) + '</div>', 9000);
     }
   }
 

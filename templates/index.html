@@ -3529,9 +3529,14 @@ async function loadActivity(filename) {
   let res;
   try {
     res = await fetch(`/api/activity/${encodeURIComponent(filename)}`);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    if (!res.ok) throw new Error(res.status === 404
+      ? 'this ride couldn’t be found — it may have been deleted'
+      : 'something went wrong loading this ride — try again');
   } catch (err) {
-    document.getElementById('header-title').value = `⚠ Failed to load activity: ${err.message}`;
+    // A raw fetch failure (offline / server down) has no friendly text.
+    const msg = /[.!?]$|—/.test(err.message) ? err.message
+      : 'couldn’t reach AlForks — is it still running?';
+    document.getElementById('header-title').value = `⚠ Failed to load: ${msg}`;
     return;
   }
   trackData = await res.json();

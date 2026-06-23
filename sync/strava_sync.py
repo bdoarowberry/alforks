@@ -63,8 +63,10 @@ SCOPE             = "activity:read_all"
 
 def read_creds() -> tuple[str, str]:
     if not CREDS_FILE.exists():
-        sys.exit(f"Missing {CREDS_FILE}.\nCreate it with two lines:\n"
-                 f"  client_id=...\n  client_secret=...")
+        sys.exit("Strava is not configured — no credentials found.\n"
+                 "Connect Strava on the Setup page, or create "
+                 f"{CREDS_FILE} with two lines:\n"
+                 "  client_id=...\n  client_secret=...")
     creds = {}
     for line in CREDS_FILE.read_text(encoding="utf-8").splitlines():
         line = line.strip()
@@ -74,7 +76,9 @@ def read_creds() -> tuple[str, str]:
         creds[k.strip().lower()] = v.strip()
     cid, secret = creds.get("client_id", ""), creds.get("client_secret", "")
     if not cid or not secret:
-        sys.exit(f"{CREDS_FILE} must define client_id and client_secret.")
+        sys.exit("Strava is not configured — credentials are incomplete "
+                 f"(no client_id / client_secret). Reconnect Strava on the "
+                 f"Setup page, or fix {CREDS_FILE}.")
     return cid, secret
 
 
@@ -207,7 +211,9 @@ def get_access_token() -> str:
         "refresh_token": tok["refresh_token"],
     })
     if "access_token" not in new:
-        sys.exit(f"Token refresh failed: {new}")
+        # Refresh token revoked/expired — the saved login is no longer valid.
+        sys.exit("Strava login expired — please reconnect on the Setup page. "
+                 f"(token refresh failed: {new})")
     # Strava returns a new refresh_token too — replace both
     tok.update(new)
     save_tokens(tok)
