@@ -8,6 +8,10 @@
   its boundary. It only moves the camera; your rides and filters stay put.
 - **What's New** page (this one, at `/whatsnew`) — the version shown in the top
   corner links here, and a banner points it out after an update.
+- **Smarter duplicate detection** — two different rides on the same day are no
+  longer flagged as possible duplicates just because they're a similar length;
+  the check now confirms the two tracks actually overlap on the map.
+- Fixed the **"Not duplicates"** button, which could fail to save on some setups.
 
 ## 2026.06.21
 - One-click in-app **Connect Strava** — register your own Strava app, paste
