@@ -1,6 +1,22 @@
 # AlForks — Changelog
 
-## 2026.06.23
+## 2026.06.23.2
+- **Cleaner navigation** — the top bar is now five focused tabs (Dashboard,
+  Activities, Map, Training, Trails & Routes), with a **⚙ menu** in the corner for
+  Settings, Clean-up, Help and What's New. A few pages were renamed to say what
+  they do: Summary → Dashboard, Logs → Activities, Heat Map → Map, Setup →
+  Settings, Review → Clean-up. **Routes** is now easy to reach next to Trails.
+- **Notifications bell** — a 🔔 in the header shows a count when there's something
+  worth a look: rides to clean up, or a new update with release notes. Open it to
+  read each one and dismiss it with ×.
+- **Friendlier messages** — when a sync runs into trouble it now explains what
+  happened and what to do in plain language (and points you to Settings to
+  reconnect) instead of showing a technical error. A brand-new copy now shows a
+  clear "connect Strava to get started" screen instead of an empty dashboard.
+- The **Sync** and **Upload** buttons are now compact icons (↻ / ↥) — hover for a
+  tooltip.
+
+## 2026.06.23.1
 - **Find a ride from the map** — the Heat Map page now has a ride list down the
   right side (newest first). Hover a ride to light up its track on the map (and
   vice-versa), and click to open that ride's log.

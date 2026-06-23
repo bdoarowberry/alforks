@@ -208,6 +208,9 @@ nav a.active .nav-pill { background: #fbbf24; }
   background: var(--warn); color: #0b0d0c; border-radius: 8px;
   border: 1.5px solid var(--bg-card);   /* punch-out from the header background */
 }
+/* No badge when there's nothing pending — just the bell. (The class above sets
+   display:inline-flex, which would otherwise override the [hidden] attribute.) */
+.nav-bell-badge[hidden] { display: none; }
 .nav-bell-panel {
   display: none;
   position: absolute; top: calc(100% + 6px); right: 0;
