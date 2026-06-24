@@ -1767,6 +1767,26 @@ def _summary_data_compute(days_back: int, units: str,
     earliest_dt = today_dt - timedelta(days=days_back - 1)
     earliest_iso = earliest_dt.strftime("%Y-%m-%d")
 
+    # Prior window (immediately preceding) bounds — reused for both the per-type
+    # and cross-activity year-over-year deltas.
+    prev_latest_dt    = earliest_dt - timedelta(days=1)
+    prev_earliest_dt  = prev_latest_dt - timedelta(days=days_back - 1)
+    prev_earliest_iso = prev_earliest_dt.strftime("%Y-%m-%d")
+    prev_latest_iso   = prev_latest_dt.strftime("%Y-%m-%d")
+
+    def _riding_h(src) -> float:
+        """Sum of riding-only hours across `src` — excludes lift/shuttle (and
+        pause) time. The per-activity `duration_sec` is gross wall-clock, so
+        instead we reconstruct moving time from riding distance ÷ riding
+        avg-speed, both of which are already lift-excluded in the stats."""
+        tot = 0.0
+        for a in src:
+            s = a.get("stats") or {}
+            spd = s.get("avg_speed_kmh")
+            if spd:
+                tot += (s.get("distance_km") or 0) / spd
+        return round(tot, 2)
+
     acts = [a for a in all_activities() if not a.get("excluded")]
     types = load_types()
     type_lookup = {t["id"]: t for t in types}
@@ -1847,6 +1867,13 @@ def _summary_data_compute(days_back: int, units: str,
                 continue
             if earliest_iso <= d <= today_iso:
                 in_window.append(a)
+
+        # Same-length window immediately before this one, for year-over-year deltas.
+        in_prev = []
+        for a in type_acts:
+            d = (a.get("date") or "")[:10]
+            if len(d) == 10 and prev_earliest_iso <= d <= prev_latest_iso:
+                in_prev.append(a)
 
         # Days set + dominant type for the ribbon
         for a in in_window:
@@ -1948,7 +1975,7 @@ def _summary_data_compute(days_back: int, units: str,
             "distance_km":     round(_stat_sum("distance_km"), 1),
             "elev_gain_m":     round(_stat_sum("elev_gain_m")),
             "elev_loss_m":     round(_stat_sum("elev_loss_m")),
-            "moving_h":        round(_stat_sum("duration_sec") / 3600.0, 2),
+            "moving_h":        _riding_h(in_window),
             "avg_speed_kmh":   None,  # computed below from total dist / total moving
             "max_speed_kmh":   round(_stat_max("max_speed_kmh"), 1) or None,
             "avg_hr":          avg_hr,
@@ -1964,6 +1991,17 @@ def _summary_data_compute(days_back: int, units: str,
         total_dist = rollups[tid]["distance_km"]
         total_h = rollups[tid]["moving_h"]
         rollups[tid]["avg_speed_kmh"] = round(total_dist / total_h, 1) if total_h > 0 else None
+
+        # Prior-window aggregate for the same type — drives the per-card YoY
+        # deltas (mirrors the current-window stats above).
+        prev_dates = {(a.get("date") or "")[:10] for a in in_prev if a.get("date")}
+        rollups[tid]["prev"] = {
+            "days":        len(prev_dates),
+            "distance_km": round(sum((a.get("stats") or {}).get("distance_km") or 0 for a in in_prev), 1),
+            "elev_gain_m": round(sum((a.get("stats") or {}).get("elev_gain_m") or 0 for a in in_prev)),
+            "elev_loss_m": round(sum((a.get("stats") or {}).get("elev_loss_m") or 0 for a in in_prev)),
+            "moving_h":    _riding_h(in_prev),
+        }
 
         # ── HISTORY: per-year monthly buckets, all years (not just window) ──
         h: dict = {}
@@ -2078,13 +2116,8 @@ def _summary_data_compute(days_back: int, units: str,
     fortnight_start = (today_dt - timedelta(days=13)).strftime("%Y-%m-%d")
     last_14d_active_days = sum(1 for d in unique_active if d >= fortnight_start)
 
-    # Prior 365-day window (immediately preceding the current one) — powers the
-    # year-over-year deltas on the dashboard hero band. Same aggregate as the
-    # current window, shifted back by `days_back` days.
-    prev_latest_dt    = earliest_dt - timedelta(days=1)
-    prev_earliest_dt  = prev_latest_dt - timedelta(days=days_back - 1)
-    prev_earliest_iso = prev_earliest_dt.strftime("%Y-%m-%d")
-    prev_latest_iso   = prev_latest_dt.strftime("%Y-%m-%d")
+    # Cross-activity prior-window aggregate (bounds computed near the top) —
+    # powers the hero-band year-over-year deltas.
     all_in_prev = [a for tid in ordered_ids for a in by_type[tid]
                    if len((a.get("date") or "")[:10]) == 10
                    and prev_earliest_iso <= (a.get("date") or "")[:10] <= prev_latest_iso]
@@ -2095,7 +2128,7 @@ def _summary_data_compute(days_back: int, units: str,
         "distance_km": round(sum((a.get("stats") or {}).get("distance_km") or 0 for a in all_in_prev), 1),
         "elev_gain_m": sum((a.get("stats") or {}).get("elev_gain_m") or 0 for a in all_in_prev),
         "elev_loss_m": sum((a.get("stats") or {}).get("elev_loss_m") or 0 for a in all_in_prev),
-        "moving_h":    round(sum((a.get("stats") or {}).get("duration_sec") or 0 for a in all_in_prev) / 3600.0, 2),
+        "moving_h":    _riding_h(all_in_prev),
     }
 
     totals = {
@@ -2104,7 +2137,7 @@ def _summary_data_compute(days_back: int, units: str,
         "distance_km":     round(sum((a.get("stats") or {}).get("distance_km") or 0 for a in all_in_window), 1),
         "elev_gain_m":     sum((a.get("stats") or {}).get("elev_gain_m") or 0 for a in all_in_window),
         "elev_loss_m":     sum((a.get("stats") or {}).get("elev_loss_m") or 0 for a in all_in_window),
-        "moving_h":        round(sum((a.get("stats") or {}).get("duration_sec") or 0 for a in all_in_window) / 3600.0, 2),
+        "moving_h":        _riding_h(all_in_window),
         "longest_streak":  longest_streak_all,
         "current_streak":  current_streak_all,
         "last_14d_active_days": last_14d_active_days,
