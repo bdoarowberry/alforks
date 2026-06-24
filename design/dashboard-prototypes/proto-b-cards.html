@@ -1,0 +1,892 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AlForks · Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg-page:#0a0c0c; --bg-card:#0f1313; --bg-elev:#11161a;
+  --border-hair:rgba(255,255,255,0.11); --border-row:rgba(255,255,255,0.14);
+  --text-primary:#fff; --text-secondary:rgba(255,255,255,0.82); --text-tertiary:rgba(255,255,255,0.62);
+  --text-muted:rgba(255,255,255,0.5); --text-faint:rgba(255,255,255,0.38);
+  --surface-tint:rgba(255,255,255,0.04);
+  --accent:#3b82f6; --accent-soft:rgba(59,130,246,0.10);
+  --warn:#f59e0b; --danger:#ef4444; --success:#22c55e; --link:#93c5fd;
+  --pos:oklch(0.78 0.15 145); --neg:oklch(0.74 0.14 55);
+  --font-sans:'Inter',system-ui,-apple-system,sans-serif;
+  --font-mono:'JetBrains Mono',ui-monospace,'SF Mono',monospace;
+  /* net-new tokens for this direction */
+  --r-sm:8px; --r-md:12px; --r-lg:16px; --r-xl:20px;
+  --card-grad:linear-gradient(180deg, rgba(255,255,255,0.045) 0%, rgba(255,255,255,0.012) 16%, rgba(255,255,255,0) 42%);
+  --card-edge:inset 0 1px 0 rgba(255,255,255,0.06);
+  --shadow-soft:0 1px 2px rgba(0,0,0,0.4), 0 8px 24px -12px rgba(0,0,0,0.6);
+  --shadow-lift:0 2px 4px rgba(0,0,0,0.45), 0 16px 40px -16px rgba(0,0,0,0.7);
+}
+*{box-sizing:border-box;margin:0;padding:0;}
+html,body{background:var(--bg-page);}
+body{
+  font-family:var(--font-sans);
+  color:var(--text-secondary);
+  -webkit-font-smoothing:antialiased;
+  line-height:1.45;
+}
+.num{font-family:var(--font-mono);font-variant-numeric:tabular-nums;}
+a{color:inherit;text-decoration:none;}
+
+/* ───────── Header / shell ───────── */
+header.app{
+  position:sticky;top:0;z-index:50;
+  display:flex;align-items:center;gap:28px;
+  padding:0 32px;height:60px;
+  background:rgba(10,12,12,0.86);
+  backdrop-filter:blur(14px);
+  border-bottom:1px solid var(--border-hair);
+}
+.wordmark{
+  font-weight:700;font-size:1.18rem;color:var(--text-primary);
+  letter-spacing:-0.01em;
+}
+.wordmark .fork{color:var(--accent);}
+nav.main{display:flex;gap:4px;align-items:center;}
+nav.main a{
+  font-size:0.9rem;font-weight:500;color:var(--text-tertiary);
+  padding:8px 12px;border-radius:var(--r-sm);transition:.15s;
+}
+nav.main a:hover{color:var(--text-secondary);background:var(--surface-tint);}
+nav.main a.active{color:var(--text-primary);background:var(--surface-tint);}
+.spacer{flex:1;}
+.icon-cluster{display:flex;gap:6px;}
+.icon-btn{
+  width:34px;height:34px;border-radius:var(--r-sm);
+  border:1px solid var(--border-hair);background:var(--bg-card);
+  color:var(--text-tertiary);font-size:0.95rem;
+  display:grid;place-items:center;cursor:pointer;transition:.15s;
+}
+.icon-btn:hover{color:var(--text-primary);border-color:var(--border-row);background:var(--bg-elev);}
+
+main{
+  max-width:1680px;margin:0 auto;
+  padding:28px 32px 56px;
+  display:flex;flex-direction:column;gap:26px;
+}
+.page-title{font-size:1.4rem;font-weight:500;color:var(--text-primary);letter-spacing:-0.01em;}
+
+.eyebrow{
+  font-size:0.7rem;font-weight:600;text-transform:uppercase;
+  letter-spacing:0.12em;color:var(--text-tertiary);
+}
+.section{display:flex;flex-direction:column;gap:14px;}
+.section-head{display:flex;align-items:baseline;justify-content:space-between;gap:16px;flex-wrap:wrap;}
+.section-sub{font-size:0.8rem;color:var(--text-faint);}
+
+/* ───────── Card base ───────── */
+.card{
+  position:relative;
+  background:var(--bg-card);
+  border:1px solid var(--border-hair);
+  border-radius:var(--r-lg);
+  box-shadow:var(--shadow-soft), var(--card-edge);
+}
+.card::before{
+  content:"";position:absolute;inset:0;border-radius:inherit;
+  background:var(--card-grad);pointer-events:none;
+}
+.card > *{position:relative;}
+
+/* ───────── HERO band ───────── */
+.hero{
+  display:grid;
+  grid-template-columns:1.5fr 1fr 1fr 1fr 1fr;
+  gap:14px;
+}
+.hero-stat{padding:20px 22px;display:flex;flex-direction:column;gap:6px;}
+.hero-stat .label{
+  font-size:0.7rem;font-weight:600;text-transform:uppercase;
+  letter-spacing:0.1em;color:var(--text-tertiary);
+}
+.hero-stat .value{
+  font-family:var(--font-mono);font-variant-numeric:tabular-nums;
+  font-weight:600;font-size:1.7rem;color:var(--text-primary);line-height:1.1;
+}
+.hero-stat .value .unit{font-size:0.85rem;color:var(--text-muted);font-weight:400;margin-left:3px;}
+.delta{
+  display:inline-flex;align-items:center;gap:4px;
+  font-family:var(--font-mono);font-variant-numeric:tabular-nums;
+  font-size:0.8rem;font-weight:500;
+}
+.delta .arrow{font-size:0.7rem;}
+.delta.up{color:var(--pos);}
+.delta.down{color:var(--neg);}
+.delta .vs{color:var(--text-faint);font-family:var(--font-sans);font-weight:400;margin-left:2px;}
+
+/* premium distance hero */
+.hero-primary{
+  grid-row:span 1;
+  padding:22px 24px;
+  display:flex;flex-direction:column;gap:10px;
+  background:
+    radial-gradient(120% 100% at 0% 0%, rgba(59,130,246,0.10), rgba(59,130,246,0) 55%),
+    var(--bg-elev);
+  border-color:rgba(59,130,246,0.22);
+}
+.hero-primary .label{color:var(--text-secondary);}
+.hero-primary .value{font-size:2.9rem;letter-spacing:-0.02em;}
+.hero-primary .value .unit{font-size:1.1rem;}
+.hero-primary .topline{display:flex;align-items:baseline;justify-content:space-between;gap:12px;}
+.spark{width:100%;height:46px;display:block;}
+.hero-foot{
+  display:flex;gap:18px;font-size:0.78rem;color:var(--text-muted);
+  border-top:1px solid var(--border-hair);padding-top:10px;
+}
+.hero-foot b{
+  font-family:var(--font-mono);font-variant-numeric:tabular-nums;
+  color:var(--text-secondary);font-weight:600;
+}
+.streak-dot{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--accent);margin-right:5px;vertical-align:middle;}
+
+/* ───────── Segmented / pill controls ───────── */
+.segmented{
+  display:inline-flex;gap:2px;padding:3px;
+  background:var(--bg-elev);border:1px solid var(--border-hair);
+  border-radius:999px;
+}
+.segmented button{
+  font-family:var(--font-sans);font-size:0.82rem;font-weight:500;
+  color:var(--text-tertiary);background:transparent;border:none;cursor:pointer;
+  padding:6px 14px;border-radius:999px;transition:.15s;white-space:nowrap;
+}
+.segmented button:hover{color:var(--text-secondary);}
+.segmented button.on{
+  color:var(--text-primary);background:var(--surface-tint);
+  box-shadow:var(--card-edge);
+}
+.chip-row{display:flex;gap:7px;flex-wrap:wrap;}
+.chip{
+  font-family:var(--font-mono);font-variant-numeric:tabular-nums;
+  font-size:0.78rem;font-weight:500;cursor:pointer;
+  padding:5px 12px;border-radius:999px;transition:.15s;
+  border:1px solid var(--border-hair);background:transparent;color:var(--text-muted);
+  display:inline-flex;align-items:center;gap:7px;
+}
+.chip .swatch{width:9px;height:9px;border-radius:2px;display:inline-block;}
+.chip:hover{color:var(--text-secondary);border-color:var(--border-row);}
+.chip.on{color:var(--text-primary);background:var(--surface-tint);border-color:var(--border-row);}
+.chip.on.dim{opacity:1;}
+.chip.off{opacity:0.45;}
+
+/* ───────── YoY chart ───────── */
+.chart-card{padding:20px 22px 14px;display:flex;flex-direction:column;gap:16px;}
+.chart-head{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;}
+.chart-controls{display:flex;align-items:center;gap:14px;flex-wrap:wrap;}
+.chart-wrap{position:relative;width:100%;}
+.chart-svg{width:100%;display:block;overflow:visible;}
+.tooltip{
+  position:absolute;pointer-events:none;z-index:20;
+  background:var(--bg-elev);border:1px solid var(--border-row);
+  border-radius:var(--r-sm);padding:7px 10px;
+  font-size:0.76rem;color:var(--text-secondary);
+  box-shadow:var(--shadow-lift);white-space:nowrap;
+  transform:translate(-50%,-115%);transition:opacity .08s;opacity:0;
+}
+.tooltip .tt-val{
+  font-family:var(--font-mono);font-variant-numeric:tabular-nums;
+  color:var(--text-primary);font-weight:600;
+}
+.tooltip .tt-date{color:var(--text-faint);font-size:0.7rem;}
+
+/* ───────── PR cards ───────── */
+.pr-scroll{
+  display:grid;grid-auto-flow:column;grid-auto-columns:minmax(220px,1fr);
+  gap:14px;overflow-x:auto;padding-bottom:4px;
+  scrollbar-width:thin;
+}
+.pr-card{
+  position:relative;overflow:hidden;
+  padding:16px 18px 16px 20px;
+  display:flex;flex-direction:column;gap:8px;
+  border-radius:var(--r-md);
+  border:1px solid var(--border-hair);
+  background:var(--bg-card);
+  box-shadow:var(--shadow-soft),var(--card-edge);
+  transition:.18s;
+}
+.pr-card:hover{transform:translateY(-2px);box-shadow:var(--shadow-lift),var(--card-edge);border-color:var(--border-row);}
+.pr-card .edge{position:absolute;left:0;top:0;bottom:0;width:4px;border-radius:4px 0 0 4px;}
+.pr-card .pr-label{font-size:0.74rem;font-weight:600;text-transform:uppercase;letter-spacing:0.08em;color:var(--text-tertiary);}
+.pr-card .pr-val{
+  font-family:var(--font-mono);font-variant-numeric:tabular-nums;
+  font-size:1.55rem;font-weight:600;color:var(--text-primary);line-height:1;
+}
+.pr-card .pr-meta{display:flex;align-items:center;gap:8px;font-size:0.78rem;color:var(--text-muted);margin-top:2px;}
+.type-chip{
+  display:inline-flex;align-items:center;gap:5px;
+  font-size:0.68rem;font-weight:600;letter-spacing:0.04em;
+  padding:3px 7px;border-radius:6px;
+}
+.pr-card .pr-ride{font-size:0.82rem;color:var(--text-secondary);font-weight:500;}
+.pr-card .pr-date{font-family:var(--font-mono);color:var(--text-faint);font-size:0.74rem;margin-left:auto;}
+
+/* ───────── Tabs ───────── */
+.tabbar{
+  display:inline-flex;gap:3px;padding:4px;
+  background:var(--bg-elev);border:1px solid var(--border-hair);
+  border-radius:999px;align-self:flex-start;
+}
+.tabbar button{
+  font-family:var(--font-sans);font-size:0.88rem;font-weight:500;
+  color:var(--text-tertiary);background:transparent;border:none;cursor:pointer;
+  padding:8px 18px;border-radius:999px;transition:.15s;
+}
+.tabbar button:hover{color:var(--text-secondary);}
+.tabbar button.on{color:var(--text-primary);background:var(--surface-tint);box-shadow:var(--card-edge);}
+.tabpanel{display:none;}
+.tabpanel.on{display:block;animation:fade .2s ease;}
+@keyframes fade{from{opacity:0;transform:translateY(4px);}to{opacity:1;transform:none;}}
+
+/* ───────── By Activity ───────── */
+.act-list{display:flex;flex-direction:column;gap:14px;}
+.act-card{overflow:hidden;}
+.act-header{
+  display:flex;align-items:center;gap:16px;
+  padding:16px 20px;cursor:pointer;user-select:none;width:100%;
+  background:transparent;border:none;text-align:left;color:inherit;
+}
+.glyph-badge{
+  flex:none;width:44px;height:44px;border-radius:var(--r-md);
+  display:grid;place-items:center;
+  font-family:var(--font-mono);font-weight:600;font-size:0.72rem;letter-spacing:0.02em;
+}
+.act-title{display:flex;flex-direction:column;gap:1px;min-width:130px;}
+.act-title .name{font-size:1.02rem;font-weight:600;color:var(--text-primary);}
+.act-title .ago{font-size:0.74rem;color:var(--text-faint);}
+.act-headline{display:flex;gap:26px;flex-wrap:wrap;margin-left:auto;align-items:center;}
+.hl{display:flex;flex-direction:column;gap:1px;}
+.hl .k{font-size:0.66rem;text-transform:uppercase;letter-spacing:0.08em;color:var(--text-faint);}
+.hl .v{font-family:var(--font-mono);font-variant-numeric:tabular-nums;font-size:0.96rem;font-weight:600;color:var(--text-secondary);}
+.chevron{flex:none;color:var(--text-faint);font-size:0.85rem;transition:.2s;margin-left:8px;}
+.act-card.open .chevron{transform:rotate(90deg);}
+.act-body{display:none;padding:0 20px 20px;flex-direction:column;gap:18px;}
+.act-card.open .act-body{display:flex;}
+.act-body-top{border-top:1px solid var(--border-hair);padding-top:18px;}
+.act-grid{display:grid;grid-template-columns:1.6fr 1fr;gap:20px;align-items:start;}
+.speed-pair{display:flex;gap:14px;margin-top:14px;}
+.speed-box{
+  flex:1;padding:12px 14px;border-radius:var(--r-md);
+  background:var(--bg-elev);border:1px solid var(--border-hair);
+}
+.speed-box .k{font-size:0.66rem;text-transform:uppercase;letter-spacing:0.08em;color:var(--text-faint);}
+.speed-box .v{font-family:var(--font-mono);font-variant-numeric:tabular-nums;font-size:1.25rem;font-weight:600;color:var(--text-primary);}
+.speed-box .v .unit{font-size:0.72rem;color:var(--text-muted);font-weight:400;}
+.rec-mini{display:flex;flex-direction:column;gap:7px;}
+.rec-mini .rec-row{
+  display:flex;align-items:center;gap:10px;
+  padding:9px 12px;border-radius:var(--r-sm);
+  border:1px solid var(--border-hair);background:var(--bg-elev);transition:.15s;
+}
+.rec-mini .rec-row:hover{border-color:var(--border-row);background:var(--bg-card);}
+.rec-row .rl{font-size:0.78rem;color:var(--text-tertiary);width:78px;flex:none;}
+.rec-row .rv{font-family:var(--font-mono);font-variant-numeric:tabular-nums;font-size:0.9rem;font-weight:600;color:var(--text-primary);}
+.rec-row .rmeta{margin-left:auto;text-align:right;font-size:0.72rem;color:var(--text-faint);}
+.rec-row .rmeta .rn{color:var(--text-muted);}
+.act-foot{display:flex;gap:18px;border-top:1px solid var(--border-hair);padding-top:14px;}
+.act-foot a{font-size:0.82rem;color:var(--link);font-weight:500;transition:.15s;}
+.act-foot a:hover{color:var(--text-primary);}
+.subhead{font-size:0.72rem;font-weight:600;text-transform:uppercase;letter-spacing:0.1em;color:var(--text-tertiary);margin-bottom:9px;}
+
+/* ───────── Calendar ───────── */
+.cal-card{padding:22px;display:flex;flex-direction:column;gap:18px;}
+.cal-legend{display:flex;gap:16px;flex-wrap:wrap;align-items:center;}
+.legend-item{display:flex;align-items:center;gap:6px;font-size:0.78rem;color:var(--text-muted);}
+.legend-item .sw{width:11px;height:11px;border-radius:3px;}
+.heat-scroll{overflow-x:auto;padding-bottom:6px;}
+.heat{display:inline-grid;grid-auto-flow:column;grid-template-rows:repeat(7,1fr);gap:3px;}
+.heat-cell{width:13px;height:13px;border-radius:3px;background:var(--surface-tint);transition:.1s;}
+.heat-cell.active{cursor:pointer;}
+.heat-cell.active:hover{outline:1.5px solid rgba(255,255,255,0.6);outline-offset:1px;}
+.heat-months{display:flex;gap:3px;font-size:0.66rem;color:var(--text-faint);font-family:var(--font-mono);margin-bottom:2px;}
+
+/* ───────── Records tab ───────── */
+.rec-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:14px;}
+.rec-type-card{padding:18px 20px;display:flex;flex-direction:column;gap:14px;}
+.rec-type-head{display:flex;align-items:center;gap:12px;}
+.rec-cols{display:grid;grid-template-columns:1fr 1fr;gap:18px;}
+.rec-col .subhead{margin-bottom:8px;}
+
+@media(max-width:1180px){
+  .hero{grid-template-columns:1fr 1fr;}
+  .hero-primary{grid-column:span 2;}
+  .act-grid{grid-template-columns:1fr;}
+  .rec-grid{grid-template-columns:1fr;}
+}
+@media(max-width:680px){
+  header.app{gap:14px;padding:0 16px;overflow-x:auto;}
+  nav.main{display:none;}
+  main{padding:20px 16px 48px;}
+  .hero{grid-template-columns:1fr 1fr;}
+  .hero-primary{grid-column:span 2;}
+  .act-headline{display:none;}
+  .rec-cols{grid-template-columns:1fr;}
+}
+@media(max-width:420px){
+  .hero{grid-template-columns:1fr;}
+  .hero-primary{grid-column:span 1;}
+  .hero-primary .value{font-size:2.3rem;}
+}
+</style>
+</head>
+<body>
+<header class="app">
+  <div class="wordmark">Al<span class="fork">Forks</span></div>
+  <nav class="main">
+    <a href="#" class="active">Dashboard</a>
+    <a href="#">Activities</a>
+    <a href="#">Map</a>
+    <a href="#">Training</a>
+    <a href="#">Trails &amp; Routes</a>
+  </nav>
+  <div class="spacer"></div>
+  <div class="icon-cluster">
+    <button class="icon-btn" title="Sync">&#8635;</button>
+    <button class="icon-btn" title="Notifications">&#128276;</button>
+    <button class="icon-btn" title="Settings">&#9881;</button>
+  </div>
+</header>
+
+<main>
+  <h1 class="page-title">Dashboard</h1>
+
+  <!-- ABOVE THE FOLD -->
+  <section class="section" id="atf">
+    <div class="section-head">
+      <span class="eyebrow">Last 365 days</span>
+      <span class="section-sub" id="window-sub"></span>
+    </div>
+
+    <!-- 1. HERO BAND -->
+    <div class="hero" id="hero"></div>
+
+    <!-- 2. CROSS-ACTIVITY YoY CHART -->
+    <div class="card chart-card">
+      <div class="chart-head">
+        <div>
+          <div class="eyebrow" style="margin-bottom:4px;">Year over year</div>
+          <div style="font-size:1.02rem;font-weight:600;color:var(--text-primary);" id="all-chart-title">Distance by month</div>
+        </div>
+        <div class="chart-controls">
+          <div class="segmented" id="all-metric"></div>
+          <div class="chip-row" id="all-years"></div>
+        </div>
+      </div>
+      <div class="chart-wrap" id="all-chart-wrap">
+        <div class="tooltip" id="all-tip"></div>
+      </div>
+    </div>
+
+    <!-- 3. RECENT RECORDS -->
+    <div class="section" style="gap:10px;">
+      <div class="section-head">
+        <span class="eyebrow">Recent records</span>
+        <span class="section-sub">Personal bests set in the last 365 days</span>
+      </div>
+      <div class="pr-scroll" id="pr-scroll"></div>
+    </div>
+  </section>
+
+  <!-- TABS -->
+  <section class="section">
+    <div class="tabbar" id="tabbar">
+      <button data-tab="activity" class="on">By Activity</button>
+      <button data-tab="calendar">Calendar</button>
+      <button data-tab="records">Records</button>
+    </div>
+
+    <div class="tabpanel on" id="tab-activity">
+      <div class="act-list" id="act-list"></div>
+    </div>
+
+    <div class="tabpanel" id="tab-calendar">
+      <div class="card cal-card">
+        <div class="cal-legend" id="cal-legend"></div>
+        <div class="heat-scroll">
+          <div class="heat-months" id="heat-months"></div>
+          <div class="heat" id="heat"></div>
+        </div>
+        <div class="section-sub" id="cal-summary"></div>
+      </div>
+    </div>
+
+    <div class="tabpanel" id="tab-records">
+      <div class="rec-grid" id="rec-grid"></div>
+    </div>
+  </section>
+</main>
+
+<script src="./mock-data.js"></script>
+<script>
+(function(){
+  'use strict';
+  const M = window.MOCK, F = window.FMT;
+  const TYPE_BY_ID = Object.fromEntries(M.TYPES.map(t=>[t.id,t]));
+  const $ = (s,r=document)=>r.querySelector(s);
+  const el = (tag,cls,html)=>{const e=document.createElement(tag); if(cls)e.className=cls; if(html!=null)e.innerHTML=html; return e;};
+
+  // helper: convert hex accent -> rgba tint
+  function tint(hex,a){
+    const h=hex.replace('#',''); const n=parseInt(h.length===3?h.split('').map(c=>c+c).join(''):h,16);
+    return `rgba(${(n>>16)&255},${(n>>8)&255},${n&255},${a})`;
+  }
+
+  const METRIC_META = {
+    distance:{label:'Distance', unit:'km', fmt:v=>F.dist(v)},
+    duration:{label:'Time',     unit:'h',  fmt:v=>v.toFixed(0)},
+    climb:   {label:'Climbing', unit:'m',  fmt:v=>F.elev(v)},
+    count:   {label:'Activities',unit:'',  fmt:v=>String(Math.round(v))},
+  };
+  const ALL_METRICS = ['distance','duration','climb','count'];
+
+  /* ───────── window sub ───────── */
+  (function(){
+    const end = new Date(M.TODAY+'T00:00:00');
+    const start = new Date(end); start.setDate(end.getDate()-364);
+    const f=d=>d.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
+    $('#window-sub').textContent = f(start)+' – '+f(end);
+  })();
+
+  /* ───────── 1. HERO BAND ───────── */
+  function deltaEl(cur,prev,invertGood){
+    const p = F.pct(cur,prev);
+    if(p==null) return el('span','delta','');
+    const up = p>=0;
+    const cls = up?'up':'down';
+    const d = el('span','delta '+cls);
+    d.innerHTML = `<span class="arrow">${up?'▲':'▼'}</span><span class="num">${Math.abs(p)}%</span><span class="vs">vs prior yr</span>`;
+    return d;
+  }
+  function statCard(label,valueHTML,cur,prev){
+    const c = el('div','card hero-stat');
+    c.appendChild(el('div','label',label));
+    c.appendChild(el('div','value',valueHTML));
+    c.appendChild(deltaEl(cur,prev));
+    return c;
+  }
+  (function(){
+    const T = M.TOTALS, hero = $('#hero');
+
+    // Premium distance hero
+    const prim = el('div','card hero-primary');
+    prim.appendChild(el('div','label','Distance'));
+    const top = el('div','topline');
+    top.appendChild(el('div','value',`<span class="num">${F.dist(T.distance_km)}</span><span class="unit">km</span>`));
+    top.appendChild(deltaEl(T.distance_km,T.distance_prev));
+    prim.appendChild(top);
+    // sparkline from current-year distance months
+    const cur = M.HISTORY_ALL.distance[M.CUR_YEAR].filter(v=>v!=null);
+    prim.appendChild(sparkline(cur));
+    const foot = el('div','hero-foot');
+    foot.innerHTML = `<span><span class="streak-dot"></span>Current streak <b class="num">${T.current_streak}</b> days</span>`+
+                     `<span>Active <b class="num">${T.last_14d_active}</b> of last 14 days</span>`+
+                     `<span>Last out <b class="num">${T.days_since}d</b> ago</span>`;
+    prim.appendChild(foot);
+    hero.appendChild(prim);
+
+    hero.appendChild(statCard('Moving time',`<span class="num">${F.hours(T.moving_h)}</span>`,T.moving_h,T.moving_prev));
+    hero.appendChild(statCard('Climbing',`<span class="num">${F.elev(T.climb_m)}</span><span class="unit">m</span>`,T.climb_m,T.climb_prev));
+    hero.appendChild(statCard('Descent',`<span class="num">${F.elev(T.descent_m)}</span><span class="unit">m</span>`,T.descent_m,T.descent_prev));
+    hero.appendChild(statCard('Days out',`<span class="num">${T.days_out}</span>`,T.days_out,T.days_prev));
+  })();
+
+  function sparkline(data){
+    const W=320,H=46,pad=3;
+    const max=Math.max(...data,1), min=Math.min(...data,0);
+    const rng=(max-min)||1;
+    const stepX=(W-pad*2)/(data.length-1||1);
+    const pts=data.map((v,i)=>[pad+i*stepX, H-pad-((v-min)/rng)*(H-pad*2)]);
+    const line=pts.map((p,i)=>(i?'L':'M')+p[0].toFixed(1)+' '+p[1].toFixed(1)).join(' ');
+    const area=line+` L ${pts[pts.length-1][0].toFixed(1)} ${H} L ${pts[0][0].toFixed(1)} ${H} Z`;
+    const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');
+    svg.setAttribute('class','spark'); svg.setAttribute('viewBox',`0 0 ${W} ${H}`); svg.setAttribute('preserveAspectRatio','none');
+    svg.innerHTML=`
+      <defs><linearGradient id="spk" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="${'var(--accent)'}" stop-opacity="0.28"/>
+        <stop offset="1" stop-color="${'var(--accent)'}" stop-opacity="0"/>
+      </linearGradient></defs>
+      <path d="${area}" fill="url(#spk)"/>
+      <path d="${line}" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      <circle cx="${pts[pts.length-1][0].toFixed(1)}" cy="${pts[pts.length-1][1].toFixed(1)}" r="3" fill="var(--accent)"/>`;
+    return svg;
+  }
+
+  /* ───────── 2 + per-activity YoY chart engine ───────── */
+  // Renders a grouped/overlaid monthly bar chart. Latest selected year is dominant.
+  function renderChart(opts){
+    // opts: {container, series:{year:[12]}, years:[selected], accent, metricFmt, tipEl}
+    const {container, history, metric, years, accent, tipEl, idPrefix} = opts;
+    const META = opts.metricMeta || METRIC_META;
+    container.querySelectorAll('svg').forEach(s=>s.remove());
+    const W=1000, H=300, padL=44, padR=12, padT=16, padB=28;
+    const innerW=W-padL-padR, innerH=H-padT-padB;
+    const sel = years.slice().sort((a,b)=>a-b);
+    const latest = Math.max(...sel);
+    const data = sel.map(y=>({year:y, vals:history[metric][y]}));
+    let max=0;
+    data.forEach(d=>d.vals.forEach(v=>{if(v!=null&&v>max)max=v;}));
+    max = max*1.08 || 1;
+    const niceMax = max;
+    const groupW = innerW/12;
+    const fmt = META[metric].fmt;
+    const unit = META[metric].unit;
+
+    const yPix = v=> padT+innerH-(v/niceMax)*innerH;
+    const svgNS='http://www.w3.org/2000/svg';
+    const svg=document.createElementNS(svgNS,'svg');
+    svg.setAttribute('class','chart-svg'); svg.setAttribute('viewBox',`0 0 ${W} ${H}`); svg.setAttribute('preserveAspectRatio','none');
+
+    let html='';
+    // gridlines (faint) at 0,.5,1 of max + max label
+    [0,0.5,1].forEach(f=>{
+      const y=padT+innerH-f*innerH;
+      html+=`<line x1="${padL}" y1="${y}" x2="${W-padR}" y2="${y}" stroke="var(--border-hair)" stroke-width="1" ${f===0?'':'stroke-dasharray="2 4"'}/>`;
+    });
+    html+=`<text x="${padL-8}" y="${padT+4}" text-anchor="end" font-family="var(--font-mono)" font-size="11" fill="var(--text-faint)">${fmt(niceMax)}</text>`;
+    html+=`<text x="${padL-8}" y="${padT+innerH+4}" text-anchor="end" font-family="var(--font-mono)" font-size="11" fill="var(--text-faint)">0</text>`;
+
+    // latest-year area fill (faint) connecting bar tops
+    const latestVals = history[metric][latest];
+    const areaPts=[];
+    for(let m=0;m<12;m++){
+      if(latestVals[m]==null) continue;
+      const cx = padL + groupW*m + groupW/2;
+      areaPts.push([cx, yPix(latestVals[m])]);
+    }
+    if(areaPts.length>1){
+      let ap='M '+areaPts[0][0]+' '+(padT+innerH);
+      areaPts.forEach(p=>ap+=` L ${p[0].toFixed(1)} ${p[1].toFixed(1)}`);
+      ap+=` L ${areaPts[areaPts.length-1][0].toFixed(1)} ${padT+innerH} Z`;
+      html+=`<path d="${ap}" fill="${tint(accent,0.10)}"/>`;
+    }
+
+    // bars: within each month, sel years side by side. Latest = accent solid, others recessive.
+    const nYears=sel.length;
+    const barGap=2;
+    const usable=groupW*0.72;
+    const bw=(usable-(nYears-1)*barGap)/nYears;
+    const x0off=(groupW-usable)/2;
+
+    let bars='';
+    for(let m=0;m<12;m++){
+      sel.forEach((y,yi)=>{
+        const v=history[metric][y][m];
+        const gx=padL+groupW*m+x0off+yi*(bw+barGap);
+        if(v==null) return;
+        const top=yPix(v);
+        const h=padT+innerH-top;
+        const isLatest=y===latest;
+        const fill = isLatest? accent : tint(accent,0.22);
+        const op = isLatest?1:1;
+        bars+=`<rect class="${idPrefix}-bar" data-y="${y}" data-m="${m}" data-v="${v}"
+                 x="${gx.toFixed(1)}" y="${top.toFixed(1)}" width="${bw.toFixed(1)}" height="${Math.max(0,h).toFixed(1)}"
+                 rx="${Math.min(3,bw/2).toFixed(1)}" fill="${fill}" opacity="${op}" style="cursor:pointer;transition:opacity .1s"/>`;
+      });
+    }
+    html+=bars;
+
+    // month axis
+    M.MONTHS.forEach((mo,m)=>{
+      const cx=padL+groupW*m+groupW/2;
+      html+=`<text x="${cx.toFixed(1)}" y="${H-8}" text-anchor="middle" font-family="var(--font-sans)" font-size="11" fill="var(--text-faint)">${mo}</text>`;
+    });
+
+    svg.innerHTML=html;
+    container.insertBefore(svg, tipEl||null);
+
+    // hover via bars
+    const wrap=container;
+    svg.querySelectorAll('rect.'+idPrefix+'-bar').forEach(r=>{
+      r.addEventListener('mousemove',ev=>{
+        const y=r.dataset.y, m=+r.dataset.m, v=+r.dataset.v;
+        if(tipEl){
+          tipEl.innerHTML=`<div class="tt-date">${M.MONTHS[m]} ${y}</div><div class="tt-val num">${fmt(v)}${unit?' '+unit:''}</div>`;
+          tipEl.style.opacity='1';
+          const rect=wrap.getBoundingClientRect();
+          tipEl.style.left=(ev.clientX-rect.left)+'px';
+          tipEl.style.top=(ev.clientY-rect.top)+'px';
+        }
+        r.setAttribute('opacity','0.78');
+      });
+      r.addEventListener('mouseleave',()=>{ if(tipEl)tipEl.style.opacity='0'; r.setAttribute('opacity', r.dataset.y==String(Math.max(...opts.years))?'1':'1'); });
+    });
+  }
+
+  /* ───────── cross-activity chart state ───────── */
+  const allState = { metric:'distance', years: M.YEARS.slice(-3) };
+  function buildMetricSeg(container,current,onpick){
+    container.innerHTML='';
+    ALL_METRICS.forEach(mk=>{
+      const b=el('button',mk===current?'on':'',METRIC_META[mk].label);
+      b.onclick=()=>onpick(mk);
+      container.appendChild(b);
+    });
+  }
+  function buildYearChips(container,allYears,selected,accent,onToggle){
+    container.innerHTML='';
+    allYears.slice().reverse().forEach(y=>{
+      const on=selected.includes(y);
+      const c=el('button','chip '+(on?'on':'off'));
+      c.innerHTML=`<span class="swatch" style="background:${y===Math.max(...selected)&&on?accent:tint(accent,0.4)}"></span><span class="num">${y}</span>`;
+      c.onclick=()=>onToggle(y);
+      container.appendChild(c);
+    });
+  }
+  function renderAllChart(){
+    $('#all-chart-title').textContent = METRIC_META[allState.metric].label+' by month';
+    buildMetricSeg($('#all-metric'),allState.metric,mk=>{allState.metric=mk;renderAllChart();});
+    buildYearChips($('#all-years'),M.YEARS,allState.years,'#3b82f6',y=>{
+      const i=allState.years.indexOf(y);
+      if(i>=0){ if(allState.years.length>1) allState.years.splice(i,1); }
+      else allState.years.push(y);
+      renderAllChart();
+    });
+    renderChart({
+      container:$('#all-chart-wrap'),
+      history:M.HISTORY_ALL,
+      metric:allState.metric,
+      years:allState.years,
+      accent:'#3b82f6',
+      tipEl:$('#all-tip'),
+      idPrefix:'all',
+    });
+  }
+  renderAllChart();
+
+  /* ───────── 3. PR cards ───────── */
+  (function(){
+    const wrap=$('#pr-scroll');
+    M.RECENT_PRS.forEach(rec=>{
+      const t=TYPE_BY_ID[rec.type];
+      const a=el('a','pr-card'); a.href='#';
+      a.innerHTML=`
+        <span class="edge" style="background:${t.accent}"></span>
+        <span class="pr-label">${rec.label}</span>
+        <span class="pr-val num">${F.record(rec)}</span>
+        <div class="pr-meta">
+          <span class="type-chip" style="background:${tint(t.accent,0.16)};color:${t.accent}">${t.glyph}</span>
+          <span class="pr-ride">${rec.ride}</span>
+        </div>
+        <div class="pr-meta">
+          <span style="color:var(--text-faint);font-size:0.74rem">${t.label}</span>
+          <span class="pr-date num">${F.dateShort(rec.date)}</span>
+        </div>`;
+      wrap.appendChild(a);
+    });
+  })();
+
+  /* ───────── Tabs ───────── */
+  $('#tabbar').addEventListener('click',e=>{
+    const b=e.target.closest('button'); if(!b)return;
+    $('#tabbar').querySelectorAll('button').forEach(x=>x.classList.toggle('on',x===b));
+    const tab=b.dataset.tab;
+    document.querySelectorAll('.tabpanel').forEach(p=>p.classList.toggle('on',p.id==='tab-'+tab));
+  });
+
+  /* ───────── By Activity ───────── */
+  const actState={}; // typeId -> {metric, years}
+  function rollupHeadline(t){
+    const r=M.ROLLUPS[t.id];
+    const items=[];
+    items.push(['Days', `<span class="num">${r.days}</span>`]);
+    if(t.isSnow){
+      items.push(['Descent', `<span class="num">${F.elev(r.descent_m)}</span> m`]);
+      items.push(['Climb', `<span class="num">${F.elev(r.climb_m)}</span> m`]);
+    } else {
+      items.push(['Distance', `<span class="num">${F.dist(r.distance_km)}</span> km`]);
+      items.push(['Climb', `<span class="num">${F.elev(r.climb_m)}</span> m`]);
+    }
+    items.push(['Moving', `<span class="num">${F.hours(r.moving_h)}</span>`]);
+    return items;
+  }
+  function recordKind(rec){return F.record(rec);}
+  function buildActCard(t){
+    const r=M.ROLLUPS[t.id];
+    const card=el('div','card act-card'); card.dataset.id=t.id;
+    actState[t.id]={metric:t.isSnow?'descent':'distance', years:M.YEARS.slice(-3)};
+
+    const header=el('button','act-header');
+    const hl=rollupHeadline(t).map(([k,v])=>`<div class="hl"><span class="k">${k}</span><span class="v">${v}</span></div>`).join('');
+    header.innerHTML=`
+      <span class="glyph-badge" style="background:${tint(t.accent,0.16)};color:${t.accent};border:1px solid ${tint(t.accent,0.3)}">${t.glyph}</span>
+      <span class="act-title"><span class="name">${t.label}</span><span class="ago">${r.days_since}d ago</span></span>
+      <span class="act-headline">${hl}</span>
+      <span class="chevron">▶</span>`;
+    card.appendChild(header);
+
+    const body=el('div','act-body');
+    body.innerHTML=`
+      <div class="act-body-top act-grid">
+        <div>
+          <div class="chart-head" style="margin-bottom:12px">
+            <div class="subhead" style="margin:0">Year over year</div>
+            <div class="chart-controls">
+              <div class="segmented act-metric"></div>
+            </div>
+          </div>
+          <div class="chart-wrap act-chart-wrap"><div class="tooltip act-tip"></div></div>
+          <div class="speed-pair">
+            <div class="speed-box"><div class="k">Avg speed</div><div class="v num">${F.speed(r.avg_speed_kmh)}<span class="unit"> km/h</span></div></div>
+            <div class="speed-box"><div class="k">Top speed</div><div class="v num">${F.speed(r.top_speed_kmh)}<span class="unit"> km/h</span></div></div>
+          </div>
+        </div>
+        <div>
+          <div class="subhead">Records · last 365 days</div>
+          <div class="rec-mini">${M.RECORDS[t.id].window.map(rec=>recRow(rec,t)).join('')}</div>
+        </div>
+      </div>
+      <div class="act-foot">
+        <a href="#">View all rides →</a>
+        <a href="#">HR &amp; load →</a>
+      </div>`;
+    card.appendChild(body);
+
+    // expand toggle
+    header.addEventListener('click',()=>{
+      const opening=!card.classList.contains('open');
+      card.classList.toggle('open');
+      if(opening) renderActChart(t.id, card);
+    });
+    return card;
+  }
+  function recRow(rec,t){
+    return `<a class="rec-row" href="#">
+      <span class="rl">${rec.label}</span>
+      <span class="rv num">${F.record(rec)}</span>
+      <span class="rmeta"><span class="rn">${rec.ride}</span> · <span class="num">${F.dateShort(rec.date)}</span></span>
+    </a>`;
+  }
+  // per-activity metric set (distance/duration/climb/descent/count) — pick a friendly subset
+  const ACT_METRICS=[
+    {k:'distance',label:'Distance'},{k:'duration',label:'Time'},
+    {k:'climb',label:'Climb'},{k:'descent',label:'Descent'},{k:'count',label:'Rides'},
+  ];
+  const ACT_METRIC_FMT={
+    distance:{label:'Distance',unit:'km',fmt:v=>F.dist(v)},
+    duration:{label:'Time',unit:'h',fmt:v=>v.toFixed(0)},
+    climb:{label:'Climb',unit:'m',fmt:v=>F.elev(v)},
+    descent:{label:'Descent',unit:'m',fmt:v=>F.elev(v)},
+    count:{label:'Rides',unit:'',fmt:v=>String(Math.round(v))},
+  };
+  function renderActChart(id,card){
+    const t=TYPE_BY_ID[id], st=actState[id];
+    const seg=card.querySelector('.act-metric');
+    seg.innerHTML='';
+    ACT_METRICS.forEach(m=>{
+      const b=el('button',m.k===st.metric?'on':'',m.label);
+      b.onclick=()=>{st.metric=m.k; renderActChart(id,card);};
+      seg.appendChild(b);
+    });
+    renderChart({
+      container:card.querySelector('.act-chart-wrap'),
+      history:M.HISTORY[id],
+      metric:st.metric,
+      years:st.years,
+      accent:t.accent,
+      tipEl:card.querySelector('.act-tip'),
+      idPrefix:'act-'+id,
+      metricMeta:ACT_METRIC_FMT,
+    });
+  }
+  (function(){
+    const list=$('#act-list');
+    M.TYPES.forEach(t=>list.appendChild(buildActCard(t)));
+  })();
+
+  /* ───────── Calendar ───────── */
+  (function(){
+    // legend
+    const leg=$('#cal-legend');
+    M.TYPES.forEach(t=>{
+      const i=el('div','legend-item');
+      i.innerHTML=`<span class="sw" style="background:${t.accent}"></span>${t.label}`;
+      leg.appendChild(i);
+    });
+    const inact=el('div','legend-item');
+    inact.innerHTML=`<span class="sw" style="background:var(--surface-tint)"></span>No activity`;
+    leg.appendChild(inact);
+
+    // build 365-day grid, columns = weeks. Align so weeks are columns, rows = weekday.
+    const heat=$('#heat'), months=$('#heat-months');
+    const end=new Date(M.TODAY+'T00:00:00');
+    const days=[];
+    for(let i=364;i>=0;i--){const d=new Date(end);d.setDate(end.getDate()-i);days.push(d);}
+    // pad front so first column starts on Sunday
+    const firstDow=days[0].getDay();
+    const cells=[];
+    for(let i=0;i<firstDow;i++) cells.push(null);
+    days.forEach(d=>cells.push(d));
+
+    let activeCount=0;
+    const monthMarks={}; // weekIndex -> label
+    cells.forEach((d,idx)=>{
+      const c=el('div','heat-cell');
+      if(d){
+        const iso=d.toISOString().slice(0,10);
+        const tid=M.DOMINANT_BY_DATE[iso];
+        if(tid){
+          const t=TYPE_BY_ID[tid];
+          c.classList.add('active');
+          c.style.background=t.accent;
+          c.title=`${d.toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric',year:'numeric'})} · ${t.label}`;
+          activeCount++;
+        } else {
+          c.title=d.toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'})+' · rest';
+        }
+        // month label on first occurrence of day 1-7 at top row
+        const wk=Math.floor(idx/7);
+        if(d.getDate()<=7 && !(wk in monthMarks)) monthMarks[wk]=M.MONTHS[d.getMonth()];
+      }
+      heat.appendChild(c);
+    });
+    // month label row
+    const totalWeeks=Math.ceil(cells.length/7);
+    for(let w=0;w<totalWeeks;w++){
+      const s=el('span'); s.style.width='13px'; s.style.display='inline-block';
+      s.textContent = monthMarks[w] ? monthMarks[w].slice(0,1) : '';
+      // better: show 3-letter at month boundaries spanning
+    }
+    // simpler month strip: place labels above corresponding week
+    months.style.display='grid';
+    months.style.gridTemplateColumns=`repeat(${totalWeeks}, 13px)`;
+    months.style.gap='3px';
+    for(let w=0;w<totalWeeks;w++){
+      const s=el('span');
+      s.textContent = monthMarks[w]||'';
+      s.style.whiteSpace='nowrap';
+      months.appendChild(s);
+    }
+    $('#cal-summary').innerHTML=`<span class="num">${activeCount}</span> active days in the last 365 · ${M.TOTALS.last_14d_active} of the last 14`;
+  })();
+
+  /* ───────── Records tab ───────── */
+  (function(){
+    const grid=$('#rec-grid');
+    M.TYPES.forEach(t=>{
+      const card=el('div','card rec-type-card');
+      const head=el('div','rec-type-head');
+      head.innerHTML=`<span class="glyph-badge" style="width:34px;height:34px;background:${tint(t.accent,0.16)};color:${t.accent};border:1px solid ${tint(t.accent,0.3)}">${t.glyph}</span>
+        <span style="font-size:1rem;font-weight:600;color:var(--text-primary)">${t.label}</span>`;
+      card.appendChild(head);
+      const cols=el('div','rec-cols');
+      cols.innerHTML=`
+        <div class="rec-col"><div class="subhead">Last 365 days</div><div class="rec-mini">${M.RECORDS[t.id].window.map(r=>recRow(r,t)).join('')}</div></div>
+        <div class="rec-col"><div class="subhead">All time</div><div class="rec-mini">${M.RECORDS[t.id].all.map(r=>recRow(r,t)).join('')}</div></div>`;
+      card.appendChild(cols);
+      grid.appendChild(card);
+    });
+  })();
+
+})();
+</script>
+</body>
+</html>

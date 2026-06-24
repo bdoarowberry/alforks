@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AlForks – Dashboard redesign prototypes</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    :root{
+      --bg-page:#0a0c0c; --bg-card:#0f1313;
+      --border-hair:rgba(255,255,255,0.11);
+      --text-primary:#fff; --text-secondary:rgba(255,255,255,0.82);
+      --text-tertiary:rgba(255,255,255,0.62); --text-muted:rgba(255,255,255,0.5);
+      --accent:#3b82f6; --accent-soft:rgba(59,130,246,0.10);
+      --font-sans:'Inter',system-ui,sans-serif; --font-mono:'JetBrains Mono',ui-monospace,monospace;
+    }
+    *{box-sizing:border-box}
+    body{margin:0;background:var(--bg-page);color:var(--text-primary);font-family:var(--font-sans);-webkit-font-smoothing:antialiased;}
+    .wrap{max-width:1000px;margin:0 auto;padding:56px 28px 80px;}
+    .eyebrow{font-family:var(--font-mono);font-size:11px;letter-spacing:0.18em;text-transform:uppercase;color:var(--text-tertiary);margin-bottom:14px;}
+    h1{font-size:1.9rem;font-weight:600;letter-spacing:-0.02em;margin:0 0 12px;}
+    .lede{color:var(--text-secondary);font-size:15px;line-height:1.6;max-width:680px;margin:0 0 40px;}
+    .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;}
+    @media (max-width:820px){.grid{grid-template-columns:1fr;}}
+    a.card{display:flex;flex-direction:column;text-decoration:none;color:inherit;background:var(--bg-card);
+      border:1px solid var(--border-hair);border-radius:8px;padding:22px;transition:border-color 120ms,transform 120ms;}
+    a.card:hover{border-color:var(--accent);transform:translateY(-2px);}
+    .tag{font-family:var(--font-mono);font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--accent);margin-bottom:12px;}
+    .card h2{font-size:1.15rem;font-weight:600;margin:0 0 8px;}
+    .card p{color:var(--text-secondary);font-size:13px;line-height:1.55;margin:0 0 16px;flex:1;}
+    .card .open{font-family:var(--font-mono);font-size:12px;color:var(--text-muted);}
+    a.card:hover .open{color:var(--accent);}
+    .note{margin-top:40px;padding:18px 20px;background:var(--bg-card);border:1px solid var(--border-hair);
+      border-radius:8px;color:var(--text-tertiary);font-size:13px;line-height:1.6;}
+    .note b{color:var(--text-secondary);font-weight:600;}
+    code{font-family:var(--font-mono);font-size:12px;color:var(--text-secondary);}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="eyebrow">AlForks · Dashboard redesign · Candidate</div>
+    <h1>The candidate — A2 + A3 records</h1>
+    <p class="lede">A2's structure (active-days ribbon promoted above the fold; <b>By&nbsp;Activity · Records</b>
+      tabs) with A3's records presentation (two equal side-by-side panels: <b>Last&nbsp;365&nbsp;days</b> vs
+      <b>All-time</b>, best-per-category across sports — living in the Records tab). This is the one we'd build.</p>
+    <div class="grid" style="grid-template-columns:1fr;max-width:520px;margin-bottom:52px">
+      <a class="card" href="./proto-candidate.html" style="border-color:var(--accent)">
+        <div class="tag">★ Candidate</div>
+        <h2>A2 + A3 records</h2>
+        <p>One clean scroll: hero → promoted ribbon → YoY chart → the two side-by-side
+          Last&nbsp;365 / All-time record panels, then By&nbsp;Activity cards. No tabs. Open this first.</p>
+        <span class="open">Open the candidate →</span>
+      </a>
+    </div>
+
+    <div class="eyebrow">Round 2 · the three takes it came from</div>
+    <h1 style="font-size:1.4rem">Refined Terminal — three takes</h1>
+    <p class="lede">You picked direction&nbsp;<b>A (Refined Terminal)</b>. These three all use that look,
+      with your feedback applied: <b>no streaks</b>, the <b>existing single-row active-days ribbon</b>
+      (today on the right, hover for the day), and <b>all-time records kept separate</b> from the rolling
+      365&nbsp;days. They differ only on <em>where the calendar lives</em> and <em>how the records split is shown</em>.
+      Identical mock data — compare the layout.</p>
+
+    <div class="grid">
+      <a class="card" href="./proto-a1-classic.html">
+        <div class="tag">A1 · Classic tabs</div>
+        <h2>Everything in tabs</h2>
+        <p>Closest to A. Above the fold: summary → YoY → recent records. Tabs:
+          <b>By&nbsp;Activity · Calendar · Records</b>. The Records tab puts
+          <b>Last&nbsp;365&nbsp;days</b> and <b>All&nbsp;time</b> in two side-by-side columns per sport —
+          like the old dashboard, cleaned up.</p>
+        <span class="open">Open A1 →</span>
+      </a>
+      <a class="card" href="./proto-a2-calendar.html">
+        <div class="tag">A2 · Calendar up top</div>
+        <h2>Ribbon promoted</h2>
+        <p>The active-days ribbon lives <b>above the fold</b>, right under the summary — no Calendar tab.
+          Tabs: <b>By&nbsp;Activity · Records</b>. Records uses a <b>365&nbsp;/&nbsp;All-time toggle</b>
+          over one combined cross-sport leaderboard.</p>
+        <span class="open">Open A2 →</span>
+      </a>
+      <a class="card" href="./proto-a3-records.html">
+        <div class="tag">A3 · Records-forward</div>
+        <h2>Bests, side by side</h2>
+        <p>Makes the split the hero: two equal panels above the fold —
+          <b>Last&nbsp;365&nbsp;days</b> vs <b>All-time records</b>, best-per-category across all sports.
+          Tabs: <b>By&nbsp;Activity · Calendar</b> (ribbon).</p>
+        <span class="open">Open A3 →</span>
+      </a>
+    </div>
+
+    <div class="eyebrow" style="margin-top:48px">Round 1 · original directions (for reference)</div>
+    <p class="lede" style="margin-bottom:24px">The first pass — kept so you can refer back. A is the base
+      we're iterating on; B and C were the warmer/bolder alternatives.</p>
+
+    <div class="grid">
+      <a class="card" href="./proto-a-terminal.html">
+        <div class="tag">A · Refined Terminal</div>
+        <h2>Evolve what's there</h2>
+        <p>The conservative, shippable option. Looks like AlForks today, but the hierarchy is
+          finally right: real title, Distance as the hero, KPI deltas, charts with a proper scale
+          and a solid latest year. Dense, precise, mono-numeric.</p>
+        <span class="open">Open prototype A →</span>
+      </a>
+      <a class="card" href="./proto-b-cards.html">
+        <div class="tag">B · Editorial Cards</div>
+        <h2>Warm &amp; premium</h2>
+        <p>A modern consumer-sports feel on the same dark palette. Roomier spacing, subtle
+          gradients/elevation, an oversized Distance hero with a sparkline, and records as a row
+          of tactile PR cards. "I want to open this every morning."</p>
+        <span class="open">Open prototype B →</span>
+      </a>
+      <a class="card" href="./proto-c-story.html">
+        <div class="tag">C · Athlete Story</div>
+        <h2>Make me feel my year</h2>
+        <p>The bold one. A "Wrapped"-style narrative headline synthesised from your data, big
+          delta callouts, one combined chart, and celebratory highlight tiles for records.
+          Emotional but tasteful — the option that makes you want to ride.</p>
+        <span class="open">Open prototype C →</span>
+      </a>
+    </div>
+
+    <div class="note">
+      <b>How to view:</b> double-click any prototype (or this <code>index.html</code>) to open in a
+      browser — no server needed. They're standalone mockups reading from
+      <code>mock-data.js</code>; nothing here touches the live app yet. Once you choose a direction,
+      I'll build the real version against <code>/api/summary</code> (with the two small backend
+      additions: a prior-365 <code>totals</code> for the deltas and a summed cross-activity history series).
+    </div>
+  </div>
+</body>
+</html>
