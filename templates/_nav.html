@@ -1,7 +1,7 @@
 {# Shared top navigation + right-hand action cluster. Each page sets the active
    item before including:  {% set nav_active = 'activities' %}{% include '_nav.html' %}
    Core keys: dashboard | activities | map | training | trailsroutes.
-   Gear-menu keys: settings | cleanup | help | whatsnew.
+   Gear-menu keys: settings | cleanup | help | glossary | whatsnew.
    Right cluster (icon-only): ↥ Upload · ↻ Sync · │ · ⚙. Upload is prepended by
    static/upload.js; the notices strip + gear dot are driven by static/notices.js
    (fed by whatsnew.js + review_nav.js). #}
@@ -31,13 +31,14 @@
       <div class="nav-bell-empty">You’re all caught up ✓</div>
     </div>
   </div>
-  <div class="nav-gear{% if _a in ['settings', 'cleanup', 'help', 'whatsnew'] %} active{% endif %}">
+  <div class="nav-gear{% if _a in ['settings', 'cleanup', 'help', 'glossary', 'whatsnew'] %} active{% endif %}">
     <button type="button" class="nav-gear-btn" aria-haspopup="true" aria-expanded="false"
             title="Settings, help &amp; more">⚙</button>
     <div class="nav-gear-menu" role="menu">
       <a href="/setup" role="menuitem"{% if _a == 'settings' %} class="active"{% endif %}>Settings</a>
       <a href="/review" role="menuitem"{% if _a == 'cleanup' %} class="active"{% endif %}>Clean-up<span id="nav-review-badge" class="nav-pill" style="display:none;">0</span></a>
       <a href="/guide" role="menuitem"{% if _a == 'help' %} class="active"{% endif %}>Help</a>
+      <a href="/glossary" role="menuitem"{% if _a == 'glossary' %} class="active"{% endif %}>Glossary</a>
       <a href="/whatsnew" role="menuitem"{% if _a == 'whatsnew' %} class="active"{% endif %}>What's New</a>
       <div class="nav-gear-ver">v{{ app_version }}</div>
     </div>

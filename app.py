@@ -7520,6 +7520,14 @@ def whatsnew_page():
                            releases=_parse_changelog(), version=_app_version())
 
 
+@app.route("/glossary")
+def glossary_page():
+    """Plain-language reference for the app's terms (riding vs elapsed time,
+    climbing/vertical, assisted segments, records, training-load metrics, HR
+    zones, VO2max). Static content; reached via the ⚙ menu."""
+    return render_template("glossary.html", version=_app_version())
+
+
 @app.route("/setup")
 def setup_page():
     return render_template("setup.html", types_json=_safe_json(load_types()))
