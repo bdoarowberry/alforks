@@ -1,0 +1,815 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AlForks · Dashboard — Refined Terminal</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg-page:#0a0c0c; --bg-card:#0f1313; --bg-elev:#11161a;
+  --border-hair:rgba(255,255,255,0.11); --border-row:rgba(255,255,255,0.14);
+  --text-primary:#fff; --text-secondary:rgba(255,255,255,0.82); --text-tertiary:rgba(255,255,255,0.62);
+  --text-muted:rgba(255,255,255,0.5); --text-faint:rgba(255,255,255,0.38);
+  --surface-tint:rgba(255,255,255,0.04);
+  --accent:#3b82f6; --accent-soft:rgba(59,130,246,0.10);
+  --warn:#f59e0b; --danger:#ef4444; --success:#22c55e; --link:#93c5fd;
+  --pos:oklch(0.78 0.15 145); --neg:oklch(0.74 0.14 55);
+  --font-sans:'Inter',system-ui,-apple-system,sans-serif;
+  --font-mono:'JetBrains Mono',ui-monospace,'SF Mono',monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{-webkit-text-size-adjust:100%}
+body{
+  background:var(--bg-page); color:var(--text-secondary);
+  font-family:var(--font-sans); font-size:14px; line-height:1.45;
+  -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility;
+}
+a{color:inherit;text-decoration:none}
+.num{font-family:var(--font-mono);font-variant-numeric:tabular-nums}
+.eyebrow{
+  font-size:10px;text-transform:uppercase;letter-spacing:0.16em;
+  color:var(--text-tertiary);font-weight:500;font-family:var(--font-sans);
+}
+
+/* ── Header / shell ───────────────────────────────────────────── */
+.app-header{
+  position:sticky;top:0;z-index:40;
+  background:rgba(10,12,12,0.86);backdrop-filter:blur(8px);
+  border-bottom:1px solid var(--border-hair);
+}
+.app-header-inner{
+  max-width:1680px;margin:0 auto;padding:0 22px;height:52px;
+  display:flex;align-items:center;gap:26px;
+}
+.wordmark{font-size:16px;font-weight:600;letter-spacing:-0.01em;color:var(--text-primary);white-space:nowrap}
+.wordmark .al{color:var(--accent)}
+.main-nav{display:flex;align-items:center;gap:2px;overflow-x:auto;scrollbar-width:none}
+.main-nav::-webkit-scrollbar{display:none}
+.main-nav a{
+  font-size:13px;color:var(--text-tertiary);padding:6px 11px;border-radius:4px;
+  white-space:nowrap;font-weight:500;transition:color .12s,background .12s;
+}
+.main-nav a:hover{color:var(--text-secondary);background:var(--surface-tint)}
+.main-nav a.active{color:var(--text-primary)}
+.main-nav a.active{position:relative}
+.main-nav a.active::after{
+  content:"";position:absolute;left:11px;right:11px;bottom:-15px;height:2px;background:var(--accent);
+}
+.header-cluster{margin-left:auto;display:flex;align-items:center;gap:4px}
+.icon-btn{
+  width:32px;height:32px;display:grid;place-items:center;border-radius:4px;
+  border:1px solid transparent;background:transparent;color:var(--text-tertiary);
+  cursor:pointer;font-size:14px;transition:color .12s,background .12s,border-color .12s;
+}
+.icon-btn:hover{color:var(--text-secondary);background:var(--surface-tint);border-color:var(--border-hair)}
+
+main{max-width:1680px;margin:0 auto;padding:18px 22px 40px;display:flex;flex-direction:column;gap:22px}
+.page-title{font-size:1.4rem;font-weight:500;letter-spacing:-0.02em;color:var(--text-primary);line-height:1.1}
+
+/* ── Section label ───────────────────────────────────────────── */
+.section-label{display:flex;align-items:baseline;gap:10px;margin-bottom:-6px}
+.section-label .rule{flex:1;height:1px;background:var(--border-hair);align-self:center}
+.section-sub{font-size:11px;color:var(--text-faint);font-family:var(--font-mono)}
+
+/* ── Panels ──────────────────────────────────────────────────── */
+.panel{background:var(--bg-card);border:1px solid var(--border-hair);border-radius:4px}
+.panel-pad{padding:16px 18px}
+.panel-head{
+  display:flex;align-items:center;gap:12px;flex-wrap:wrap;
+  padding:13px 18px;border-bottom:1px solid var(--border-hair);
+}
+.panel-head h2{font-size:12px;font-weight:600;color:var(--text-secondary);letter-spacing:0.01em}
+
+/* ── Hero band ───────────────────────────────────────────────── */
+.hero{
+  display:grid;grid-template-columns:1.6fr 1fr 1fr 1fr 1fr;
+  border:1px solid var(--border-hair);border-radius:4px;background:var(--bg-card);overflow:hidden;
+}
+.hero-cell{padding:16px 18px;border-left:1px solid var(--border-hair);position:relative}
+.hero-cell:first-child{border-left:none}
+.hero-cell.hero-main{background:var(--surface-tint)}
+.hero-cell .eyebrow{margin-bottom:9px}
+.hero-val{font-family:var(--font-mono);font-variant-numeric:tabular-nums;color:var(--text-primary);font-weight:500;line-height:1;letter-spacing:-0.01em}
+.hero-main .hero-val{font-size:2.6rem}
+.hero-cell .hero-val{font-size:1.55rem}
+.hero-unit{font-size:0.5em;color:var(--text-muted);font-weight:400;margin-left:3px;letter-spacing:0}
+.hero-delta{margin-top:9px;display:flex;align-items:center;gap:5px;font-size:11px;font-family:var(--font-mono)}
+.hero-delta .arrow{font-size:10px;line-height:1}
+.hero-delta.up{color:var(--pos)}
+.hero-delta.down{color:var(--neg)}
+.hero-delta .vs{color:var(--text-faint);font-family:var(--font-sans)}
+.streak-line{
+  display:flex;flex-wrap:wrap;gap:18px;padding:11px 18px;
+  border-top:1px solid var(--border-hair);font-size:11.5px;color:var(--text-muted);
+  grid-column:1 / -1;background:var(--bg-page);
+}
+.streak-line b{color:var(--text-secondary);font-family:var(--font-mono);font-weight:500}
+.streak-line .dot{width:6px;height:6px;border-radius:50%;background:var(--success);display:inline-block;margin-right:6px;vertical-align:middle}
+
+/* ── Segmented control + chips ───────────────────────────────── */
+.segmented{display:inline-flex;border:1px solid var(--border-hair);border-radius:4px;overflow:hidden}
+.segmented button{
+  font-family:var(--font-sans);font-size:11px;font-weight:500;letter-spacing:0.01em;
+  padding:5px 11px;background:transparent;color:var(--text-tertiary);border:none;
+  border-left:1px solid var(--border-hair);cursor:pointer;transition:color .1s,background .1s;white-space:nowrap;
+}
+.segmented button:first-child{border-left:none}
+.segmented button:hover{color:var(--text-secondary)}
+.segmented button.on{background:var(--accent-soft);color:var(--text-primary)}
+.chips{display:flex;gap:6px;flex-wrap:wrap}
+.chip{
+  font-family:var(--font-mono);font-size:11px;padding:4px 9px;border-radius:4px;cursor:pointer;
+  border:1px solid var(--border-hair);background:transparent;color:var(--text-muted);
+  display:inline-flex;align-items:center;gap:6px;transition:color .1s,border-color .1s;user-select:none;
+}
+.chip:hover{color:var(--text-secondary)}
+.chip .swatch{width:8px;height:8px;border-radius:1px;display:inline-block;opacity:.35}
+.chip.on{color:var(--text-primary);border-color:var(--border-row)}
+.chip.on .swatch{opacity:1}
+
+/* ── Chart ───────────────────────────────────────────────────── */
+.chart-wrap{position:relative}
+.chart-svg{display:block;width:100%;height:auto;overflow:visible}
+.chart-svg text{font-family:var(--font-mono);fill:var(--text-faint)}
+.gridline{stroke:var(--border-hair);stroke-width:1;stroke-dasharray:2 3}
+.bar-cur{fill:var(--accent)}
+.bar-prior{fill:none;stroke-width:1.25}
+.bar-hit{fill:transparent;cursor:pointer}
+.axis-mon{font-size:9px;fill:var(--text-faint);text-anchor:middle}
+.tooltip{
+  position:absolute;pointer-events:none;z-index:20;opacity:0;transition:opacity .08s;
+  background:var(--bg-elev);border:1px solid var(--border-row);border-radius:4px;
+  padding:6px 9px;font-size:11px;color:var(--text-primary);white-space:nowrap;
+  font-family:var(--font-mono);box-shadow:0 6px 20px rgba(0,0,0,.5);transform:translate(-50%,-110%);
+}
+.tooltip .tt-lab{color:var(--text-tertiary);font-family:var(--font-sans);font-size:10px;text-transform:uppercase;letter-spacing:.1em;display:block;margin-bottom:2px}
+
+/* ── Records strip ───────────────────────────────────────────── */
+.pr-strip{
+  display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:1px;
+  background:var(--border-hair);border:1px solid var(--border-hair);border-radius:4px;overflow:hidden;
+}
+.pr-cell{background:var(--bg-card);padding:13px 15px 13px 16px;position:relative;transition:background .1s;display:block}
+.pr-cell:hover{background:var(--bg-elev)}
+.pr-cell::before{content:"";position:absolute;left:0;top:0;bottom:0;width:2px;background:var(--type-accent)}
+.pr-cell .pr-top{display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin-bottom:7px}
+.pr-label{font-size:10px;text-transform:uppercase;letter-spacing:0.13em;color:var(--text-tertiary);font-weight:500}
+.pr-badge{font-family:var(--font-mono);font-size:9px;font-weight:500;letter-spacing:.06em;color:var(--type-accent);border:1px solid var(--type-accent);opacity:.9;padding:1px 5px;border-radius:3px}
+.pr-val{font-family:var(--font-mono);font-variant-numeric:tabular-nums;font-size:1.3rem;color:var(--text-primary);font-weight:500;line-height:1.1;margin-bottom:5px}
+.pr-meta{font-size:11px;color:var(--text-muted);display:flex;justify-content:space-between;gap:8px}
+.pr-meta .pr-ride{color:var(--text-tertiary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pr-meta .pr-date{font-family:var(--font-mono);flex-shrink:0;color:var(--text-faint)}
+
+/* ── Tab bar ─────────────────────────────────────────────────── */
+.tab-bar{display:flex;gap:0;border-bottom:1px solid var(--border-hair);overflow-x:auto;scrollbar-width:none}
+.tab-bar::-webkit-scrollbar{display:none}
+.tab-btn{
+  font-family:var(--font-sans);font-size:13px;font-weight:500;color:var(--text-tertiary);
+  background:transparent;border:none;padding:10px 16px;cursor:pointer;position:relative;white-space:nowrap;
+  transition:color .12s;
+}
+.tab-btn:hover{color:var(--text-secondary)}
+.tab-btn.on{color:var(--text-primary)}
+.tab-btn.on::after{content:"";position:absolute;left:0;right:0;bottom:-1px;height:2px;background:var(--accent)}
+.tab-panel{display:none}
+.tab-panel.on{display:block;animation:fade .18s ease}
+@keyframes fade{from{opacity:0}to{opacity:1}}
+
+/* ── By Activity cards ───────────────────────────────────────── */
+.act-list{display:flex;flex-direction:column;gap:12px}
+.act-card{border:1px solid var(--border-hair);border-radius:4px;background:var(--bg-card);overflow:hidden}
+.act-card-head{
+  display:flex;align-items:center;gap:14px;padding:13px 16px;cursor:pointer;
+  position:relative;transition:background .1s;
+}
+.act-card-head::before{content:"";position:absolute;left:0;top:0;bottom:0;width:2px;background:var(--type-accent)}
+.act-card-head:hover{background:var(--bg-elev)}
+.glyph-badge{
+  font-family:var(--font-mono);font-size:11px;font-weight:600;letter-spacing:.04em;
+  color:var(--type-accent);background:var(--type-accent-soft);
+  border:1px solid var(--type-accent);border-radius:4px;
+  width:46px;height:32px;display:grid;place-items:center;flex-shrink:0;
+}
+.act-head-label{font-size:14px;font-weight:600;color:var(--text-primary);flex-shrink:0;min-width:108px}
+.act-head-stats{display:flex;flex-wrap:wrap;gap:5px 18px;flex:1;align-items:baseline}
+.act-stat{font-size:11px;color:var(--text-muted);white-space:nowrap}
+.act-stat b{font-family:var(--font-mono);font-variant-numeric:tabular-nums;color:var(--text-secondary);font-weight:500;font-size:12.5px}
+.act-head-right{display:flex;align-items:center;gap:12px;flex-shrink:0}
+.act-ago{font-size:10.5px;font-family:var(--font-mono);color:var(--text-faint);white-space:nowrap}
+.caret{color:var(--text-faint);font-size:11px;transition:transform .15s;font-family:var(--font-mono)}
+.act-card.open .caret{transform:rotate(90deg)}
+.act-body{display:none;border-top:1px solid var(--border-hair)}
+.act-card.open .act-body{display:block}
+.act-body-grid{display:grid;grid-template-columns:1.7fr 1fr;gap:0}
+.act-body-grid > div{padding:16px 18px}
+.act-body-grid > div:last-child{border-left:1px solid var(--border-hair)}
+.body-section-label{margin-bottom:12px}
+.speed-pair{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--border-hair);border:1px solid var(--border-hair);border-radius:4px;overflow:hidden;margin-bottom:16px}
+.speed-pair > div{background:var(--bg-card);padding:11px 13px}
+.speed-pair .eyebrow{margin-bottom:6px}
+.speed-pair .sp-val{font-family:var(--font-mono);font-variant-numeric:tabular-nums;font-size:1.25rem;color:var(--text-primary);font-weight:500}
+.speed-pair .sp-unit{font-size:.5em;color:var(--text-muted);margin-left:3px}
+.rec-list{display:flex;flex-direction:column}
+.rec-row{
+  display:flex;align-items:baseline;justify-content:space-between;gap:10px;
+  padding:7px 0;border-bottom:1px solid var(--border-hair);font-size:12px;
+}
+.rec-row:last-child{border-bottom:none}
+.rec-row:hover .rec-ride{color:var(--text-secondary)}
+.rec-row .rec-label{color:var(--text-tertiary);font-size:11px;text-transform:uppercase;letter-spacing:.08em;min-width:62px;flex-shrink:0}
+.rec-row .rec-val{font-family:var(--font-mono);font-variant-numeric:tabular-nums;color:var(--text-primary);font-weight:500;flex-shrink:0}
+.rec-row .rec-ride{color:var(--text-muted);flex:1;text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rec-row .rec-date{font-family:var(--font-mono);color:var(--text-faint);font-size:10.5px;flex-shrink:0;min-width:46px;text-align:right}
+.act-footer{display:flex;gap:18px;flex-wrap:wrap;padding:11px 18px;border-top:1px solid var(--border-hair);background:var(--bg-page)}
+.foot-link{font-size:11.5px;color:var(--link);font-family:var(--font-sans);transition:color .1s}
+.foot-link:hover{color:var(--text-primary)}
+
+/* ── Calendar / heatmap ──────────────────────────────────────── */
+.cal-legend{display:flex;gap:16px;flex-wrap:wrap;align-items:center}
+.cal-legend .lg{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text-muted)}
+.cal-legend .lg .sw{width:11px;height:11px;border-radius:2px}
+.cal-scroll{overflow-x:auto;padding-bottom:4px;scrollbar-width:thin}
+.cal-grid{display:grid;grid-auto-flow:column;grid-template-rows:repeat(7,1fr);gap:3px;min-width:740px}
+.cal-day{width:13px;height:13px;border-radius:2px;background:var(--surface-tint);cursor:default}
+.cal-day.active{cursor:pointer}
+.cal-months{display:flex;min-width:740px;margin-top:7px;font-size:9.5px;color:var(--text-faint);font-family:var(--font-mono)}
+
+/* ── Records tab ─────────────────────────────────────────────── */
+.rec-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:14px}
+.rec-card{border:1px solid var(--border-hair);border-radius:4px;background:var(--bg-card);overflow:hidden}
+.rec-card-head{display:flex;align-items:center;gap:11px;padding:12px 16px;border-bottom:1px solid var(--border-hair);position:relative}
+.rec-card-head::before{content:"";position:absolute;left:0;top:0;bottom:0;width:2px;background:var(--type-accent)}
+.rec-card-head .glyph-badge{width:42px;height:28px;font-size:10px}
+.rec-card-head h3{font-size:13px;font-weight:600;color:var(--text-primary)}
+.rec-cols{display:grid;grid-template-columns:1fr 1fr}
+.rec-cols > div{padding:13px 16px}
+.rec-cols > div:last-child{border-left:1px solid var(--border-hair)}
+.rec-cols .col-label{margin-bottom:11px}
+
+.foot-note{font-size:10.5px;color:var(--text-faint);font-family:var(--font-mono);text-align:center;padding-top:8px}
+
+/* ── Responsive ──────────────────────────────────────────────── */
+@media(max-width:1100px){
+  .hero{grid-template-columns:1fr 1fr 1fr}
+  .hero-cell.hero-main{grid-column:1 / -1}
+  .hero-cell:nth-child(2),.hero-cell:nth-child(3),.hero-cell:nth-child(4){border-top:1px solid var(--border-hair)}
+  .hero-main .hero-val{font-size:2.4rem}
+}
+@media(max-width:760px){
+  .act-body-grid{grid-template-columns:1fr}
+  .act-body-grid > div:last-child{border-left:none;border-top:1px solid var(--border-hair)}
+  .act-head-label{min-width:0}
+  .rec-cols{grid-template-columns:1fr}
+  .rec-cols > div:last-child{border-left:none;border-top:1px solid var(--border-hair)}
+}
+@media(max-width:560px){
+  main{padding:14px 13px 36px}
+  .hero{grid-template-columns:1fr 1fr}
+  .hero-cell:nth-child(n){border-top:1px solid var(--border-hair)}
+  .hero-cell:first-child{border-top:none}
+  .hero-cell.hero-main{grid-column:1 / -1}
+  .panel-head{padding:11px 13px}
+  .panel-pad{padding:13px}
+  .act-head-stats{display:none}
+  .act-card-head{gap:11px}
+}
+@media(max-width:400px){
+  .hero{grid-template-columns:1fr}
+  .hero-cell{border-left:none}
+  .hero-main .hero-val{font-size:2.1rem}
+}
+</style>
+</head>
+<body>
+
+<header class="app-header">
+  <div class="app-header-inner">
+    <div class="wordmark"><span class="al">Al</span>Forks</div>
+    <nav class="main-nav">
+      <a href="#" class="active">Dashboard</a>
+      <a href="#">Activities</a>
+      <a href="#">Map</a>
+      <a href="#">Training</a>
+      <a href="#">Trails &amp; Routes</a>
+    </nav>
+    <div class="header-cluster">
+      <button class="icon-btn" title="Sync">&#8635;</button>
+      <button class="icon-btn" title="Notifications">&#128276;</button>
+      <button class="icon-btn" title="Settings">&#9881;</button>
+    </div>
+  </div>
+</header>
+
+<main>
+  <h1 class="page-title">Dashboard</h1>
+
+  <!-- ABOVE THE FOLD -->
+  <div class="section-label">
+    <span class="eyebrow">Last 365 days</span>
+    <span class="rule"></span>
+    <span class="section-sub" id="window-range"></span>
+  </div>
+
+  <!-- 1. HERO BAND -->
+  <section class="hero" id="hero"></section>
+
+  <!-- 2. YoY CHART -->
+  <section class="panel">
+    <div class="panel-head">
+      <h2>Cross-Activity · Year over Year</h2>
+      <div class="segmented" id="metric-switch" style="margin-left:auto"></div>
+      <div class="chips" id="year-chips"></div>
+    </div>
+    <div class="panel-pad chart-wrap" id="all-chart-wrap">
+      <div id="all-chart"></div>
+      <div class="tooltip" id="all-tooltip"></div>
+    </div>
+  </section>
+
+  <!-- 3. RECENT RECORDS -->
+  <section>
+    <div class="section-label" style="margin-bottom:10px">
+      <span class="eyebrow">Recent records · set in the last 365 days</span>
+      <span class="rule"></span>
+    </div>
+    <div class="pr-strip" id="pr-strip"></div>
+  </section>
+
+  <!-- TABS -->
+  <section style="margin-top:6px">
+    <div class="tab-bar" id="tab-bar">
+      <button class="tab-btn on" data-tab="activity">By Activity</button>
+      <button class="tab-btn" data-tab="calendar">Calendar</button>
+      <button class="tab-btn" data-tab="records">Records</button>
+    </div>
+
+    <div class="tab-panel on" data-panel="activity" style="margin-top:16px">
+      <div class="act-list" id="act-list"></div>
+    </div>
+
+    <div class="tab-panel" data-panel="calendar" style="margin-top:16px">
+      <div class="panel">
+        <div class="panel-head">
+          <h2>Active Days</h2>
+          <div class="cal-legend" id="cal-legend" style="margin-left:auto"></div>
+        </div>
+        <div class="panel-pad">
+          <div class="cal-scroll">
+            <div class="cal-grid" id="cal-grid"></div>
+            <div class="cal-months" id="cal-months"></div>
+          </div>
+          <div class="tooltip" id="cal-tooltip"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="tab-panel" data-panel="records" style="margin-top:16px">
+      <div class="rec-grid" id="rec-grid"></div>
+    </div>
+  </section>
+
+  <div class="foot-note">AlForks · design prototype A — “Refined Terminal” · mock data · window ending 2026-06-23</div>
+</main>
+
+<script src="./mock-data.js"></script>
+<script>
+(function(){
+  'use strict';
+  const $ = (s,r=document)=>r.querySelector(s);
+  const el=(tag,cls,html)=>{const n=document.createElement(tag);if(cls)n.className=cls;if(html!=null)n.innerHTML=html;return n;};
+  const typeById = Object.fromEntries(MOCK.TYPES.map(t=>[t.id,t]));
+  function hexA(hex,a){const h=hex.replace('#','');const r=parseInt(h.slice(0,2),16),g=parseInt(h.slice(2,4),16),b=parseInt(h.slice(4,6),16);return `rgba(${r},${g},${b},${a})`;}
+
+  /* ── Window range subline ────────────────────────────────── */
+  (function(){
+    const end=new Date(MOCK.TODAY+'T00:00:00');
+    const start=new Date(end);start.setDate(end.getDate()-364);
+    const f=d=>d.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
+    $('#window-range').textContent = f(start)+' — '+f(end);
+  })();
+
+  /* ── 1. HERO BAND ────────────────────────────────────────── */
+  function deltaHTML(cur,prev,invertColor){
+    const p = FMT.pct(cur,prev);
+    if(p==null) return '';
+    const up = p>=0;
+    const cls = up ? 'up':'down';
+    const arrow = up ? '&#9650;':'&#9660;';
+    return `<div class="hero-delta ${cls}"><span class="arrow">${arrow}</span><span>${up?'+':''}${p}%</span><span class="vs">vs prior 365d</span></div>`;
+  }
+  function heroCell(eyebrow,val,unit,delta,main){
+    const c=el('div','hero-cell'+(main?' hero-main':''));
+    c.innerHTML = `<div class="eyebrow">${eyebrow}</div>
+      <div class="hero-val">${val}${unit?`<span class="hero-unit">${unit}</span>`:''}</div>${delta}`;
+    return c;
+  }
+  (function(){
+    const T=MOCK.TOTALS, host=$('#hero');
+    host.appendChild(heroCell('Distance', FMT.dist(T.distance_km), 'km', deltaHTML(T.distance_km,T.distance_prev), true));
+    host.appendChild(heroCell('Moving time', FMT.hours(T.moving_h), '', deltaHTML(T.moving_h,T.moving_prev)));
+    host.appendChild(heroCell('Climbing', FMT.elev(T.climb_m), 'm', deltaHTML(T.climb_m,T.climb_prev)));
+    host.appendChild(heroCell('Descent', FMT.elev(T.descent_m), 'm', deltaHTML(T.descent_m,T.descent_prev)));
+    host.appendChild(heroCell('Days out', String(T.days_out), '', deltaHTML(T.days_out,T.days_prev)));
+    const streak=el('div','streak-line');
+    streak.innerHTML = `<span><span class="dot"></span>Current streak <b>${T.current_streak} days</b></span>
+      <span>Active <b>${T.last_14d_active}</b> of last 14 days</span>
+      <span>Longest streak <b>${T.longest_streak} days</b></span>
+      <span>Last activity <b>${FMT.dateShort(T.last_date)}</b> · ${T.days_since}d ago</span>
+      <span>${T.activities} activities total</span>`;
+    host.appendChild(streak);
+  })();
+
+  /* ── CHART COMPONENT (reusable) ──────────────────────────── */
+  // metricUnit: short label used for tooltips
+  const METRIC_DEFS = {
+    distance:{label:'Distance', unit:'km', fmt:v=>Math.round(v).toLocaleString()},
+    duration:{label:'Time',     unit:'h',  fmt:v=>v.toFixed(1)},
+    climb:   {label:'Climbing', unit:'m',  fmt:v=>Math.round(v).toLocaleString()},
+    count:   {label:'Activities',unit:'',  fmt:v=>Math.round(v).toLocaleString()},
+  };
+  // metric switch options shown in the segmented control
+  const CHART_METRICS = ['distance','duration','climb','count'];
+
+  function makeChart(host, tooltip, getSeries, state){
+    // getSeries(metric, year) -> [12] (null allowed). state={metric, years:[]}
+    function render(){
+      host.innerHTML='';
+      const W=920, H=230, padL=42, padR=12, padT=16, padB=24;
+      const plotW=W-padL-padR, plotH=H-padT-padB;
+      const months=MOCK.MONTHS;
+      const md=METRIC_DEFS[state.metric];
+      // max across selected years
+      let max=0;
+      state.years.forEach(y=>{(getSeries(state.metric,y)||[]).forEach(v=>{if(v!=null&&v>max)max=v;});});
+      if(max<=0)max=1;
+      // round max up to a "nice" number for the gridline
+      const nice = niceMax(max);
+      const yScale = v=> padT+plotH-(v/nice)*plotH;
+      const colW = plotW/12;
+      const yearsSorted=[...state.years].sort((a,b)=>a-b);
+      const curYear=Math.max(...MOCK.YEARS);
+
+      const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');
+      svg.setAttribute('viewBox',`0 0 ${W} ${H}`);
+      svg.setAttribute('class','chart-svg');
+      svg.setAttribute('preserveAspectRatio','xMidYMid meet');
+
+      // gridlines (0, half, max)
+      [0,0.5,1].forEach(frac=>{
+        const yv=nice*frac, yy=yScale(yv);
+        const line=document.createElementNS(svg.namespaceURI,'line');
+        line.setAttribute('x1',padL);line.setAttribute('x2',W-padR);
+        line.setAttribute('y1',yy);line.setAttribute('y2',yy);
+        line.setAttribute('class','gridline');
+        if(frac===0)line.setAttribute('stroke-dasharray','none');
+        svg.appendChild(line);
+        const t=document.createElementNS(svg.namespaceURI,'text');
+        t.setAttribute('x',padL-7);t.setAttribute('y',yy+3);
+        t.setAttribute('text-anchor','end');t.setAttribute('font-size','9');
+        t.textContent=md.fmt(yv);
+        svg.appendChild(t);
+      });
+
+      // bars: within each month, lay prior years as outlined slim bars, current year solid
+      const innerPad=colW*0.16;
+      const groupW=colW-innerPad*2;
+      const nY=yearsSorted.length;
+      const bw=Math.max(3, Math.min(groupW/nY - 2, 16));
+      const gap=(groupW-(bw*nY))/Math.max(1,(nY-1)) || 0;
+
+      months.forEach((mon,mi)=>{
+        const gx=padL+mi*colW+innerPad;
+        yearsSorted.forEach((y,yi)=>{
+          const series=getSeries(state.metric,y)||[];
+          const v=series[mi];
+          const bx=gx+yi*(bw+ (nY>1?gap:0));
+          if(v==null) {
+            // hit-target still useful for future months? skip null
+          } else {
+            const by=yScale(v), bh=padT+plotH-by;
+            const rect=document.createElementNS(svg.namespaceURI,'rect');
+            rect.setAttribute('x',bx);rect.setAttribute('width',bw);
+            rect.setAttribute('y',by);rect.setAttribute('height',Math.max(0,bh));
+            if(y===curYear){ rect.setAttribute('class','bar-cur'); }
+            else {
+              rect.setAttribute('class','bar-prior');
+              rect.setAttribute('stroke', hexA('#ffffff', 0.28 + 0.12*(yi)));
+            }
+            rect.setAttribute('rx','0.5');
+            svg.appendChild(rect);
+          }
+          // invisible hit region (full column height) for tooltip — one per year per month
+          if(v!=null){
+            const hit=document.createElementNS(svg.namespaceURI,'rect');
+            hit.setAttribute('x',bx-1);hit.setAttribute('width',bw+2);
+            hit.setAttribute('y',padT);hit.setAttribute('height',plotH);
+            hit.setAttribute('class','bar-hit');
+            hit.addEventListener('mousemove',ev=>showTip(ev,mon,y,v,md));
+            hit.addEventListener('mouseleave',hideTip);
+            svg.appendChild(hit);
+          }
+        });
+        // month axis label
+        const t=document.createElementNS(svg.namespaceURI,'text');
+        t.setAttribute('x',padL+mi*colW+colW/2);t.setAttribute('y',H-7);
+        t.setAttribute('class','axis-mon');
+        t.textContent=mon;
+        svg.appendChild(t);
+      });
+
+      host.appendChild(svg);
+    }
+    function niceMax(m){
+      const pow=Math.pow(10,Math.floor(Math.log10(m)));
+      const n=m/pow;
+      let f;
+      if(n<=1)f=1;else if(n<=2)f=2;else if(n<=2.5)f=2.5;else if(n<=5)f=5;else f=10;
+      return f*pow;
+    }
+    function showTip(ev,mon,year,val,md){
+      tooltip.innerHTML=`<span class="tt-lab">${md.label}</span>${mon} ${year} · ${md.fmt(val)}${md.unit?(' '+md.unit):''}`;
+      const wrap=tooltip.parentElement.getBoundingClientRect();
+      tooltip.style.left=(ev.clientX-wrap.left)+'px';
+      tooltip.style.top=(ev.clientY-wrap.top)+'px';
+      tooltip.style.opacity='1';
+    }
+    function hideTip(){tooltip.style.opacity='0';}
+    return {render};
+  }
+
+  /* ── 2. Cross-activity YoY chart ─────────────────────────── */
+  (function(){
+    const recent3 = [...MOCK.YEARS].slice(-3);
+    const chartState={metric:'distance', years:[...recent3]};
+    const chart2=makeChart($('#all-chart'), $('#all-tooltip'),
+      (metric,year)=>MOCK.HISTORY_ALL[metric][year], chartState);
+
+    // metric segmented control
+    const ms=$('#metric-switch');
+    CHART_METRICS.forEach(m=>{
+      const b=el('button',m===chartState.metric?'on':'',METRIC_DEFS[m].label);
+      b.addEventListener('click',()=>{
+        chartState.metric=m;
+        [...ms.children].forEach(c=>c.classList.remove('on'));
+        b.classList.add('on');
+        chart2.render();
+      });
+      ms.appendChild(b);
+    });
+    // year chips
+    const yc=$('#year-chips');
+    [...MOCK.YEARS].sort((a,b)=>b-a).forEach(y=>{
+      const on=chartState.years.includes(y);
+      const chip=el('span','chip'+(on?' on':''));
+      const isCur=y===Math.max(...MOCK.YEARS);
+      chip.innerHTML=`<span class="swatch" style="background:${isCur?'var(--accent)':'rgba(255,255,255,.5)'}"></span>${y}`;
+      chip.addEventListener('click',()=>{
+        const idx=chartState.years.indexOf(y);
+        if(idx>=0){ if(chartState.years.length>1){chartState.years.splice(idx,1);chip.classList.remove('on');} }
+        else { chartState.years.push(y); chip.classList.add('on'); }
+        chart2.render();
+      });
+      yc.appendChild(chip);
+    });
+    chart2.render();
+  })();
+
+  /* ── 3. RECENT RECORDS strip ─────────────────────────────── */
+  (function(){
+    const host=$('#pr-strip');
+    MOCK.RECENT_PRS.forEach(rec=>{
+      const t=typeById[rec.type];
+      const a=el('a','pr-cell');
+      a.href='#'; // would be /log/<file>
+      a.style.setProperty('--type-accent',t.accent);
+      a.innerHTML=`
+        <div class="pr-top">
+          <span class="pr-label">${rec.label}</span>
+          <span class="pr-badge">${t.glyph}</span>
+        </div>
+        <div class="pr-val">${FMT.record(rec)}</div>
+        <div class="pr-meta">
+          <span class="pr-ride">${rec.ride}</span>
+          <span class="pr-date">${FMT.dateShort(rec.date)}</span>
+        </div>`;
+      host.appendChild(a);
+    });
+  })();
+
+  /* ── TABS ────────────────────────────────────────────────── */
+  (function(){
+    const bar=$('#tab-bar');
+    bar.addEventListener('click',e=>{
+      const btn=e.target.closest('.tab-btn'); if(!btn)return;
+      [...bar.children].forEach(b=>b.classList.toggle('on',b===btn));
+      const tab=btn.dataset.tab;
+      document.querySelectorAll('.tab-panel').forEach(p=>p.classList.toggle('on',p.dataset.panel===tab));
+    });
+  })();
+
+  /* ── By Activity cards ───────────────────────────────────── */
+  (function(){
+    const host=$('#act-list');
+    MOCK.TYPES.forEach(t=>{
+      const R=MOCK.ROLLUPS[t.id];
+      const card=el('div','act-card');
+      card.style.setProperty('--type-accent',t.accent);
+      card.style.setProperty('--type-accent-soft',hexA(t.accent,0.12));
+
+      // headline stats — lead metric depends on isSnow
+      const leadStat = t.isSnow
+        ? `<span class="act-stat">Descent <b>${FMT.elev(R.descent_m)} m</b></span>`
+        : `<span class="act-stat">Distance <b>${FMT.dist(R.distance_km)} km</b></span>`;
+      const secondStat = t.isSnow
+        ? `<span class="act-stat">Climb <b>${FMT.elev(R.climb_m)} m</b></span>`
+        : `<span class="act-stat">Climb <b>${FMT.elev(R.climb_m)} m</b></span>`;
+
+      const head=el('div','act-card-head');
+      head.innerHTML=`
+        <span class="glyph-badge">${t.glyph}</span>
+        <span class="act-head-label">${t.label}</span>
+        <span class="act-head-stats">
+          <span class="act-stat">Days <b>${R.days}</b></span>
+          ${leadStat}
+          ${secondStat}
+          <span class="act-stat">Descent <b>${FMT.elev(R.descent_m)} m</b></span>
+          <span class="act-stat">Moving <b>${FMT.hours(R.moving_h)}</b></span>
+        </span>
+        <span class="act-head-right">
+          <span class="act-ago">${R.days_since}d ago</span>
+          <span class="caret">&#9656;</span>
+        </span>`;
+      card.appendChild(head);
+
+      // body
+      const body=el('div','act-body');
+      const grid=el('div','act-body-grid');
+
+      // left: YoY chart for this type
+      const left=el('div');
+      left.innerHTML=`<div class="eyebrow body-section-label">Year over year</div>`;
+      const chartHost=el('div','chart-wrap');
+      const chartDiv=el('div'); const ttDiv=el('div','tooltip');
+      chartHost.appendChild(chartDiv); chartHost.appendChild(ttDiv);
+      left.appendChild(chartHost);
+      // mini metric switch for the type chart
+      const miniSwitch=el('div','segmented'); miniSwitch.style.marginTop='12px';
+      grid.appendChild(left);
+
+      // right: speed pair + records
+      const right=el('div');
+      right.innerHTML=`
+        <div class="speed-pair">
+          <div><div class="eyebrow">Avg speed</div><div class="sp-val">${FMT.speed(R.avg_speed_kmh)}<span class="sp-unit">km/h</span></div></div>
+          <div><div class="eyebrow">Top speed</div><div class="sp-val">${FMT.speed(R.top_speed_kmh)}<span class="sp-unit">km/h</span></div></div>
+        </div>
+        <div class="eyebrow body-section-label">Records · last 365 days</div>`;
+      const recList=el('div','rec-list');
+      MOCK.RECORDS[t.id].window.forEach(rec=>{
+        const a=el('a','rec-row'); a.href='#'; // /log/<file>
+        a.innerHTML=`<span class="rec-label">${rec.label}</span>
+          <span class="rec-val">${FMT.record(rec)}</span>
+          <span class="rec-ride">${rec.ride}</span>
+          <span class="rec-date">${FMT.dateShort(rec.date)}</span>`;
+        recList.appendChild(a);
+      });
+      right.appendChild(recList);
+      grid.appendChild(right);
+      body.appendChild(grid);
+
+      // footer links
+      const foot=el('div','act-footer');
+      foot.innerHTML=`<a class="foot-link" href="#">View all rides &rarr;</a>
+        <a class="foot-link" href="#">HR &amp; load &rarr;</a>`;
+      body.appendChild(foot);
+
+      card.appendChild(body);
+      host.appendChild(card);
+
+      // wire chart (lazy render on first open) -----------------
+      const cState={metric:'distance', years:[...MOCK.YEARS].slice(-3)};
+      const tChart=makeChart(chartDiv, ttDiv, (metric,year)=>MOCK.HISTORY[t.id][metric][year], cState);
+      // build mini switch (insert before chartHost? keep after eyebrow)
+      CHART_METRICS.forEach(m=>{
+        const b=el('button',m===cState.metric?'on':'',METRIC_DEFS[m].label);
+        b.addEventListener('click',ev=>{ev.stopPropagation();cState.metric=m;[...miniSwitch.children].forEach(c=>c.classList.remove('on'));b.classList.add('on');tChart.render();});
+        miniSwitch.appendChild(b);
+      });
+      left.insertBefore(miniSwitch, chartHost);
+
+      let rendered=false;
+      head.addEventListener('click',()=>{
+        const opening=!card.classList.contains('open');
+        card.classList.toggle('open');
+        if(opening && !rendered){ tChart.render(); rendered=true; }
+      });
+    });
+  })();
+
+  /* ── Calendar / heatmap ──────────────────────────────────── */
+  (function(){
+    const grid=$('#cal-grid'), monthsRow=$('#cal-months'), tooltip=$('#cal-tooltip');
+    const end=new Date(MOCK.TODAY+'T00:00:00');
+    const start=new Date(end); start.setDate(end.getDate()-364);
+    // align start to Sunday for a clean 7-row grid
+    const gridStart=new Date(start);
+    gridStart.setDate(gridStart.getDate()-gridStart.getDay());
+    const days=[];
+    for(let d=new Date(gridStart); d<=end; d.setDate(d.getDate()+1)){
+      days.push(new Date(d));
+    }
+    const fullWeeks=Math.ceil(days.length/7);
+
+    days.forEach(d=>{
+      const iso=d.toISOString().slice(0,10);
+      const inWindow = d>=start && d<=end;
+      const typeId=inWindow?MOCK.DOMINANT_BY_DATE[iso]:null;
+      const cell=el('div','cal-day'+(typeId?' active':''));
+      if(typeId){
+        const t=typeById[typeId];
+        cell.style.background=t.accent;
+        const dateLabel=d.toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric',year:'numeric'});
+        cell.addEventListener('mousemove',ev=>{
+          tooltip.innerHTML=`<span class="tt-lab">${dateLabel}</span>${t.label}`;
+          const wrap=tooltip.parentElement.getBoundingClientRect();
+          tooltip.style.left=(ev.clientX-wrap.left)+'px';
+          tooltip.style.top=(ev.clientY-wrap.top)+'px';
+          tooltip.style.opacity='1';
+        });
+        cell.addEventListener('mouseleave',()=>tooltip.style.opacity='0');
+      } else if(!inWindow){
+        cell.style.background='transparent';
+      }
+      grid.appendChild(cell);
+    });
+
+    // month labels — one per column-week where the month changes
+    monthsRow.style.position='relative';
+    monthsRow.style.height='14px';
+    let lastMonth=-1;
+    for(let w=0; w<fullWeeks; w++){
+      const d=days[w*7]; if(!d)break;
+      const m=d.getMonth();
+      if(m!==lastMonth){
+        lastMonth=m;
+        const lab=el('span','',MOCK.MONTHS[m]);
+        lab.style.position='absolute';
+        // each week column = 13px cell + 3px gap = 16px
+        lab.style.left=(w*16)+'px';
+        monthsRow.appendChild(lab);
+      }
+    }
+
+    // legend
+    const legend=$('#cal-legend');
+    MOCK.TYPES.forEach(t=>{
+      const lg=el('span','lg');
+      lg.innerHTML=`<span class="sw" style="background:${t.accent}"></span>${t.label}`;
+      legend.appendChild(lg);
+    });
+    const lgOff=el('span','lg');
+    lgOff.innerHTML=`<span class="sw" style="background:var(--surface-tint)"></span>Rest`;
+    legend.appendChild(lgOff);
+  })();
+
+  /* ── Records tab ─────────────────────────────────────────── */
+  (function(){
+    const host=$('#rec-grid');
+    function recRows(list){
+      return list.map(rec=>`<a class="rec-row" href="#">
+        <span class="rec-label">${rec.label}</span>
+        <span class="rec-val">${FMT.record(rec)}</span>
+        <span class="rec-ride">${rec.ride}</span>
+        <span class="rec-date">${FMT.dateShort(rec.date)}</span></a>`).join('');
+    }
+    MOCK.TYPES.forEach(t=>{
+      const R=MOCK.RECORDS[t.id];
+      const card=el('div','rec-card');
+      card.style.setProperty('--type-accent',t.accent);
+      card.style.setProperty('--type-accent-soft',hexA(t.accent,0.12));
+      card.innerHTML=`
+        <div class="rec-card-head">
+          <span class="glyph-badge">${t.glyph}</span>
+          <h3>${t.label}</h3>
+        </div>
+        <div class="rec-cols">
+          <div>
+            <div class="eyebrow col-label">Last 365 days</div>
+            <div class="rec-list">${recRows(R.window)}</div>
+          </div>
+          <div>
+            <div class="eyebrow col-label">All time</div>
+            <div class="rec-list">${recRows(R.all)}</div>
+          </div>
+        </div>`;
+      host.appendChild(card);
+    });
+  })();
+
+})();
+</script>
+</body>
+</html>

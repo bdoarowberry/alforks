@@ -1957,6 +1957,7 @@ def _summary_data_compute(days_back: int, units: str,
             "current_streak":  current_streak,
             "last_date":       last_date_iso,
             "prs":             prs,
+            "prs_window":      _build_prs(in_window),
             "prs_by_year":     prs_by_year,
         }
         # avg_speed: total distance / total riding time
@@ -2077,8 +2078,29 @@ def _summary_data_compute(days_back: int, units: str,
     fortnight_start = (today_dt - timedelta(days=13)).strftime("%Y-%m-%d")
     last_14d_active_days = sum(1 for d in unique_active if d >= fortnight_start)
 
+    # Prior 365-day window (immediately preceding the current one) — powers the
+    # year-over-year deltas on the dashboard hero band. Same aggregate as the
+    # current window, shifted back by `days_back` days.
+    prev_latest_dt    = earliest_dt - timedelta(days=1)
+    prev_earliest_dt  = prev_latest_dt - timedelta(days=days_back - 1)
+    prev_earliest_iso = prev_earliest_dt.strftime("%Y-%m-%d")
+    prev_latest_iso   = prev_latest_dt.strftime("%Y-%m-%d")
+    all_in_prev = [a for tid in ordered_ids for a in by_type[tid]
+                   if len((a.get("date") or "")[:10]) == 10
+                   and prev_earliest_iso <= (a.get("date") or "")[:10] <= prev_latest_iso]
+    prev_unique = {(a.get("date") or "")[:10] for a in all_in_prev if a.get("date")}
+    totals_prev = {
+        "days":        len(prev_unique),
+        "activities":  len(all_in_prev),
+        "distance_km": round(sum((a.get("stats") or {}).get("distance_km") or 0 for a in all_in_prev), 1),
+        "elev_gain_m": sum((a.get("stats") or {}).get("elev_gain_m") or 0 for a in all_in_prev),
+        "elev_loss_m": sum((a.get("stats") or {}).get("elev_loss_m") or 0 for a in all_in_prev),
+        "moving_h":    round(sum((a.get("stats") or {}).get("duration_sec") or 0 for a in all_in_prev) / 3600.0, 2),
+    }
+
     totals = {
         "days":            len(unique_active),
+        "activities":      len(all_in_window),
         "distance_km":     round(sum((a.get("stats") or {}).get("distance_km") or 0 for a in all_in_window), 1),
         "elev_gain_m":     sum((a.get("stats") or {}).get("elev_gain_m") or 0 for a in all_in_window),
         "elev_loss_m":     sum((a.get("stats") or {}).get("elev_loss_m") or 0 for a in all_in_window),
@@ -2105,6 +2127,7 @@ def _summary_data_compute(days_back: int, units: str,
         "activeDates": sorted(active_dates_set),
         "dominantByDate": active_dates_dominant,
         "totals":     totals,
+        "totalsPrev": totals_prev,
     }
 
 

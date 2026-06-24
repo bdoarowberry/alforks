@@ -1,5 +1,21 @@
 # AlForks — Changelog
 
+## 2026.06.24.1
+- **Redesigned Dashboard** — the home page now leads with what actually matters
+  at a glance. Your **last 365 days** sit up top — distance, moving time,
+  climbing, descent, days out and activities — each with an **up/down arrow vs.
+  the year before**, so you can see at once whether you're ahead of last year.
+- **Year-over-year chart** — one chart across all your sports, month by month,
+  this year against previous years. Switch between distance, time, climbing and
+  activity count, and pick which years to compare.
+- **Records, recent next to all-time** — the personal bests you set in the
+  **last 365 days** now sit right beside your **all-time** bests, per sport, so a
+  strong recent result is easy to spot against your lifetime best.
+- **Activity ribbon up top** — your year shown as a single colour-coded strip,
+  one block per day with today on the right; hover any day to see what you did.
+- **Drill into a sport** — open any sport for its own year-over-year chart,
+  average/top speed, and its recent and all-time records.
+
 ## 2026.06.23.5
 - **New Training page** — rebuilt around plain questions instead of jargon:
   *What should I do next? · Am I getting fitter? · Am I overdoing it? · Am I

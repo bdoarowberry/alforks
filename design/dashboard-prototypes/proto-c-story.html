@@ -1,0 +1,879 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AlForks · Dashboard — Athlete Story</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg-page:#0a0c0c; --bg-card:#0f1313; --bg-elev:#11161a;
+  --border-hair:rgba(255,255,255,0.11); --border-row:rgba(255,255,255,0.14);
+  --text-primary:#fff; --text-secondary:rgba(255,255,255,0.82); --text-tertiary:rgba(255,255,255,0.62);
+  --text-muted:rgba(255,255,255,0.5); --text-faint:rgba(255,255,255,0.38);
+  --surface-tint:rgba(255,255,255,0.04);
+  --accent:#3b82f6; --accent-soft:rgba(59,130,246,0.10);
+  --warn:#f59e0b; --danger:#ef4444; --success:#22c55e; --link:#93c5fd;
+  --pos:oklch(0.78 0.15 145); --neg:oklch(0.74 0.14 55);
+  --font-sans:'Inter',system-ui,-apple-system,sans-serif;
+  --font-mono:'JetBrains Mono',ui-monospace,'SF Mono',monospace;
+  /* net-new: display scale + accent glow for the hero direction */
+  --display-xl:clamp(2.6rem,6.2vw,5.2rem);
+  --display-lg:clamp(1.9rem,3.4vw,3rem);
+  --display-md:clamp(1.5rem,2.4vw,2.1rem);
+  --accent-glow:0 0 0 1px rgba(59,130,246,0.30), 0 8px 40px -12px rgba(59,130,246,0.45);
+  --radius:14px; --radius-sm:10px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{-webkit-text-size-adjust:100%}
+body{
+  background:var(--bg-page);
+  color:var(--text-primary);
+  font-family:var(--font-sans);
+  font-size:15px;line-height:1.5;
+  -webkit-font-smoothing:antialiased;
+  background-image:
+    radial-gradient(1200px 600px at 78% -8%, rgba(59,130,246,0.07), transparent 60%),
+    radial-gradient(900px 500px at 8% 4%, rgba(249,115,22,0.045), transparent 55%);
+  background-attachment:fixed;
+}
+.num{font-family:var(--font-mono);font-variant-numeric:tabular-nums}
+.eyebrow{
+  text-transform:uppercase;letter-spacing:.14em;font-size:11px;font-weight:600;
+  color:var(--text-tertiary);
+}
+a{color:inherit;text-decoration:none}
+
+/* ── App shell header ── */
+header.shell{
+  position:sticky;top:0;z-index:50;
+  display:flex;align-items:center;gap:24px;
+  padding:0 24px;height:58px;
+  background:rgba(10,12,12,0.78);
+  backdrop-filter:blur(14px);
+  border-bottom:1px solid var(--border-hair);
+}
+.wordmark{font-weight:800;font-size:18px;letter-spacing:-.02em}
+.wordmark span{color:var(--accent)}
+nav.top{display:flex;gap:4px;flex:1;overflow-x:auto;scrollbar-width:none}
+nav.top::-webkit-scrollbar{display:none}
+nav.top a{
+  padding:8px 12px;border-radius:8px;font-size:13.5px;font-weight:500;
+  color:var(--text-tertiary);white-space:nowrap;transition:.15s;
+}
+nav.top a:hover{color:var(--text-secondary);background:var(--surface-tint)}
+nav.top a.active{color:var(--text-primary);background:var(--accent-soft)}
+.iconbtns{display:flex;gap:6px}
+.iconbtn{
+  width:34px;height:34px;display:grid;place-items:center;border-radius:8px;
+  border:1px solid var(--border-hair);background:transparent;color:var(--text-tertiary);
+  cursor:pointer;transition:.15s;font-size:15px;
+}
+.iconbtn:hover{color:var(--text-primary);border-color:var(--border-row);background:var(--surface-tint)}
+
+main{max-width:1680px;margin:0 auto;padding:36px 28px 96px;display:flex;flex-direction:column;gap:40px}
+.page-title{font-size:14px;font-weight:600;color:var(--text-muted);letter-spacing:.02em}
+
+/* ── Narrative hero ── */
+.hero{display:flex;flex-direction:column;gap:30px}
+.hero-eyebrow{display:flex;align-items:center;gap:10px}
+.hero-eyebrow .dot{width:6px;height:6px;border-radius:50%;background:var(--pos);box-shadow:0 0 12px var(--pos)}
+.hero-headline{
+  font-size:var(--display-lg);font-weight:800;line-height:1.06;letter-spacing:-.025em;
+  max-width:20ch;
+}
+.hero-headline .hl{color:var(--accent)}
+.hero-headline .num{font-weight:800}
+.hero-sub{color:var(--text-tertiary);font-size:15px;max-width:62ch;margin-top:-12px}
+
+.callouts{
+  display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));
+  gap:1px;background:var(--border-hair);
+  border:1px solid var(--border-hair);border-radius:var(--radius);overflow:hidden;
+}
+.callout{background:var(--bg-card);padding:22px 22px 20px;display:flex;flex-direction:column;gap:8px;position:relative}
+.callout.lead{background:linear-gradient(180deg,rgba(59,130,246,0.07),rgba(59,130,246,0.01))}
+.callout .label{font-size:11.5px}
+.callout .big{font-size:var(--display-md);font-weight:800;line-height:1;letter-spacing:-.02em}
+.callout .big .unit{font-size:.42em;font-weight:600;color:var(--text-muted);margin-left:4px;letter-spacing:0}
+.delta{display:inline-flex;align-items:center;gap:5px;font-size:12.5px;font-weight:600;width:fit-content}
+.delta.up{color:var(--pos)} .delta.down{color:var(--neg)} .delta.flat{color:var(--text-muted)}
+.delta .arw{font-size:11px}
+.callout .ctx{font-size:11.5px;color:var(--text-faint)}
+
+/* ── Card base ── */
+.card{background:var(--bg-card);border:1px solid var(--border-hair);border-radius:var(--radius)}
+.card-h{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:20px 22px;flex-wrap:wrap}
+.card-h h2{font-size:16px;font-weight:700;letter-spacing:-.01em}
+.card-h .sub{font-size:12px;color:var(--text-muted);margin-top:3px}
+
+/* segmented + chips */
+.controls{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.seg{display:inline-flex;background:var(--bg-elev);border:1px solid var(--border-hair);border-radius:9px;padding:3px}
+.seg button{
+  border:0;background:transparent;color:var(--text-tertiary);font-family:var(--font-sans);
+  font-size:12.5px;font-weight:600;padding:6px 12px;border-radius:6px;cursor:pointer;transition:.15s;
+}
+.seg button:hover{color:var(--text-secondary)}
+.seg button.on{background:var(--accent);color:#fff}
+.chips{display:inline-flex;gap:6px}
+.chip{
+  border:1px solid var(--border-hair);background:transparent;color:var(--text-muted);
+  font-family:var(--font-mono);font-size:12px;font-weight:500;padding:5px 11px;border-radius:20px;cursor:pointer;transition:.15s;
+  display:inline-flex;align-items:center;gap:6px;
+}
+.chip:hover{border-color:var(--border-row);color:var(--text-secondary)}
+.chip .sw{width:9px;height:9px;border-radius:3px;background:currentColor;opacity:.85}
+.chip.on{color:var(--text-primary);border-color:var(--border-row);background:var(--surface-tint)}
+
+/* ── Hero chart ── */
+.chartwrap{padding:6px 22px 26px;position:relative}
+.chart-svg{width:100%;height:auto;display:block;overflow:visible}
+.gridline{stroke:var(--border-hair);stroke-width:1}
+.gridline.zero{stroke:var(--border-row)}
+.axis-lbl{fill:var(--text-faint);font-family:var(--font-mono);font-size:10px}
+.max-lbl{fill:var(--text-muted);font-family:var(--font-mono);font-size:10px}
+.bar-cur{transition:opacity .15s}
+.line-prior{fill:none;stroke-linejoin:round;stroke-linecap:round}
+.chart-legend{display:flex;gap:18px;flex-wrap:wrap;padding:0 22px 4px;align-items:center}
+.lg-item{display:flex;align-items:center;gap:7px;font-size:11.5px;color:var(--text-tertiary)}
+.lg-item .num{color:var(--text-secondary)}
+.lg-bar{width:13px;height:13px;border-radius:3px}
+.lg-line{width:16px;height:0;border-top-width:2px;border-top-style:solid}
+
+.tooltip{
+  position:fixed;z-index:80;pointer-events:none;opacity:0;transition:opacity .1s;
+  background:var(--bg-elev);border:1px solid var(--border-row);border-radius:8px;
+  padding:8px 11px;font-size:12px;box-shadow:0 8px 30px -8px rgba(0,0,0,.7);min-width:120px;
+}
+.tooltip .tt-t{color:var(--text-tertiary);font-size:10.5px;text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px}
+.tooltip .tt-row{display:flex;justify-content:space-between;gap:14px;align-items:center}
+.tooltip .tt-v{font-family:var(--font-mono);font-weight:600}
+.tooltip .tt-row+.tt-row{margin-top:3px}
+
+/* ── Records highlight tiles ── */
+.section-head{display:flex;align-items:baseline;justify-content:space-between;gap:16px;margin-bottom:18px;flex-wrap:wrap}
+.section-head h2{font-size:var(--display-md);font-weight:800;letter-spacing:-.025em;line-height:1}
+.section-head .sub{color:var(--text-tertiary);font-size:13px}
+.pr-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(232px,1fr));gap:14px}
+.pr-tile{
+  position:relative;background:var(--bg-card);border:1px solid var(--border-hair);border-radius:var(--radius);
+  padding:20px 20px 18px;display:flex;flex-direction:column;gap:14px;overflow:hidden;transition:.18s;
+}
+.pr-tile:hover{border-color:var(--border-row);transform:translateY(-2px)}
+.pr-tile::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--tile-accent)}
+.pr-tile .glow{position:absolute;inset:0;background:radial-gradient(140px 90px at 90% -10%,var(--tile-accent),transparent 70%);opacity:.10;pointer-events:none}
+.pr-top{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.pr-badge{
+  display:inline-flex;align-items:center;gap:7px;font-size:10.5px;font-weight:600;
+  text-transform:uppercase;letter-spacing:.1em;color:var(--tile-accent);
+}
+.pr-badge .star{font-size:13px;line-height:1}
+.pr-type{
+  font-family:var(--font-mono);font-size:10px;font-weight:600;letter-spacing:.06em;
+  color:var(--text-muted);border:1px solid var(--border-hair);border-radius:5px;padding:2px 6px;
+}
+.pr-val{font-size:var(--display-md);font-weight:800;letter-spacing:-.025em;line-height:1}
+.pr-val .unit{font-size:.4em;font-weight:600;color:var(--text-muted);margin-left:5px;letter-spacing:0}
+.pr-meta{display:flex;flex-direction:column;gap:3px;margin-top:auto}
+.pr-ride{font-size:13px;font-weight:600;color:var(--text-secondary)}
+.pr-date{font-size:11.5px;color:var(--text-faint)}
+
+/* ── Tabs ── */
+.tabnav{display:flex;gap:26px;border-bottom:1px solid var(--border-hair);margin-bottom:26px;overflow-x:auto;scrollbar-width:none}
+.tabnav::-webkit-scrollbar{display:none}
+.tabnav button{
+  position:relative;border:0;background:transparent;cursor:pointer;
+  font-family:var(--font-sans);font-size:15px;font-weight:600;color:var(--text-muted);
+  padding:0 0 14px;white-space:nowrap;transition:.15s;
+}
+.tabnav button:hover{color:var(--text-secondary)}
+.tabnav button.on{color:var(--text-primary)}
+.tabnav button.on::after{
+  content:"";position:absolute;left:0;right:0;bottom:-1px;height:2px;background:var(--accent);border-radius:2px;
+}
+.tabpanel{display:none;animation:fade .25s ease}
+.tabpanel.on{display:block}
+@keyframes fade{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+
+/* ── By Activity ── */
+.act-list{display:flex;flex-direction:column;gap:12px}
+.act-card{background:var(--bg-card);border:1px solid var(--border-hair);border-radius:var(--radius);overflow:hidden;transition:.15s}
+.act-card.open{border-color:var(--border-row)}
+.act-head{display:flex;align-items:center;gap:18px;padding:18px 22px;cursor:pointer;flex-wrap:wrap}
+.act-head:hover{background:var(--surface-tint)}
+.glyph{
+  width:46px;height:46px;flex:none;border-radius:11px;display:grid;place-items:center;
+  font-family:var(--font-mono);font-size:13px;font-weight:600;letter-spacing:.02em;
+  color:var(--type-accent);background:color-mix(in srgb,var(--type-accent) 14%,transparent);
+  border:1px solid color-mix(in srgb,var(--type-accent) 35%,transparent);
+}
+.act-id{flex:none;min-width:130px}
+.act-id .lbl{font-size:16px;font-weight:700}
+.act-id .ago{font-size:11.5px;color:var(--text-faint);margin-top:2px}
+.act-stats{display:flex;gap:26px;flex:1;flex-wrap:wrap}
+.act-stat{display:flex;flex-direction:column;gap:2px}
+.act-stat .v{font-family:var(--font-mono);font-size:15px;font-weight:600}
+.act-stat .k{font-size:10.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-faint)}
+.act-chev{margin-left:auto;color:var(--text-muted);transition:.2s;font-size:18px;flex:none}
+.act-card.open .act-chev{transform:rotate(180deg)}
+.act-body{display:none;padding:0 22px 24px;border-top:1px solid var(--border-hair)}
+.act-card.open .act-body{display:block}
+.act-body-grid{display:grid;grid-template-columns:1.5fr 1fr;gap:26px;margin-top:22px}
+@media(max-width:880px){.act-body-grid{grid-template-columns:1fr}}
+.speed-pair{display:flex;gap:14px;margin-top:18px}
+.speed-box{flex:1;background:var(--bg-elev);border:1px solid var(--border-hair);border-radius:var(--radius-sm);padding:14px 16px}
+.speed-box .k{font-size:10.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-faint)}
+.speed-box .v{font-family:var(--font-mono);font-size:21px;font-weight:700;margin-top:5px}
+.speed-box .v .unit{font-size:.5em;color:var(--text-muted);font-weight:600}
+.rec-list{display:flex;flex-direction:column}
+.rec-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 0;border-bottom:1px solid var(--border-hair);transition:.12s}
+.rec-row:last-child{border-bottom:0}
+.rec-row:hover .rec-ride{color:var(--text-primary)}
+.rec-left{display:flex;flex-direction:column;gap:2px;min-width:0}
+.rec-lbl{font-size:10.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-tertiary)}
+.rec-ride{font-size:12.5px;color:var(--text-muted);transition:.12s;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rec-right{text-align:right;flex:none}
+.rec-val{font-family:var(--font-mono);font-size:14px;font-weight:600}
+.rec-date{font-size:10.5px;color:var(--text-faint);font-family:var(--font-mono)}
+.act-foot{display:flex;gap:22px;margin-top:20px;flex-wrap:wrap}
+.act-foot a{font-size:13px;font-weight:600;color:var(--link);display:inline-flex;align-items:center;gap:5px}
+.act-foot a:hover{text-decoration:underline}
+.subhead{font-size:11px;text-transform:uppercase;letter-spacing:.12em;color:var(--text-tertiary);font-weight:600;margin-bottom:8px}
+
+/* ── Calendar ── */
+.cal-wrap{padding:22px}
+.cal-scroll{overflow-x:auto;padding-bottom:8px;scrollbar-width:thin}
+.cal-grid{display:grid;grid-auto-flow:column;grid-template-rows:repeat(7,1fr);gap:3px;width:max-content}
+.cal-cell{width:13px;height:13px;border-radius:3px;background:var(--surface-tint);cursor:default;transition:.1s}
+.cal-cell.active{cursor:pointer}
+.cal-cell:hover{outline:1.5px solid var(--text-secondary);outline-offset:1px}
+.cal-months{display:grid;grid-auto-flow:column;gap:3px;width:max-content;margin-bottom:6px;font-size:10px;color:var(--text-faint);font-family:var(--font-mono)}
+.cal-legend{display:flex;gap:18px;flex-wrap:wrap;margin-top:18px;align-items:center}
+.cal-legend .li{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--text-tertiary)}
+.cal-legend .sw{width:12px;height:12px;border-radius:3px}
+.cal-summary{display:flex;gap:30px;flex-wrap:wrap;margin-bottom:20px}
+.cal-summary .cs .v{font-family:var(--font-mono);font-size:26px;font-weight:800;letter-spacing:-.02em}
+.cal-summary .cs .k{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-faint);margin-top:2px}
+
+/* ── Records tab ── */
+.rec-types{display:grid;grid-template-columns:repeat(auto-fit,minmax(330px,1fr));gap:16px}
+.rec-card{background:var(--bg-card);border:1px solid var(--border-hair);border-radius:var(--radius);padding:20px 22px}
+.rec-card .rc-h{display:flex;align-items:center;gap:12px;margin-bottom:16px}
+.rec-card .rc-h .lbl{font-size:16px;font-weight:700}
+.rec-scope{margin-top:18px}
+.rec-scope:first-of-type{margin-top:0}
+
+footer.foot{text-align:center;color:var(--text-faint);font-size:11.5px;padding:20px}
+
+@media(max-width:560px){
+  main{padding:24px 16px 80px;gap:32px}
+  .callout .big{font-size:1.7rem}
+  .act-stats{gap:18px}
+  .act-id{min-width:100px}
+}
+</style>
+</head>
+<body>
+
+<header class="shell">
+  <div class="wordmark">Al<span>Forks</span></div>
+  <nav class="top">
+    <a href="#" class="active">Dashboard</a>
+    <a href="#">Activities</a>
+    <a href="#">Map</a>
+    <a href="#">Training</a>
+    <a href="#">Trails &amp; Routes</a>
+  </nav>
+  <div class="iconbtns">
+    <button class="iconbtn" title="Sync">&#8635;</button>
+    <button class="iconbtn" title="Notifications">&#128276;</button>
+    <button class="iconbtn" title="Settings">&#9881;</button>
+  </div>
+</header>
+
+<main>
+  <h1 class="page-title">Dashboard</h1>
+
+  <!-- ════ NARRATIVE HERO ════ -->
+  <section class="hero">
+    <div class="hero-eyebrow">
+      <span class="dot"></span>
+      <span class="eyebrow">Last 365 days · ending Jun 23, 2026</span>
+    </div>
+    <h1 class="hero-headline" id="heroHeadline"></h1>
+    <p class="hero-sub" id="heroSub"></p>
+    <div class="callouts" id="callouts"></div>
+  </section>
+
+  <!-- ════ YEAR-OVER-YEAR HERO CHART ════ -->
+  <section class="card" id="heroChartCard">
+    <div class="card-h">
+      <div>
+        <h2>The shape of your year</h2>
+        <div class="sub">Monthly totals across every activity — this year against your past selves</div>
+      </div>
+      <div class="controls">
+        <div class="seg" id="metricSeg"></div>
+      </div>
+    </div>
+    <div class="controls" style="padding:0 22px 4px">
+      <span class="eyebrow">Compare</span>
+      <div class="chips" id="yearChips"></div>
+    </div>
+    <div class="chart-legend" id="chartLegend"></div>
+    <div class="chartwrap">
+      <svg class="chart-svg" id="heroChart" viewBox="0 0 1000 360" preserveAspectRatio="xMidYMid meet" aria-label="Year over year chart"></svg>
+    </div>
+  </section>
+
+  <!-- ════ RECENT RECORDS ════ -->
+  <section>
+    <div class="section-head">
+      <div>
+        <h2>This year's highlights</h2>
+        <div class="sub">Personal records you set in the last 365 days</div>
+      </div>
+      <span class="eyebrow"><span class="num" id="prCount"></span> new records</span>
+    </div>
+    <div class="pr-grid" id="prGrid"></div>
+  </section>
+
+  <!-- ════ TABS ════ -->
+  <section>
+    <div class="tabnav" id="tabnav">
+      <button class="on" data-tab="byact">By Activity</button>
+      <button data-tab="cal">Calendar</button>
+      <button data-tab="rec">Records</button>
+    </div>
+
+    <div class="tabpanel on" id="tab-byact">
+      <div class="act-list" id="actList"></div>
+    </div>
+
+    <div class="tabpanel" id="tab-cal">
+      <div class="card">
+        <div class="card-h">
+          <div>
+            <h2>Your year, day by day</h2>
+            <div class="sub">Each square is a day — coloured by what you did most</div>
+          </div>
+        </div>
+        <div class="cal-wrap">
+          <div class="cal-summary" id="calSummary"></div>
+          <div class="cal-scroll">
+            <div class="cal-months" id="calMonths"></div>
+            <div class="cal-grid" id="calGrid"></div>
+          </div>
+          <div class="cal-legend" id="calLegend"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="tabpanel" id="tab-rec">
+      <div class="rec-types" id="recTypes"></div>
+    </div>
+  </section>
+
+  <footer class="foot">AlForks — design prototype C · Athlete Story. Data is mock; all links inert.</footer>
+</main>
+
+<div class="tooltip" id="tooltip"></div>
+
+<script src="./mock-data.js"></script>
+<script>
+(function(){
+  'use strict';
+  const M = window.MOCK, F = window.FMT;
+  const $ = (s,r=document)=>r.querySelector(s);
+  const el = (tag,cls,html)=>{const e=document.createElement(tag); if(cls)e.className=cls; if(html!=null)e.innerHTML=html; return e;};
+  const typeById = id => M.TYPES.find(t=>t.id===id);
+  const tip = $('#tooltip');
+
+  // ─── metric meta ───
+  const METRIC_META = {
+    distance: {label:'Distance', unit:'km',  fmt:v=>F.dist(v)},
+    duration: {label:'Time',     unit:'h',   fmt:v=>v.toFixed(0)},
+    climb:    {label:'Climbing', unit:'m',   fmt:v=>F.elev(v)},
+    count:    {label:'Activities',unit:'',   fmt:v=>Math.round(v)},
+  };
+  const CHART_METRICS = ['distance','duration','climb','count'];
+
+  // ═══════════ HERO NARRATIVE ═══════════
+  function renderHero(){
+    const T = M.TOTALS;
+    const dDist = F.pct(T.distance_km, T.distance_prev);
+    const dDays = F.pct(T.days_out, T.days_prev);
+    const hl = $('#heroHeadline');
+    hl.innerHTML = `Your strongest 12 months yet — <span class="hl"><span class="num">+${dDist}%</span> distance</span>, `
+      + `<span class="num">${T.days_out}</span> days out, an <span class="num">${T.longest_streak}-day</span> streak.`;
+    $('#heroSub').textContent =
+      `${F.dist(T.distance_km)} km ridden over ${F.hours(T.moving_h)} of moving time, with ${F.elev(T.climb_m)} m of climbing. `
+      + `You've been active ${T.last_14d_active} of the last 14 days — last out ${T.days_since} days ago.`;
+
+    const calls = [
+      mkCallout('Distance', F.dist(T.distance_km), 'km', F.pct(T.distance_km,T.distance_prev), `vs ${F.dist(T.distance_prev)} km prior`, true),
+      mkCallout('Days out', String(T.days_out), '', F.pct(T.days_out,T.days_prev), `vs ${T.days_prev} prior year`),
+      mkCallout('Moving time', F.hours(T.moving_h), '', F.pct(T.moving_h,T.moving_prev), `vs ${F.hours(T.moving_prev)} prior`),
+      mkCallout('Climbing', F.elev(T.climb_m), 'm', F.pct(T.climb_m,T.climb_prev), `vs ${F.elev(T.climb_prev)} m prior`),
+      mkCallout('Current streak', String(T.current_streak), 'days', null, `longest was ${T.longest_streak} days`),
+    ];
+    const wrap = $('#callouts'); calls.forEach(c=>wrap.appendChild(c));
+  }
+  function mkCallout(label, big, unit, pct, ctx, lead){
+    const c = el('div','callout'+(lead?' lead':''));
+    c.appendChild(el('div','label eyebrow',label));
+    c.appendChild(el('div','big num', big + (unit?`<span class="unit">${unit}</span>`:'')));
+    if(pct!=null){
+      const dir = pct>0?'up':pct<0?'down':'flat';
+      const arw = pct>0?'&#9650;':pct<0?'&#9660;':'&#8212;';
+      const d = el('div','delta '+dir, `<span class="arw">${arw}</span><span class="num">${pct>0?'+':''}${pct}%</span>`);
+      c.appendChild(d);
+    } else {
+      c.appendChild(el('div','delta flat','&nbsp;'));
+    }
+    c.appendChild(el('div','ctx',ctx));
+    return c;
+  }
+
+  // ═══════════ HERO CHART (cross-activity YoY) ═══════════
+  const chartState = {
+    metric:'distance',
+    years: M.YEARS.slice(-3),   // most recent 3
+  };
+  const YEAR_STYLE = {};
+  (function(){
+    // assign recessive→dominant styling; latest year = accent
+    const sorted = [...M.YEARS].sort((a,b)=>a-b);
+    const priorShades = ['rgba(255,255,255,0.16)','rgba(255,255,255,0.30)','rgba(255,255,255,0.46)'];
+    let pi=0;
+    sorted.forEach(y=>{
+      if(y===M.CUR_YEAR) YEAR_STYLE[y] = {cur:true, color:'var(--accent)'};
+      else YEAR_STYLE[y] = {cur:false, color:priorShades[Math.min(pi++,priorShades.length-1)]};
+    });
+  })();
+
+  function buildMetricSeg(){
+    const seg = $('#metricSeg');
+    CHART_METRICS.forEach(m=>{
+      const b = el('button',chartState.metric===m?'on':'',METRIC_META[m].label);
+      b.onclick=()=>{chartState.metric=m; [...seg.children].forEach(c=>c.classList.remove('on')); b.classList.add('on'); drawChart();};
+      seg.appendChild(b);
+    });
+  }
+  function buildYearChips(){
+    const wrap = $('#yearChips');
+    [...M.YEARS].sort((a,b)=>b-a).forEach(y=>{
+      const on = chartState.years.includes(y);
+      const c = el('button','chip'+(on?' on':''));
+      c.style.color = YEAR_STYLE[y].cur ? 'var(--accent)' : 'var(--text-secondary)';
+      c.innerHTML = `<span class="sw"></span><span>${y}${y===M.CUR_YEAR?' · now':''}</span>`;
+      c.dataset.year=y;
+      c.onclick=()=>{
+        const yr=+c.dataset.year;
+        if(chartState.years.includes(yr)){
+          if(chartState.years.length<=1) return;
+          chartState.years = chartState.years.filter(x=>x!==yr);
+        } else chartState.years.push(yr);
+        c.classList.toggle('on');
+        drawChart();
+      };
+      wrap.appendChild(c);
+    });
+  }
+
+  function drawChart(){
+    const svg = $('#heroChart');
+    const meta = METRIC_META[chartState.metric];
+    const data = M.HISTORY_ALL[chartState.metric];
+    const W=1000,H=360, padL=46, padR=16, padT=22, padB=34;
+    const plotW=W-padL-padR, plotH=H-padT-padB;
+    const years = chartState.years.slice().sort((a,b)=>a-b);
+
+    // max value across selected years
+    let max=0;
+    years.forEach(y=>data[y].forEach(v=>{if(v!=null&&v>max)max=v;}));
+    max = max||1;
+    // nice ceil
+    const niceMax = niceCeil(max);
+    const yOf = v => padT + plotH - (v/niceMax)*plotH;
+    const bandW = plotW/12;
+
+    let svgEls = '';
+    // gridlines (4 divisions)
+    for(let i=0;i<=4;i++){
+      const val = niceMax*i/4;
+      const y = yOf(val);
+      svgEls += `<line class="gridline${i===0?' zero':''}" x1="${padL}" y1="${y}" x2="${W-padR}" y2="${y}"/>`;
+      svgEls += `<text class="axis-lbl" x="${padL-8}" y="${y+3}" text-anchor="end">${meta.fmt(val)}</text>`;
+    }
+    // max label top-right
+    svgEls += `<text class="max-lbl" x="${W-padR}" y="${padT-7}" text-anchor="end">peak ${meta.fmt(niceMax)} ${meta.unit}/mo</text>`;
+
+    // current year as bars; prior years as lines
+    const curYear = years.includes(M.CUR_YEAR) ? M.CUR_YEAR : null;
+    const priorYears = years.filter(y=>y!==M.CUR_YEAR);
+
+    // bars (current)
+    if(curYear){
+      const bw = Math.min(bandW*0.5, 34);
+      data[curYear].forEach((v,m)=>{
+        if(v==null) return;
+        const cx = padL + bandW*m + bandW/2;
+        const y = yOf(v);
+        const h = padT+plotH-y;
+        svgEls += `<rect class="bar-cur dpt" x="${cx-bw/2}" y="${y}" width="${bw}" height="${h}" rx="3" `
+          + `fill="var(--accent)" data-year="${curYear}" data-month="${m}" data-val="${v}"/>`;
+      });
+    }
+    // prior year lines
+    priorYears.forEach(y=>{
+      const pts = [];   // [cx, cy, monthIdx, value]
+      data[y].forEach((v,m)=>{ if(v==null) return; pts.push([padL+bandW*m+bandW/2, yOf(v), m, v]); });
+      if(pts.length){
+        const d = pts.map((p,i)=>(i?'L':'M')+p[0].toFixed(1)+' '+p[1].toFixed(1)).join(' ');
+        svgEls += `<path class="line-prior" d="${d}" stroke="${YEAR_STYLE[y].color}" stroke-width="2"/>`;
+        pts.forEach((p)=>{
+          svgEls += `<circle class="dpt" cx="${p[0]}" cy="${p[1]}" r="8" fill="transparent" `
+            + `data-year="${y}" data-month="${p[2]}" data-val="${p[3]}"/>`;
+          svgEls += `<circle cx="${p[0]}" cy="${p[1]}" r="2.6" fill="${YEAR_STYLE[y].color}"/>`;
+        });
+      }
+    });
+    // month axis
+    M.MONTHS.forEach((mo,m)=>{
+      const cx = padL + bandW*m + bandW/2;
+      svgEls += `<text class="axis-lbl" x="${cx}" y="${H-12}" text-anchor="middle">${mo}</text>`;
+    });
+
+    svg.innerHTML = svgEls;
+    buildLegend();
+    wireChartHover(svg);
+  }
+  function monthForPoint(arr,i){
+    // map nth non-null point back to its month index
+    let c=-1;
+    for(let m=0;m<12;m++){ if(arr[m]!=null){c++; if(c===i)return m;} }
+    return i;
+  }
+  function niceCeil(v){
+    const pow = Math.pow(10, Math.floor(Math.log10(v)));
+    const n = v/pow;
+    const step = n<=1?1:n<=2?2:n<=2.5?2.5:n<=5?5:10;
+    return step*pow;
+  }
+
+  function buildLegend(){
+    const lg = $('#chartLegend'); lg.innerHTML='';
+    const meta = METRIC_META[chartState.metric];
+    const data = M.HISTORY_ALL[chartState.metric];
+    chartState.years.slice().sort((a,b)=>b-a).forEach(y=>{
+      const st = YEAR_STYLE[y];
+      const tot = data[y].reduce((s,v)=>s+(v||0),0);
+      const item = el('div','lg-item');
+      if(st.cur){
+        item.innerHTML = `<span class="lg-bar" style="background:var(--accent)"></span>`
+          + `<span>${y} <span class="num">· ${meta.fmt(tot)} ${meta.unit} YTD</span></span>`;
+      } else {
+        item.innerHTML = `<span class="lg-line" style="border-top-color:${st.color}"></span>`
+          + `<span>${y} <span class="num">· ${meta.fmt(tot)} ${meta.unit}</span></span>`;
+      }
+      lg.appendChild(item);
+    });
+  }
+
+  function wireChartHover(svg){
+    const meta = METRIC_META[chartState.metric];
+    svg.querySelectorAll('.dpt').forEach(node=>{
+      node.style.cursor='pointer';
+      node.addEventListener('mouseenter',e=>{
+        const y=node.dataset.year, m=+node.dataset.month, v=+node.dataset.val;
+        tip.innerHTML = `<div class="tt-t">${M.MONTHS[m]} ${y}</div>`
+          + `<div class="tt-row"><span>${meta.label}</span><span class="tt-v">${meta.fmt(v)} ${meta.unit}</span></div>`;
+        tip.style.opacity='1';
+        if(node.classList.contains('bar-cur')) node.style.opacity='0.78';
+      });
+      node.addEventListener('mousemove',e=>{ positionTip(e); });
+      node.addEventListener('mouseleave',()=>{ tip.style.opacity='0'; if(node.classList.contains('bar-cur'))node.style.opacity='1'; });
+    });
+  }
+  function positionTip(e){
+    let x=e.clientX+14, y=e.clientY-10;
+    const r=tip.getBoundingClientRect();
+    if(x+r.width>window.innerWidth-8) x=e.clientX-r.width-14;
+    if(y<8) y=8;
+    tip.style.left=x+'px'; tip.style.top=y+'px';
+  }
+
+  // ═══════════ RECENT RECORDS ═══════════
+  function renderPRs(){
+    const grid = $('#prGrid');
+    $('#prCount').textContent = M.RECENT_PRS.length;
+    M.RECENT_PRS.forEach(rec=>{
+      const t = typeById(rec.type);
+      const a = el('a','pr-tile'); a.href='#'; a.title=`Open ${rec.ride}`;
+      a.style.setProperty('--tile-accent', t.accent);
+      const valStr = F.record(rec);
+      // split value & unit for typographic emphasis
+      const parts = valStr.match(/^(.*?)(\s+(?:km\/h|km|m|h|m))?$/);
+      let bigHtml = valStr;
+      const um = valStr.match(/(km\/h|km|m)$/);
+      if(um && rec.kind!=='dur'){ bigHtml = valStr.slice(0,-um[0].length).trim() + `<span class="unit">${um[0]}</span>`; }
+      a.innerHTML = `
+        <span class="glow"></span>
+        <div class="pr-top">
+          <span class="pr-badge"><span class="star">&#9733;</span>${rec.label}</span>
+          <span class="pr-type">${t.glyph}</span>
+        </div>
+        <div class="pr-val num">${bigHtml}</div>
+        <div class="pr-meta">
+          <span class="pr-ride">${rec.ride}</span>
+          <span class="pr-date">${t.label} · ${F.dateShort(rec.date)}, ${rec.date.slice(0,4)}</span>
+        </div>`;
+      grid.appendChild(a);
+    });
+  }
+
+  // ═══════════ TABS ═══════════
+  function wireTabs(){
+    const nav = $('#tabnav');
+    nav.querySelectorAll('button').forEach(b=>{
+      b.onclick=()=>{
+        nav.querySelectorAll('button').forEach(x=>x.classList.remove('on'));
+        b.classList.add('on');
+        document.querySelectorAll('.tabpanel').forEach(p=>p.classList.remove('on'));
+        $('#tab-'+b.dataset.tab).classList.add('on');
+        if(b.dataset.tab==='cal') ensureCalendar();
+      };
+    });
+  }
+
+  // ═══════════ BY ACTIVITY ═══════════
+  function renderByActivity(){
+    const list = $('#actList');
+    M.TYPES.forEach(t=>{
+      const r = M.ROLLUPS[t.id];
+      const card = el('div','act-card');
+      card.style.setProperty('--type-accent', t.accent);
+
+      // lead metric: distance, or descent for snow
+      const lead = t.isSnow
+        ? {k:'Descent', v:F.elev(r.descent_m)+' m'}
+        : {k:'Distance', v:F.dist(r.distance_km)+' km'};
+      const head = el('div','act-head');
+      head.innerHTML = `
+        <div class="glyph">${t.glyph}</div>
+        <div class="act-id">
+          <div class="lbl">${t.label}</div>
+          <div class="ago">${r.days_since}d ago · ${r.activities} activities</div>
+        </div>
+        <div class="act-stats">
+          <div class="act-stat"><span class="v">${r.days}</span><span class="k">Days</span></div>
+          <div class="act-stat"><span class="v">${lead.v}</span><span class="k">${lead.k}</span></div>
+          <div class="act-stat"><span class="v">${F.elev(r.climb_m)} m</span><span class="k">Climb</span></div>
+          <div class="act-stat"><span class="v">${F.elev(r.descent_m)} m</span><span class="k">Descent</span></div>
+          <div class="act-stat"><span class="v">${F.hours(r.moving_h)}</span><span class="k">Moving</span></div>
+        </div>
+        <span class="act-chev">&#9662;</span>`;
+
+      const body = el('div','act-body');
+      // per-type chart state
+      const cs = {metric:'distance', built:false};
+      body.innerHTML = `
+        <div class="act-body-grid">
+          <div>
+            <div class="controls" style="margin:20px 0 8px">
+              <div class="seg act-metric"></div>
+            </div>
+            <svg class="chart-svg act-mini" viewBox="0 0 600 220" preserveAspectRatio="xMidYMid meet"></svg>
+            <div class="speed-pair">
+              <div class="speed-box"><div class="k">Avg speed</div><div class="v num">${F.speed(r.avg_speed_kmh)}<span class="unit"> km/h</span></div></div>
+              <div class="speed-box"><div class="k">Top speed</div><div class="v num">${F.speed(r.top_speed_kmh)}<span class="unit"> km/h</span></div></div>
+            </div>
+          </div>
+          <div>
+            <div class="subhead">Records · last 365 days</div>
+            <div class="rec-list act-recs"></div>
+            <div class="act-foot">
+              <a href="#">View all rides &rarr;</a>
+              <a href="#">HR &amp; load &rarr;</a>
+            </div>
+          </div>
+        </div>`;
+
+      // metric seg for this type
+      const seg = body.querySelector('.act-metric');
+      CHART_METRICS.forEach(m=>{
+        const b=el('button',cs.metric===m?'on':'',METRIC_META[m].label);
+        b.onclick=()=>{cs.metric=m;[...seg.children].forEach(c=>c.classList.remove('on'));b.classList.add('on');drawMini(body.querySelector('.act-mini'),t,cs.metric);};
+        seg.appendChild(b);
+      });
+      // records
+      const rl = body.querySelector('.act-recs');
+      M.RECORDS[t.id].window.forEach(rec=>rl.appendChild(recRow(rec)));
+
+      head.onclick=()=>{
+        const opening = !card.classList.contains('open');
+        card.classList.toggle('open');
+        if(opening && !cs.built){ cs.built=true; drawMini(body.querySelector('.act-mini'),t,cs.metric); }
+      };
+
+      card.appendChild(head); card.appendChild(body);
+      list.appendChild(card);
+    });
+  }
+  function recRow(rec){
+    const a = el('a','rec-row'); a.href='#';
+    a.innerHTML = `
+      <div class="rec-left">
+        <span class="rec-lbl">${rec.label}</span>
+        <span class="rec-ride">${rec.ride}</span>
+      </div>
+      <div class="rec-right">
+        <div class="rec-val num">${F.record(rec)}</div>
+        <div class="rec-date num">${F.dateShort(rec.date)} ${rec.date.slice(0,4)}</div>
+      </div>`;
+    return a;
+  }
+  function drawMini(svg, type, metric){
+    const meta = METRIC_META[metric];
+    const data = M.HISTORY[type.id][metric];
+    const years = M.YEARS.slice(-3).sort((a,b)=>a-b);
+    const W=600,H=220,padL=40,padR=10,padT=14,padB=26;
+    const plotW=W-padL-padR, plotH=H-padT-padB;
+    let max=0; years.forEach(y=>data[y].forEach(v=>{if(v!=null&&v>max)max=v;})); max=max||1;
+    const niceMax=niceCeil(max);
+    const yOf=v=>padT+plotH-(v/niceMax)*plotH;
+    const bandW=plotW/12;
+    let s='';
+    for(let i=0;i<=2;i++){const val=niceMax*i/2;const y=yOf(val);
+      s+=`<line class="gridline${i===0?' zero':''}" x1="${padL}" y1="${y}" x2="${W-padR}" y2="${y}"/>`;
+      s+=`<text class="axis-lbl" x="${padL-6}" y="${y+3}" text-anchor="end">${meta.fmt(val)}</text>`;}
+    // current = bars
+    const bw=Math.min(bandW*0.46,18);
+    data[M.CUR_YEAR].forEach((v,m)=>{if(v==null)return;const cx=padL+bandW*m+bandW/2;const y=yOf(v);
+      s+=`<rect class="dpt" x="${cx-bw/2}" y="${y}" width="${bw}" height="${padT+plotH-y}" rx="2" fill="${type.accent}" data-y="${M.CUR_YEAR}" data-m="${m}" data-v="${v}"/>`;});
+    // prior lines
+    years.filter(y=>y!==M.CUR_YEAR).forEach((y,idx)=>{
+      const op=idx===0?0.22:0.42;
+      const pts=[];data[y].forEach((v,m)=>{if(v==null)return;pts.push([padL+bandW*m+bandW/2,yOf(v)]);});
+      if(pts.length){const d=pts.map((p,i)=>(i?'L':'M')+p[0].toFixed(1)+' '+p[1].toFixed(1)).join(' ');
+        s+=`<path class="line-prior" d="${d}" stroke="rgba(255,255,255,${op})" stroke-width="1.6"/>`;}
+    });
+    M.MONTH_LETTERS.forEach((mo,m)=>{const cx=padL+bandW*m+bandW/2;
+      s+=`<text class="axis-lbl" x="${cx}" y="${H-9}" text-anchor="middle">${mo}</text>`;});
+    svg.innerHTML=s;
+    svg.querySelectorAll('.dpt').forEach(node=>{
+      node.addEventListener('mouseenter',()=>{const y=node.dataset.y,m=+node.dataset.m,v=+node.dataset.v;
+        tip.innerHTML=`<div class="tt-t">${M.MONTHS[m]} ${y}</div><div class="tt-row"><span>${meta.label}</span><span class="tt-v">${meta.fmt(v)} ${meta.unit}</span></div>`;
+        tip.style.opacity='1';node.style.opacity='0.78';});
+      node.addEventListener('mousemove',positionTip);
+      node.addEventListener('mouseleave',()=>{tip.style.opacity='0';node.style.opacity='1';});
+    });
+  }
+
+  // ═══════════ CALENDAR ═══════════
+  let calBuilt=false;
+  function ensureCalendar(){ if(calBuilt) return; calBuilt=true; renderCalendar(); }
+  function renderCalendar(){
+    const end = new Date('2026-06-23T00:00:00');
+    const start = new Date(end); start.setDate(end.getDate()-364);
+    // align start back to Sunday for clean weeks
+    const gridStart = new Date(start); gridStart.setDate(start.getDate()-start.getDay());
+    const days=[];
+    const cur=new Date(gridStart);
+    while(cur<=end){ days.push(new Date(cur)); cur.setDate(cur.getDate()+1); }
+
+    const grid=$('#calGrid'); grid.innerHTML='';
+    const monthsRow=$('#calMonths'); monthsRow.innerHTML='';
+    const counts={}; M.TYPES.forEach(t=>counts[t.id]=0);
+    let activeDays=0;
+
+    // build columns (weeks)
+    const weeks = Math.ceil(days.length/7);
+    monthsRow.style.gridTemplateColumns=`repeat(${weeks},13px)`;
+    grid.style.gridTemplateColumns=`repeat(${weeks},13px)`;
+
+    // month label per week (first week containing day 1..7 of a month)
+    const monthLabels={};
+    for(let w=0;w<weeks;w++){
+      const d=days[w*7];
+      if(d){ const lab=d.toLocaleDateString('en-US',{month:'short'});
+        if(d.getDate()<=7 && !monthLabels[lab+ d.getFullYear()]){ monthLabels[w]=lab; monthLabels[lab+d.getFullYear()]=true; }
+      }
+    }
+    for(let w=0;w<weeks;w++){ monthsRow.appendChild(el('div',null, monthLabels[w]||'')); }
+
+    days.forEach(d=>{
+      // mock-data.js keys DOMINANT_BY_DATE via toISOString() from local-midnight
+      // dates; we anchor the grid the same way, so match its key generation exactly.
+      const iso=d.toISOString().slice(0,10);
+      const inWindow = d>=start && d<=end;
+      const tid = inWindow ? M.DOMINANT_BY_DATE[iso] : null;
+      const cell=el('div','cal-cell'+(tid?' active':''));
+      if(tid){
+        const t=typeById(tid);
+        cell.style.background=t.accent;
+        counts[tid]++; activeDays++;
+        cell.title=`${d.toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'})} — ${t.label}`;
+        cell.addEventListener('mouseenter',()=>{
+          tip.innerHTML=`<div class="tt-t">${d.toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric',year:'numeric'})}</div>`
+            +`<div class="tt-row"><span style="display:inline-flex;align-items:center;gap:6px"><span style="width:9px;height:9px;border-radius:2px;background:${t.accent};display:inline-block"></span>${t.label}</span></div>`;
+          tip.style.opacity='1';});
+        cell.addEventListener('mousemove',positionTip);
+        cell.addEventListener('mouseleave',()=>tip.style.opacity='0');
+      } else if(!inWindow){
+        cell.style.background='transparent';
+      }
+      grid.appendChild(cell);
+    });
+
+    // summary
+    const sum=$('#calSummary'); sum.innerHTML='';
+    sum.appendChild(mkCalStat(activeDays,'active days'));
+    sum.appendChild(mkCalStat(M.TOTALS.longest_streak,'longest streak'));
+    sum.appendChild(mkCalStat(Math.round(activeDays/365*100)+'%','of the year'));
+
+    // legend
+    const lg=$('#calLegend'); lg.innerHTML='';
+    M.TYPES.forEach(t=>{
+      const li=el('div','li',`<span class="sw" style="background:${t.accent}"></span>${t.label} <span class="num" style="color:var(--text-muted);margin-left:4px">${counts[t.id]}</span>`);
+      lg.appendChild(li);
+    });
+    lg.appendChild(el('div','li',`<span class="sw" style="background:var(--surface-tint)"></span>Rest`));
+  }
+  function mkCalStat(v,k){const d=el('div','cs');d.innerHTML=`<div class="v num">${v}</div><div class="k">${k}</div>`;return d;}
+
+  // ═══════════ RECORDS TAB ═══════════
+  function renderRecordsTab(){
+    const wrap=$('#recTypes');
+    M.TYPES.forEach(t=>{
+      const card=el('div','rec-card');
+      card.style.setProperty('--type-accent',t.accent);
+      const rec=M.RECORDS[t.id];
+      card.appendChild(elFromHTML(`<div class="rc-h"><div class="glyph" style="--type-accent:${t.accent};width:38px;height:38px;font-size:11px;border-radius:9px">${t.glyph}</div><div class="lbl">${t.label}</div></div>`));
+      const w=el('div','rec-scope'); w.appendChild(el('div','subhead','Last 365 days'));
+      const wl=el('div','rec-list'); rec.window.forEach(r=>wl.appendChild(recRow(r))); w.appendChild(wl); card.appendChild(w);
+      const a=el('div','rec-scope'); a.appendChild(el('div','subhead','All time'));
+      const al=el('div','rec-list'); rec.all.forEach(r=>al.appendChild(recRow(r))); a.appendChild(al); card.appendChild(a);
+      wrap.appendChild(card);
+    });
+  }
+  function elFromHTML(h){const d=el('div');d.innerHTML=h;return d.firstElementChild;}
+
+  // ═══════════ INIT ═══════════
+  renderHero();
+  buildMetricSeg();
+  buildYearChips();
+  drawChart();
+  renderPRs();
+  wireTabs();
+  renderByActivity();
+  renderRecordsTab();
+  window.addEventListener('resize',()=>{ /* svg viewBox is fluid; nothing needed */ });
+})();
+</script>
+</body>
+</html>
