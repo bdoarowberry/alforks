@@ -286,7 +286,7 @@ _STRAVA_SPORT_TO_TYPE = {
     "TrailRun":           "hike",
 }
 
-METADATA_FILE = _ROOT / "metadata.json"
+METADATA_FILE = _ROOT / "instance" / "metadata.json"
 
 
 def _apply_sport_type_tag(filename: str, sport_type: str | None) -> str | None:

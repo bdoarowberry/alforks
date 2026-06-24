@@ -20,7 +20,7 @@ sys.path.insert(0, str(ROOT))
 
 import route_builder
 
-REGIONS_FILE      = ROOT / "regions.json"
+REGIONS_FILE      = ROOT / "instance" / "regions.json"
 ARTIFACTS_DIR     = ROOT / "cache" / "region_trails"
 OSM_PATHS_DIR     = ROOT / "cache" / "osm_paths"
 OSM_ROADS_DIR     = ROOT / "cache" / "osm_roads"

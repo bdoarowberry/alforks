@@ -60,12 +60,13 @@ if errorlevel 1 ( echo          FAILED to install the required components. & ech
 echo          Components are ready.
 echo.
 
-rem --- First run: bootstrap config.json from the example -----------------
+rem --- First run: bootstrap instance\config.json from the example --------
 set "FIRSTRUN="
-if not exist "config.json" (
+if not exist "instance\config.json" (
     set "FIRSTRUN=1"
-    if exist "config.example.json" copy /Y "config.example.json" "config.json" >nul
-    echo          First run detected - created your settings file config.json.
+    if not exist "instance" mkdir "instance"
+    if exist "config.example.json" copy /Y "config.example.json" "instance\config.json" >nul
+    echo          First run detected - created your settings file instance\config.json.
     echo.
 )
 

@@ -1,10 +1,8 @@
 # Project-specific data (user/local)
 tracks/
-metadata.json
-regions.json
-config.json
-weights.json
-dup_dismissals.json
+# Per-deployment local data — config, regions, activity metadata, weights,
+# dismissals. (config.example.json + types.json stay tracked at repo root.)
+instance/
 
 # Python & Flask
 __pycache__/

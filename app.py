@@ -56,13 +56,18 @@ logger.addHandler(logging.NullHandler())
 _ROOT         = Path(__file__).parent
 GPX_DIR       = _ROOT / "tracks"
 CACHE_DIR     = _ROOT / "cache"
-METADATA_FILE = _ROOT / "metadata.json"
-CONFIG_FILE   = _ROOT / "config.json"
+# Per-deployment local data (gitignored, holds the user's actual data: regions,
+# activity metadata, weights, dismissals, config/secrets). Flask-idiomatic
+# instance folder — created on first import so atomic writes have a parent dir.
+_INSTANCE     = _ROOT / "instance"
+_INSTANCE.mkdir(exist_ok=True)
+METADATA_FILE = _INSTANCE / "metadata.json"
+CONFIG_FILE   = _INSTANCE / "config.json"
 CONFIG_EXAMPLE_FILE = _ROOT / "config.example.json"
-REGIONS_FILE  = _ROOT / "regions.json"
+REGIONS_FILE  = _INSTANCE / "regions.json"
 TYPES_FILE    = _ROOT / "types.json"
-DUP_DISMISSALS_FILE = _ROOT / "dup_dismissals.json"
-WEIGHTS_FILE  = _ROOT / "weights.json"
+DUP_DISMISSALS_FILE = _INSTANCE / "dup_dismissals.json"
+WEIGHTS_FILE  = _INSTANCE / "weights.json"
 
 _DEFAULT_TYPES = [
     {"id": "mtb",       "label": "Mountain Bike", "glyph": "MTB", "color": "#4ade80", "bg": "#1a3a2a"},
