@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  {% include '_head.html' %}
+  <title>AlForks – Glossary</title>
+  <link rel="stylesheet" href="/static/base.css?v={{ asset_v('base.css') }}">
+  <style>
+    /* Glossary — plain-language definitions of the terms used across AlForks.
+       Chrome (header, wordmark, fonts, tokens) comes from base.css; this is
+       just the reading column + definition cards. Mirrors whatsnew.html. */
+    body { min-height: 100vh; display: flex; flex-direction: column; }
+    .gl-main { flex: 1; width: 100%; max-width: 820px; margin: 0 auto; padding: 40px 24px 64px; }
+
+    .gl-head { margin-bottom: 26px; }
+    .gl-head h1 { font-size: 1.7rem; font-weight: 600; color: var(--text-primary); letter-spacing: -0.02em; margin: 0 0 8px; }
+    .gl-head p  { color: var(--text-secondary); font-size: 0.92rem; margin: 0; max-width: 64ch; line-height: 1.5; }
+
+    /* Jump-to nav for the groups. */
+    .gl-toc { display: flex; flex-wrap: wrap; gap: 8px; margin: 18px 0 28px; }
+    .gl-toc a { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.04em;
+                color: var(--text-tertiary); background: var(--surface-tint);
+                border: 1px solid var(--border-hair); border-radius: 3px; padding: 4px 10px;
+                text-decoration: none; }
+    .gl-toc a:hover { color: var(--text-primary); border-color: rgba(255,255,255,0.18); }
+
+    /* One card per group of related terms. */
+    .gl-group { background: var(--bg-card); border: 1px solid var(--border-hair); border-radius: 10px;
+                padding: 8px 24px 18px; margin-bottom: 18px; scroll-margin-top: 16px; }
+    .gl-group h2 { font-family: var(--font-mono); font-size: 10px; text-transform: uppercase; letter-spacing: 0.18em;
+                   color: var(--text-tertiary); margin: 18px 0 4px; padding-bottom: 0; }
+
+    /* Definition entries. */
+    .gl-term { padding: 16px 0; border-bottom: 1px solid var(--border-hair); }
+    .gl-term:last-child { border-bottom: none; }
+    .gl-term dt { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px; margin-bottom: 5px; }
+    .gl-term .name { color: var(--text-primary); font-size: 0.96rem; font-weight: 600; }
+    .gl-term .alias { font-family: var(--font-mono); font-size: 0.72rem; color: var(--text-muted);
+                      background: var(--surface-tint); padding: 1px 7px; border-radius: 4px; letter-spacing: 0.02em; }
+    .gl-term dd { margin: 0; color: var(--text-secondary); font-size: 0.9rem; line-height: 1.55; }
+    .gl-term dd + dd { margin-top: 6px; color: var(--text-tertiary); font-size: 0.84rem; }
+    .gl-term dd strong { color: var(--text-primary); font-weight: 600; }
+    .gl-term dd code { font-family: var(--font-mono); font-size: 0.84em; background: var(--surface-tint);
+                       padding: 1px 5px; border-radius: 4px; color: var(--text-primary); }
+
+    .foot { margin-top: 26px; color: var(--text-muted); font-size: 0.74rem; font-family: var(--font-mono);
+            text-align: center; letter-spacing: 0.04em; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1><span>Al</span>Forks</h1>
+    {% set nav_active = 'glossary' %}
+  {% include '_nav.html' %}
+  </header>
+
+  <main class="gl-main">
+    <div class="gl-head">
+      <h1>Glossary</h1>
+      <p>Plain-language definitions for the numbers and labels you see around AlForks —
+         what they mean, and how the app actually works them out.</p>
+      <div class="gl-toc">
+        <a href="#time">Time &amp; distance</a>
+        <a href="#elevation">Elevation</a>
+        <a href="#records">Records &amp; comparisons</a>
+        <a href="#training">Training &amp; fitness</a>
+      </div>
+    </div>
+
+    <!-- ── Time & distance ─────────────────────────────────────────────── -->
+    <section class="gl-group" id="time">
+      <h2>Time &amp; distance</h2>
+
+      <dl class="gl-term">
+        <dt><span class="name">Riding time</span><span class="alias">moving time</span></dt>
+        <dd>The time you were actually moving under your own power. Pauses (stopped at
+            a junction, fixing a flat, lunch) and any lift/shuttle segments are taken out.</dd>
+      </dl>
+
+      <dl class="gl-term">
+        <dt><span class="name">Elapsed time</span></dt>
+        <dd>Total wall-clock time from the first GPS point to the last — everything
+            included: stops, breaks, and lift rides. Usually larger than riding time.</dd>
+      </dl>
+
+      <dl class="gl-term">
+        <dt><span class="name">Average speed</span></dt>
+        <dd>Distance divided by <strong>riding</strong> time, not elapsed time. Lift and
+            shuttle segments are excluded from both the distance and the time, so the
+            number reflects your pace <em>when you were actually riding</em> — not a number
+            watered down by chairlift rides and coffee stops.</dd>
+      </dl>
+    </section>
+
+    <!-- ── Elevation ───────────────────────────────────────────────────── -->
+    <section class="gl-group" id="elevation">
+      <h2>Elevation</h2>
+
+      <dl class="gl-term">
+        <dt><span class="name">Climbing</span><span class="alias">elevation gain</span></dt>
+        <dd>Total metres climbed over the activity, added up across every uphill section.
+            Only climbing you did under your own power counts — see <em>Assisted segments</em>.</dd>
+      </dl>
+
+      <dl class="gl-term">
+        <dt><span class="name">Descent</span><span class="alias">vertical · elevation loss</span></dt>
+        <dd>Total metres descended. On skis and snowboard this is the headline number
+            (shown as <strong>Vertical</strong>), since a ski day is mostly about the down.
+            Descent always counts — even on a lift-served run, you still rode it down.</dd>
+      </dl>
+
+      <dl class="gl-term">
+        <dt><span class="name">Assisted segments</span><span class="alias">lift / shuttle</span></dt>
+        <dd>Stretches where you were carried uphill rather than moving under your own
+            power — a chairlift, gondola, T-bar, or a shuttle/car bump back to the top.
+            The app spots these automatically.</dd>
+        <dd>Assisted stretches are left out of riding distance, riding time, average speed
+            and climbing, so those stats stay honest. <strong>Descent still counts</strong>
+            (the down is yours), and the segment is marked with a <code>LIFT</code> tag on
+            the activity.</dd>
+      </dl>
+    </section>
+
+    <!-- ── Records & comparisons ───────────────────────────────────────── -->
+    <section class="gl-group" id="records">
+      <h2>Records &amp; comparisons</h2>
+
+      <dl class="gl-term">
+        <dt><span class="name">Top performances</span><span class="alias">last 365 days</span></dt>
+        <dd>Your best result in each category — longest, most climbing, fastest, and so on —
+            from the <strong>last 365 days</strong> only. A rolling "how have I been doing
+            lately" snapshot that refreshes as the year rolls forward.</dd>
+      </dl>
+
+      <dl class="gl-term">
+        <dt><span class="name">All-time records</span></dt>
+        <dd>Your best ever in each category, across <strong>every</strong> activity you've
+            logged. These don't expire — beating one is a genuine personal best.</dd>
+      </dl>
+
+      <dl class="gl-term">
+        <dt><span class="name">Year-over-year</span><span class="alias">YoY</span></dt>
+        <dd>A comparison of one calendar year against the previous one for a given metric
+            (e.g. distance this year vs last year), so you can see your trend across seasons.</dd>
+      </dl>
+
+      <dl class="gl-term">
+        <dt><span class="name">“vs prior 365d”</span></dt>
+        <dd>The small up/down figure under the dashboard's headline numbers. It compares
+            the <strong>last 365 days</strong> with the <strong>365 days before that</strong>
+            — a like-for-like rolling window, not a partial calendar year.</dd>
+      </dl>
+    </section>
+
+    <!-- ── Training & fitness ──────────────────────────────────────────── -->
+    <section class="gl-group" id="training">
+      <h2>Training &amp; fitness</h2>
+
+      <dl class="gl-term">
+        <dt><span class="name">Heart-rate zones</span><span class="alias">Karvonen</span></dt>
+        <dd>Five effort bands derived from your heart rate. AlForks uses the
+            <strong>Karvonen</strong> method, which sets the bands from your
+            <em>heart-rate reserve</em> — the gap between your resting and maximum HR —
+            so the zones fit you rather than a generic chart. Higher zone = harder effort.</dd>
+        <dd>Set your resting and max HR in <strong>Settings → Fitness</strong> for accurate
+            zones. Without HR data the app falls back to an estimate from duration, distance
+            and climbing.</dd>
+      </dl>
+
+      <dl class="gl-term">
+        <dt><span class="name">Training load</span></dt>
+        <dd>A single "how hard was this?" score per activity. With heart rate, it's
+            zone-weighted — easy time barely counts, hard time counts a lot (recovery
+            below ~60% effort adds nothing). It's the daily fuel for Fitness, Fatigue and Form.</dd>
+      </dl>
+
+      <dl class="gl-term">
+        <dt><span class="name">Fitness</span><span class="alias">CTL</span></dt>
+        <dd>Your training load smoothed over roughly the <strong>last 6 weeks</strong>
+            (a 42-day weighted average). It rises slowly as you put in consistent work and
+            fades when you ease off — a measure of the engine you've built.</dd>
+      </dl>
+
+      <dl class="gl-term">
+        <dt><span class="name">Fatigue</span><span class="alias">ATL</span></dt>
+        <dd>The same training load but smoothed over just the <strong>last week</strong>
+            (a 7-day weighted average). It spikes fast after hard days and settles quickly
+            with rest — how tired you are right now.</dd>
+      </dl>
+
+      <dl class="gl-term">
+        <dt><span class="name">Form</span><span class="alias">TSB</span></dt>
+        <dd>Fitness minus Fatigue — your <em>freshness</em>. Positive means rested and
+            ready (you've recovered faster than you've built fitness); negative means you're
+            carrying fatigue from recent hard work. Useful for timing a big day.</dd>
+      </dl>
+
+      <dl class="gl-term">
+        <dt><span class="name">Load ratio</span><span class="alias">ACWR</span></dt>
+        <dd>Acute-to-chronic workload ratio: your <strong>last 7 days</strong> of load
+            against your <strong>last 28 days</strong>. A rough gauge of how fast you're
+            ramping up.</dd>
+        <dd>Above <strong>1.5</strong> = ramping hard (higher injury risk); roughly
+            <strong>0.8–1.5</strong> = a sustainable sweet spot; below <strong>0.8</strong>
+            = detraining. Needs about a month of history before it's meaningful.</dd>
+      </dl>
+
+      <dl class="gl-term">
+        <dt><span class="name">VO₂max</span></dt>
+        <dd>An estimate of your aerobic capacity — how much oxygen your body can use when
+            working hard. AlForks uses a simple field formula from the ratio of your maximum
+            to resting heart rate, so it reflects your <em>whole-body</em> fitness (cycling,
+            skiing, hiking) rather than a running-only watch estimate.</dd>
+        <dd>It's a ballpark trend line, not a lab measurement — watch the direction over
+            time, not the exact number.</dd>
+      </dl>
+    </section>
+
+    <div class="foot">AlForks &middot; v{{ version }} &middot; runs locally on your machine</div>
+  </main>
+</body>
+</html>
