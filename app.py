@@ -1853,7 +1853,7 @@ def _summary_data_compute(days_back: int, units: str,
                 years_set.add(int(d[:4]))
             except ValueError:
                 pass
-    years_sorted = sorted(years_set)
+    years_sorted = sorted(years_set)[-8:]
 
     rollups: dict = {}
     history: dict = {}
@@ -1928,11 +1928,14 @@ def _summary_data_compute(days_back: int, units: str,
 
             def _rank(key, top=1, src=None):
                 items = src if src is not None else source
-                ranked = sorted(
-                    (a for a in items if (a.get("stats") or {}).get(key) is not None),
-                    key=lambda a: a["stats"][key], reverse=True,
-                )
-                return ranked[:top]
+                candidates = [a for a in items if (a.get("stats") or {}).get(key) is not None]
+                if not candidates:
+                    return []
+                # top=1 is the only caller today; a single max() scan is O(n)
+                # vs sorting the whole slice. Keep the sort path for top>1.
+                if top == 1:
+                    return [max(candidates, key=lambda a: a["stats"][key])]
+                return sorted(candidates, key=lambda a: a["stats"][key], reverse=True)[:top]
 
             def _entry(top, label, value_key, value_field, kind):
                 return {
@@ -1960,19 +1963,6 @@ def _summary_data_compute(days_back: int, units: str,
             return out
 
         prs = _build_prs(type_acts)   # all-time
-        # Per-year top-1 snapshots so the frontend can merge any year-chip
-        # selection client-side. Top-1 per year, then max across selected
-        # years, is equivalent to running the rank on the union of those
-        # years' activities (which is what the user expects from the
-        # "Records" column when they toggle year chips).
-        prs_by_year: dict = {}
-        acts_by_year: dict = {}
-        for a in type_acts:
-            yr = (a.get("date") or "")[:4]
-            if yr.isdigit():
-                acts_by_year.setdefault(yr, []).append(a)
-        for yr, acts in acts_by_year.items():
-            prs_by_year[yr] = _build_prs(acts)
 
         rollups[tid] = {
             "days":            len(unique_dates),
@@ -1990,7 +1980,6 @@ def _summary_data_compute(days_back: int, units: str,
             "last_date":       last_date_iso,
             "prs":             prs,
             "prs_window":      _build_prs(in_window),
-            "prs_by_year":     prs_by_year,
         }
         # avg_speed: total distance / total riding time
         total_dist = rollups[tid]["distance_km"]
