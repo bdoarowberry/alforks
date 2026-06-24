@@ -1,5 +1,13 @@
 # AlForks — Changelog
 
+## 2026.06.24.2
+- **New Glossary** — a plain-language reference for the terms you see around the
+  app. What **riding time** means versus **elapsed time**, **climbing** versus
+  **vertical**, what an **assisted** lift-or-shuttle segment is, how your
+  **recent records** differ from **all-time** ones, and what the training numbers
+  (**Fitness, Fatigue, Form, VO₂max** and **heart-rate zones**) actually tell you.
+  Find it under the **⚙ menu → Glossary**.
+
 ## 2026.06.24.1
 - **Redesigned Dashboard** — the home page now leads with what actually matters
   at a glance. Your **last 365 days** sit up top — distance, moving time,
