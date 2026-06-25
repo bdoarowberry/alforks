@@ -62,7 +62,11 @@
         <a href="#time">Time &amp; distance</a>
         <a href="#elevation">Elevation</a>
         <a href="#records">Records &amp; comparisons</a>
+        <a href="#heart">Heart rate</a>
         <a href="#training">Training &amp; fitness</a>
+        <a href="#body">Body &amp; wellness</a>
+        <a href="#trails">Trails &amp; routes</a>
+        <a href="#data">Data quality</a>
       </div>
     </div>
 
@@ -88,6 +92,22 @@
             shuttle segments are excluded from both the distance and the time, so the
             number reflects your pace <em>when you were actually riding</em> — not a number
             watered down by chairlift rides and coffee stops.</dd>
+      </dl>
+
+      <dl class="gl-term">
+        <dt><span class="name">Distance</span><span class="alias">riding distance</span></dt>
+        <dd>How far you travelled under your own power. Like average speed and climbing,
+            it leaves out <em>assisted</em> stretches — so a chairlift ride or a shuttle back
+            to the trailhead doesn't pad your distance.</dd>
+      </dl>
+
+      <dl class="gl-term">
+        <dt><span class="name">Top speed</span><span class="alias">max speed</span></dt>
+        <dd>The fastest you went. Records and headline numbers use your fastest
+            <strong>riding</strong> moment — lift and shuttle samples are excluded, so a
+            gondola or a drive uphill never shows up as a "top speed".</dd>
+        <dd>A few places (e.g. an individual activity's raw readout) show the whole-track
+            maximum instead, which can read higher if a lift moved faster than you rode.</dd>
       </dl>
     </section>
 
@@ -117,6 +137,19 @@
             and climbing, so those stats stay honest. <strong>Descent still counts</strong>
             (the down is yours), and the segment is marked with a <code>LIFT</code> tag on
             the activity.</dd>
+      </dl>
+
+      <dl class="gl-term">
+        <dt><span class="name">Peak elevation</span><span class="alias">high point</span></dt>
+        <dd>The highest point reached on the activity, taken straight from the GPS track's
+            elevation data.</dd>
+      </dl>
+
+      <dl class="gl-term">
+        <dt><span class="name">Gradient</span><span class="alias">grade · steepness</span></dt>
+        <dd>How steep the terrain is at a point on the track — the change in elevation over
+            the distance covered, shown as a percentage on the elevation and speed profiles.
+            Positive is uphill, negative downhill.</dd>
       </dl>
     </section>
 
@@ -149,11 +182,56 @@
             the <strong>last 365 days</strong> with the <strong>365 days before that</strong>
             — a like-for-like rolling window, not a partial calendar year.</dd>
       </dl>
+
+      <dl class="gl-term">
+        <dt><span class="name">Record categories</span><span class="alias">Longest · Biggest Day · …</span></dt>
+        <dd>The specific bests AlForks tracks: <strong>Longest</strong> (distance),
+            <strong>Climbing</strong> and <strong>Vertical</strong> (descent),
+            <strong>Top speed</strong>, longest <strong>Duration</strong>, and snow-day extras
+            like <strong>Biggest Day</strong>, <strong>Most Lifts in a day</strong> and
+            <strong>Days on Snow</strong>. Each shows as both a last-365-day and an all-time
+            figure.</dd>
+      </dl>
+
+      <dl class="gl-term">
+        <dt><span class="name">Streaks</span><span class="alias">current · longest</span></dt>
+        <dd>A run of consecutive days with at least one activity. <strong>Current streak</strong>
+            counts back from today (or yesterday); <strong>longest streak</strong> is your best
+            ever, across all history.</dd>
+      </dl>
+
+      <dl class="gl-term">
+        <dt><span class="name">Active days</span></dt>
+        <dd>The number of distinct calendar days you logged something — not the number of
+            activities. Two rides on the same day count as one active day.</dd>
+      </dl>
     </section>
 
-    <!-- ── Training & fitness ──────────────────────────────────────────── -->
-    <section class="gl-group" id="training">
-      <h2>Training &amp; fitness</h2>
+    <!-- ── Heart rate ──────────────────────────────────────────────────── -->
+    <section class="gl-group" id="heart">
+      <h2>Heart rate</h2>
+
+      <dl class="gl-term">
+        <dt><span class="name">Average HR</span><span class="alias">avg HR · bpm</span></dt>
+        <dd>Your mean heart rate over the activity, in beats per minute. Needs heart-rate
+            data — from a paired Garmin (Settings → Connect Garmin) or a recording that
+            already carries HR.</dd>
+      </dl>
+
+      <dl class="gl-term">
+        <dt><span class="name">Max HR</span><span class="alias">peak HR · bpm</span></dt>
+        <dd>The highest heart rate recorded during the activity. Different from your
+            <em>maximum HR</em> setting, which is the ceiling used to size your zones — you can
+            override that in <strong>Settings → Fitness</strong>.</dd>
+      </dl>
+
+      <dl class="gl-term">
+        <dt><span class="name">Resting HR</span><span class="alias">RHR · “usual”</span></dt>
+        <dd>Your heart rate at rest, from Garmin wellness data. The <strong>“usual”</strong>
+            figure beside it is your median resting HR over the last 30 days — a baseline to
+            compare today against. A resting HR drifting <em>below</em> your usual is generally
+            a good sign.</dd>
+      </dl>
 
       <dl class="gl-term">
         <dt><span class="name">Heart-rate zones</span><span class="alias">Karvonen</span></dt>
@@ -165,6 +243,11 @@
             zones. Without HR data the app falls back to an estimate from duration, distance
             and climbing.</dd>
       </dl>
+    </section>
+
+    <!-- ── Training & fitness ──────────────────────────────────────────── -->
+    <section class="gl-group" id="training">
+      <h2>Training &amp; fitness</h2>
 
       <dl class="gl-term">
         <dt><span class="name">Training load</span></dt>
@@ -212,6 +295,180 @@
             skiing, hiking) rather than a running-only watch estimate.</dd>
         <dd>It's a ballpark trend line, not a lab measurement — watch the direction over
             time, not the exact number.</dd>
+        <dd>If a Garmin VO₂max is shown too, note it's a running-specific watch estimate and
+            tends to read low for non-running sports like MTB — AlForks' own estimate is the
+            whole-body one.</dd>
+      </dl>
+
+      <dl class="gl-term">
+        <dt><span class="name">Calories</span><span class="alias">kcal</span></dt>
+        <dd>An estimate of energy burned. With heart rate it's zone-weighted; otherwise it's
+            based on the activity's duration, sport and climbing. It scales with your
+            <strong>body weight</strong>, so keep your weight log current — a stale weight makes
+            the calorie figure drift.</dd>
+      </dl>
+
+      <dl class="gl-term">
+        <dt><span class="name">Aerobic fitness</span><span class="alias">Z2 HR trend</span></dt>
+        <dd>An indirect fitness indicator from your easy-effort (Zone 2) heart rate. As you get
+            fitter, your HR at a given easy pace drifts <em>down</em> — so a line trending
+            downward over months is progress. Read the trend, not week-to-week wiggles.</dd>
+      </dl>
+
+      <dl class="gl-term">
+        <dt><span class="name">Training balance</span><span class="alias">training mix · polarization</span></dt>
+        <dd>How your effort splits across easy, moderate and hard. Most endurance plans favour
+            plenty of easy and some genuinely hard, with little stuck in the middle — this tells
+            you whether your mix leans too hard, too easy, or sits about right.</dd>
+      </dl>
+
+      <dl class="gl-term">
+        <dt><span class="name">Consistency</span></dt>
+        <dd>How regularly you've been active over the recent window — rewarding steady, frequent
+            activity over occasional big one-offs.</dd>
+      </dl>
+    </section>
+
+    <!-- ── Body & wellness ─────────────────────────────────────────────── -->
+    <section class="gl-group" id="body">
+      <h2>Body &amp; wellness</h2>
+
+      <dl class="gl-term">
+        <dt><span class="name">Body weight</span><span class="alias">weight log</span></dt>
+        <dd>Your logged weight over time. Stored internally in kilograms; you can enter it in
+            stones &amp; pounds. Beyond the trend, it feeds the <em>Calories</em> estimate —
+            which is why the card nudges you when the latest reading is over a week old.</dd>
+      </dl>
+
+      <dl class="gl-term">
+        <dt><span class="name">Body Battery</span><span class="alias">Garmin</span></dt>
+        <dd>Garmin's 0–100 estimate of your energy reserves, blending stress, rest and
+            activity. Higher means more in the tank. Shown when Garmin wellness data is
+            connected.</dd>
+      </dl>
+
+      <dl class="gl-term">
+        <dt><span class="name">Sleep</span></dt>
+        <dd>Last night's sleep duration from Garmin, in hours — a rough input to how recovered
+            you are coming into the day.</dd>
+      </dl>
+
+      <dl class="gl-term">
+        <dt><span class="name">Training status</span><span class="alias">Garmin</span></dt>
+        <dd>Garmin's own verdict on where your training is heading (productive, maintaining,
+            detraining, and so on). Passed through as-is when available — AlForks' Fitness,
+            Fatigue and Form are its independent take.</dd>
+      </dl>
+    </section>
+
+    <!-- ── Trails & routes ─────────────────────────────────────────────── -->
+    <section class="gl-group" id="trails">
+      <h2>Trails &amp; routes</h2>
+
+      <dl class="gl-term">
+        <dt><span class="name">On-trail matching</span></dt>
+        <dd>AlForks snaps your GPS track to named trails and roads from OpenStreetMap, so it can
+            tell <em>which</em> trails you rode — not just where you went. This is what powers
+            coverage, leaderboards and route detection.</dd>
+      </dl>
+
+      <dl class="gl-term">
+        <dt><span class="name">Coverage</span><span class="alias">% covered</span></dt>
+        <dd>How much of a trail's mapped length you actually rode on a given pass, as a
+            percentage. Partial laps and out-and-backs read below 100%.</dd>
+      </dl>
+
+      <dl class="gl-term">
+        <dt><span class="name">Completed</span></dt>
+        <dd>A trail counts as completed on a pass when you covered at least <strong>85%</strong>
+            of its length — or when you touched both ends with solid partial coverage (an
+            “endpoint” completion), which catches trails where GPS drift leaves a gap in the
+            middle.</dd>
+      </dl>
+
+      <dl class="gl-term">
+        <dt><span class="name">Direction</span><span class="alias">up / down / ↔</span></dt>
+        <dd>Which way you travelled a trail — uphill, downhill, or forward/reverse along its
+            mapped line. Times are tracked per direction, since a descent and a climb of the
+            same trail aren't really comparable.</dd>
+      </dl>
+
+      <dl class="gl-term">
+        <dt><span class="name">Visits</span></dt>
+        <dd>How many separate times you've ridden a given trail (in a given direction) across
+            all your logged activities.</dd>
+      </dl>
+
+      <dl class="gl-term">
+        <dt><span class="name">Leaderboard &amp; rank</span><span class="alias">Best Run</span></dt>
+        <dd>Your completed passes of a trail or route, sorted fastest-first. <strong>Rank</strong>
+            is where a given run sits in that list and <strong>Best Run</strong> is your fastest.
+            Since it's only you, it's a personal leaderboard — a way to chase your own times.</dd>
+      </dl>
+
+      <dl class="gl-term">
+        <dt><span class="name">Difficulty</span><span class="alias">MTB scale</span></dt>
+        <dd>A trail's technical grade where OpenStreetMap provides one (the MTB difficulty
+            scale). Blank when the trail isn't rated upstream.</dd>
+      </dl>
+
+      <dl class="gl-term">
+        <dt><span class="name">Routes &amp; attempts</span></dt>
+        <dd>A <strong>route</strong> is a named string of trails you ride as a set. An
+            <strong>attempt</strong> is one activity that rode that route; <strong>Best</strong>
+            is your fastest full attempt. Coverage decides whether an attempt counts as a full
+            completion or a partial.</dd>
+      </dl>
+
+      <dl class="gl-term">
+        <dt><span class="name">Suggested routes</span></dt>
+        <dd>Routes AlForks proposes by spotting loops and trail combinations you ride often, so
+            your regulars become reusable named routes without building them by hand.</dd>
+      </dl>
+    </section>
+
+    <!-- ── Data quality & processing ───────────────────────────────────── -->
+    <section class="gl-group" id="data">
+      <h2>Data quality &amp; processing</h2>
+
+      <dl class="gl-term">
+        <dt><span class="name">Duplicates</span><span class="alias">likely duplicate</span></dt>
+        <dd>When two activities cover nearly the same time and place — common if a ride syncs
+            from both Strava and Garmin — AlForks flags them so you can keep one and dismiss the
+            rest. Dismissed pairs stay remembered so they don't nag you again.</dd>
+      </dl>
+
+      <dl class="gl-term">
+        <dt><span class="name">Spike repair</span><span class="alias">raw vs repaired speed</span></dt>
+        <dd>GPS occasionally jumps, producing impossible speed spikes. Spike repair smooths
+            those out so they don't wreck your max-speed and distance numbers. The activity view
+            can show <strong>raw</strong> vs <strong>repaired</strong> speed side by side.</dd>
+      </dl>
+
+      <dl class="gl-term">
+        <dt><span class="name">Trim</span><span class="alias">trim ends</span></dt>
+        <dd>Cuts unwanted start/end portions of a track — a recording left running in the car
+            park, say — from the stats and map, without touching the original file.</dd>
+      </dl>
+
+      <dl class="gl-term">
+        <dt><span class="name">Smoothing</span><span class="alias">smooth GPS</span></dt>
+        <dd>Optional extra smoothing of a noisy track over a chosen distance window, to tame
+            jitter in the elevation and speed traces.</dd>
+      </dl>
+
+      <dl class="gl-term">
+        <dt><span class="name">Data issues</span><span class="alias">odd times · missing type</span></dt>
+        <dd>Flags the app raises for review: <strong>odd times</strong> (gaps or out-of-order
+            timestamps), <strong>missing type</strong> (no activity type set yet), and other
+            quality warnings, gathered on the review screen.</dd>
+      </dl>
+
+      <dl class="gl-term">
+        <dt><span class="name">Excluded from stats</span></dt>
+        <dd>A switch that keeps an activity in your library but leaves it out of totals, records
+            and trends — handy for a test recording, a duplicate you want to keep, or a wildly
+            broken track.</dd>
       </dl>
     </section>
 
