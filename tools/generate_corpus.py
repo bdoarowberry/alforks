@@ -138,6 +138,7 @@ class Column:
     sqltype: str
     identity: bool = False
     computed: str | None = None
+    computed_from: tuple = ()
 
 
 @dataclass
@@ -184,6 +185,7 @@ class Expr:
     kind: str
     base: str
     plain: str | None = None        # column name when the expression is a bare reference
+    bare: bool = False              # contains a column reference without an alias prefix
 
 
 @dataclass
@@ -552,8 +554,7 @@ class Generator:
         self.emit(obj, self.table_ddl(obj))
         for col in obj.columns:
             if col.computed:
-                inputs = [(f"{obj.key}.{c.name}", "value", frozenset()) for c in obj.columns
-                          if c.name in col.computed and not c.computed and c is not col]
+                inputs = [(f"{obj.key}.{name}", "value", frozenset()) for name in col.computed_from]
                 self.truth.write(f"{obj.key}.{col.name}", inputs, {"computed_column"}, f"ddl:{obj.key}")
 
     def proc_text(self, obj: DbObject, params: list[str], body: Body) -> str:
@@ -577,13 +578,20 @@ class Generator:
         return f"{src.alias}.{text}", styled
 
     def make_expr(self, ctx: Ctx, srcs: list[Src], picker: Picker) -> Expr:
+        expr = self._make_expr(ctx, srcs, picker)
+        return expr
+
+    def _make_expr(self, ctx: Ctx, srcs: list[Src], picker: Picker) -> Expr:
         single = len(srcs) == 1
         inputs: list = []
         feats: set = set()
+        bare = []
 
         def r(item, role="value") -> str:
             src, col = item
             text, styled = self.colref(src, col, single)
+            if not text.startswith(src.alias + "."):
+                bare.append(True)
             extra = {"bracketed_or_mixed_case"} if styled else set()
             inputs.append((f"{src.prefix}.{col.name}", role, src.feats | extra))
             return text
@@ -971,7 +979,8 @@ class Generator:
             nums = [c for c in cols if c.typ == "num"]
             if len(nums) >= 2:
                 comp = Column(f"{nums[0].name}_x_{nums[1].name}"[:60], "num", "decimal(18,4)",
-                              computed=f"{nums[0].name} * {nums[1].name}")
+                              computed=f"{nums[0].name} * {nums[1].name}",
+                              computed_from=(nums[0].name, nums[1].name))
                 core_cols.insert(rng.randint(2, len(core_cols)), comp)
         core_cols.append(self.column("load_ts", "date"))
         core_table = self.new_object(self.core_db, "core", subj, "table", "core", subj, core_cols)
