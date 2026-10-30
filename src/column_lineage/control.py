@@ -51,6 +51,8 @@ class _Parser:
         self.masked = masked
         self.ends = statement_ends
         self.regions: list[tuple[int, int, str]] = []
+        self.arms: dict[tuple[int, int], tuple[int, str]] = {}   # region -> (owning IF/WHILE/TRY offset, arm)
+        self.visited: set[int] = set()   # indexed statement starts the parser walked through
         self.steps = 0
 
     def word_at(self, i: int) -> tuple[str, int] | None:
@@ -95,6 +97,7 @@ class _Parser:
     def simple_end(self, i: int, end: int) -> int:
         known = self.ends.get(i)
         if known is not None and known > i:
+            self.visited.add(i)
             return min(known, end)
         # Unindexed statement (PRINT, TRUNCATE, cursor verbs...): to ';' or end of line.
         newline = self.masked.find("\n", i, end)
@@ -119,12 +122,14 @@ class _Parser:
             label = f"{name} {condition}"
             body_end = self.statement(cond_end, end)
             self.regions.append((cond_end, body_end, label))
+            self.arms[(cond_end, body_end)] = (i, "then" if name == "IF" else "loop")
             if name == "IF":
                 j = self.skip_ws(body_end, end)
                 nxt = self.word_at(j)
                 if nxt and nxt[0] == "ELSE":
                     else_end = self.statement(nxt[1], end)
                     self.regions.append((nxt[1], else_end, f"ELSE (of IF {condition})"))
+                    self.arms[(nxt[1], else_end)] = (i, "else")
                     return else_end
             return body_end
         if name == "BEGIN":
@@ -142,6 +147,7 @@ class _Parser:
                     if catch and catch[0] == "CATCH":
                         catch_end = self.block(catch[1], end, "CATCH")
                         self.regions.append((catch[1], catch_end, "CATCH"))
+                        self.arms[(catch[1], catch_end)] = (i, "catch")
                         return catch_end
                 return body_end
             return self.block(after, end, None)
@@ -166,8 +172,7 @@ class _Parser:
         return end
 
 
-def control_contexts(text: str, masked: str, statements) -> dict[int, tuple[str, ...]]:
-    """Map each statement start offset to its enclosing control labels, outermost first."""
+def _parse(text: str, masked: str, statements) -> _Parser:
     ends = {s.start: s.end for s in statements}
     procedures = [m for m in DEFINITION.finditer(masked) if m.group("kind").lower().startswith("proc")]
     batches = [0] + [m.end() for m in GO.finditer(masked)]
@@ -189,9 +194,36 @@ def control_contexts(text: str, masked: str, statements) -> dict[int, tuple[str,
                 i = nxt if nxt > i else i + 1
         except RecursionError:
             continue
+    return parser
+
+
+def control_contexts(text: str, masked: str, statements) -> dict[int, tuple[str, ...]]:
+    """Map each statement start offset to its enclosing control labels, outermost first."""
+    parser = _parse(text, masked, statements)
     result: dict[int, tuple[str, ...]] = {}
     for statement in statements:
         enclosing = [r for r in parser.regions if r[0] <= statement.start < r[1]]
         enclosing.sort(key=lambda r: (r[0], -r[1]))
         result[statement.start] = tuple(label for _, _, label in enclosing)
+    return result
+
+
+def control_regions(text: str, masked: str, statements) -> dict[int, tuple[tuple[int, int, str, int, str], ...]]:
+    """Like control_contexts, with each region's span and its arm: (start, end, label, owner, arm).
+
+    Only statements the parser actually reached are included: a missing start means the control
+    flow around it could not be followed. ``owner`` is the offset of the IF/WHILE/BEGIN TRY that opens
+    the region; ``arm`` is ``then`` or
+    ``else`` for IF, ``loop`` for WHILE, ``try`` / ``catch`` for TRY ... CATCH. Two regions with the same
+    owner and different arms of an IF are mutually exclusive.
+    """
+    parser = _parse(text, masked, statements)
+    result: dict[int, tuple[tuple[int, int, str, int, str], ...]] = {}
+    for statement in statements:
+        if statement.start not in parser.visited:
+            continue
+        enclosing = [r for r in parser.regions if r[0] <= statement.start < r[1]]
+        enclosing.sort(key=lambda r: (r[0], -r[1]))
+        result[statement.start] = tuple((s, e, label) + parser.arms.get((s, e), (s, "try" if label == "TRY" else "block"))
+                                        for s, e, label in enclosing)
     return result

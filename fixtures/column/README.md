@@ -28,3 +28,10 @@ Invented T-SQL used by `tests/test_column_acceptance.py` and `tests/test_column_
 - `quoted_identifiers` - bracketed, double-quoted and mixed-case names for the same objects, columns and `#temp` table.
 - `comments_strings` - line/block comments and a string literal containing SQL that mentions the target and a decoy table.
 - `parse_failure` - writers that sqlglot cannot parse: `OPTION (USE HINT (...))` on an INSERT and `UPDATE ... OUTPUT ... INTO`.
+- `dynamic/` - dynamic SQL evaluated statically (`tests/test_column_dynamic_eval.py`), one root per case:
+  `literal`, `concat` (+ and CONCAT with literal variables), `if_else` (IF/ELSE choosing target and source;
+  assignment and EXEC in the same branch), `quotename` (QUOTENAME, REPLACE, CHAR, CAST), `parameter`
+  (literal default and literal callers; a procedure with no caller), `unknown_select` (value from a query),
+  `loop` (built in a WHILE), `too_many` (32 alternatives), `multi_statement` (SELECT INTO #temp then INSERT
+  in one string), `nested` (EXEC inside the string), `batch_variable` (a variable read inside the string;
+  declared-length truncation).

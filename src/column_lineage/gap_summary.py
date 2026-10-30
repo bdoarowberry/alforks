@@ -127,6 +127,11 @@ def build(catalog, traces: list[dict], samples: int = 25) -> dict:
                 sample["anonymized_near_error"] = near
             sample_list.append(sample)
     issue_kinds = Counter(issue.kind for issue in catalog.issues)
+    evaluations = Counter()
+    for issue in catalog.issues:
+        evaluation = catalog.dynamic_evaluation(issue) if hasattr(catalog, "dynamic_evaluation") else None
+        if evaluation is not None:
+            evaluations[evaluation.status] += 1
     trace_summary = []
     for data in traces:
         completeness = data["completeness"]
@@ -151,6 +156,7 @@ def build(catalog, traces: list[dict], samples: int = 25) -> dict:
         "note": "Contains no object, column, path or file names. Anonymized SQL replaces identifiers with IDn.",
         "scan": {k: v for k, v in catalog.stats.items()},
         "statement_issues_by_kind": dict(sorted(issue_kinds.items())),
+        "dynamic_sql_evaluation": dict(sorted(evaluations.items())),
         "unparsed_statements_by_keyword": dict(sorted(statements.items())),
         "parse_error_classes": dict(errors.most_common(40)),
         "unparsed_samples": sample_list,

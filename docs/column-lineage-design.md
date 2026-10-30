@@ -155,6 +155,43 @@ dependency.
 are no gaps. A `source_without_writer` stop means "no writer exists in the scanned
 files", not "this is the ultimate source-system field".
 
+### Dynamic SQL evaluation (`dynamic_eval.py`)
+
+After loading, every `dynamic_sql` statement issue (other than dead dynamic SQL) is evaluated once:
+
+- The executed expression (`EXEC (expr)`, `EXEC sp_executesql expr | @stmt = expr`) is evaluated to
+  the set of strings it can take. Evaluated: string and N-string literals, NULL, numbers (as text only
+  through CAST/CONVERT), `+`, `CONCAT`, `QUOTENAME`, `REPLACE` (case-insensitive), `CHAR`/`NCHAR`,
+  `CAST`/`CONVERT` to a string type (with its length), `ISNULL`/`COALESCE`, `UPPER`/`LOWER`,
+  `LTRIM`/`RTRIM`, `LEFT`/`RIGHT`.
+- A variable's value at the EXEC is computed from its assignments before it in the same scope (DECLARE,
+  SET, SELECT without FROM), in order, using `control.control_regions`: an assignment inside an IF/ELSE
+  arm or CATCH that does not enclose the EXEC is conditional, so earlier values survive under the
+  negated condition. Arms of the same IF exclude each other, so variables set together stay paired.
+  The declared length of the variable truncates the value.
+- A procedure parameter takes what each caller in the scanned files passes (evaluated in the caller,
+  recursively, at most 8 calls deep), or its default for callers that omit it. With no caller the
+  default is the only known value and the evaluation is **open**.
+- Anything else makes the evaluation **unknown**: a value from a query, FETCH, UPDATE or OUTPUT; an
+  assignment in a WHILE loop; an unparsed statement that may assign the variable; control flow that
+  could not be followed; a non-literal argument; a parameter with no caller and no default; more than
+  16 alternatives.
+- Each string is split and parsed like a file. It is refused (unknown) if it reads a variable (they
+  belong to the dynamic batch or to sp_executesql parameters), contains control flow (IF, WHILE, ...),
+  a statement the indexer does not recognise (USE, CREATE PROCEDURE, GRANT, ...), or one that is not
+  a DML/SELECT INTO/CREATE TABLE/VIEW/EXEC procedure statement. DECLARE/SET of literals inside it feed
+  a nested `EXEC`, which is evaluated recursively.
+- For a **complete** or **open** evaluation the statements of every alternative are indexed as
+  writers at the EXEC (same scope, offset and database context, so `#temp` scoping is that of the
+  procedure). Their steps are `inferred` (never `verified`), `branch_context` adds
+  `dynamic SQL alternative i of n` and the alternative's conditions, and a note says where the string
+  was built and executed. Evidence cites the EXEC's lines with the evaluated SQL as the excerpt.
+- Only a **complete** evaluation removes the `dynamic_sql` gap. Otherwise the gap stays, with
+  `detail.evaluation` (`open` / `unknown`), `detail.unknown_pieces` / `detail.open_pieces` (which
+  variable or piece, why, where) and `detail.alternatives_enumerated`.
+- `scan-diagnostics.json` lists fully evaluated statements as `evaluated_dynamic_sql`, and every
+  evaluated issue has an `evaluation` entry with each alternative's conditions and SQL.
+
 ## JSON shape (`column-lineage/1.0`)
 
 ```

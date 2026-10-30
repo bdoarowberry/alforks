@@ -241,13 +241,8 @@ def main(argv: list[str] | None = None) -> int:
             "assertion_effects": {k: sorted(v, key=lambda g: (g["kind"], g["location"]))
                                   for k, v in sorted(tracer.assertion_effects.items())},
             "statements_blocking_most_traces": blocking_statements(traces),
-            "statement_issues": [
-                {"kind": "dead_dynamic_sql" if catalog.dead_dynamic(i) else i.kind,
-                 "message": ("Dynamic SQL that can only execute an empty string or NULL; not a writer."
-                             if catalog.dead_dynamic(i) else i.message), "targets": list(i.targets),
-                 "evidence": catalog.evidence(i.unit, i.statement, role=i.kind).to_dict()}
-                for i in sorted(catalog.issues, key=lambda i: (i.unit.root_label, i.unit.rel_path, i.statement.start))
-            ],
+            "statement_issues": [issue_entry(catalog, i) for i in
+                                 sorted(catalog.issues, key=lambda i: (i.unit.root_label, i.unit.rel_path, i.statement.start))],
         }
         (output / "scan-diagnostics.json").write_text(json.dumps(diagnostics, indent=2, ensure_ascii=False) + "\n",
                                                       encoding="utf-8")
@@ -262,6 +257,26 @@ def main(argv: list[str] | None = None) -> int:
                                      for t in traces],
                           "written": [str(p) for p in written]}, indent=2))
     return 3 if (args.fail_on_incomplete and incomplete) else 0
+
+
+def issue_entry(catalog, issue) -> dict:
+    """One statement issue for scan-diagnostics.json, with the outcome of dynamic SQL evaluation."""
+    kind, message = issue.kind, issue.message
+    evaluation = catalog.dynamic_evaluation(issue)
+    if catalog.dead_dynamic(issue):
+        kind, message = "dead_dynamic_sql", "Dynamic SQL that can only execute an empty string or NULL; not a writer."
+    elif evaluation is not None and evaluation.complete:
+        kind = "evaluated_dynamic_sql"
+        message = (f"Dynamic SQL evaluated statically: {len(evaluation.alternatives)} possible text(s), all enumerated "
+                   "from literals and analysed as writers.")
+    entry = {"kind": kind, "message": message, "targets": list(issue.targets),
+             "evidence": catalog.evidence(issue.unit, issue.statement, role=issue.kind).to_dict()}
+    if evaluation is not None:
+        entry["evaluation"] = {**evaluation.detail(),
+                               "alternatives": [{"conditions": a.conditions, "built_at": a.built_at,
+                                                 "statements": len(a.statements), "sql": a.sql[:2000]}
+                                                for a in evaluation.alternatives]}
+    return entry
 
 
 if __name__ == "__main__":

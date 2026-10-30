@@ -31,6 +31,7 @@ class Tracer:
         self.assertions_seen: set[str] = set()
         self.assertion_effects: dict[str, list[dict]] = {}   # assertion id -> gaps it resolved
         self._memo: dict[tuple, tuple] = {}   # shared between traces in one run
+        catalog.evaluate_dynamic()
 
     # ------------------------------------------------------------- targets
     def target_node(self, spec: str) -> tuple[Node | None, str, list[Gap]]:
@@ -158,11 +159,12 @@ class Tracer:
         used = [a for a in self.assertions if a.id in result.assertions_used and a.writer_path]
         for scope in sorted(scopes_seen):
             for issue in self.catalog.dynamic_by_scope.get(scope, []):
-                if issue.targets or self.catalog.dead_dynamic(issue):
+                if issue.targets or self.catalog.dead_dynamic(issue) or self.catalog.dynamic_resolved(issue):
                     continue
                 gap = Gap("dynamic_sql", "A procedure on this path executes dynamic SQL whose target is "
                           "built at runtime; it may write columns on this path.", None,
-                          [self.catalog.evidence(issue.unit, issue.statement, role="dynamic_sql")])
+                          [self.catalog.evidence(issue.unit, issue.statement, role="dynamic_sql")],
+                          self.dynamic_detail(issue))
                 explained = next((a for a in used if gap.kind in a.resolves and a.explains(gap.evidence)), None)
                 if explained is not None:
                     result.resolved_gaps.append({**gap.to_dict(), "affects": "context", "resolved_by": explained.id})
@@ -313,15 +315,20 @@ class Tracer:
         ref = node.object
         gaps = []
         for issue in self.catalog.issues_by_target.get(ref.name, []):
-            if self.catalog.dead_dynamic(issue):
+            if self.catalog.dead_dynamic(issue) or self.catalog.dynamic_resolved(issue):
                 continue
             wording = {"dynamic_sql": "Dynamic SQL in {where} names {obj} as a write target; what it writes is not analysed.",
                        "parse_error": "An unparsed statement in {where} appears to write {obj}.",
                        "insert_exec": "INSERT ... EXEC in {where} writes {obj} from a procedure result set; columns are not mapped.",
                        }.get(issue.kind, issue.message)
+            evaluation = self.catalog.dynamic_evaluation(issue)
+            if evaluation is not None and evaluation.status == "open":
+                wording = ("Dynamic SQL in {where} names {obj} as a write target; the texts known from the code are "
+                           "analysed, but others may be executed (see the open pieces).")
             where = issue.statement.procedure or issue.unit.rel_path
             gaps.append(Gap(issue.kind, wording.format(where=where, obj=ref.name), node,
-                            [self.catalog.evidence(issue.unit, issue.statement, role=issue.kind)]))
+                            [self.catalog.evidence(issue.unit, issue.statement, role=issue.kind)],
+                            self.dynamic_detail(issue)))
         if ref.kind in ("table", "view") and ref.database:
             for writer in self.catalog.unknown_db_writers.get((ref.schema, ref.name), []):
                 dbs = sorted(self.catalog.known_databases.get((ref.schema, ref.name), ()))
@@ -333,6 +340,11 @@ class Tracer:
         if ref.server:
             gaps.append(Gap("external_object", f"{ref.display} is on linked server {ref.server}; it is not in the scanned files.", node))
         return gaps
+
+    def dynamic_detail(self, issue) -> dict:
+        """Why a dynamic SQL statement could not be fully evaluated (empty for other issues)."""
+        evaluation = self.catalog.dynamic_evaluation(issue)
+        return evaluation.detail() if evaluation is not None else {}
 
     def _expand_column(self, node: Node, before):
         ref = node.object
@@ -361,6 +373,7 @@ class Tracer:
                 continue
             gaps.extend(found_gaps)
             cycles.extend(found_cycles)
+            mark_evaluated(found, writer.statement)
             for step in found:
                 step._scope = writer.statement.scope
                 step._position = (writer.unit.path, writer.statement.start, writer.statement.scope)
@@ -523,6 +536,7 @@ class Tracer:
             except Exception as exc:  # noqa: BLE001
                 gaps.append(internal_gap(self.catalog, call.unit, call.statement, node, exc))
                 continue
+            mark_evaluated(found, call.statement)
             for step in found:
                 step._scope = call.statement.scope
                 step._position = (call.unit.path, call.statement.start, call.statement.scope)
@@ -552,6 +566,19 @@ class Tracer:
                               "No EXEC in the scanned files passes this parameter (it may be set by a job, an SSIS "
                               "package or an application, or left to its default)."))
         return steps, gaps, stops, []
+
+
+def mark_evaluated(steps, statement) -> None:
+    """Steps from SQL evaluated out of a dynamic string are inferred, never verified."""
+    if not getattr(statement, "eval_key", None):
+        return
+    for step in steps:
+        step.status = worst(step.status, INFERRED)
+        where = (f"built at {statement.built_at} (executed at {statement.executed_at})"
+                 if statement.built_at != statement.executed_at else f"built and executed at {statement.executed_at}")
+        note = f"Evaluated from dynamic SQL {where}; the string was enumerated from literals in the code."
+        if note not in step.notes:
+            step.notes.append(note)
 
 
 def clean_controls(controls) -> tuple[str, ...]:
