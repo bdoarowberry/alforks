@@ -153,7 +153,26 @@ class Tracer:
                                    [self.catalog.evidence(issue.unit, issue.statement, role="dynamic_sql")]))
         result.cycles.extend(c for c in find_cycles(edges) if c not in result.cycles)
         result.stops = dedupe_stops(result.stops)
+        self._explain_ends(result)
         return result
+
+    @staticmethod
+    def _explain_ends(result: TraceResult) -> None:
+        """Every end of a value path must carry a stop or a gap; record any that does not."""
+        nodes, steps = result.value_path()
+        targets = {s.target.id for s in result.steps}
+        stopped = {s.node.id for s in result.stops}
+        gapped = {g.node.id for g in result.gaps.values() if g.node is not None}
+        gapped |= {i.node.id for s in steps for i in s.inputs if i.gap}
+        cyclic = {n for c in result.cycles for n in c}
+        for node_id in sorted(nodes - targets - stopped - gapped - cyclic):
+            node = result.nodes.get(node_id)
+            if node is None:
+                continue
+            if node_id == result.target.id and not result.steps:
+                continue
+            result.add_gap(Gap("unexplained_end", "The trace ends here without a recorded reason; treat paths "
+                               "through this node as unproven.", node))
 
     @staticmethod
     def read_point(node: Node, position):

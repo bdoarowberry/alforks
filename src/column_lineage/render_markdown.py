@@ -813,6 +813,130 @@ def _section_steps(t: _Trace) -> list[str]:
 
 # --------------------------------------------------------------------------- gaps
 
+NEXT_EVIDENCE = {
+    "dynamic_sql": "the SQL this statement builds and executes at runtime (a captured example or a confirmed "
+                   "mapping), or the metadata that drives it",
+    "external_object": "the definition of the external object and the code that loads it (add those files to "
+                       "--source-root)",
+    "missing_definition": "the definition and writers of this object (add their files to --source-root, or check "
+                          "the database mapping)",
+    "parse_error": "the statement at the cited line, confirmed or rewritten by hand (send its anonymized shape)",
+    "unsupported_statement": "the statement at the cited line, confirmed or rewritten by hand (send its anonymized "
+                             "shape)",
+    "insert_exec": "the ordered result-set columns of the called procedure",
+    "opaque_function": "the body of the user function (add its definition) to see what else it reads",
+    "table_valued_function": "the definition of the table-valued function and its output columns",
+    "ambiguous_object": "database context for the name: a USE, a three-part name or a --database-map entry",
+    "ambiguous_column": "a qualified column reference or the schemas of the candidate sources",
+    "unresolved_alias": "the query at the cited line; the alias names nothing in scope",
+    "ambiguous_writer_order": "the run order of the listed procedures (job steps or orchestration)",
+    "positional_without_schema": "the ordered column list (CREATE TABLE) of the target",
+    "wildcard_without_schema": "the ordered column list (CREATE TABLE) of the source behind the *",
+    "column_count_mismatch": "the INSERT column list and SELECT list at the cited line",
+    "unresolved_variable": "how the variable is set (OUTPUT parameter, return code, cursor or dynamic SQL)",
+    "runtime_branch": "which branch runs at runtime",
+    "cycle": "manual review of the cycle",
+    "depth_limit": "manual review; the expression is too deeply nested to analyse",
+    "unexplained_end": "manual review of the last step; please report this as a tool defect",
+}
+
+
+def _where_proof_ends(t: _Trace, gaps: list[dict]) -> list[str]:
+    """Every place a value path ends, each as its own bullet, with location and next evidence."""
+    out = ["### Where proof ends", ""]
+    consumers: dict[str, list[tuple[dict, dict]]] = {}
+    for step in t.ordered:
+        for inp in step.get("inputs") or []:
+            consumers.setdefault(inp.get("node"), []).append((step, inp))
+    _, value_step_ids = t.reach(t.target_id, ("value", "condition", "window"))
+
+    def via(node: str) -> list[str]:
+        """One line per step that reads this node, with its location and branches."""
+        grouped: dict[str, tuple[dict, list[str]]] = {}
+        for step, inp in consumers.get(node, []):
+            entry = grouped.setdefault(step["id"], (step, []))
+            if inp.get("branch") and inp["branch"] not in entry[1]:
+                entry[1].append(inp["branch"])
+        lines = []
+        for step, branches in list(grouped.values())[:5]:
+            ev = (step.get("evidence") or [None])[0]
+            text = "Reached via " + t.step_link(step) + (f" at {_code(t.location(ev))}" if ev else "")
+            if branches:
+                text += " — branch " + ", ".join(_code(b, 80) for b in branches)
+            lines.append(text)
+        if len(grouped) > 5:
+            lines.append(f"Reached via {len(grouped) - 5} more steps (see Detailed steps)")
+        return lines
+
+    boundary = t.data.get("boundary") or {}
+    requested = [*(f"database {d}" for d in boundary.get("databases") or []),
+                 *(f"objects {o}" for o in boundary.get("objects") or [])]
+    if requested and not any(s.get("reason") == "boundary" for s in t.stops):
+        out.append(f"- **No value path reaches the requested boundary** ({_text(', '.join(requested))}); every "
+                   "path ends at one of the points below first.")
+
+    by_reason: dict[str, list[dict]] = {}
+    for stop in t.stops:
+        by_reason.setdefault(stop.get("reason") or "stop", []).append(stop)
+    for reason in sorted(by_reason):
+        out.append(f"- Stopped — {STOP_LABEL.get(reason, _text(reason))}:")
+        for stop in by_reason[reason]:
+            line = f"  - {_code(t.display(stop.get('node')))}"
+            if stop.get("detail"):
+                line += f" ({_text(stop['detail'])})"
+            out.append(line)
+            out += [f"    - {item}" for item in via(stop.get("node"))]
+
+    gap_nodes = sorted({g["node"] for g in gaps if g.get("node")})
+    if gap_nodes:
+        out.append("- Proof is missing at:")
+        for node in gap_nodes:
+            node_gaps = [g for g in gaps if g.get("node") == node]
+            kinds = sorted({g.get("kind") or "gap" for g in node_gaps})
+            scope = "row selection only" if all(g.get("affects") == "row_selection" for g in node_gaps) else "value path"
+            out.append(f"  - {_code(t.display(node))} — {_text(', '.join(kinds))} ({scope})")
+            places = sorted({t.location(ev) for g in node_gaps for ev in (g.get("evidence") or [])[:1]})
+            if places:
+                out.append("    - Where: " + ", ".join(_code(p) for p in places[:5])
+                           + (f" and {len(places) - 5} more" if len(places) > 5 else ""))
+            out += [f"    - {item}" for item in via(node)]
+            for kind in kinds:
+                out.append(f"    - Next evidence ({_text(kind)}): {_text(NEXT_EVIDENCE.get(kind, 'manual review of the cited statement'))}")
+
+    gap_free = [g for g in gaps if not g.get("node")]
+    if gap_free:
+        out.append("- Not tied to a node (procedure or statement level):")
+        for gap in sorted(gap_free, key=lambda g: (g.get("kind") or "", g.get("id") or "")):
+            ev = (gap.get("evidence") or [None])[0]
+            where = f" — {_code(t.location(ev))}" if ev else ""
+            out.append(f"  - {_text(gap.get('kind') or 'gap')}: {_text(gap.get('message') or '')}{where}")
+            out.append(f"    - Next evidence: {_text(NEXT_EVIDENCE.get(gap.get('kind'), 'manual review of the cited statement'))}")
+
+    weak: dict[tuple[str, str], list[dict]] = {}
+    for step in t.ordered:
+        if step["id"] in value_step_ids and (step.get("status") or "verified") in ("inferred", "partial", "ambiguous"):
+            weak.setdefault((step.get("status"), step.get("mapping_method") or "?"), []).append(step)
+    if weak:
+        total = sum(len(v) for v in weak.values())
+        out.append(f"- Weaker links on the value paths (not ends, but not verified): {_plural(total, 'step')}")
+        for (status, method), steps in sorted(weak.items(), key=lambda kv: (_status_rank(kv[0][0]), kv[0][1])):
+            out.append(f"  - {_text(status)} — {_text(method)}: {_join_list([t.step_link(s) for s in steps], 12)}")
+
+    if len(out) > 2:
+        out.append("")
+    result, _ = _result_text(t)
+    if gaps:
+        out.append(f"Proof ends at the {_plural(len(gap_nodes), 'node')} listed above with gaps; value paths "
+                   f"through them are unproven. The result is **{_text(result)}**. Stops mark where the "
+                   "trace ended, not ultimate source-system fields.")
+    elif t.stops:
+        out.append(f"Every recorded value path ends at a stop. The result is **{_text(result)}**. Stops mark "
+                   "where the trace ended, not ultimate source-system fields.")
+    else:
+        out.append(f"No stops or gaps were recorded. The result is **{_text(result)}**.")
+    return out
+
+
 def _section_gaps(t: _Trace, json_name: str | None) -> list[str]:
     out: list[str] = []
     gaps = t.sorted_gaps()
@@ -862,42 +986,7 @@ def _section_gaps(t: _Trace, json_name: str | None) -> list[str]:
         out += ["- " + " → ".join(_code(t.display(n)) for n in cycle) for cycle in t.cycles]
         out.append("")
 
-    out += ["### Where proof ends", ""]
-    if t.stops:
-        by_reason: dict[str, list[str]] = {}
-        for stop in t.stops:
-            text = _code(t.display(stop.get("node")))
-            if stop.get("detail"):
-                text += f" ({_text(stop['detail'])})"
-            by_reason.setdefault(stop.get("reason") or "stop", []).append(text)
-        for reason in sorted(by_reason):
-            out.append(f"- Stopped — {STOP_LABEL.get(reason, _text(reason))}:")
-            out += [f"  - {item}" for item in sorted(set(by_reason[reason]))]
-    gap_nodes = sorted({g["node"] for g in gaps if g.get("node")})
-    if gap_nodes:
-        out.append("- Proof is missing at:")
-        for node in gap_nodes:
-            node_gaps = [g for g in gaps if g.get("node") == node]
-            kinds = ", ".join(sorted({_text(g.get("kind") or "gap") for g in node_gaps}))
-            scope = "row selection only" if all(g.get("affects") == "row_selection" for g in node_gaps) else "value path"
-            out.append(f"  - {_code(t.display(node))} — {kinds} ({scope})")
-    gap_free = [g for g in gaps if not g.get("node")]
-    if gap_free:
-        out.append("- Not tied to a node (scan or statement level):")
-        for gap in sorted(gap_free, key=lambda g: (g.get("kind") or "", g.get("id") or "")):
-            out.append(f"  - {_text(gap.get('kind') or 'gap')}: {_text(gap.get('message') or '')}")
-    if t.stops or gaps:
-        out.append("")
-    result, _ = _result_text(t)
-    if gaps:
-        out.append(f"Proof ends at the {_plural(len(gap_nodes), 'node')} listed above with gaps; value paths "
-                   f"through them are unproven. The result is **{_text(result)}**. Stops mark where the "
-                   "trace ended, not ultimate source-system fields.")
-    elif t.stops:
-        out.append(f"Every recorded value path ends at a stop. The result is **{_text(result)}**. Stops mark "
-                   "where the trace ended, not ultimate source-system fields.")
-    else:
-        out.append(f"No stops or gaps were recorded. The result is **{_text(result)}**.")
+    out += _where_proof_ends(t, gaps)
     out.append("")
     if json_name:
         out.append(f"Companion JSON (complete trace graph and full evidence): "

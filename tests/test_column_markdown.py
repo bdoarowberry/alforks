@@ -250,7 +250,8 @@ def test_gaps_section_lists_gaps_and_json():
     assert "- Proof is missing at:\n  - `@override_value (in reporting.demo.apply_overrides)` — dynamic_sql (value path)" in gaps
     # Every stop and missing-proof item is its own bullet, never a run-on list.
     proof = gaps.split("### Where proof ends", 1)[1].split("\n\n", 2)[1]
-    assert all(line.startswith(("- ", "  - ")) for line in proof.splitlines())
+    assert all(line.startswith(("- ", "  - ", "    - ")) for line in proof.splitlines())
+    assert "    - Next evidence (dynamic_sql):" in proof and "    - Where: " in proof
     assert "  - `staging.demo.source.input_a`" in proof and "  - `staging.demo.source.input_b`" in proof
     assert f"[{SAMPLE_JSON_NAME}]({SAMPLE_JSON_NAME})" in gaps
     assert "### Steps that are not verified" in gaps

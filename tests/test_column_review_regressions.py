@@ -177,3 +177,47 @@ def test_wildcard_step_cites_the_star_and_its_source_schema(tmp_path):
 def test_qualified_names_in_insert_column_list_are_repaired(tmp_path):
     t = review("insert_qualified_cols", "demo.output.result_value", tmp_path, *DB)
     assert "db.demo.source.input_a" in reach(t)
+
+
+# ---- real-source feedback, round 3
+
+def test_round3_parse_repairs(tmp_path):
+    t = review("round3_parse", "demo.output.result_value", tmp_path, *DB)
+    assert "db.demo.source.input_a" in reach(t)                      # spaced ! = and < = repaired
+    pairs = set().union(*(row_selection_pairs(s) for s in t.steps))
+    assert ("db.demo.source.flag", "filter") in pairs
+    assert t.data["scan"]["fallback"] == 0                             # PK CLUSTERED, same-line DECLAREs, ALTER ADD PK
+    assert "parse_error" not in t.gap_kinds
+
+
+def test_where_proof_ends_says_when_no_path_reaches_the_boundary(tmp_path):
+    t = review("round3_parse", "demo.output.result_value", tmp_path, *DB, "--stop-at-database", "elsewhere")
+    assert "No value path reaches the requested boundary" in t.markdown
+    t = review("round3_parse", "demo.output.result_value", tmp_path / "b", *DB, "--stop-at-database", "db")
+    assert "No value path reaches the requested boundary" not in t.markdown
+
+
+def test_every_value_path_end_is_explained():
+    from column_lineage.model import COLUMN, Boundary, Input, Node, ObjectRef, Step, TraceResult, VALUE
+    from column_lineage.tracer import Tracer
+    target = Node(COLUMN, "c", ObjectRef("t", "s", "db"))
+    leaf = Node(COLUMN, "x", ObjectRef("u", "s", "db"))
+    result = TraceResult(target, "db.s.t.c", Boundary(), {})
+    result.add_node(target)
+    result.add_node(leaf)
+    result.steps.append(Step(target, "insert_select", "x", "rename", [Input(leaf, VALUE, "x")]))
+    Tracer._explain_ends(result)
+    assert [g.kind for g in result.gaps.values()] == ["unexplained_end"]
+    assert result.completeness()["status"] == "incomplete"
+
+
+def test_worker_processes_print_no_sql(tmp_path):
+    import shutil
+    from column_lineage_helpers_subprocess import run_with_workers
+    src = tmp_path / "src"
+    src.mkdir()
+    for i in range(24):
+        shutil.copy(FIXTURES / "parse_failure" / "load_output.sql", src / f"f{i}.sql")
+    proc = run_with_workers(src, tmp_path / "out")
+    assert proc.returncode == 0, proc.stderr[-2000:]
+    assert proc.stderr.strip() == ""

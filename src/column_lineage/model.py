@@ -52,7 +52,7 @@ GAP_KINDS = (
     "missing_definition", "unresolved_alias", "ambiguous_column", "ambiguous_object",
     "ambiguous_writer_order", "positional_without_schema", "wildcard_without_schema",
     "column_count_mismatch", "opaque_function", "table_valued_function", "external_object",
-    "unresolved_variable", "runtime_branch", "cycle", "depth_limit", "column_not_written",
+    "unresolved_variable", "runtime_branch", "cycle", "depth_limit", "column_not_written", "unexplained_end",
 )
 
 

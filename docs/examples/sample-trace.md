@@ -184,9 +184,16 @@ Ordered target-first, then upstream by depth.
 
 - Stopped — requested boundary:
   - `staging.demo.source.input_a` (database staging is in the requested boundary)
+    - Reached via [S3](#step-9fa99888e121e84d) at `procedures/load_output.sql:5` — branch `WHEN s.input_a IS NOT NULL`, `WHEN s.input_a IS NOT NULL THEN`
   - `staging.demo.source.input_b` (database staging is in the requested boundary)
+    - Reached via [S3](#step-9fa99888e121e84d) at `procedures/load_output.sql:5` — branch `ELSE`
 - Proof is missing at:
   - `@override_value (in reporting.demo.apply_overrides)` — dynamic_sql (value path)
+    - Where: `procedures/apply_overrides.sql:9`
+    - Reached via [S2](#step-a92b7a4a25e85778) at `procedures/apply_overrides.sql:12`
+    - Next evidence (dynamic_sql): the SQL this statement builds and executes at runtime (a captured example or a confirmed mapping), or the metadata that drives it
+- Weaker links on the value paths (not ends, but not verified): 1 step
+  - partial — set_clause: [S2](#step-a92b7a4a25e85778)
 
 Proof ends at the 1 node listed above with gaps; value paths through them are unproven. The result is **Incomplete — 1 value-path gap**. Stops mark where the trace ended, not ultimate source-system fields.
 

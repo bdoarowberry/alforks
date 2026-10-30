@@ -34,6 +34,22 @@
 - **sqlglot fallback warnings** are silenced.
 - **Anonymizer:** `@var` / `#temp` stay single tokens, and built-in function names are kept.
 
+## Fixed after feedback round 3
+
+- Worker processes no longer print SQLGlot fallback warnings, which quoted raw SQL.
+- **Parse repairs:**
+  - spaced comparison operators (`! =`, `< =`, `> =`);
+  - `PRIMARY KEY` / `UNIQUE CLUSTERED` inside CREATE TABLE;
+  - several DECLAREs on one line.
+- `ALTER TABLE … ADD PRIMARY KEY/UNIQUE/…` and index-option fragments count as non-lineage.
+- **"Where proof ends"** is comprehensive:
+  - every stop and every node missing proof is its own bullet, with its location, the step(s) and
+    branch(es) that reach it, and the next evidence needed;
+  - it says explicitly when no value path reaches the requested boundary;
+  - weaker (inferred/partial) links are listed;
+  - the tracer guarantees every value-path end has a stop or a gap: otherwise an `unexplained_end`
+    gap is recorded.
+
 ## Known open issues
 
 - Corpus chain 08 ends in `missing_definition` (recall 0.6). Not investigated.

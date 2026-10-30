@@ -6,6 +6,7 @@ says, plus the context needed to bind names later: database, scope, control flow
 from __future__ import annotations
 
 from collections import defaultdict
+import logging
 from dataclasses import dataclass, field, replace
 import hashlib
 from pathlib import Path
@@ -43,6 +44,8 @@ INSERT_HINT = re.compile(rf"\bINSERT\s+(?:INTO\s+)?{IDENT}\s*(?P<hint>WITH\s*\(\
 OUTPUT_CLAUSE = re.compile(rf"(?<![.\w\[\]])OUTPUT\s+(?=INSERTED\b|DELETED\b|\$ACTION\b|@)(?:(?!\bOUTPUT\b).)*?(?:\bINTO\s+(?P<target>{IDENT})(?:\s*\([^()]*\))?)?"
                            r"(?=\s*(?:SELECT|VALUES|FROM|WHERE|DEFAULT|;|$))", re.I | re.S)
 INSERT_COLUMNS = re.compile(rf"\bINSERT\s+(?:INTO\s+)?{IDENT}\s*\((?P<cols>[^()]*)\)", re.I)
+KEY_CLUSTERING = re.compile(r"\b(?:PRIMARY\s+KEY|UNIQUE)\s+(?P<kind>(?:NON)?CLUSTERED)\b", re.I)
+SPACED_OPERATOR = re.compile(r"([!<>])[ \t]+([=>])")
 OPTION_HINT = re.compile(r"(?P<option>\bOPTION\s*\((?:[^()]|\((?:[^()]|\([^()]*\))*\))*\))\s*;?\s*$", re.I)
 ALIAS_DEF = re.compile(rf"\b(?:FROM|JOIN|UPDATE|MERGE(?:\s+INTO)?)\s+(?P<name>{IDENT})\s+(?:WITH\s*\([^)]*\)\s*)?(?:AS\s+)?"
                        r"(?P<alias>\[[^\]]+\]|[A-Za-z_][\w$#]*)", re.I)
@@ -50,18 +53,25 @@ NON_LINEAGE = re.compile(
     r"\s*(?:RAISERROR\b|RETURN\b|PRINT\b|THROW\b|REVERT\b|(?:WITH\s+)?EXEC(?:UTE)?\s+AS\b|"
     # Cursor verbs and DROP are read separately from the source text; WHILE here is a condition fragment.
     r"DECLARE\s+[A-Za-z_][\w$#@]*\s+(?:INSENSITIVE\s+|SCROLL\s+)*CURSOR\b|(?:OPEN|FETCH|CLOSE|DEALLOCATE|DROP|WHILE)\b|"
-    r"ALTER\s+TABLE\s+\S+\s+(?:ADD\s+CONSTRAINT|DROP\s+CONSTRAINT|(?:WITH\s+)?(?:NO)?CHECK|SWITCH|REBUILD|SET\s*\()|"
+    r"ALTER\s+TABLE\s+\S+\s+(?:ADD\s+(?:CONSTRAINT|PRIMARY\s+KEY|UNIQUE|FOREIGN\s+KEY|CHECK|INDEX|DEFAULT)|"
+    r"DROP\s+CONSTRAINT|(?:WITH\s+)?(?:NO)?CHECK|SWITCH|REBUILD|SET\s*\()|"
+    # Index options split off a CREATE INDEX / constraint: WITH (PAD_INDEX = OFF, ...) ON [PRIMARY]
+    r"WITH\s*\(\s*[A-Za-z_]+\s*=\s*(?:ON|OFF|\d+)\b|"
     r"SET\s+(?:NOCOUNT|XACT_ABORT|ANSI_\w+|QUOTED_IDENTIFIER|ARITHABORT|CONCAT_NULL_YIELDS_NULL|NUMERIC_ROUNDABORT|"
     r"TRANSACTION|IDENTITY_INSERT|DATEFORMAT|DATEFIRST|LANGUAGE|LOCK_TIMEOUT|DEADLOCK_PRIORITY|ROWCOUNT|STATISTICS|"
     r"FMTONLY|NOEXEC|IMPLICIT_TRANSACTIONS|CURSOR_CLOSE_ON_COMMIT|TEXTSIZE|CONTEXT_INFO)\b)", re.I)
 GLUE = re.compile(r"(?im)^[ \t]*(?P<word>TRUNCATE|DECLARE|SET|EXEC|EXECUTE|WHILE|IF|PRINT|DROP|CREATE|RAISERROR|RETURN|"
                   r"BEGIN|END|INSERT|UPDATE|DELETE|MERGE|SELECT|WITH|OPEN|FETCH|CLOSE|DEALLOCATE|COMMIT|ROLLBACK|THROW)\b")
+DECLARE_ANYWHERE = re.compile(r"(?<![\w@#$])DECLARE\b", re.I)
 DROP_TEMP = re.compile(r"\bDROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?(?P<name>#[A-Za-z_][\w$#@]*)", re.I)
 
 
 def prepare_in_worker(job):
     """Process-pool entry point: parse and repair one file with a scratch catalog."""
     path, text, root, root_label, settings = job
+    # Workers do not inherit the parent's logging setup (spawn on Windows), and SQLGlot's fallback
+    # warnings quote raw SQL: silence them here too.
+    logging.getLogger("sqlglot").setLevel(logging.ERROR)
     scratch = Catalog(*settings)
     source = SourceFile(Path(path), text)
     try:
@@ -121,12 +131,14 @@ def parse_or_none(text: str):
 
 
 def glued_boundaries(masked: str, limit: int = 60) -> list[int]:
-    """Offsets of line-start statement keywords at parenthesis depth 0 and outside CASE ... END."""
+    """Offsets of line-start statement keywords (and DECLARE anywhere) at parenthesis depth 0,
+    outside CASE ... END."""
     cuts = []
     depth = 0
     case = 0
     position = 0
-    for match in GLUE.finditer(masked):
+    starts = sorted({m.start(): m for m in list(GLUE.finditer(masked)) + list(DECLARE_ANYWHERE.finditer(masked))}.items())
+    for _, match in starts:
         segment = masked[position:match.start()]
         depth += segment.count("(") - segment.count(")")
         case += len(re.findall(r"\bCASE\b", segment, re.I)) - len(re.findall(r"\bEND\b", segment, re.I))
@@ -504,7 +516,7 @@ class Catalog:
         masked = mask_noncode(text)
         outputs = []
         spans = []
-        for pattern, group in ((INSERT_HINT, "hint"), (DML_TOP, "top"), (OPTION_HINT, "option")):
+        for pattern, group in ((INSERT_HINT, "hint"), (DML_TOP, "top"), (OPTION_HINT, "option"), (KEY_CLUSTERING, "kind")):
             for match in pattern.finditer(masked):
                 spans.append(match.span(group))
         target_list = INSERT_COLUMNS.search(masked)
@@ -518,6 +530,10 @@ class Catalog:
                 outputs.append(split_name(match.group("target"))[-1].lower())
         for start, end in sorted(spans, reverse=True):
             text = text[:start] + "".join(c if c in "\r\n" else " " for c in text[start:end]) + text[end:]
+        for match in SPACED_OPERATOR.finditer(mask_noncode(text)):
+            # `a ! = b` / `a < = b` are accepted by SQL Server: close the gap, keeping the length.
+            gap = match.end() - match.start() - 2
+            text = text[:match.start()] + match.group(1) + match.group(2) + " " * gap + text[match.end():]
         return text, outputs
 
     def _reparse(self, root_label: str, rel: str, statement: Statement) -> Statement | None:
