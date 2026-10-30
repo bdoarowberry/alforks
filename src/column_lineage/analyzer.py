@@ -119,6 +119,7 @@ class Ctx:
         # While analysing row-selection clauses, bind columns without expanding CTE/derived
         # sources: row-selection columns are recorded, not traced (unless --trace-row-selection).
         self.no_expand = False
+        self.in_row_selection = False
 
     def position(self, node) -> int:
         """Stable ordinal of an AST node within its statement, so reused aliases stay distinct."""
@@ -132,7 +133,10 @@ class Ctx:
 
     def gap(self, kind: str, message: str, node: Node | None = None, expr: exp.Expression | None = None,
             detail: dict | None = None) -> str:
-        gap = Gap(kind, message, node, [self.catalog.evidence(self.unit, self.statement, expr, "gap")], detail or {})
+        detail = dict(detail or {})
+        if self.in_row_selection:
+            detail["raised_in_row_selection"] = True
+        gap = Gap(kind, message, node, [self.catalog.evidence(self.unit, self.statement, expr, "gap")], detail)
         if all(g.id != gap.id for g in self.gaps):
             self.gaps.append(gap)
         return gap.id
@@ -780,6 +784,10 @@ class Analyzer:
         tree = writer.statement.tree
         if writer.via:
             through = self.through_column(writer, column, ctx)
+            if through is AMBIGUOUS_THROUGH:
+                ctx.gap("ambiguous_object", f"This statement writes through view {writer.via[1]}, which has several "
+                        "definitions in the scanned files; which base column it sets cannot be determined.", target)
+                return [], ctx.gaps, ctx.cycles
             if through is None:
                 return [], ctx.gaps, ctx.cycles
             column = through
@@ -796,6 +804,10 @@ class Analyzer:
                 self._merge(tree, column, target, ctx, writer)
         except RecursionError:
             ctx.gap("depth_limit", "Expression nesting is too deep to analyse.", target)
+        if (f"{writer.unit.root_label}/{writer.unit.rel_path}", writer.statement.start) in self.catalog.top_limited:
+            for step in ctx.steps:
+                step.notes.append("This statement has TOP (n): it writes only some of the qualifying rows, and "
+                                  "which ones is not determined.")
         return ctx.steps, ctx.gaps, ctx.cycles
 
     def through_column(self, writer: Writer, column: str, ctx: Ctx) -> str | None:
@@ -810,7 +822,7 @@ class Analyzer:
         else:
             views = [w for w in self.catalog.writers.get(name, []) if w.kind == "view"]
             if len(views) != 1:
-                return None
+                return AMBIGUOUS_THROUGH if views else None
             view = views[0]
             tree = view.statement.tree
             query = tree.args.get("expression")
@@ -995,6 +1007,16 @@ class Analyzer:
             if not any(s.alias in target_aliases for s in scope.sources):
                 scope.add_from(target_table)
         for assignment in tree.expressions:
+            if isinstance(assignment, exp.Dot) and isinstance(assignment.expression, exp.Anonymous) \
+                    and str(assignment.expression.this).upper() == "WRITE" and norm(ident_text(assignment.this)) == column:
+                # col.WRITE(expr, offset, length) replaces part of the existing value.
+                value = exp.Anonymous(this="WRITE", expressions=[exp.column(column), *assignment.expression.expressions])
+                step = self.make_step(target, "update", value, scope, ctx, "set_clause", [])
+                step.operation = "partial_update"
+                step.row_selection.extend(self.row_selection(tree, scope, ctx))
+                step.notes.append(".WRITE replaces part of the existing value with the given expression.")
+                ctx.steps.append(step)
+                continue
             if not isinstance(assignment, exp.EQ) or not isinstance(assignment.this, exp.Column):
                 continue
             left = assignment.this
@@ -1123,6 +1145,9 @@ class Analyzer:
 
 
 # ----------------------------------------------------------------- helpers
+AMBIGUOUS_THROUGH = object()   # through_column: the view has several definitions
+
+
 class row_selection_mode:
     """Context manager: bind columns without expanding local sources (see Ctx.no_expand)."""
 
@@ -1130,11 +1155,12 @@ class row_selection_mode:
         self.ctx = ctx
 
     def __enter__(self):
-        self.previous = self.ctx.no_expand
+        self.previous = (self.ctx.no_expand, self.ctx.in_row_selection)
         self.ctx.no_expand = not self.ctx.analyzer.expand_row_selection
+        self.ctx.in_row_selection = True
 
     def __exit__(self, *exc):
-        self.ctx.no_expand = self.previous
+        self.ctx.no_expand, self.ctx.in_row_selection = self.previous
 
 
 def parse_expression(text: str | None):

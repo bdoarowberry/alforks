@@ -332,7 +332,7 @@ class TraceResult:
             node = gap.node.id if gap.node else None
             if gap.id in value_ids or (node and node in value_nodes):
                 effects[gap.id] = "value"
-            elif gap.id in row_ids or (node and node in row_nodes):
+            elif gap.id in row_ids or (node and node in row_nodes) or gap.detail.get("raised_in_row_selection"):
                 effects[gap.id] = "row_selection"
             elif node and node not in value_nodes:
                 # Reached only through traced row-selection columns.

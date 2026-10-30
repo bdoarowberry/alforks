@@ -76,10 +76,13 @@ class Assertion:
         """Whether a gap's evidence points at the statement this assertion explains."""
         if self.writer_path is None:
             return True
+        want = self.writer_path.replace("\\", "/").lower()
+        while want.startswith("./"):
+            want = want[2:]
         for ev in evidence:
             path = (ev.path or "").replace("\\", "/").lower()
-            want = self.writer_path.replace("\\", "/").lower().lstrip("./")
-            if path == want or path.endswith("/" + want) or want.endswith("/" + path):
+            # The path as shown on the page (relative to its source root), optionally prefixed by the root label.
+            if path == want or (ev.root and f"{ev.root.lower()}/{path}" == want):
                 if self.writer_line is None or ev.start_line <= self.writer_line <= ev.end_line:
                     return True
         return False
@@ -129,7 +132,15 @@ def load(path: str | Path) -> list[Assertion]:
         if not alternatives:
             raise ValueError(f"{where}: needs at least one alternative")
         writer = item.get("writer") or {}
+        if not isinstance(writer, dict):
+            raise ValueError(f"{where}: 'writer' must be an object like {{\"path\": \"folder/file.sql\", \"line\": 12}}")
+        if writer and not isinstance(writer.get("path"), str):
+            raise ValueError(f"{where}: 'writer' needs a 'path' (a line alone would match every file)")
+        if writer.get("line") is not None and not isinstance(writer.get("line"), int):
+            raise ValueError(f"{where}: 'writer.line' must be a whole number")
         resolves = item.get("resolves")
+        if resolves is not None and (not isinstance(resolves, list) or not all(isinstance(r, str) for r in resolves)):
+            raise ValueError(f"{where}: 'resolves' must be a list of gap kinds, e.g. [\"dynamic_sql\"]")
         line = _line_of(text, ident)
         out.append(Assertion(ident, target, alternatives, writer.get("path"),
                              int(writer["line"]) if writer.get("line") is not None else None,

@@ -54,7 +54,7 @@ NON_LINEAGE = re.compile(
     # Cursor verbs and DROP are read separately from the source text; WHILE here is a condition fragment.
     r"DECLARE\s+[A-Za-z_][\w$#@]*\s+(?:INSENSITIVE\s+|SCROLL\s+)*CURSOR\b|(?:OPEN|FETCH|CLOSE|DEALLOCATE|DROP|WHILE)\b|"
     r"ALTER\s+TABLE\s+\S+\s+(?:ADD\s+(?:CONSTRAINT|PRIMARY\s+KEY|UNIQUE|FOREIGN\s+KEY|CHECK|INDEX|DEFAULT)|"
-    r"DROP\s+CONSTRAINT|(?:WITH\s+)?(?:NO)?CHECK|SWITCH|REBUILD|SET\s*\()|"
+    r"DROP\s+CONSTRAINT|(?:WITH\s+)?(?:NO)?CHECK|REBUILD|SET\s*\()|"
     # Index options split off a CREATE INDEX / constraint: WITH (PAD_INDEX = OFF, ...) ON [PRIMARY]
     r"WITH\s*\(\s*[A-Za-z_]+\s*=\s*(?:ON|OFF|\d+)\b|"
     r"SET\s+(?:NOCOUNT|XACT_ABORT|ANSI_\w+|QUOTED_IDENTIFIER|ARITHABORT|CONCAT_NULL_YIELDS_NULL|NUMERIC_ROUNDABORT|"
@@ -63,6 +63,13 @@ NON_LINEAGE = re.compile(
 GLUE = re.compile(r"(?im)^[ \t]*(?P<word>TRUNCATE|DECLARE|SET|EXEC|EXECUTE|WHILE|IF|PRINT|DROP|CREATE|RAISERROR|RETURN|"
                   r"BEGIN|END|INSERT|UPDATE|DELETE|MERGE|SELECT|WITH|OPEN|FETCH|CLOSE|DEALLOCATE|COMMIT|ROLLBACK|THROW)\b")
 DECLARE_ANYWHERE = re.compile(r"(?<![\w@#$])DECLARE\b", re.I)
+LITERAL_WRITE_TARGET = re.compile(
+    rf"\b(?:INSERT\s+{TOP}(?:INTO\s+)?|UPDATE\s+{TOP}|MERGE\s+{TOP}(?:INTO\s+)?|SELECT\b[^;]*?\bINTO\s+)(?P<target>{IDENT})", re.I)
+SWITCH = re.compile(rf"\bALTER\s+TABLE\s+(?P<source>{IDENT})\s+SWITCH\s+(?:PARTITION\s+\S+\s+)?TO\s+(?P<target>{IDENT})", re.I)
+ALTER_DEFAULT = re.compile(rf"\bALTER\s+TABLE\s+(?P<name>{IDENT})\s+(?:WITH\s+(?:NO)?CHECK\s+)?ADD\s+(?:CONSTRAINT\s+\S+\s+)?"
+                           r"DEFAULT\s*(?P<expr>\((?:[^()]|\((?:[^()]|\([^()]*\))*\))*\)|N?'(?:''|[^'])*'|[-\w.]+)\s+FOR\s+"
+                           r"(?P<col>\[[^\]]+\]|[A-Za-z_][\w$#@]*)", re.I)
+EXEC_AS_HEADER = re.compile(r"\s*WITH\s+EXEC(?:UTE)?\s+AS\s+(?:N?'[^']*'|[A-Za-z_]\w*)\s*(?:,\s*[A-Za-z_]\w*\s*)*AS\b", re.I)
 DROP_TEMP = re.compile(r"\bDROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?(?P<name>#[A-Za-z_][\w$#@]*)", re.I)
 
 
@@ -108,6 +115,31 @@ def merge_split_inserts(statements: list[Statement], text: str, masked: str) -> 
 
 STATEMENT_KEYWORD = re.compile(r"(?<![\w@#$.])(?:INSERT|UPDATE|DELETE|MERGE|SELECT|EXEC(?:UTE)?|SET|DECLARE|WITH|"
                                r"TRUNCATE)\b", re.I)
+
+
+def expression_end(masked: str, start: int) -> int:
+    """End of the expression starting at ``start``: a top-level comma, clause keyword or the end."""
+    depth = 0
+    i = start
+    while i < len(masked):
+        char = masked[i]
+        if char == "(":
+            depth += 1
+        elif char == ")":
+            if depth == 0:
+                return i
+            depth -= 1
+        elif depth == 0 and (char in ",;" or re.match(r"(?i)(?<![\w@#$])(?:FROM|WHERE|OUTPUT|OPTION)\b", masked[i:i + 7])
+                             and (i == 0 or not (masked[i - 1].isalnum() or masked[i - 1] in "_@#$"))):
+            end = i
+            while end > start and masked[end - 1].isspace():
+                end -= 1
+            return end
+        i += 1
+    end = len(masked)
+    while end > start and masked[end - 1].isspace():
+        end -= 1
+    return end
 
 
 def unmatched_close(masked: str) -> int | None:
@@ -192,20 +224,30 @@ def empty_literal(value) -> bool:
     return False
 
 
-def write_targets(text: str) -> tuple[str, ...]:
-    """Object names a SQL text writes, resolving `UPDATE alias ... FROM table AS alias`."""
+# Reserved words, which cannot be unquoted object names: matched only as keywords (UPDATE STATISTICS x).
+NOT_TARGETS = {"set", "select", "from", "where", "values", "top", "into", "table", "statistics", "with"}
+
+
+def write_targets(text: str, literal: bool = False) -> tuple[str, ...]:
+    """Object names a SQL text writes, resolving `UPDATE alias ... FROM table AS alias`.
+
+    An alias defined more than once (e.g. again inside a subquery) maps to every table it names.
+    With ``literal`` the text is string-literal content: a bare `INTO x` only counts after
+    INSERT or SELECT, so prose such as 'copying rows into the archive' names no target."""
     stop = {"WITH", "ON", "WHERE", "SET", "INNER", "LEFT", "RIGHT", "FULL", "CROSS", "JOIN", "USING", "WHEN", "OUTER",
             "GROUP", "ORDER", "UNION", "AS", "OUTPUT", "VALUES", "SELECT"}
-    aliases = {}
+    aliases: dict[str, set[str]] = {}
     for match in ALIAS_DEF.finditer(text):
         alias = split_name(match.group("alias"))[-1].lower()
         if alias.upper() not in stop:
-            aliases.setdefault(alias, split_name(match.group("name"))[-1].lower())
+            aliases.setdefault(alias, set()).add(split_name(match.group("name"))[-1].lower())
     names = set()
-    for match in WRITE_TARGET.finditer(text):
+    for match in (LITERAL_WRITE_TARGET if literal else WRITE_TARGET).finditer(text):
         name = split_name(match.group("target"))[-1].lower()
-        names.add(aliases.get(name, name))
-    return tuple(sorted(names))
+        if name in NOT_TARGETS:
+            continue
+        names |= aliases.get(name, {name})
+    return tuple(sorted(names - NOT_TARGETS))
 
 
 def procedure_scopes(text: str, masked: str) -> list[tuple[int, str, str]]:
@@ -285,7 +327,7 @@ DIGIT_PLACEHOLDER = "@__d"
 
 def restore_variable(name: str) -> str:
     """Undo the placeholder given to variables whose names start with a digit (@2_x)."""
-    return name.replace(DIGIT_PLACEHOLDER, "@") if DIGIT_PLACEHOLDER in name else name
+    return re.sub(r"@__d(?=\d)", "@", name, flags=re.I) if DIGIT_PLACEHOLDER in name.lower() else name
 
 
 def table_parts(table: exp.Table) -> tuple[str | None, str | None, str | None, str]:
@@ -457,6 +499,9 @@ class Catalog:
         self.fallback_by_scope: dict[str, list[Statement]] = defaultdict(list)
         self._view_bases: dict[str, list[str]] | None = None
         self._dead_dynamic: dict[int, bool] = {}
+        self.column_defaults: dict[str, dict[str, str]] = defaultdict(dict)   # ALTER TABLE ... DEFAULT ... FOR col
+        self.top_limited: set[tuple[str, int]] = set()                        # statements whose TOP (n) was blanked
+        self._dynamic_args: dict[str, list] | None = None
         self._evaluations: dict[int, object] | None = None   # id(issue) -> dynamic_eval.Evaluation
 
     # ---------------------------------------------------------------- loading
@@ -547,6 +592,7 @@ class Catalog:
         for order, statement in enumerate(index.statements):
             self.stats["statements"] += 1
             if statement.parse_status != "parsed" and non_lineage(statement.text):
+                self._alter_default(unit, statement)
                 self.stats["ignored"] += 1
                 continue
             self.stats["parsed" if statement.parse_status == "parsed" else "fallback"] += 1
@@ -597,6 +643,16 @@ class Catalog:
            semicolon before TRUNCATE, WHILE, SET NOCOUNT ...): split at line-start statement
            keywords and parse each piece on its own.
         """
+        header = EXEC_AS_HEADER.match(mask_noncode(statement.text))
+        if header:
+            offset = header.end()
+            body = statement.text[offset:]
+            tree = parse_or_none(body)
+            statement = replace(statement, start=statement.start + offset, text=body,
+                                line=statement.line + statement.text.count("\n", 0, offset), tree=tree,
+                                parse_status="parsed" if tree is not None else statement.parse_status)
+            if tree is not None:
+                return [statement]
         if non_lineage(statement.text) or INSERT_EXEC.match(mask_noncode(statement.text)):
             return [statement]
         repaired = self._reparse(root_label, rel, statement)
@@ -635,10 +691,12 @@ class Catalog:
         compound = list(COMPOUND.finditer(masked))
         for match in reversed(compound):
             lhs = text[match.start("lhs"):match.end("lhs")]
-            text = text[:match.start()] + f"{lhs} = {lhs} {match.group('op')} " + text[match.end():]
+            end = expression_end(mask_noncode(text), match.end())
+            text = (text[:match.start()] + f"{lhs} = {lhs} {match.group('op')} (" + text[match.end():end] + ")"
+                    + text[end:])
         # SQLGlot splits @2_name into '@', '2' and '_name'; give such variables a parseable
         # placeholder name (restored by restore_variable wherever names are read).
-        digits = list(DIGIT_VARIABLE.finditer(mask_noncode(text)))
+        digits = [] if DIGIT_PLACEHOLDER in text.lower() else list(DIGIT_VARIABLE.finditer(mask_noncode(text)))
         for match in reversed(digits):
             text = text[:match.start()] + DIGIT_PLACEHOLDER + text[match.end():]
         compound = compound or digits
@@ -649,6 +707,8 @@ class Catalog:
             return None
         if compound:
             self.rewritten.add((root_label + "/" + rel, statement.start))
+        if DML_TOP.search(mask_noncode(statement.text)):
+            self.top_limited.add((root_label + "/" + rel, statement.start))
         self.stats["repaired"] += 1
         self.pending_outputs.extend((statement, name) for name in outputs)
         return replace(statement, tree=tree, parse_status="parsed", parse_error=None)
@@ -685,6 +745,10 @@ class Catalog:
                 continue
             i += 1
         if not any_parsed:
+            return []
+        if any(p.parse_status != "parsed" and not non_lineage(p.text) for p in pieces):
+            # Some text did not form a statement (e.g. a line-start WITH (NOLOCK) hint): the cut was
+            # inside one statement, so keep it whole and report it as unparsed rather than lose a part.
             return []
         self.stats["repaired"] += 1
         return pieces
@@ -919,6 +983,23 @@ class Catalog:
     def _statement(self, unit: Unit, statement: Statement, order: int) -> None:
         tree = statement.tree
         text = statement.text
+        switch = SWITCH.search(mask_noncode(text))
+        if switch:
+            target = self.ref_from_text(switch.group("target"), unit, statement)
+            self._issue("unsupported_statement", unit, statement, (target.name,),
+                        f"ALTER TABLE ... SWITCH moves every row of {split_name(switch.group('source'))[-1]} into this "
+                        "table; its columns correspond by position and are not mapped.")
+            return
+        self._alter_default(unit, statement)
+        returning = tree.args.get("returning") if isinstance(tree, exp.Expression) else None
+        into = returning.args.get("into") if isinstance(returning, exp.Expression) else None
+        if into is not None:
+            # SQLGlot parses OUTPUT ... INTO natively; report the OUTPUT target instead of losing it.
+            node = into.this if isinstance(into, exp.Into) else into
+            name = table_parts(node)[3] if isinstance(node, exp.Table) else ident_text(node)
+            if name:
+                self._issue("unsupported_statement", unit, statement, (norm(name),),
+                            "OUTPUT ... INTO writes rows to this object; the OUTPUT column mapping is not analysed.")
         if DYNAMIC.match(text):
             self._issue("dynamic_sql", unit, statement, self._literal_targets(unit, statement),
                         "Dynamic SQL is executed here; its statements are not analysed.")
@@ -1064,7 +1145,7 @@ class Catalog:
             masked = mask_noncode(other.text)
             # Keep only string-literal (and comment) content, joined across concatenations.
             literals.append("".join(c if m == " " and c != " " else " " for c, m in zip(other.text, masked)))
-        return write_targets(" ".join(literals).replace("'", " "))
+        return write_targets(" ".join(literals).replace("'", " "), literal=True)
 
     def _writer_ref(self, ref: ObjectRef, unit: Unit, statement: Statement) -> ObjectRef:
         # Temp refs keep the writing statement's scope; callers are resolved at query time,
@@ -1101,6 +1182,15 @@ class Catalog:
                     info.rowversion = True
                 columns.append(info)
         self.schemas[ref.key].append(TableSchema(ref, columns, statement, unit, "create_table"))
+
+    def _alter_default(self, unit: Unit, statement: Statement) -> None:
+        """ALTER TABLE ... ADD [CONSTRAINT x] DEFAULT (expr) FOR col."""
+        for match in ALTER_DEFAULT.finditer(statement.text):
+            ref = self.ref_from_text(match.group("name"), unit, statement)
+            expr = match.group("expr").strip()
+            while expr.startswith("(") and expr.endswith(")") and depth_at(expr, 1, len(expr) - 1) == 0:
+                expr = expr[1:-1].strip()
+            self.column_defaults[ref.key][norm(split_name(match.group("col"))[-1])] = expr
 
     def _alter(self, unit: Unit, statement: Statement) -> None:
         match = ALTER_ADD.search(statement.text)
@@ -1273,6 +1363,43 @@ class Catalog:
         evaluation = self.dynamic_evaluation(issue)
         return bool(evaluation is not None and evaluation.complete)
 
+    def issue_names(self, ref: ObjectRef) -> set[str]:
+        """Names under which statement issues for ``ref`` may be recorded: its own name, synonyms
+        that resolve to it and updatable views over it."""
+        names = {ref.name}
+        if ref.kind in ("table", "view"):
+            for syn_key, (target, _, _) in self.synonyms.items():
+                if self.canonical(target)[0].key == ref.key:
+                    names.add(norm(split_name(syn_key)[-1]))
+            for view_key, bases in self.view_bases().items():
+                if ref.key in bases:
+                    views = self.writers.get(view_key, [])
+                    if views:
+                        names.add(views[0].ref.name)
+        return names
+
+    def dynamic_literal_args(self) -> dict[str, list]:
+        """Object name -> (call, issue) for calls passing that name as a string literal to a procedure
+        that runs dynamic SQL not fully evaluated (a generic loader called with its target's name)."""
+        if self._dynamic_args is None:
+            found: dict[str, list] = defaultdict(list)
+            for scope, issues in self.dynamic_by_scope.items():
+                live = [i for i in issues if not self.dead_dynamic(i) and not self.dynamic_resolved(i)]
+                proc = self.proc_by_scope.get(scope)
+                if not live or proc is None:
+                    continue
+                calls = list(self.calls_by_callee.get(proc.key, []))
+                if proc.ref.database:
+                    calls += self.calls_by_callee.get(".".join(("?", proc.ref.schema or "?", proc.ref.name)), [])
+                for call in calls:
+                    for _, arg in call.args:
+                        if isinstance(arg, (exp.Literal, exp.National)) and (isinstance(arg, exp.National) or arg.is_string):
+                            parts = split_name(arg.this or "")
+                            if 1 <= len(parts) <= 4 and all(re.fullmatch(r"[A-Za-z_#][\w$#@ ]*", p) for p in parts):
+                                found[parts[-1].lower()].append((call, live[0]))
+            self._dynamic_args = found
+        return self._dynamic_args
+
     def writers_for(self, ref: ObjectRef) -> list[Writer]:
         """Writers of an object; for a #temp table, includes callees writing into it."""
         found = list(self.writers.get(ref.key, []))
@@ -1317,7 +1444,9 @@ class Catalog:
         distinct = {tuple((c.name, c.identity, c.computed, c.rowversion) for c in s.columns) for s in creates}
         if len(distinct) > 1:
             return None, "ambiguous", creates[0]
-        columns = [ColumnInfo(c.name, c.ordinal, c.identity, c.computed, c.rowversion, c.default) for c in creates[0].columns]
+        defaults = self.column_defaults.get(ref.key, {})
+        columns = [ColumnInfo(c.name, c.ordinal, c.identity, c.computed, c.rowversion, c.default or defaults.get(c.name))
+                   for c in creates[0].columns]
         for extra in [s for s in schemas if s.source == "alter_add"]:
             for c in extra.columns:
                 if all(x.name != c.name for x in columns):

@@ -1,0 +1,1 @@
+{"schema_version": "column-lineage-expected/1.0", "columns": [{"target": "demo.dbo.target.c", "label": "C01", "sources": ["dbo.feed.v"]}]}

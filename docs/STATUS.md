@@ -92,6 +92,22 @@
   "Dynamic SQL evaluation". Fixtures: `fixtures/column/dynamic/`; tests: `tests/test_column_dynamic_eval.py`.
 - Parameter defaults that are string literals (`@p sysname = N'x',`) were cut to `N`; fixed.
 
+## Fixed after adversarial review 4 (tests: tests/test_column_review4.py)
+
+- Glued-statement splitting is accepted only when every piece is a whole statement (a line-start
+  `WITH (NOLOCK)` hint no longer splits one UPDATE into a phantom writer and a lost tail).
+- `OUTPUT … INTO` parsed natively, `ALTER TABLE … SWITCH`, unparsed writes through synonyms and
+  views, and writes through views with several definitions are reported as gaps.
+- Alias resolution for unparsed/dynamic targets uses every table an alias names.
+- Targets read from string literals need INSERT/UPDATE/MERGE or SELECT … INTO; reserved words
+  are never targets; runtime-built dynamic SQL keeps its scope gap (one gap per statement).
+- `ALTER TABLE … ADD DEFAULT … FOR col` defaults; `.WRITE` updates; TOP (n) notes; compound
+  assignment precedence; `WITH EXECUTE AS` headers; digit-variable placeholders cannot capture
+  real names; functions in WHERE are row-selection gaps.
+- Assertions: `writer.path` must match exactly (optionally prefixed by the root label);
+  malformed `writer`/`resolves` are usage errors.
+- `compare`: sources reached only through ambiguous bindings are `found_as_ambiguous_candidate`.
+
 ## Known open issues
 
 - Corpus chain 08 ends in `missing_definition` (recall 0.6). Not investigated.

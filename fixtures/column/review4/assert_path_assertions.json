@@ -1,0 +1,4 @@
+{"schema_version": "column-lineage-assertions/1.0",
+ "assertions": [{"id": "A1", "target": "demo.dbo.target.c", "writer": {"path": "sales/load.sql", "line": 5},
+   "reason": "sales loader copies feed_a.v", "asserted_by": "owner",
+   "alternatives": [{"inputs": ["demo.dbo.feed_a.v"]}]}]}

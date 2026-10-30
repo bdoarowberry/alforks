@@ -22,6 +22,8 @@ For each expected source the comparison reports one of:
 
 - ``found``: on the trace's value path (as a value input);
 - ``found_as_condition``: reached only as a CASE/IIF condition or window input;
+- ``found_as_ambiguous_candidate``: reached only through an ambiguous or unresolved binding (one of
+  several candidates the trace could not decide between);
 - ``found_as_row_selection``: appears only as a filter/join column;
 - ``missing_behind_gaps``: not reached, and the trace has open value or context gaps (the likely
   reason; their kinds are counted);
@@ -71,8 +73,15 @@ def _walk(trace: dict) -> tuple[dict[str, set[str]], set[str], set[str]]:
         seen.add((node, role))
         for step in by_target.get(node, []):
             for item in step.get("inputs", []):
-                # A condition anywhere upstream makes everything behind it condition-only.
-                stack.append((item["node"], "value" if role == "value" and item["role"] == "value" else "condition"))
+                # A condition anywhere upstream makes everything behind it condition-only; an ambiguous
+                # or unresolved binding makes everything behind it only a candidate.
+                if role == "condition" or item["role"] != "value":
+                    child = "condition"
+                elif role == "candidate" or item.get("status") in ("ambiguous", "unresolved"):
+                    child = "candidate"
+                else:
+                    child = "value"
+                stack.append((item["node"], child))
             rows.update(r["node"] for r in step.get("row_selection", []))
     leaves = {n for n in roles if n not in by_target and n != trace["target"]["id"]}
     return roles, leaves, rows
@@ -95,6 +104,8 @@ def compare_one(expected: dict, trace: dict | None) -> tuple[dict, dict]:
         reached = [n for n in roles if _matches(n, source)]
         if any("value" in roles[n] for n in reached):
             result = "found"
+        elif any("candidate" in roles[n] for n in reached):
+            result = "found_as_ambiguous_candidate"
         elif reached:
             result = "found_as_condition"
         elif any(_matches(n, source) for n in rows):
@@ -108,7 +119,7 @@ def compare_one(expected: dict, trace: dict | None) -> tuple[dict, dict]:
         outcome[result] += 1
         details["sources"][source] = {"result": result, "matched_nodes": sorted(reached)}
     expected_sources = expected.get("sources", [])
-    value_leaves = [n for n in leaves if "value" in roles[n] and not n.startswith(("constant:", "unknown:"))
+    value_leaves = [n for n in leaves if roles[n] & {"value", "candidate"} and not n.startswith(("constant:", "unknown:"))
                     and stops.get(n) in ("boundary", "source_without_writer")]
     extra = sorted(n for n in value_leaves if not any(_matches(n, s) for s in expected_sources))
     details["extra"] = extra

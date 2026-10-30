@@ -159,8 +159,15 @@ class Tracer:
         used = [a for a in self.assertions if a.id in result.assertions_used and a.writer_path]
         for scope in sorted(scopes_seen):
             for issue in self.catalog.dynamic_by_scope.get(scope, []):
-                if issue.targets or self.catalog.dead_dynamic(issue) or self.catalog.dynamic_resolved(issue):
+                if self.catalog.dead_dynamic(issue) or self.catalog.dynamic_resolved(issue):
                     continue
+                evaluation = self.catalog.dynamic_evaluation(issue)
+                if issue.targets and evaluation is None:
+                    continue  # targets named in literals and nothing suggests a runtime-built target
+                cited = {ev.statement_id for g in result.gaps.values() for ev in g.evidence}
+                cited |= {ev.get("statement_id") for g in result.resolved_gaps for ev in g.get("evidence", [])}
+                if self.catalog.evidence(issue.unit, issue.statement).statement_id in cited:
+                    continue  # this statement already has a gap on the path
                 gap = Gap("dynamic_sql", "A procedure on this path executes dynamic SQL whose target is "
                           "built at runtime; it may write columns on this path.", None,
                           [self.catalog.evidence(issue.unit, issue.statement, role="dynamic_sql")],
@@ -314,7 +321,16 @@ class Tracer:
     def _object_gaps(self, node: Node) -> list[Gap]:
         ref = node.object
         gaps = []
-        for issue in self.catalog.issues_by_target.get(ref.name, []):
+        issues = []
+        for name in sorted(self.catalog.issue_names(ref)):
+            issues.extend(i for i in self.catalog.issues_by_target.get(name, []) if i not in issues)
+        for call, issue in self.catalog.dynamic_literal_args().get(ref.name, []):
+            gaps.append(Gap("dynamic_sql", f"{call.statement.procedure or call.unit.rel_path} passes {ref.name} to "
+                            f"{issue.statement.procedure or 'a procedure'}, which builds and runs dynamic SQL; "
+                            "it may write this object.", node,
+                            [self.catalog.evidence(call.unit, call.statement, role="call"),
+                             self.catalog.evidence(issue.unit, issue.statement, role="dynamic_sql")]))
+        for issue in issues:
             if self.catalog.dead_dynamic(issue) or self.catalog.dynamic_resolved(issue):
                 continue
             wording = {"dynamic_sql": "Dynamic SQL in {where} names {obj} as a write target; what it writes is not analysed.",
