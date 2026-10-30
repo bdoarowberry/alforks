@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 from pathlib import Path
 import re
 import subprocess
@@ -74,6 +75,9 @@ def root_labels(roots: list[Path]) -> dict[Path, str]:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # SQLGlot logs a warning for every statement it falls back on; parse failures are reported in
+    # scan-diagnostics.json instead.
+    logging.getLogger("sqlglot").setLevel(logging.ERROR)
     parser = build_parser()
     args = parser.parse_args(argv)
     if args.max_depth is not None and args.max_depth < 0:
@@ -117,6 +121,8 @@ def main(argv: list[str] | None = None) -> int:
             "statements": catalog.stats["statements"],
             "parsed": catalog.stats["parsed"],
             "fallback": catalog.stats["fallback"],
+            "ignored_non_lineage": catalog.stats["ignored"],
+            "repaired": catalog.stats["repaired"],
             "statement_issues": len(catalog.issues),
             "file_errors": len(catalog.file_errors),
             "source_revision": source_revision(roots),

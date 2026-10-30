@@ -296,31 +296,86 @@ class TraceResult:
     def steps_for(self, node_id: str) -> list[Step]:
         return [s for s in self.steps if s.target.id == node_id]
 
+    def value_path(self) -> tuple[set[str], list[Step]]:
+        """Nodes and steps reachable from the target through value, condition and window inputs."""
+        by_target: dict[str, list[Step]] = {}
+        for step in self.steps:
+            by_target.setdefault(step.target.id, []).append(step)
+        nodes, steps, frontier = set(), [], [self.target.id]
+        while frontier:
+            node = frontier.pop()
+            if node in nodes:
+                continue
+            nodes.add(node)
+            for step in by_target.get(node, []):
+                steps.append(step)
+                frontier.extend(i.node.id for i in step.inputs)
+        return nodes, steps
+
+    def gap_effects(self) -> dict[str, str]:
+        """Gap id -> what it affects: value (the value path), row_selection (only which rows
+        contribute) or context (procedure- or statement-level uncertainty around the path)."""
+        value_nodes, value_steps = self.value_path()
+        value_ids = set(self.target_gaps)
+        row_ids: set[str] = set()
+        row_nodes: set[str] = set()
+        for step in value_steps:
+            value_ids |= set(step.gaps) | {i.gap for i in step.inputs if i.gap}
+        for step in self.steps:
+            row_ids |= {r.gap for r in step.row_selection if r.gap}
+            row_nodes |= {r.node.id for r in step.row_selection}
+        effects = {}
+        for gap in self.gaps.values():
+            node = gap.node.id if gap.node else None
+            if gap.id in value_ids or (node and node in value_nodes):
+                effects[gap.id] = "value"
+            elif gap.id in row_ids or (node and node in row_nodes):
+                effects[gap.id] = "row_selection"
+            elif node and node not in value_nodes:
+                # Reached only through traced row-selection columns.
+                effects[gap.id] = "row_selection"
+            else:
+                effects[gap.id] = "context"
+        return effects
+
     def completeness(self) -> dict:
         """Summarise whether every value path ends at a boundary or a source without writers."""
-        step_statuses = [s.status for s in self.steps]
+        _, value_steps = self.value_path()
+        effects = self.gap_effects()
+        step_statuses = [s.status for s in value_steps]
         open_gaps = sorted(self.gaps.values(), key=lambda g: (g.kind, g.id))
         counts: dict[str, int] = {}
+        by_effect: dict[str, dict[str, int]] = {"value": {}, "row_selection": {}, "context": {}}
         for gap in open_gaps:
             counts[gap.kind] = counts.get(gap.kind, 0) + 1
+            bucket = by_effect[effects[gap.id]]
+            bucket[gap.kind] = bucket.get(gap.kind, 0) + 1
+        blocking = [g for g in open_gaps if effects[g.id] != "row_selection"]
         statuses: dict[str, int] = {}
         for status in step_statuses:
             statuses[status] = statuses.get(status, 0) + 1
-        overall = worst(self.target_status, *step_statuses) if self.steps else UNRESOLVED
-        if not self.steps and self.target_status == VERIFIED and not open_gaps:
+        overall = worst(self.target_status, *step_statuses) if value_steps else UNRESOLVED
+        if not value_steps and self.target_status == VERIFIED and not blocking:
             overall = VERIFIED  # the target is itself a source or boundary column
-        if open_gaps and overall in (VERIFIED, INFERRED):
+        if blocking and overall in (VERIFIED, INFERRED):
             overall = PARTIAL
-        complete = overall in (VERIFIED, INFERRED) and not open_gaps
+        complete = overall in (VERIFIED, INFERRED) and not blocking
         return {"status": "complete" if complete else "incomplete", "overall_step_status": overall,
                 "steps_by_status": dict(sorted(statuses.items())), "gaps_by_kind": dict(sorted(counts.items())),
+                "value_gaps_by_kind": dict(sorted(by_effect["value"].items())),
+                "context_gaps_by_kind": dict(sorted(by_effect["context"].items())),
+                "row_selection_gaps_by_kind": dict(sorted(by_effect["row_selection"].items())),
+                "row_selection_status": "incomplete" if by_effect["row_selection"] else "complete",
                 "stops_by_reason": dict(sorted(_count(s.reason for s in self.stops).items())),
                 "note": "Complete means every value path ends at the requested boundary or at a source "
-                        "object with no writer in the scanned files. It does not claim those are "
-                        "ultimate source-system fields."}
+                        "object with no writer in the scanned files, with no value-path or context gaps. "
+                        "Row-selection gaps (filters and joins that could not be fully resolved) are "
+                        "reported separately and do not make the value lineage incomplete. A complete "
+                        "trace does not claim its stops are ultimate source-system fields."}
 
     def to_dict(self) -> dict:
         steps = sorted(self.steps, key=lambda s: (s.target.id, s.order, s.id))
+        effects = self.gap_effects()
         return {
             "schema_version": SCHEMA_VERSION,
             "requested": self.requested,
@@ -333,7 +388,8 @@ class TraceResult:
             "nodes": [self.nodes[k].to_dict() for k in sorted(self.nodes)],
             "steps": [s.to_dict() for s in steps],
             "stops": [s.to_dict() for s in sorted(self.stops, key=lambda s: (s.node.id, s.reason))],
-            "gaps": [g.to_dict() for g in sorted(self.gaps.values(), key=lambda g: (g.kind, g.id))],
+            "gaps": [{**g.to_dict(), "affects": effects[g.id]}
+                     for g in sorted(self.gaps.values(), key=lambda g: (g.kind, g.id))],
             "cycles": sorted(self.cycles),
         }
 

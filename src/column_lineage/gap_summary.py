@@ -21,8 +21,35 @@ def anonymize(sql: str, limit: int = 400) -> str:
         return _fallback(sql, limit)
     names: dict[str, str] = {}
     out = []
-    for token in tokens:
+    merged = []
+    i = 0
+    while i < len(tokens):
+        token = tokens[i]
+        # '@name' and '#name' arrive as a prefix token plus a name token.
+        if token.text in ("@", "@@", "#", "##") and i + 1 < len(tokens) and tokens[i + 1].start == token.end + 1:
+            key = (token.text + tokens[i + 1].text).lower()
+            names.setdefault(key, f"ID{len(names) + 1}")
+            merged.append(None)
+            out.append(token.text + names[key])
+            i += 2
+            continue
+        merged.append(token)
+        i += 1
+    tokens = [t for t in merged if t is not None]
+    prefixed = out
+    out = []
+    pending = iter(prefixed)
+    builtins = set(sqlglot.Dialect.get_or_raise("tsql").parser_class.FUNCTIONS) | {
+        "TRY_PARSE", "PARSE", "STRING_AGG", "FORMAT", "IIF", "CHOOSE", "OPENJSON", "OPENQUERY", "OPENROWSET"}
+    for position, token in enumerate(merged):
+        if token is None:
+            out.append(next(pending))
+            continue
         kind = token.token_type
+        following = next((t for t in merged[position + 1:] if t is not None), None)
+        if kind == TokenType.VAR and token.text.upper() in builtins and following is not None and following.text == "(":
+            out.append(token.text.upper())  # built-in function names are not identifying and explain parse failures
+            continue
         if kind in (TokenType.VAR, TokenType.IDENTIFIER) or (kind == TokenType.PARAMETER):
             key = token.text.lower()
             names.setdefault(key, f"ID{len(names) + 1}")

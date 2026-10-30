@@ -13,22 +13,32 @@
   - precision 1.0, static recall 0.975;
   - about 20 s per run, most of it parsing.
 
-## Known open defects (fix first)
+## Fixed after the first real-source test (feedback round 1)
 
-1. **False `complete` when the only writer is unparsed or dynamic and its write target is an alias.**
-   - Examples:
-     - `UPDATE TOP (5000) f SET ... FROM mart.x AS f` (does not parse);
-     - dynamic SQL `'UPDATE f SET ... FROM mart.x AS f'`.
-   - The write target is recorded as `f`, not `x`, so no gap is attached to `x`.
-   - Planned fix:
-     - strip `TOP (n)` after UPDATE, DELETE and INSERT and re-parse (extend
-       `Catalog._rewrite_compound`);
-     - resolve `alias -> table` from `FROM/JOIN name [AS] alias` in `write_targets`, for
-       both unparsed statements and dynamic-SQL literals.
-   - Corpus chains 10 and 13 reproduce it.
-2. **sqlglot warnings on stderr.** It logs "Falling back to parsing as a 'Command'" for every
-   unparsed statement. Set `logging.getLogger("sqlglot").setLevel(logging.ERROR)` in `cli.main`.
-3. **Corpus chain 08** ends in `missing_definition` with recall 0.6. Not investigated yet.
+- **False `complete` with an aliased unparsed or dynamic writer** (`UPDATE TOP (n) f … FROM x AS f`):
+  - `TOP (n)` is blanked and the statement re-parsed;
+  - aliases are resolved to tables for unparsed statements and dynamic-SQL literals.
+- **Statement repair:**
+  - INSERT table hints, `OPTION (...)` query hints and `OUTPUT … INTO` are blanked (the OUTPUT
+    target is reported as a gap);
+  - statements the indexer glued together (missing semicolon before TRUNCATE, WHILE, SET, …) are
+    split and parsed piece by piece;
+  - an INSERT cut off from its SELECT is rejoined.
+- **Non-lineage statements** (RAISERROR, SET options, EXECUTE AS, IF-condition fragments) are counted
+  as `ignored_non_lineage`, not as parse failures.
+- **Gaps are classified** as `value`, `row_selection` or `context` (`affects` in the JSON):
+  - completeness depends only on value-path and context gaps;
+  - row-selection gaps are reported separately.
+- **Report text:** SQL comments no longer leak into labels or excerpts; "and and N more" fixed.
+- **Windows:** `render_markdown -o -` writes UTF-8 bytes (it used to raise UnicodeEncodeError on cp1252).
+- **sqlglot fallback warnings** are silenced.
+- **Anonymizer:** `@var` / `#temp` stay single tokens, and built-in function names are kept.
+
+## Known open issues
+
+- Corpus chain 08 ends in `missing_definition` (recall 0.6). Not investigated.
+- Dynamic SQL that builds its projection from metadata cannot be followed. This is by design: it is
+  reported as a `dynamic_sql` gap at the EXEC.
 
 ## Still to do
 

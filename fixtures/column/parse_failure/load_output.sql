@@ -22,3 +22,13 @@ BEGIN
     INNER JOIN demo.source AS s ON s.id = demo.output.id;
 END;
 GO
+
+CREATE PROCEDURE demo.load_culture
+AS
+BEGIN
+    -- TRY_PARSE ... USING is valid T-SQL that the SQL parser rejects.
+    INSERT INTO demo.output (id, parsed_value)
+    SELECT s.id, TRY_PARSE(s.input_text AS int USING 'en-US')
+    FROM demo.source AS s;
+END;
+GO

@@ -288,23 +288,32 @@ def test_comments_and_string_literals_do_not_create_lineage(tmp_path):
 
 
 def test_unparseable_insert_writer_is_gap(tmp_path):
-    t = trace("parse_failure", "demo.output.result_value", tmp_path)
+    t = trace("parse_failure", "demo.output.parsed_value", tmp_path)
     assert t.gap_kinds & {"parse_error", "unsupported_statement"}
     assert not t.complete
-    assert all(s["status"] != "verified" for s in t.steps_for(t.target_id))
+    assert all(s["status"] != "verified" for s in t.steps_for(t.target_id)
+               if s["writer_kind"] != "insert_omitted")
     assert (t.target_id, "source_without_writer") not in t.stop_pairs()
-    assert t.data["scan"]["fallback"] >= 2
+    assert t.data["scan"]["fallback"] >= 1
     diagnostics = tmp_path / "scan-diagnostics.json"
     assert diagnostics.exists()
     json.loads(diagnostics.read_text(encoding="utf-8"))
 
 
-def test_unparseable_update_output_writer_is_gap(tmp_path):
+def test_query_hint_is_removed_and_writer_is_traced(tmp_path):
+    # OPTION (USE HINT (...)) has no lineage; the INSERT is re-parsed without it.
+    t = trace("parse_failure", "demo.output.result_value", tmp_path)
+    step = next(s for s in t.steps_for(t.target_id) if s["writer_kind"] == "insert_select")
+    assert inputs(step, "value") == ["?.demo.source.input_a"]
+
+
+def test_update_output_into_is_traced_and_output_target_reported(tmp_path):
+    # The OUTPUT clause is blanked so the UPDATE parses; the OUTPUT target is reported, not mapped.
     t = trace("parse_failure", "demo.output.other_value", tmp_path)
-    assert t.gap_kinds & {"parse_error", "unsupported_statement"}
-    assert not t.complete
-    assert all(s["status"] != "verified" for s in t.steps_for(t.target_id))
-    assert (t.target_id, "source_without_writer") not in t.stop_pairs()
+    step = next(s for s in t.steps_for(t.target_id) if s["writer_kind"] == "update")
+    assert inputs(step, "value") == ["?.demo.source.input_a"]
+    diagnostics = json.loads((tmp_path / "scan-diagnostics.json").read_text(encoding="utf-8"))
+    assert any(i["kind"] == "unsupported_statement" and "#changed" in i["targets"] for i in diagnostics["statement_issues"])
 
 
 # ------------------------------------------------------------ CLI contract

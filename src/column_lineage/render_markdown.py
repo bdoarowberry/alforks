@@ -121,7 +121,7 @@ def _anchor(raw: str) -> str:
 
 def _join_list(items: list[str], limit: int = SUMMARY_MAX_ITEMS) -> str:
     if len(items) > limit:
-        items = items[:limit] + [f"and {len(items) - limit} more"]
+        return ", ".join(items[:limit]) + f", and {len(items) - limit} more"
     if len(items) <= 1:
         return "".join(items)
     if len(items) == 2:
@@ -278,10 +278,13 @@ class _Trace:
 def _result_text(t: _Trace) -> tuple[str, int]:
     comp = t.data.get("completeness") or {}
     n_gaps = len(t.gaps) if t.gaps else sum((comp.get("gaps_by_kind") or {}).values())
+    n_rows = sum((comp.get("row_selection_gaps_by_kind") or {}).values())
+    row_note = f"; {_plural(n_rows, 'row-selection gap')} reported separately" if n_rows else ""
     if comp.get("status") == "complete":
-        return "Complete", n_gaps
+        return "Complete" + (f" (value lineage{row_note})" if n_rows else ""), n_gaps
     if n_gaps:
-        return f"Incomplete — {_plural(n_gaps, 'gap')}", n_gaps
+        n_value = n_gaps - n_rows
+        return f"Incomplete — {_plural(n_value, 'value-path gap')}{row_note}", n_gaps
     overall = comp.get("overall_step_status") or "unknown"
     return f"Incomplete — no gaps recorded, overall step status {overall}", n_gaps
 
@@ -481,11 +484,14 @@ def _section_short_answer(t: _Trace) -> list[str]:
 
 def _uncertainty_bullet(t: _Trace, gaps: list[dict]) -> str:
     parts = []
-    if gaps:
+    for label, chosen in (("value-path gap", [g for g in gaps if g.get("affects", "value") != "row_selection"]),
+                          ("row-selection gap", [g for g in gaps if g.get("affects") == "row_selection"])):
+        if not chosen:
+            continue
         kinds: dict[str, int] = {}
-        for gap in gaps:
+        for gap in chosen:
             kinds[gap.get("kind") or "gap"] = kinds.get(gap.get("kind") or "gap", 0) + 1
-        parts.append(f"{_plural(len(gaps), 'gap')} ("
+        parts.append(f"{_plural(len(chosen), label)} ("
                      + ", ".join(f"{_text(k)}: {v}" for k, v in sorted(kinds.items()))
                      + ") — see [Gaps and next evidence](#gaps)")
     weak: dict[str, list[str]] = {}
@@ -942,7 +948,14 @@ def main(argv=None) -> int:
         print(f"error: {json_path} does not contain a trace object", file=sys.stderr)
         return 2
     if args.output == "-":
-        sys.stdout.write(render_markdown(data, json_path.name))
+        # Write UTF-8 bytes: the page contains symbols a Windows console code page cannot encode.
+        text = render_markdown(data, json_path.name)
+        buffer = getattr(sys.stdout, "buffer", None)
+        if buffer is not None:
+            buffer.write(text.encode("utf-8"))
+            buffer.flush()
+        else:
+            sys.stdout.write(text)
         return 0
     out_path = Path(args.output) if args.output else _default_output(json_path)
     json_name = os.path.relpath(json_path.resolve(), out_path.resolve().parent).replace(os.sep, "/")

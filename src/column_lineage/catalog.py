@@ -38,7 +38,103 @@ CURSOR = re.compile(r"\bDECLARE\s+(?P<cursor>[A-Za-z_][\w$#@]*)\s+(?:INSENSITIVE
 FETCH = re.compile(r"\bFETCH\s+(?:(?:NEXT|PRIOR|FIRST|LAST|ABSOLUTE\s+\S+|RELATIVE\s+\S+)\s+)?(?:FROM\s+)?(?:GLOBAL\s+)?"
                    r"(?P<cursor>[A-Za-z_][\w$#@]*)\s+INTO\s+(?P<vars>@[\w$#@]+(?:\s*,\s*@[\w$#@]+)*)", re.I)
 ALTER_VIEW = re.compile(rf"\bALTER\s+VIEW\s+{IDENT}\s*(?:\([^)]*\)\s*)?(?:WITH\s+[\w\s,]+?\s+)?AS\b", re.I)
+DML_TOP = re.compile(r"(?:^|(?<=[\s;]))(?:UPDATE|DELETE|INSERT)\s+(?P<top>TOP\s*\([^)]*\)\s*(?:PERCENT\b)?)", re.I)
+INSERT_HINT = re.compile(rf"\bINSERT\s+(?:INTO\s+)?{IDENT}\s*(?P<hint>WITH\s*\(\s*[A-Za-z_]+(?:\s*,\s*[A-Za-z_]+)*\s*\))", re.I)
+OUTPUT_CLAUSE = re.compile(rf"(?<![.\w\[\]])OUTPUT\s+(?=INSERTED\b|DELETED\b|\$ACTION\b|@)(?:(?!\bOUTPUT\b).)*?(?:\bINTO\s+(?P<target>{IDENT})(?:\s*\([^()]*\))?)?"
+                           r"(?=\s*(?:SELECT|VALUES|FROM|WHERE|DEFAULT|;|$))", re.I | re.S)
+OPTION_HINT = re.compile(r"(?P<option>\bOPTION\s*\((?:[^()]|\((?:[^()]|\([^()]*\))*\))*\))\s*;?\s*$", re.I)
+ALIAS_DEF = re.compile(rf"\b(?:FROM|JOIN|UPDATE|MERGE(?:\s+INTO)?)\s+(?P<name>{IDENT})\s+(?:WITH\s*\([^)]*\)\s*)?(?:AS\s+)?"
+                       r"(?P<alias>\[[^\]]+\]|[A-Za-z_][\w$#]*)", re.I)
+NON_LINEAGE = re.compile(
+    r"\s*(?:RAISERROR\b|RETURN\b|PRINT\b|THROW\b|REVERT\b|(?:WITH\s+)?EXEC(?:UTE)?\s+AS\b|"
+    r"SET\s+(?:NOCOUNT|XACT_ABORT|ANSI_\w+|QUOTED_IDENTIFIER|ARITHABORT|CONCAT_NULL_YIELDS_NULL|NUMERIC_ROUNDABORT|"
+    r"TRANSACTION|IDENTITY_INSERT|DATEFORMAT|DATEFIRST|LANGUAGE|LOCK_TIMEOUT|DEADLOCK_PRIORITY|ROWCOUNT|STATISTICS|"
+    r"FMTONLY|NOEXEC|IMPLICIT_TRANSACTIONS|CURSOR_CLOSE_ON_COMMIT|TEXTSIZE|CONTEXT_INFO)\b)", re.I)
+GLUE = re.compile(r"(?im)^[ \t]*(?P<word>TRUNCATE|DECLARE|SET|EXEC|EXECUTE|WHILE|IF|PRINT|DROP|CREATE|RAISERROR|RETURN|"
+                  r"BEGIN|END|INSERT|UPDATE|DELETE|MERGE|SELECT|WITH|OPEN|FETCH|CLOSE|DEALLOCATE|COMMIT|ROLLBACK|THROW)\b")
 DROP_TEMP = re.compile(r"\bDROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?(?P<name>#[A-Za-z_][\w$#@]*)", re.I)
+
+
+def merge_split_inserts(statements: list[Statement], text: str, masked: str) -> list[Statement]:
+    """Rejoin an INSERT the indexer cut off from the SELECT/VALUES/WITH that follows it."""
+    out: list[Statement] = []
+    i = 0
+    while i < len(statements):
+        current = statements[i]
+        tree = current.tree
+        if (i + 1 < len(statements) and isinstance(tree, exp.Insert) and tree.expression is None
+                and re.match(r"\s*(?:SELECT|VALUES|WITH|\()", statements[i + 1].text, re.I)
+                and not masked[current.end:statements[i + 1].start].strip()):
+            nxt = statements[i + 1]
+            joined = text[current.start:nxt.end]
+            merged = parse_or_none(joined)
+            out.append(replace(current, end=nxt.end, text=joined, tree=merged,
+                               parse_status="parsed" if merged is not None else "fallback",
+                               parse_error=None if merged is not None else "statement could not be parsed"))
+            i += 2
+            continue
+        out.append(current)
+        i += 1
+    return out
+
+
+def non_lineage(text: str) -> bool:
+    """Statements that never carry column lineage, or a condition fragment like `... ) ) OR (...`
+    split off an IF/WHILE by the indexer (more closing than opening parentheses)."""
+    if NON_LINEAGE.match(text):
+        return True
+    masked = mask_noncode(text)
+    return masked.count(")") > masked.count("(")
+
+
+def parse_or_none(text: str):
+    try:
+        tree = sqlglot.parse_one(text, read="tsql", error_level=ErrorLevel.RAISE)
+    except (SqlglotError, ValueError, RecursionError, AttributeError, TypeError):
+        return None
+    if tree is None or isinstance(tree, exp.Command):
+        return None
+    # SQLGlot accepts some statements cut short, e.g. an INSERT with no source.
+    if isinstance(tree, exp.Insert) and tree.expression is None:
+        return None
+    if isinstance(tree, exp.Update) and not tree.expressions:
+        return None
+    return tree
+
+
+def glued_boundaries(masked: str, limit: int = 60) -> list[int]:
+    """Offsets of line-start statement keywords at parenthesis depth 0 and outside CASE ... END."""
+    cuts = []
+    depth = 0
+    case = 0
+    position = 0
+    for match in GLUE.finditer(masked):
+        segment = masked[position:match.start()]
+        depth += segment.count("(") - segment.count(")")
+        case += len(re.findall(r"\bCASE\b", segment, re.I)) - len(re.findall(r"\bEND\b", segment, re.I))
+        case = max(case, 0)
+        position = match.start()
+        if match.start() > 0 and depth <= 0 and case == 0 and masked[:match.start()].strip():
+            cuts.append(match.start())
+        if len(cuts) >= limit:
+            break
+    return cuts
+
+
+def write_targets(text: str) -> tuple[str, ...]:
+    """Object names a SQL text writes, resolving `UPDATE alias ... FROM table AS alias`."""
+    stop = {"WITH", "ON", "WHERE", "SET", "INNER", "LEFT", "RIGHT", "FULL", "CROSS", "JOIN", "USING", "WHEN", "OUTER",
+            "GROUP", "ORDER", "UNION", "AS", "OUTPUT", "VALUES", "SELECT"}
+    aliases = {}
+    for match in ALIAS_DEF.finditer(text):
+        alias = split_name(match.group("alias"))[-1].lower()
+        if alias.upper() not in stop:
+            aliases.setdefault(alias, split_name(match.group("name"))[-1].lower())
+    names = set()
+    for match in WRITE_TARGET.finditer(text):
+        name = split_name(match.group("target"))[-1].lower()
+        names.add(aliases.get(name, name))
+    return tuple(sorted(names))
 
 
 def procedure_scopes(text: str, masked: str) -> list[tuple[int, str, str]]:
@@ -86,9 +182,9 @@ def ident_text(node) -> str | None:
         name = node.this
         return ("#" + name) if node.args.get("temporary") and not name.startswith("#") else name
     if isinstance(node, exp.Parameter):
-        return node.sql(dialect="tsql")
+        return node.sql(dialect="tsql", comments=False)
     if isinstance(node, exp.Expression):
-        return node.name or node.sql(dialect="tsql")
+        return node.name or node.sql(dialect="tsql", comments=False)
     return str(node)
 
 
@@ -251,10 +347,11 @@ class Catalog:
         self.dynamic_by_scope: dict[str, list[StatementIssue]] = defaultdict(list)
         self.known_databases: dict[tuple[str, str], set[str]] = defaultdict(set)  # (schema, name) -> {db}
         self.unknown_db_writers: dict[tuple[str, str], list[Writer]] = defaultdict(list)
-        self.stats = {"files": 0, "statements": 0, "parsed": 0, "fallback": 0}
+        self.stats = {"files": 0, "statements": 0, "parsed": 0, "fallback": 0, "ignored": 0, "repaired": 0}
         self.fallback_samples: list[tuple[Statement, Unit]] = []
         self.file_errors: list[tuple[str, str, str]] = []
-        self.rewritten: set[tuple[str, int]] = set()       # statements parsed after a compound-assignment rewrite
+        self.rewritten: set[tuple[str, int]] = set()
+        self.pending_outputs: list[tuple[Statement, str]] = []   # OUTPUT ... INTO targets blanked by _repair       # statements parsed after a compound-assignment rewrite
         self.temp_resets: dict[tuple[str, str], list[int]] = defaultdict(list)  # (scope, #name) -> DROP/CREATE offsets
         self.fallback_by_scope: dict[str, list[Statement]] = defaultdict(list)
         self._view_bases: dict[str, list[str]] | None = None
@@ -285,7 +382,7 @@ class Catalog:
         masked = mask_noncode(text)
         proc_scopes = procedure_scopes(text, masked)
         statements = []
-        for statement in index.statements:
+        for statement in merge_split_inserts(index.statements, text, masked):
             if statement.scope.startswith(prefix):
                 name = statement.scope[len(prefix):]
                 if not name.startswith("<batch@"):
@@ -293,7 +390,8 @@ class Catalog:
                     name = owner[-1][2] if owner else name
                 statement = replace(statement, scope=portable + name)
             if statement.parse_status != "parsed":
-                statement = self._rewrite_compound(root_label, rel, statement)
+                statements.extend(self._repair(root_label, rel, statement))
+                continue
             statements.append(statement)
         index.statements = statements
         uses = [(m.start(), norm(split_name(m.group("db"))[0])) for m in USE.finditer(masked)]
@@ -313,6 +411,9 @@ class Catalog:
                 self.file_errors.append((root_label, rel, f"{step.__name__}: {type(exc).__name__}"))
         for order, statement in enumerate(index.statements):
             self.stats["statements"] += 1
+            if statement.parse_status != "parsed" and non_lineage(statement.text):
+                self.stats["ignored"] += 1
+                continue
             self.stats["parsed" if statement.parse_status == "parsed" else "fallback"] += 1
             if statement.parse_status != "parsed":
                 self.fallback_by_scope[statement.scope].append(statement)
@@ -320,6 +421,10 @@ class Catalog:
                 self._statement(unit, statement, order)
             except Exception as exc:  # noqa: BLE001 - one bad statement must not stop the scan
                 self._issue("unsupported_statement", unit, statement, (), f"Statement could not be indexed: {type(exc).__name__}")
+        for statement, name in self.pending_outputs:
+            self._issue("unsupported_statement", unit, statement, (name,),
+                        "OUTPUT ... INTO writes rows to this object; the OUTPUT column mapping is not analysed.")
+        self.pending_outputs = []
         for step in (self._cursors, self._temp_drops, self._alter_views):
             try:
                 step(unit)
@@ -327,24 +432,93 @@ class Catalog:
                 self.file_errors.append((root_label, rel, f"{step.__name__}: {type(exc).__name__}"))
 
     # ------------------------------------------------------------ add_file helpers
-    def _rewrite_compound(self, root_label: str, rel: str, statement: Statement) -> Statement:
-        """Parse `x += y` (unsupported by SQLGlot) as `x = x + y`; evidence keeps statement lines."""
-        masked = mask_noncode(statement.text)
-        matches = list(COMPOUND.finditer(masked))
-        if not matches:
-            return statement
-        text = statement.text
-        for match in reversed(matches):
+    def _repair(self, root_label: str, rel: str, statement: Statement) -> list[Statement]:
+        """Recover statements SQLGlot rejects, without changing what they mean for lineage.
+
+        1. Blank out syntax with no column lineage, keeping offsets: INSERT target table hints,
+           OUTPUT clauses (their targets are reported as gaps), TOP (n) on UPDATE/DELETE/INSERT.
+        2. Rewrite compound assignment `x += y` as `x = x + y` (offsets change: evidence then
+           uses whole-statement lines).
+        3. If it still fails, the indexer may have glued several statements together (a missing
+           semicolon before TRUNCATE, WHILE, SET NOCOUNT ...): split at line-start statement
+           keywords and parse each piece on its own.
+        """
+        if non_lineage(statement.text) or INSERT_EXEC.match(mask_noncode(statement.text)):
+            return [statement]
+        repaired = self._reparse(root_label, rel, statement)
+        if repaired is not None:
+            return [repaired]
+        pieces = self._split_glued(root_label, rel, statement)
+        return pieces or [statement]
+
+    def _blank(self, text: str) -> tuple[str, list[str]]:
+        masked = mask_noncode(text)
+        outputs = []
+        spans = []
+        for pattern, group in ((INSERT_HINT, "hint"), (DML_TOP, "top"), (OPTION_HINT, "option")):
+            for match in pattern.finditer(masked):
+                spans.append(match.span(group))
+        for match in OUTPUT_CLAUSE.finditer(masked):
+            spans.append(match.span())
+            if match.group("target"):
+                outputs.append(split_name(match.group("target"))[-1].lower())
+        for start, end in sorted(spans, reverse=True):
+            text = text[:start] + "".join(c if c in "\r\n" else " " for c in text[start:end]) + text[end:]
+        return text, outputs
+
+    def _reparse(self, root_label: str, rel: str, statement: Statement) -> Statement | None:
+        text, outputs = self._blank(statement.text)
+        masked = mask_noncode(text)
+        compound = list(COMPOUND.finditer(masked))
+        for match in reversed(compound):
             lhs = text[match.start("lhs"):match.end("lhs")]
             text = text[:match.start()] + f"{lhs} = {lhs} {match.group('op')} " + text[match.end():]
-        try:
-            tree = sqlglot.parse_one(text, read="tsql", error_level=ErrorLevel.RAISE)
-        except (SqlglotError, ValueError, RecursionError):
-            return statement
-        if tree is None or isinstance(tree, exp.Command):
-            return statement
-        self.rewritten.add((root_label + "/" + rel, statement.start))
+        if text == statement.text:
+            return None
+        tree = parse_or_none(text)
+        if tree is None:
+            return None
+        if compound:
+            self.rewritten.add((root_label + "/" + rel, statement.start))
+        self.stats["repaired"] += 1
+        self.pending_outputs.extend((statement, name) for name in outputs)
         return replace(statement, tree=tree, parse_status="parsed", parse_error=None)
+
+    def _split_glued(self, root_label: str, rel: str, statement: Statement) -> list[Statement]:
+        masked = mask_noncode(statement.text)
+        cuts = glued_boundaries(masked)
+        if not cuts:
+            return []
+        pieces: list[Statement] = []
+        start = 0
+        bounds = cuts + [len(masked)]
+        i = 0
+        any_parsed = False
+        while i < len(bounds):
+            end = bounds[i]
+            chunk = statement.text[start:end]
+            piece = replace(statement, start=statement.start + start, end=statement.start + end, text=chunk,
+                            line=statement.line + statement.text.count("\n", 0, start))
+            tree = parse_or_none(chunk) if chunk.strip() else None
+            if tree is None and chunk.strip():
+                fixed = self._reparse(root_label, rel, piece)
+                tree = fixed.tree if fixed is not None else None
+            if tree is not None:
+                pieces.append(replace(piece, tree=tree, parse_status="parsed", parse_error=None))
+                any_parsed = True
+                start = end
+            elif i == len(bounds) - 1:
+                if chunk.strip():
+                    pieces.append(replace(piece, tree=None, parse_status="fallback"))
+            else:
+                # Extend the piece to the next boundary (e.g. INSERT ... on one line, SELECT on the next).
+                i += 1
+                continue
+            i += 1
+        if not any_parsed:
+            return []
+        self.stats["repaired"] += 1
+        return pieces
 
     def _scope_at(self, unit: Unit, offset: int) -> tuple[str | None, str | None, Statement | None]:
         """Scope and procedure of the indexed statement nearest before ``offset``."""
@@ -519,7 +693,7 @@ class Catalog:
                 start_line = statement.line + statement.text.count("\n", 0, min(positions))
                 end_line = statement.line + statement.text.count("\n", 0, max(ends))
         if excerpt is None:
-            excerpt = node.sql(dialect="tsql") if node is not None else statement.text
+            excerpt = node.sql(dialect="tsql", comments=False) if node is not None else statement.text
         return Evidence(unit.rel_path, start_line, end_line, collapse(excerpt), role,
                         statement_id(unit, statement), unit.root_label)
 
@@ -587,8 +761,7 @@ class Catalog:
             self._writer_ref(target, unit, statement)
             return
         if tree is None or isinstance(tree, exp.Command):
-            targets = tuple(sorted({split_name(m.group("target"))[-1].lower()
-                                    for m in WRITE_TARGET.finditer(mask_noncode(text))}))
+            targets = write_targets(mask_noncode(text))
             if targets:
                 self._issue("parse_error", unit, statement, targets,
                             f"Statement could not be parsed: {(statement.parse_error or 'unsupported command')[:160]}")
@@ -624,7 +797,7 @@ class Catalog:
             for item in tree.expressions:
                 eq = item.this if isinstance(item, exp.SetItem) else item
                 if isinstance(eq, exp.EQ) and isinstance(eq.this, exp.Parameter):
-                    self._assign(unit, statement, eq.this.sql(dialect="tsql"), eq.expression, None, "set")
+                    self._assign(unit, statement, eq.this.sql(dialect="tsql", comments=False), eq.expression, None, "set")
             return
         if isinstance(tree, exp.Execute):
             self._call(unit, statement, tree)
@@ -640,7 +813,7 @@ class Catalog:
         if isinstance(tree, exp.Update):
             for item in tree.expressions:
                 if isinstance(item, exp.EQ) and isinstance(item.this, exp.Parameter):
-                    self._assign(unit, statement, item.this.sql(dialect="tsql"), item.expression, tree, "update")
+                    self._assign(unit, statement, item.this.sql(dialect="tsql", comments=False), item.expression, tree, "update")
             target = update_target(tree)
             if isinstance(target, exp.Table):
                 if self._via_cte(tree, target, "update", unit, statement, order):
@@ -671,7 +844,7 @@ class Catalog:
             if isinstance(tree, exp.Select):
                 for item in tree.expressions:
                     if isinstance(item, exp.EQ) and isinstance(item.this, exp.Parameter):
-                        self._assign(unit, statement, item.this.sql(dialect="tsql"), item.expression, tree, "select")
+                        self._assign(unit, statement, item.this.sql(dialect="tsql", comments=False), item.expression, tree, "select")
             return
 
     def _via_cte(self, tree, target: exp.Table, kind: str, unit: Unit, statement: Statement, order: int) -> bool:
@@ -709,15 +882,14 @@ class Catalog:
         Dynamic SQL is usually assembled in variables before the EXEC, so look at every
         literal in the procedure or batch, not only the EXEC statement.
         """
-        names = set()
+        literals = []
         for other in unit.index.statements:
             if other.scope != statement.scope:
                 continue
             masked = mask_noncode(other.text)
-            for match in WRITE_TARGET.finditer(other.text):
-                if masked[match.start()] == " " and other.text[match.start()] != " ":
-                    names.add(split_name(match.group("target"))[-1].lower())
-        return tuple(sorted(names))
+            # Keep only string-literal (and comment) content, joined across concatenations.
+            literals.append("".join(c if m == " " and c != " " else " " for c, m in zip(other.text, masked)))
+        return write_targets(" ".join(literals).replace("'", " "))
 
     def _writer_ref(self, ref: ObjectRef, unit: Unit, statement: Statement) -> ObjectRef:
         # Temp refs keep the writing statement's scope; callers are resolved at query time,
@@ -778,7 +950,7 @@ class Catalog:
             for name_node in names:
                 if not isinstance(name_node, exp.Parameter):
                     continue
-                name = name_node.sql(dialect="tsql")
+                name = name_node.sql(dialect="tsql", comments=False)
                 if isinstance(kind, exp.Schema):
                     ref = ObjectRef(norm(name), kind="table_variable", scope=statement.scope)
                     columns = [column_info(d, 0) for d in kind.expressions if isinstance(d, exp.ColumnDef)]
@@ -810,13 +982,13 @@ class Catalog:
             if isinstance(arg, exp.Alias) and str(arg.alias).upper() in ("OUTPUT", "OUT"):
                 arg, output = arg.this, True
             if isinstance(arg, exp.EQ) and isinstance(arg.this, exp.Parameter):
-                args.append((arg.this.sql(dialect="tsql").lower(), arg.expression))
+                args.append((arg.this.sql(dialect="tsql", comments=False).lower(), arg.expression))
                 if output and isinstance(arg.expression, exp.Parameter):
-                    self._assign(unit, statement, arg.expression.sql(dialect="tsql"), None, None, "exec_output")
+                    self._assign(unit, statement, arg.expression.sql(dialect="tsql", comments=False), None, None, "exec_output")
             else:
                 args.append((None, arg))
                 if output and isinstance(arg, exp.Parameter):
-                    self._assign(unit, statement, arg.sql(dialect="tsql"), None, None, "exec_output")
+                    self._assign(unit, statement, arg.sql(dialect="tsql", comments=False), None, None, "exec_output")
         returned = re.match(r"\s*EXEC(?:UTE)?\s+(@[\w$#@]+)\s*=", mask_noncode(statement.text), re.I)
         if returned:
             self._assign(unit, statement, returned.group(1), None, None, "exec_output")
@@ -961,11 +1133,11 @@ def column_info(definition: exp.ColumnDef, ordinal: int) -> ColumnInfo | None:
         if isinstance(kind, exp.GeneratedAsIdentityColumnConstraint):
             identity = True
         elif isinstance(kind, exp.ComputedColumnConstraint):
-            computed = kind.this.sql(dialect="tsql") if kind.this is not None else "computed"
+            computed = kind.this.sql(dialect="tsql", comments=False) if kind.this is not None else "computed"
         elif isinstance(kind, exp.DefaultColumnConstraint):
-            default = kind.this.sql(dialect="tsql") if kind.this is not None else None
+            default = kind.this.sql(dialect="tsql", comments=False) if kind.this is not None else None
     data_type = definition.args.get("kind")
-    type_name = data_type.sql(dialect="tsql").upper() if data_type is not None else ""
+    type_name = data_type.sql(dialect="tsql", comments=False).upper() if data_type is not None else ""
     if data_type is None and computed is None:
         # `col AS (expr)` without a type is a computed column in T-SQL.
         computed = None

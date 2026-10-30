@@ -4,7 +4,7 @@
 
 ## 1. Identity and result
 
-> **Result: Incomplete — 1 gap** (overall step status: partial)
+> **Result: Incomplete — 1 value-path gap** (overall step status: partial)
 >
 > A *stop* at the requested boundary, or at a source with no writer in the scanned files, is where this trace ended. It is not a claim that those columns are ultimate source-system fields.
 
@@ -22,7 +22,7 @@
 | Gaps | dynamic_sql: 1 |
 | Companion JSON | [sample-trace.lineage.json](sample-trace.lineage.json) |
 
-*Complete means every value path ends at the requested boundary or at a source object with no writer in the scanned files. It does not claim those are ultimate source-system fields.*
+*Complete means every value path ends at the requested boundary or at a source object with no writer in the scanned files, with no value-path or context gaps. Row-selection gaps (filters and joins that could not be fully resolved) are reported separately and do not make the value lineage incomplete. A complete trace does not claim its stops are ultimate source-system fields.*
 
 <a id="short-answer"></a>
 
@@ -35,7 +35,7 @@
 - **Alternative writers:** `reporting.demo.output.result_value` has 2 alternative writers: [S1](#step-a8a5acba10b98843) insert_select in reporting.demo.load_output and [S2](#step-a92b7a4a25e85778) update in reporting.demo.apply_overrides under IF @apply_override = 1. All are kept as alternatives.
 - **Row selection:** 3 row-selection columns (filter (WHERE): 1, join key: 2) decide which rows contribute; they are not value sources (see [Row-selection context](#row-selection)).
 - **Where the trace stops:** requested boundary. This is where the trace ended, not a claim about ultimate source-system fields.
-- **Uncertainty:** 1 gap (dynamic_sql: 1) — see [Gaps and next evidence](#gaps); 1 step partial ([S2](#step-a92b7a4a25e85778)).
+- **Uncertainty:** 1 value-path gap (dynamic_sql: 1) — see [Gaps and next evidence](#gaps); 1 step partial ([S2](#step-a92b7a4a25e85778)).
 
 <a id="value-lineage"></a>
 
@@ -185,6 +185,6 @@ Ordered target-first, then upstream by depth.
 - Stopped — requested boundary: `staging.demo.source.input_a` (database staging is in the requested boundary) and `staging.demo.source.input_b` (database staging is in the requested boundary)
 - Proof is missing at: `@override_value (in reporting.demo.apply_overrides)`
 
-Proof ends at the 1 node listed above with gaps; value paths through them are unproven. The result is **Incomplete — 1 gap**. Stops mark where the trace ended, not ultimate source-system fields.
+Proof ends at the 1 node listed above with gaps; value paths through them are unproven. The result is **Incomplete — 1 value-path gap**. Stops mark where the trace ended, not ultimate source-system fields.
 
 Companion JSON (complete trace graph and full evidence): [sample-trace.lineage.json](sample-trace.lineage.json)

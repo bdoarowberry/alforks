@@ -162,7 +162,7 @@ def test_six_sections_in_order():
 def test_identity_and_result():
     md = render_markdown(sample_trace().to_dict(), SAMPLE_JSON_NAME)
     ident = section(md, "Identity and result")
-    assert "**Result: Incomplete — 1 gap**" in ident
+    assert "**Result: Incomplete — 1 value-path gap**" in ident
     assert "`reporting.demo.output.result_value`" in ident
     assert "databases `staging`" in ident
     assert "`synthetic-r1`" in ident
@@ -376,7 +376,7 @@ def test_empty_trace_unresolved_target():
     gid = trace.add_gap(Gap("column_not_written", "No statement writes db.s.t.missing", node=target))
     trace.target_gaps.append(gid)
     md = render_markdown(trace.to_dict())
-    assert "**Result: Incomplete — 1 gap**" in md
+    assert "**Result: Incomplete — 1 value-path gap**" in md
     assert "**unresolved**" in section(md, "Short answer")
     assert "### column_not_written (1)" in md
     assert len(re.findall(r"^## \d\. ", render_markdown({}), re.M)) == 6  # even an empty dict renders all sections

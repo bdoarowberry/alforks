@@ -191,9 +191,9 @@ class Scope:
                 return result
             scope = scope.parent
         ctx = self.ctx
-        node = Node(UNKNOWN, column.sql(dialect="tsql"))
+        node = Node(UNKNOWN, column.sql(dialect="tsql", comments=False))
         if qualifier:
-            gap = ctx.gap("unresolved_alias", f"Alias or object '{qualifier}' in {column.sql(dialect='tsql')} is not "
+            gap = ctx.gap("unresolved_alias", f"Alias or object '{qualifier}' in {column.sql(dialect='tsql', comments=False)} is not "
                           "visible in this query.", node, column)
         else:
             gap = ctx.gap("ambiguous_column", f"Column {name} could not be bound to any source in this query.", node, column)
@@ -206,7 +206,7 @@ class Scope:
             if not candidates:
                 return None
             if len(candidates) > 1:
-                node = Node(UNKNOWN, column.sql(dialect="tsql"))
+                node = Node(UNKNOWN, column.sql(dialect="tsql", comments=False))
                 gap = self.ctx.gap("ambiguous_column", f"Qualifier '{qualifier}' matches several sources.", node, column)
                 return [Binding(node, AMBIGUOUS, gap)]
             return self.ctx.analyzer.source_column(candidates[0], name, self, column, expand_local)
@@ -223,7 +223,7 @@ class Scope:
                 # schema for the inner source we cannot tell which.
                 inner = self.ctx.analyzer.source_column(only, name, self, column, expand_local)
                 outer = self.parent.bind(column, expand_local)
-                node = Node(UNKNOWN, column.sql(dialect="tsql"))
+                node = Node(UNKNOWN, column.sql(dialect="tsql", comments=False))
                 gap = self.ctx.gap("ambiguous_column", f"Unqualified {name} in a subquery binds to {only.alias} if it "
                                    "has that column (its schema is unknown), otherwise to the outer query.", node, column)
                 return [Binding(b.node, AMBIGUOUS, gap, "inner or outer binding") for b in inner + outer]
@@ -243,7 +243,7 @@ class Scope:
             return None
         if not known and not unknown:
             return None  # maybe an outer (correlated) reference
-        node = Node(UNKNOWN, column.sql(dialect="tsql"))
+        node = Node(UNKNOWN, column.sql(dialect="tsql", comments=False))
         candidates = sorted(s.alias for s in (known or unknown))
         gap = self.ctx.gap("ambiguous_column", f"Unqualified column {name} could come from any of: {', '.join(candidates)}.",
                            node, column, {"candidates": candidates})
@@ -291,9 +291,9 @@ class Analyzer:
             server, database, schema, name = table_parts(node)
             if isinstance(node.this, (exp.Func, exp.Anonymous)) or (isinstance(node.this, exp.Dot) and isinstance(node.this.expression, exp.Func)):
                 func = node.this if not isinstance(node.this, exp.Dot) else node.this.expression
-                fname = (func.name or func.sql(dialect="tsql")).lower()
+                fname = (func.name or func.sql(dialect="tsql", comments=False)).lower()
                 kind = "external_object" if fname in EXTERNAL_FUNCTIONS else "table_valued_function"
-                n = Node(UNKNOWN, node.sql(dialect="tsql"))
+                n = Node(UNKNOWN, node.sql(dialect="tsql", comments=False))
                 gap = ctx.gap(kind, f"Rows come from {fname.upper()}(...); its columns are not traced.", n, node)
                 return Source(alias or fname, "opaque", gap=gap, names=(fname,))
             lname = norm(name) or ""
@@ -328,7 +328,7 @@ class Analyzer:
             name = alias or f"values{len(scope.sources) + 1}"
             local = Local("values", name, node, alias_columns, {}, None, ObjectRef(name, kind="derived", scope=ctx.local_scope(node)))
             return Source(name, "local", columns=alias_columns, reliable=bool(alias_columns), local=local, names=(name,))
-        n = Node(UNKNOWN, node.sql(dialect="tsql") if isinstance(node, exp.Expression) else str(node))
+        n = Node(UNKNOWN, node.sql(dialect="tsql", comments=False) if isinstance(node, exp.Expression) else str(node))
         gap = ctx.gap("unsupported_statement", f"Unsupported row source {type(node).__name__}.", n,
                       node if isinstance(node, exp.Expression) else None)
         return Source(alias or f"source{len(scope.sources) + 1}", "opaque", gap=gap)
@@ -432,7 +432,7 @@ class Analyzer:
                       expand_local: bool = True) -> list[Binding]:
         ctx = scope.ctx
         if source.kind == "opaque":
-            node = Node(UNKNOWN, column.sql(dialect="tsql"))
+            node = Node(UNKNOWN, column.sql(dialect="tsql", comments=False))
             return [Binding(node, UNRESOLVED, source.gap)]
         if source.kind == "local":
             local = source.local
@@ -531,12 +531,11 @@ class Analyzer:
         if item.source is not None and item.column is not None:
             column = exp.column(item.column, table=item.source.alias)
             step = self.make_step(target, writer_kind, column, scope, ctx, "wildcard_schema", context)
-            step.notes.append(f"Expanded from {item.expr.sql(dialect='tsql')} using the ordered schema of {item.source.alias}.")
+            step.notes.append(f"Expanded from {item.expr.sql(dialect='tsql', comments=False)} using the ordered schema of {item.source.alias}.")
         else:
             step = self.make_step(target, writer_kind, item.expr, scope, ctx, method, context)
         if select is not None:
             step.row_selection.extend(self.row_selection(select, scope, ctx))
-            step.status = worst(step.status, *[r.status for r in step.row_selection if r.status == AMBIGUOUS])
         return step
 
     def make_step(self, target: Node, writer_kind: str, value: exp.Expression, scope: Scope, ctx: Ctx,
@@ -547,7 +546,7 @@ class Analyzer:
         self.walk(value, VALUE, None, scope, ctx, inputs, extra_rows, True)
         inputs = dedupe_inputs(inputs)
         operation = classify(value, target.name)
-        step = Step(target=target, writer_kind=writer_kind, expression=value.sql(dialect="tsql"),
+        step = Step(target=target, writer_kind=writer_kind, expression=value.sql(dialect="tsql", comments=False),
                     operation=operation, inputs=inputs, row_selection=extra_rows,
                     branch_context=list(ctx.controls) + list(context), mapping_method=method,
                     procedure=procedure if procedure is not None else ctx.statement.procedure,
@@ -571,20 +570,20 @@ class Analyzer:
             if isinstance(e.this, exp.Star):
                 return
             for b in scope.bind(e):
-                out.append(Input(b.node, role, e.sql(dialect="tsql"), branch, b.status, b.gap, b.note))
+                out.append(Input(b.node, role, e.sql(dialect="tsql", comments=False), branch, b.status, b.gap, b.note))
             return
         if isinstance(e, exp.Neg) and isinstance(unparen(e.this), exp.Literal):
             if role == VALUE and const_ok:
-                out.append(Input(Node(CONSTANT, e.sql(dialect="tsql")), VALUE, e.sql(dialect="tsql"), branch))
+                out.append(Input(Node(CONSTANT, e.sql(dialect="tsql", comments=False)), VALUE, e.sql(dialect="tsql", comments=False), branch))
             return
         if isinstance(e, (exp.Literal, exp.Null, exp.Boolean)):
             if role == VALUE and const_ok:
-                out.append(Input(Node(CONSTANT, e.sql(dialect="tsql")), VALUE, e.sql(dialect="tsql"), branch))
+                out.append(Input(Node(CONSTANT, e.sql(dialect="tsql", comments=False)), VALUE, e.sql(dialect="tsql", comments=False), branch))
             return
         if isinstance(e, exp.DataType) or isinstance(e, exp.Var):
             return
         if isinstance(e, exp.Parameter):
-            name = e.sql(dialect="tsql").lower()
+            name = e.sql(dialect="tsql", comments=False).lower()
             if name.startswith("@@"):
                 if role == VALUE and const_ok:
                     out.append(Input(Node(CONSTANT, name), VALUE, name, branch, VERIFIED, None, "system function"))
@@ -596,8 +595,8 @@ class Analyzer:
             if e.this is not None:
                 self.walk(e.this, CONDITION, join_branch(branch, "CASE operand"), scope, ctx, out, rows, False)
             for case_if in e.args.get("ifs") or []:
-                cond = case_if.this.sql(dialect="tsql")
-                when = f"WHEN {e.this.sql(dialect='tsql')} = {cond}" if e.this is not None else f"WHEN {cond}"
+                cond = case_if.this.sql(dialect="tsql", comments=False)
+                when = f"WHEN {e.this.sql(dialect='tsql', comments=False)} = {cond}" if e.this is not None else f"WHEN {cond}"
                 self.walk(case_if.this, CONDITION, join_branch(branch, when), scope, ctx, out, rows, False)
                 self.walk(case_if.args.get("true"), role, join_branch(branch, when + " THEN"), scope, ctx, out, rows, True)
             default = e.args.get("default")
@@ -608,7 +607,7 @@ class Analyzer:
                                  "implicit ELSE NULL: the CASE has no ELSE"))
             return
         if isinstance(e, exp.If):
-            cond = e.this.sql(dialect="tsql")
+            cond = e.this.sql(dialect="tsql", comments=False)
             self.walk(e.this, CONDITION, join_branch(branch, f"IIF {cond}"), scope, ctx, out, rows, False)
             self.walk(e.args.get("true"), role, join_branch(branch, f"IIF {cond} THEN"), scope, ctx, out, rows, True)
             self.walk(e.args.get("false"), role, join_branch(branch, f"IIF {cond} ELSE"), scope, ctx, out, rows, True)
@@ -646,7 +645,7 @@ class Analyzer:
                 self.predicate_subquery(inner, role if role != VALUE else CONDITION, branch, scope, ctx, out)
             return
         if isinstance(e, exp.Dot) and isinstance(e.expression, (exp.Anonymous, exp.Func)):
-            fname = f"{e.this.sql(dialect='tsql')}.{e.expression.name}"
+            fname = f"{e.this.sql(dialect='tsql', comments=False)}.{e.expression.name}"
             node = Node(UNKNOWN, fname + "(...)")
             ctx.gap("opaque_function", f"User function {fname} is applied; its body is not traced, so other "
                     "inputs it reads are not shown.", None, e)
@@ -695,7 +694,7 @@ class Analyzer:
 
         def add(expr, role, prefix=""):
             for clause in conjuncts(expr):
-                text = prefix + clause.sql(dialect="tsql")
+                text = prefix + clause.sql(dialect="tsql", comments=False)
                 kind = role
                 if role == JOIN_PREDICATE and isinstance(clause, exp.EQ) and \
                         isinstance(unparen(clause.this), exp.Column) and isinstance(unparen(clause.expression), exp.Column):
@@ -739,7 +738,7 @@ class Analyzer:
         order = select.args.get("order")
         if limit is not None and order is not None:
             # TOP n ... ORDER BY decides which rows survive.
-            top = limit.expression.sql(dialect="tsql") if isinstance(limit, exp.Limit) and limit.expression is not None else "n"
+            top = limit.expression.sql(dialect="tsql", comments=False) if isinstance(limit, exp.Limit) and limit.expression is not None else "n"
             for part in order.expressions:
                 add(part.this if isinstance(part, exp.Ordered) else part, TOP_ORDER, f"TOP {top} ORDER BY ")
         return out
@@ -900,8 +899,8 @@ class Analyzer:
         else:
             value = exp.Null()
             what = "NULL (no default is declared)" if info is not None else "its default or NULL (schema unknown)"
-        step = Step(target=target, writer_kind="insert_omitted", expression=value.sql(dialect="tsql"), operation="constant",
-                    inputs=[Input(Node(CONSTANT, value.sql(dialect="tsql")), VALUE, value.sql(dialect="tsql"), None)],
+        step = Step(target=target, writer_kind="insert_omitted", expression=value.sql(dialect="tsql", comments=False), operation="constant",
+                    inputs=[Input(Node(CONSTANT, value.sql(dialect="tsql", comments=False)), VALUE, value.sql(dialect="tsql", comments=False), None)],
                     branch_context=list(ctx.controls), mapping_method="omitted_from_insert",
                     status=VERIFIED if info is not None else INFERRED, procedure=ctx.statement.procedure,
                     evidence=[ctx.evidence(tree.this, "target_column_list")], order=ctx.statement.start)
@@ -992,7 +991,7 @@ class Analyzer:
                 role = JOIN_KEY if isinstance(clause, exp.EQ) else JOIN_PREDICATE
                 for item in inputs:
                     if item.node.kind != CONSTANT:
-                        base_rows.append(RowSelection(item.node, role, "MERGE ON " + clause.sql(dialect="tsql"),
+                        base_rows.append(RowSelection(item.node, role, "MERGE ON " + clause.sql(dialect="tsql", comments=False),
                                                       ctx.evidence(clause, role), item.status, item.gap))
         whens = tree.args.get("whens")
         whens = whens.expressions if isinstance(whens, exp.Whens) else (whens or [])
@@ -1003,7 +1002,7 @@ class Analyzer:
             label = "WHEN MATCHED" if matched else ("WHEN NOT MATCHED BY SOURCE" if by_source else "WHEN NOT MATCHED")
             condition = when.args.get("condition")
             if condition is not None:
-                label += f" AND {condition.sql(dialect='tsql')}"
+                label += f" AND {condition.sql(dialect='tsql', comments=False)}"
             then = when.args.get("then")
             rows = list(base_rows)
             if condition is not None:
@@ -1011,7 +1010,7 @@ class Analyzer:
                 self.walk(condition, CONDITION, None, scope, ctx, inputs, [], False)
                 for item in inputs:
                     if item.node.kind != CONSTANT:
-                        rows.append(RowSelection(item.node, MERGE_CONDITION, condition.sql(dialect="tsql"),
+                        rows.append(RowSelection(item.node, MERGE_CONDITION, condition.sql(dialect="tsql", comments=False),
                                                  ctx.evidence(condition, MERGE_CONDITION), item.status, item.gap))
             if isinstance(then, exp.Update):
                 for assignment in then.expressions:
