@@ -146,9 +146,7 @@ class Scope:
         from_ = select.args.get("from_")
         if from_ is not None and from_.this is not None:
             self.add_from(from_.this)
-            for join in from_.args.get("joins") or []:
-                self.add_from(join.this)
-        for join in select.args.get("joins") or []:
+        for join in join_list(select):
             self.add_from(join.this)
 
     def find_alias(self, qualifier: str) -> list[Source]:
@@ -569,7 +567,8 @@ class Analyzer:
             if default is not None:
                 self.walk(default, role, join_branch(branch, "ELSE"), scope, ctx, out, rows, True)
             elif role == VALUE:
-                out.append(Input(Node(CONSTANT, "NULL"), VALUE, "NULL", join_branch(branch, "ELSE (implicit NULL)")))
+                out.append(Input(Node(CONSTANT, "NULL"), VALUE, "NULL", join_branch(branch, "ELSE"), VERIFIED, None,
+                                 "implicit ELSE NULL: the CASE has no ELSE"))
             return
         if isinstance(e, exp.If):
             cond = e.this.sql(dialect="tsql")
@@ -581,7 +580,7 @@ class Analyzer:
             label = "ISNULL" if e.args.get("is_null") else "COALESCE"
             args = [e.this] + list(e.expressions or [])
             for i, arg in enumerate(args, 1):
-                self.walk(arg, role, join_branch(branch, f"{label} argument {i} of {len(args)}"), scope, ctx, out, rows, True)
+                self.walk(arg, role, join_branch(branch, f"{label} argument {i}"), scope, ctx, out, rows, True)
             return
         if isinstance(e, exp.Nullif):
             self.walk(e.this, role, branch, scope, ctx, out, rows, const_ok)
@@ -649,7 +648,7 @@ class Analyzer:
                 node = select.args.get(clause)
                 if node is not None:
                     self.walk(node.this, role, join_branch(branch, "subquery " + clause.upper()), inner, ctx, out, sink_rows, False)
-            for join in select.args.get("joins") or []:
+            for join in join_list(select):
                 if join.args.get("on") is not None:
                     self.walk(join.args["on"], role, join_branch(branch, "subquery JOIN"), inner, ctx, out, sink_rows, False)
 
@@ -677,11 +676,7 @@ class Analyzer:
         where = select.args.get("where")
         if where is not None:
             add(where.this, FILTER)
-        joins = list(select.args.get("joins") or [])
-        from_ = select.args.get("from_")
-        if from_ is not None:
-            joins.extend(from_.args.get("joins") or [])
-        for join in joins:
+        for join in join_list(select):
             side = " ".join(p for p in (join.args.get("side"), join.args.get("kind")) if p)
             prefix = f"{side} JOIN ".lstrip() if side else "JOIN "
             on = join.args.get("on")
@@ -913,8 +908,8 @@ class Analyzer:
                         if source is not target_source:
                             insert_scope.sources.append(source)
                     step = self.make_step(target, "merge_insert", values[position], insert_scope, ctx, "target_list", [label])
-                    step.row_selection.extend(r for r in rows if r.node.object is None or
-                                              not target_source or r.node.object not in [x for x, _ in target_source.refs])
+                    # NOT MATCHED rows are those with no target match, so the ON keys on both sides select them.
+                    step.row_selection.extend(rows)
                     ctx.steps.append(step)
 
     # ======================================================== variables etc.
@@ -946,6 +941,17 @@ class Analyzer:
 
 
 # ----------------------------------------------------------------- helpers
+def join_list(select: exp.Expression) -> list[exp.Join]:
+    """Joins of a query level; SQLGlot may attach them to the statement, the FROM, or the FROM's table."""
+    joins = list(select.args.get("joins") or [])
+    from_ = select.args.get("from_")
+    if from_ is not None:
+        joins.extend(from_.args.get("joins") or [])
+        if isinstance(from_.this, exp.Expression):
+            joins.extend(from_.this.args.get("joins") or [])
+    return joins
+
+
 def join_branch(outer: str | None, inner: str) -> str:
     return f"{outer} / {inner}" if outer else inner
 

@@ -235,6 +235,10 @@ class Tracer:
                 step._position = (writer.unit.path, writer.statement.start, writer.statement.scope)
                 if step.target.id == node.id:
                     writing.append((writer, step))
+                    if ref.kind == "temp_table" and writer.statement.scope != ref.scope:
+                        step.status = worst(step.status, INFERRED)
+                        step.notes.append(f"Writes {ref.name}, created by caller {ref.scope_label}; SQL Server makes a "
+                                          "caller's #temp table visible to the procedures it calls.")
             for step in found:
                 if step.target.kind == LOCAL_COLUMN:
                     step._scope = writer.statement.scope

@@ -372,11 +372,15 @@ class Catalog:
         tree = statement.tree
         text = statement.text
         if DYNAMIC.match(text):
-            mentioned = tuple(sorted({normalize_name(m.group("target")) for m in WRITE_TARGET.finditer(unit.text[statement.start:statement.end])}))
-            self._issue("dynamic_sql", unit, statement, mentioned,
+            self._issue("dynamic_sql", unit, statement, self._literal_targets(unit, statement),
                         "Dynamic SQL is executed here; its statements are not analysed.")
             return
         insert_exec = INSERT_EXEC.match(mask_noncode(text))
+        if insert_exec is None and re.match(r"\s*INSERT\b", text, re.I) and (
+                tree is None or isinstance(tree, exp.Command) or (isinstance(tree, exp.Insert) and tree.expression is None)):
+            # The indexer splits INSERT ... EXEC into two statements; look at what follows.
+            if re.match(r"\s*EXEC(?:UTE)?\b", unit.masked[statement.end:statement.end + 200], re.I):
+                insert_exec = INSERT_EXEC.match(mask_noncode(text) + " EXEC")
         if insert_exec:
             target = self.ref_from_text(insert_exec.group("target"), unit, statement)
             self._issue("insert_exec", unit, statement, (target.name,),
@@ -455,6 +459,22 @@ class Catalog:
                     if isinstance(item, exp.EQ) and isinstance(item.this, exp.Parameter):
                         self._assign(unit, statement, item.this.sql(dialect="tsql"), item.expression, tree, "select")
             return
+
+    def _literal_targets(self, unit: Unit, statement: Statement) -> tuple[str, ...]:
+        """Object names that string literals in the same scope name as write targets.
+
+        Dynamic SQL is usually assembled in variables before the EXEC, so look at every
+        literal in the procedure or batch, not only the EXEC statement.
+        """
+        names = set()
+        for other in unit.index.statements:
+            if other.scope != statement.scope:
+                continue
+            masked = mask_noncode(other.text)
+            for match in WRITE_TARGET.finditer(other.text):
+                if masked[match.start()] == " " and other.text[match.start()] != " ":
+                    names.add(split_name(match.group("target"))[-1].lower())
+        return tuple(sorted(names))
 
     def _writer_ref(self, ref: ObjectRef, unit: Unit, statement: Statement) -> ObjectRef:
         # Temp refs keep the writing statement's scope; callers are resolved at query time,
