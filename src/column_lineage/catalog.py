@@ -205,6 +205,8 @@ def parameter_defaults(header: str, statement: Statement) -> dict:
             continue
         start = param.end() + eq + 1
         stop = param.end() + len(segment.rstrip().rstrip(",").rstrip())
+        # A string literal is blank in the masked text: a default that ends with one ends at its closing quote.
+        stop = literal_end(header, stop, end)
         tail = re.search(r"\b(?:OUTPUT|OUT|READONLY)\b|\bAS\s*$|\)\s*(?:AS\s*)?$|,\s*$", masked[start:stop], re.I)
         value_end = start + tail.start() if tail else stop
         value = header[start:value_end].strip().rstrip(",")
@@ -217,6 +219,24 @@ def parameter_defaults(header: str, statement: Statement) -> dict:
         if isinstance(parsed, exp.Select) and parsed.expressions:
             defaults[param.group().lower()] = (parsed.expressions[0], statement)
     return defaults
+
+
+def literal_end(text: str, at: int, limit: int) -> int:
+    """If a string literal starts at ``at`` (after spaces), the offset after its closing quote; else ``at``."""
+    i = at
+    while i < limit and text[i] in " \t":
+        i += 1
+    if i >= limit or text[i] != "'":
+        return at
+    i += 1
+    while i < limit:
+        if text[i] == "'":
+            if i + 1 < limit and text[i + 1] == "'":
+                i += 2
+                continue
+            return i + 1
+        i += 1
+    return at
 
 
 def ident_text(node) -> str | None:

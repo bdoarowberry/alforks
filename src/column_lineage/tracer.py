@@ -570,8 +570,9 @@ def mark_evaluated(steps, statement) -> None:
         return
     for step in steps:
         step.status = worst(step.status, INFERRED)
-        note = (f"Evaluated from dynamic SQL built at {statement.built_at} (executed at {statement.executed_at}); "
-                "the string was enumerated from literals in the code.")
+        where = (f"built at {statement.built_at} (executed at {statement.executed_at})"
+                 if statement.built_at != statement.executed_at else f"built and executed at {statement.executed_at}")
+        note = f"Evaluated from dynamic SQL {where}; the string was enumerated from literals in the code."
         if note not in step.notes:
             step.notes.append(note)
 

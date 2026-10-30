@@ -62,8 +62,8 @@ class Cond:
     """One runtime condition an alternative depends on. Same key and a different arm contradict."""
     key: tuple
     arm: str
-    label: str
-    order: tuple = ()
+    label: str = field(compare=False)
+    order: tuple = field(default=(), compare=False)
 
 
 @dataclass(frozen=True)
@@ -151,24 +151,33 @@ def quote_name(value: str, quote: str) -> str | None:
     return left + value.replace(right, right + right) + right
 
 
-def type_length(data_type) -> tuple[bool, int | None]:
-    """(is a string type, maximum length or None for unbounded) of a declared type."""
+def type_length(data_type) -> tuple[str, int | None]:
+    """(kind, maximum length) of a declared type: kind is ``string``, ``other`` (not text) or ``unknown``
+    (a user-defined type); the length is None when unbounded or not written."""
     if not isinstance(data_type, exp.DataType):
-        return False, None
+        return "unknown", None
     name = data_type.this.name if hasattr(data_type.this, "name") else str(data_type.this)
-    name = name.upper().replace("DTYPE.", "")
+    name = name.upper()
+    if name == "USERDEFINED":
+        return ("string", 128) if data_type.sql(dialect="tsql").upper() in ("SYSNAME", "[SYSNAME]") else ("unknown", None)
     if name not in STRING_TYPES:
-        return False, None
+        return "other", None
     if STRING_TYPES[name] is None:
-        return True, None
+        return "string", None
     params = data_type.expressions
     if not params:
-        return True, None   # caller decides the implicit length (DECLARE: 1, CAST: 30)
+        return "string", None   # the caller decides the implicit length (DECLARE: 1, CAST: 30)
     value = params[0].this if isinstance(params[0], exp.DataTypeParam) else params[0]
     text = sql_text(value).upper()
     if text == "MAX":
-        return True, None
-    return (True, int(text)) if text.isdigit() else (True, None)
+        return "string", None
+    return "string", (int(text) if text.isdigit() else None)
+
+
+def implicit_length(data_type) -> bool:
+    """A (n)char/(n)varchar written without a length."""
+    return (isinstance(data_type, exp.DataType) and not data_type.expressions
+            and getattr(data_type.this, "name", "").upper() in ("CHAR", "NCHAR", "VARCHAR", "NVARCHAR"))
 
 
 class Evaluator:
@@ -378,11 +387,10 @@ class Evaluator:
         return alts
 
     def convert(self, value_node, data_type, args, node) -> list[Alt]:
-        is_string, length = type_length(data_type)
-        if not is_string:
+        kind, length = type_length(data_type)
+        if kind != "string":
             raise Unknown(f"{shorten(sql_text(node))}: conversion to a non-string type is not evaluated")
-        if length is None and isinstance(data_type, exp.DataType) and not data_type.expressions \
-                and str(data_type.this).upper().replace("DTYPE.", "") not in ("TEXT", "NTEXT"):
+        if implicit_length(data_type):
             length = 30   # CAST/CONVERT to (n)varchar without a length
         def cast(vs):
             value = vs[0]
@@ -492,8 +500,8 @@ class Evaluator:
         declared = self.declared_types(scope, unit).get(name)
         if declared is None:
             return values
-        is_string, length = declared
-        if not is_string:
+        kind, length = declared
+        if kind == "other":
             raise Unknown(f"{name}: declared with a non-string type")
         if length is None:
             return values
@@ -513,11 +521,10 @@ class Evaluator:
                 for n in names:
                     if isinstance(n, exp.Parameter):
                         data_type = item.args["kind"]
-                        is_string, length = type_length(data_type)
-                        if is_string and length is None and not data_type.expressions and \
-                                str(data_type.this).upper().replace("DTYPE.", "") not in ("TEXT", "NTEXT"):
+                        kind, length = type_length(data_type)
+                        if implicit_length(data_type):
                             length = 1   # DECLARE @v varchar  means varchar(1)
-                        found[sql_text(n).lower()] = (is_string, length)
+                        found[sql_text(n).lower()] = (kind, length)
         proc = self.catalog.proc_by_scope.get(scope)
         if proc is not None:
             end = header_end(proc.unit.masked, proc.start, len(proc.unit.masked)) or proc.start
@@ -529,9 +536,9 @@ class Evaluator:
                 type_name = match.group("type").strip("[]").split(".")[-1].strip("[]").upper()
                 length = match.group("length")
                 if type_name == "SYSNAME":
-                    found[param] = (True, 128)
+                    found[param] = ("string", 128)
                 elif type_name in STRING_TYPES:
-                    found[param] = (True, None if (length or "").upper() == "MAX" or STRING_TYPES[type_name] is None
+                    found[param] = ("string", None if (length or "").upper() == "MAX" or STRING_TYPES[type_name] is None
                                     else int(length) if length else 1)
         self._declared[scope] = found
         return found
