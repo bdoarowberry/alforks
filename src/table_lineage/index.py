@@ -120,56 +120,57 @@ def _next_statement_boundary(text: str, masked: str, start: int, limit: int, mat
     return limit
 
 
+_NONCODE_START = re.compile("--|/\\*|['\\[\"]")
+_BLOCK_COMMENT = re.compile(r"/\*|\*/")
+_NOT_NEWLINE = re.compile(r"[^\r\n]")
+
+
+def _quoted_end(text: str, start: int, close: str) -> int:
+    """End offset (exclusive) of a quoted run opened at ``start``; doubled closers escape."""
+    j = start + 1
+    while True:
+        k = text.find(close, j)
+        if k < 0:
+            return len(text)
+        if k + 1 < len(text) and text[k + 1] == close:
+            j = k + 2
+            continue
+        return k + 1
+
+
 def mask_noncode(text: str) -> str:
     """Mask comments and string literals without changing offsets or line breaks."""
-    result = list(text)
+    parts = []
+    last = 0
     i = 0
-    while i < len(text):
-        start = i
-        if text.startswith('--', i):
-            end = text.find('\n', i)
-            i = len(text) if end < 0 else end
-        elif text.startswith('/*', i):
-            i += 2
+    while True:
+        match = _NONCODE_START.search(text, i)
+        if match is None:
+            break
+        start = match.start()
+        token = match.group()
+        if token == "--":
+            end = text.find("\n", start)
+            end = len(text) if end < 0 else end
+        elif token == "/*":
             depth = 1
-            while i < len(text) and depth:
-                if text.startswith('/*', i):
-                    depth += 1
-                    i += 2
-                elif text.startswith('*/', i):
-                    depth -= 1
-                    i += 2
-                else:
-                    i += 1
-        elif text[i] == "'":
-            i += 1
-            while i < len(text):
-                if text[i] == "'":
-                    if i + 1 < len(text) and text[i + 1] == "'":
-                        i += 2
-                        continue
-                    i += 1
+            end = len(text)
+            for inner in _BLOCK_COMMENT.finditer(text, start + 2):
+                depth += 1 if inner.group() == "/*" else -1
+                if depth == 0:
+                    end = inner.end()
                     break
-                i += 1
-        elif text[i] in '["':
-            close = ']' if text[i] == '[' else '"'
-            i += 1
-            while i < len(text):
-                if text[i] == close:
-                    if i + 1 < len(text) and text[i + 1] == close:
-                        i += 2
-                        continue
-                    i += 1
-                    break
-                i += 1
-            continue
+        elif token == "'":
+            end = _quoted_end(text, start, "'")
         else:
-            i += 1
+            # Bracketed and double-quoted identifiers are code: skip them unmasked.
+            i = _quoted_end(text, start, "]" if token == "[" else '"')
             continue
-        for pos in range(start, i):
-            if text[pos] not in '\r\n':
-                result[pos] = ' '
-    return ''.join(result)
+        parts.append(text[last:start])
+        parts.append(_NOT_NEWLINE.sub(" ", text[start:end]))
+        last = i = end
+    parts.append(text[last:])
+    return "".join(parts)
 
 
 def _sql_for_parsing(sql: str) -> str:

@@ -159,3 +159,21 @@ def test_single_merge_is_not_described_as_two_ordered_writers(tmp_path):
     t = review("merge_derived", "demo.output.result_value", tmp_path, *DB)
     for step in t.steps_for(t.target_id):
         assert not any("Runs after earlier writers" in n for n in step["notes"])
+
+
+# ---- real-source feedback, round 2
+
+def test_wildcard_step_cites_the_star_and_its_source_schema(tmp_path):
+    t = review("wildcard_cte", "schema1.stage2.target_col", tmp_path, *DB)
+    step = t.only_step_for(t.target_id)
+    assert step["mapping_method"] == "wildcard_schema"
+    assert step["status"] == "inferred"
+    star = next(e for e in step["evidence"] if e["role"] == "wildcard")
+    assert star["start_line"] == 11 and "s.*" in star["excerpt"]
+    assert any(e["role"] == "source_schema" and e["start_line"] == 1 for e in step["evidence"])
+    assert "db.schema1.stage1.target_col" in reach(t)
+
+
+def test_qualified_names_in_insert_column_list_are_repaired(tmp_path):
+    t = review("insert_qualified_cols", "demo.output.result_value", tmp_path, *DB)
+    assert "db.demo.source.input_a" in reach(t)

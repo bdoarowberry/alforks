@@ -14,12 +14,12 @@ from sqlglot.tokens import TokenType
 KEYWORD = re.compile(r"[A-Za-z_]+")
 
 
-def anonymize(sql: str, limit: int = 400) -> str:
+def anonymize(sql: str, limit: int = 400, names: dict | None = None) -> str:
     try:
         tokens = sqlglot.Dialect.get_or_raise("tsql").tokenizer().tokenize(sql)
     except Exception:  # noqa: BLE001 - the tokenizer may fail on exactly the SQL we want to report
         return _fallback(sql, limit)
-    names: dict[str, str] = {}
+    names = {} if names is None else names
     out = []
     merged = []
     i = 0
@@ -87,6 +87,26 @@ def _error_class(error: str | None) -> str:
     return first.strip()[:120]
 
 
+def _error_window(sql: str, error: str | None, before: int = 160, after: int = 100) -> str | None:
+    """Anonymized text around the parser's reported position, marked with <<HERE>>."""
+    match = re.search(r"Line (\d+), Col: (\d+)", re.sub(r"\x1b\[[0-9;]*m", "", error or ""))
+    if not match:
+        return None
+    line, col = int(match.group(1)), int(match.group(2))
+    lines = sql.split("\n")
+    if line < 1 or line > len(lines):
+        return None
+    offset = sum(len(x) + 1 for x in lines[:line - 1]) + max(col - 1, 0)
+    # Cut at whitespace so a token is not split.
+    start = sql.rfind(" ", 0, max(0, offset - before)) + 1 if offset > before else 0
+    end = sql.find(" ", min(len(sql), offset + after))
+    end = len(sql) if end < 0 else end
+    names: dict = {}
+    left = anonymize(sql[start:offset], limit=before * 2, names=names)
+    right = anonymize(sql[offset:end], limit=after * 2, names=names)
+    return ("… " if start else "") + left + " <<HERE>> " + right + (" …" if end < len(sql) else "")
+
+
 def build(catalog, traces: list[dict], samples: int = 25) -> dict:
     statements = Counter()
     errors = Counter()
@@ -101,7 +121,11 @@ def build(catalog, traces: list[dict], samples: int = 25) -> dict:
         shape = anonymize(statement.text)
         if len(sample_list) < samples and (keyword, error_class) not in seen:
             seen.add((keyword, error_class))
-            sample_list.append({"keyword": keyword, "error_class": error_class, "anonymized_sql": shape})
+            sample = {"keyword": keyword, "error_class": error_class, "anonymized_sql": shape}
+            near = _error_window(statement.text, statement.parse_error)
+            if near:
+                sample["anonymized_near_error"] = near
+            sample_list.append(sample)
     issue_kinds = Counter(issue.kind for issue in catalog.issues)
     trace_summary = []
     for data in traces:

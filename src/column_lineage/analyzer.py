@@ -531,12 +531,36 @@ class Analyzer:
         if item.source is not None and item.column is not None:
             column = exp.column(item.column, table=item.source.alias)
             step = self.make_step(target, writer_kind, column, scope, ctx, "wildcard_schema", context)
-            step.notes.append(f"Expanded from {item.expr.sql(dialect='tsql', comments=False)} using the ordered schema of {item.source.alias}.")
+            star = item.expr.sql(dialect="tsql", comments=False)
+            # Cite the * as written; the expanded column is not in the source text.
+            step.expression = f"{star} (expands to {item.source.alias}.{item.column})"
+            step.evidence = [self.catalog.evidence(ctx.unit, ctx.statement, item.expr, "wildcard",
+                                                   excerpt=f"{star}  [{item.source.alias}.{item.column} by position]")]
+            step.evidence.extend(self.schema_evidence(item.source))
+            step.status = worst(step.status, INFERRED)
+            step.notes.append(f"{star} was expanded using the ordered column list of {item.source.alias} "
+                              "(see the source_schema evidence); the column is not named in this statement.")
         else:
             step = self.make_step(target, writer_kind, item.expr, scope, ctx, method, context)
         if select is not None:
             step.row_selection.extend(self.row_selection(select, scope, ctx))
         return step
+
+    def schema_evidence(self, source: Source) -> list:
+        """Where the ordered column list used to expand a * comes from."""
+        out = []
+        for ref, _ in source.refs[:1]:
+            _, status, schema = self.catalog.schema_for(ref)
+            if status == "declared" and schema is not None:
+                out.append(self.catalog.evidence(schema.unit, schema.statement, role="source_schema",
+                                                 excerpt=f"column list of {ref.display}"))
+                continue
+            for writer in self.catalog.writers_for(ref):
+                if writer.kind in ("select_into", "view"):
+                    out.append(self.catalog.evidence(writer.unit, writer.statement, role="source_schema",
+                                                     excerpt=f"output columns of {ref.display} ({writer.kind})"))
+                    break
+        return out
 
     def make_step(self, target: Node, writer_kind: str, value: exp.Expression, scope: Scope, ctx: Ctx,
                   method: str, context: list[str], procedure: str | None = None) -> Step:

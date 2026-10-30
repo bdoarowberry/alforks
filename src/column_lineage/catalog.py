@@ -42,11 +42,15 @@ DML_TOP = re.compile(r"(?:^|(?<=[\s;]))(?:UPDATE|DELETE|INSERT)\s+(?P<top>TOP\s*
 INSERT_HINT = re.compile(rf"\bINSERT\s+(?:INTO\s+)?{IDENT}\s*(?P<hint>WITH\s*\(\s*[A-Za-z_]+(?:\s*,\s*[A-Za-z_]+)*\s*\))", re.I)
 OUTPUT_CLAUSE = re.compile(rf"(?<![.\w\[\]])OUTPUT\s+(?=INSERTED\b|DELETED\b|\$ACTION\b|@)(?:(?!\bOUTPUT\b).)*?(?:\bINTO\s+(?P<target>{IDENT})(?:\s*\([^()]*\))?)?"
                            r"(?=\s*(?:SELECT|VALUES|FROM|WHERE|DEFAULT|;|$))", re.I | re.S)
+INSERT_COLUMNS = re.compile(rf"\bINSERT\s+(?:INTO\s+)?{IDENT}\s*\((?P<cols>[^()]*)\)", re.I)
 OPTION_HINT = re.compile(r"(?P<option>\bOPTION\s*\((?:[^()]|\((?:[^()]|\([^()]*\))*\))*\))\s*;?\s*$", re.I)
 ALIAS_DEF = re.compile(rf"\b(?:FROM|JOIN|UPDATE|MERGE(?:\s+INTO)?)\s+(?P<name>{IDENT})\s+(?:WITH\s*\([^)]*\)\s*)?(?:AS\s+)?"
                        r"(?P<alias>\[[^\]]+\]|[A-Za-z_][\w$#]*)", re.I)
 NON_LINEAGE = re.compile(
     r"\s*(?:RAISERROR\b|RETURN\b|PRINT\b|THROW\b|REVERT\b|(?:WITH\s+)?EXEC(?:UTE)?\s+AS\b|"
+    # Cursor verbs and DROP are read separately from the source text; WHILE here is a condition fragment.
+    r"DECLARE\s+[A-Za-z_][\w$#@]*\s+(?:INSENSITIVE\s+|SCROLL\s+)*CURSOR\b|(?:OPEN|FETCH|CLOSE|DEALLOCATE|DROP|WHILE)\b|"
+    r"ALTER\s+TABLE\s+\S+\s+(?:ADD\s+CONSTRAINT|DROP\s+CONSTRAINT|(?:WITH\s+)?(?:NO)?CHECK|SWITCH|REBUILD|SET\s*\()|"
     r"SET\s+(?:NOCOUNT|XACT_ABORT|ANSI_\w+|QUOTED_IDENTIFIER|ARITHABORT|CONCAT_NULL_YIELDS_NULL|NUMERIC_ROUNDABORT|"
     r"TRANSACTION|IDENTITY_INSERT|DATEFORMAT|DATEFIRST|LANGUAGE|LOCK_TIMEOUT|DEADLOCK_PRIORITY|ROWCOUNT|STATISTICS|"
     r"FMTONLY|NOEXEC|IMPLICIT_TRANSACTIONS|CURSOR_CLOSE_ON_COMMIT|TEXTSIZE|CONTEXT_INFO)\b)", re.I)
@@ -458,6 +462,11 @@ class Catalog:
         for pattern, group in ((INSERT_HINT, "hint"), (DML_TOP, "top"), (OPTION_HINT, "option")):
             for match in pattern.finditer(masked):
                 spans.append(match.span(group))
+        target_list = INSERT_COLUMNS.search(masked)
+        if target_list:
+            base = target_list.start("cols")
+            for qualifier in re.finditer(r"(?:\[[^\]]+\]|[A-Za-z_][\w$#]*)\s*\.\s*(?=\[|[A-Za-z_])", target_list.group("cols")):
+                spans.append((base + qualifier.start(), base + qualifier.end()))
         for match in OUTPUT_CLAUSE.finditer(masked):
             spans.append(match.span())
             if match.group("target"):

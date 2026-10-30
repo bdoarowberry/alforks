@@ -394,7 +394,7 @@ def test_cli_regenerates_page(tmp_path):
     assert "(out/x.lineage.json)" in (tmp_path / "page.md").read_text(encoding="utf-8")
     assert main([str(tmp_path / "nope.json")]) == 2
     proc = subprocess.run([sys.executable, "-m", "column_lineage.render_markdown", str(json_path), "-o", "-"],
-                          capture_output=True, text=True, cwd=ROOT, env={"PYTHONPATH": str(ROOT / "src")})
+                          capture_output=True, text=True, encoding="utf-8", cwd=ROOT, env={"PYTHONPATH": str(ROOT / "src")})
     assert proc.returncode == 0 and "## 6. Gaps and next evidence" in proc.stdout
 
 
