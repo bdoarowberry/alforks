@@ -693,7 +693,7 @@ class Evaluator:
                     for piece in repaired:
                         out.extend(self.piece(piece.text, piece.tree, env))
                     continue
-                if non_lineage(text):
+                if non_lineage(text) or MAINTENANCE.match(mask_noncode(text)):
                     continue
                 raise Unknown(f"a statement in the evaluated SQL could not be parsed: {shorten(' '.join(text.split()))}")
             out.extend(self.piece(text, tree, env))
@@ -754,7 +754,10 @@ INITIAL = object()
 HARMLESS = re.compile(
     r"(?:(?:BEGIN|COMMIT|ROLLBACK|SAVE)(?:\s+(?:TRAN|TRANSACTION|WORK)\b.*)?|END|GO|PRINT\b.*|"
     r"TRUNCATE\s+TABLE\s+\S+|DROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?\S+|"
-    r"CREATE\s+(?:UNIQUE\s+)?(?:(?:NON)?CLUSTERED\s+)?(?:COLUMNSTORE\s+)?INDEX\b.*)", re.I)
+    r"CREATE\s+(?:UNIQUE\s+)?(?:(?:NON)?CLUSTERED\s+)?(?:COLUMNSTORE\s+)?INDEX\b.*|"
+    r"ALTER\s+INDEX\b.*|DBCC\b.*|UPDATE\s+STATISTICS\b.*)", re.I)
+# Maintenance statements with no column lineage that SQLGlot does not parse.
+MAINTENANCE = re.compile(r"\s*(?:UPDATE\s+STATISTICS|ALTER\s+INDEX|DBCC)\b", re.I)
 
 
 def uncovered_text(masked: str, statements) -> str:
