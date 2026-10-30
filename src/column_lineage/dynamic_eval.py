@@ -263,9 +263,14 @@ class Evaluator:
         if unit.path not in self._regions:
             try:
                 self._regions[unit.path] = control_regions(unit.text, unit.masked, unit.index.statements)
-            except Exception:  # noqa: BLE001 - control flow is optional
+            except Exception:  # noqa: BLE001 - control flow is optional, but then nothing here is evaluated
                 self._regions[unit.path] = {}
-        return self._regions[unit.path].get(statement.start, ())
+        found = self._regions[unit.path].get(statement.start)
+        if found is None:
+            # Without its IF/ELSE/WHILE context an assignment would look unconditional and could hide
+            # the alternatives before it.
+            raise Unknown(f"the control flow around {unit.rel_path}:{statement.line} could not be followed")
+        return found
 
     def region_conds(self, unit, statement) -> tuple[list[Cond], list[tuple]]:
         """Conditions of the regions enclosing ``statement`` (outermost first) and its loops."""
@@ -444,6 +449,8 @@ class Evaluator:
         given_set = set(given)
         loop_spans = {(s, e) for s, e, _ in loops}
         for a in assignments:
+            if a.statement.start >= point.start and not loop_spans:
+                continue   # runs after the EXEC, and the EXEC is not repeated
             _, a_loops = self.region_conds(a.unit, a.statement)
             if a_loops and (a.statement.start < point.start or {(s, e) for s, e, _ in a_loops} & loop_spans):
                 raise Unknown(f"{name}: assigned inside a loop ({a_loops[0][2][:60]}) at {where(a.statement)}")

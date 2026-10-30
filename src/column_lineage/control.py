@@ -52,6 +52,7 @@ class _Parser:
         self.ends = statement_ends
         self.regions: list[tuple[int, int, str]] = []
         self.arms: dict[tuple[int, int], tuple[int, str]] = {}   # region -> (owning IF/WHILE/TRY offset, arm)
+        self.visited: set[int] = set()   # indexed statement starts the parser walked through
         self.steps = 0
 
     def word_at(self, i: int) -> tuple[str, int] | None:
@@ -96,6 +97,7 @@ class _Parser:
     def simple_end(self, i: int, end: int) -> int:
         known = self.ends.get(i)
         if known is not None and known > i:
+            self.visited.add(i)
             return min(known, end)
         # Unindexed statement (PRINT, TRUNCATE, cursor verbs...): to ';' or end of line.
         newline = self.masked.find("\n", i, end)
@@ -209,13 +211,17 @@ def control_contexts(text: str, masked: str, statements) -> dict[int, tuple[str,
 def control_regions(text: str, masked: str, statements) -> dict[int, tuple[tuple[int, int, str, int, str], ...]]:
     """Like control_contexts, with each region's span and its arm: (start, end, label, owner, arm).
 
-    ``owner`` is the offset of the IF/WHILE/BEGIN TRY that opens the region; ``arm`` is ``then`` or
+    Only statements the parser actually reached are included: a missing start means the control
+    flow around it could not be followed. ``owner`` is the offset of the IF/WHILE/BEGIN TRY that opens
+    the region; ``arm`` is ``then`` or
     ``else`` for IF, ``loop`` for WHILE, ``try`` / ``catch`` for TRY ... CATCH. Two regions with the same
     owner and different arms of an IF are mutually exclusive.
     """
     parser = _parse(text, masked, statements)
     result: dict[int, tuple[tuple[int, int, str, int, str], ...]] = {}
     for statement in statements:
+        if statement.start not in parser.visited:
+            continue
         enclosing = [r for r in parser.regions if r[0] <= statement.start < r[1]]
         enclosing.sort(key=lambda r: (r[0], -r[1]))
         result[statement.start] = tuple((s, e, label) + parser.arms.get((s, e), (s, "try" if label == "TRY" else "block"))
