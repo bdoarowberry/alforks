@@ -151,6 +151,20 @@ def glued_boundaries(masked: str, limit: int = 60) -> list[int]:
     return cuts
 
 
+EXECUTED_VARIABLE = re.compile(
+    r"\s*EXEC(?:UTE)?\s*(?:\(\s*(@[\w$#@]+)\s*\)|(?:\[?sys\]?\s*\.\s*)?\[?sp_executesql\]?\s+(@[\w$#@]+)\s*(?:;|$)|"
+    r"(@[\w$#@]+)\s*(?:;|$))", re.I)
+
+
+def empty_literal(value) -> bool:
+    """An empty string or NULL literal (N'' included)."""
+    if isinstance(value, exp.Null):
+        return True
+    if isinstance(value, exp.National) or (isinstance(value, exp.Literal) and value.is_string):
+        return (value.this or "") == ""
+    return False
+
+
 def write_targets(text: str) -> tuple[str, ...]:
     """Object names a SQL text writes, resolving `UPDATE alias ... FROM table AS alias`."""
     stop = {"WITH", "ON", "WHERE", "SET", "INNER", "LEFT", "RIGHT", "FULL", "CROSS", "JOIN", "USING", "WHEN", "OUTER",
@@ -395,6 +409,7 @@ class Catalog:
         self.temp_resets: dict[tuple[str, str], list[int]] = defaultdict(list)  # (scope, #name) -> DROP/CREATE offsets
         self.fallback_by_scope: dict[str, list[Statement]] = defaultdict(list)
         self._view_bases: dict[str, list[str]] | None = None
+        self._dead_dynamic: dict[int, bool] = {}
 
     # ---------------------------------------------------------------- loading
     def _mapped_database(self, root: Path, rel: str, absolute: str) -> str | None:
@@ -1120,6 +1135,31 @@ class Catalog:
                         base, _ = self.canonical(self.ref_from_table(table, writer.unit, writer.statement))
                         self._view_bases[key].append(base.key)
         return self._view_bases
+
+    def dead_dynamic(self, issue: StatementIssue) -> bool:
+        """Dynamic SQL that can only execute an empty string or NULL, so it never runs anything.
+
+        True only when the executed text is a single variable that is not a parameter, every
+        assignment to it in the scope is an empty-string or NULL literal (or there are none), and
+        no unparsed statement in the scope could assign it.
+        """
+        if issue.kind != "dynamic_sql":
+            return False
+        cached = self._dead_dynamic.get(id(issue))
+        if cached is not None:
+            return cached
+        match = EXECUTED_VARIABLE.match(mask_noncode(issue.statement.text))
+        dead = False
+        if match:
+            name = restore_variable(next(g for g in match.groups() if g)).lower()
+            scope = issue.statement.scope
+            assignments = self.assignments.get((scope, name), [])
+            unparsed = re.compile(re.escape(name) + r"(?![\w$#@])\s*[-+*/%&|^]?=(?!=)", re.I)
+            dead = (not self.is_parameter(scope, name)
+                    and all(a.kind in ("set", "declare", "select") and empty_literal(a.value) for a in assignments)
+                    and not any(unparsed.search(mask_noncode(s.text)) for s in self.fallback_by_scope.get(scope, [])))
+        self._dead_dynamic[id(issue)] = dead
+        return dead
 
     def writers_for(self, ref: ObjectRef) -> list[Writer]:
         """Writers of an object; for a #temp table, includes callees writing into it."""

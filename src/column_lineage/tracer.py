@@ -24,6 +24,7 @@ class Tracer:
         self.catalog = catalog
         self.analyzer = analyzer or Analyzer(catalog)
         self.trace_row_selection = trace_row_selection
+        self.analyzer.expand_row_selection = trace_row_selection
         self.assertions = list(assertions or [])
         self._asserted: dict[str, list] | None = None
         self.assertion_errors: list[str] = []
@@ -157,7 +158,7 @@ class Tracer:
         used = [a for a in self.assertions if a.id in result.assertions_used and a.writer_path]
         for scope in sorted(scopes_seen):
             for issue in self.catalog.dynamic_by_scope.get(scope, []):
-                if issue.targets:
+                if issue.targets or self.catalog.dead_dynamic(issue):
                     continue
                 gap = Gap("dynamic_sql", "A procedure on this path executes dynamic SQL whose target is "
                           "built at runtime; it may write columns on this path.", None,
@@ -312,6 +313,8 @@ class Tracer:
         ref = node.object
         gaps = []
         for issue in self.catalog.issues_by_target.get(ref.name, []):
+            if self.catalog.dead_dynamic(issue):
+                continue
             wording = {"dynamic_sql": "Dynamic SQL in {where} names {obj} as a write target; what it writes is not analysed.",
                        "parse_error": "An unparsed statement in {where} appears to write {obj}.",
                        "insert_exec": "INSERT ... EXEC in {where} writes {obj} from a procedure result set; columns are not mapped.",

@@ -116,6 +116,9 @@ class Ctx:
         self.local_active: set[tuple[str, str]] = set()
         self.cycles: list[list[str]] = []
         self._positions: dict[int, int] | None = None
+        # While analysing row-selection clauses, bind columns without expanding CTE/derived
+        # sources: row-selection columns are recorded, not traced (unless --trace-row-selection).
+        self.no_expand = False
 
     def position(self, node) -> int:
         """Stable ordinal of an AST node within its statement, so reused aliases stay distinct."""
@@ -178,6 +181,7 @@ class Scope:
 
     # ---------------------------------------------------------------- binding
     def bind(self, column: exp.Column, expand_local: bool = True) -> list[Binding]:
+        expand_local = expand_local and not self.ctx.no_expand
         name = norm(ident_text(column.this)) or ""
         qualifier_parts = [ident_text(column.args.get(k)) for k in ("catalog", "db", "table") if column.args.get(k)]
         qualifier = ".".join(qualifier_parts).lower() if qualifier_parts else None
@@ -253,6 +257,7 @@ class Scope:
 class Analyzer:
     def __init__(self, catalog: Catalog):
         self.catalog = catalog
+        self.expand_row_selection = False   # set by the tracer for --trace-row-selection
         self._object_columns: dict[str, tuple[list[str] | None, bool]] = {}
         self._object_columns_active: set[str] = set()
 
@@ -725,7 +730,8 @@ class Analyzer:
                     kind = JOIN_KEY
                 inputs: list[Input] = []
                 nested: list[RowSelection] = []
-                self.walk(clause, CONDITION, None, scope, ctx, inputs, nested, False)
+                with row_selection_mode(ctx):
+                    self.walk(clause, CONDITION, None, scope, ctx, inputs, nested, False)
                 out.extend(RowSelection(r.node, kind if role != JOIN_PREDICATE else JOIN_PREDICATE, text + " :: " + r.expression,
                                         r.evidence, r.status, r.gap) for r in nested)
                 evidence = ctx.evidence(clause, role)
@@ -1011,7 +1017,8 @@ class Analyzer:
         if on is not None:
             for clause in conjuncts(on):
                 inputs: list[Input] = []
-                self.walk(clause, CONDITION, None, scope, ctx, inputs, [], False)
+                with row_selection_mode(ctx):
+                    self.walk(clause, CONDITION, None, scope, ctx, inputs, [], False)
                 role = JOIN_KEY if isinstance(clause, exp.EQ) else JOIN_PREDICATE
                 for item in inputs:
                     if item.node.kind != CONSTANT:
@@ -1031,7 +1038,8 @@ class Analyzer:
             rows = list(base_rows)
             if condition is not None:
                 inputs: list[Input] = []
-                self.walk(condition, CONDITION, None, scope, ctx, inputs, [], False)
+                with row_selection_mode(ctx):
+                    self.walk(condition, CONDITION, None, scope, ctx, inputs, [], False)
                 for item in inputs:
                     if item.node.kind != CONSTANT:
                         rows.append(RowSelection(item.node, MERGE_CONDITION, condition.sql(dialect="tsql", comments=False),
@@ -1115,6 +1123,20 @@ class Analyzer:
 
 
 # ----------------------------------------------------------------- helpers
+class row_selection_mode:
+    """Context manager: bind columns without expanding local sources (see Ctx.no_expand)."""
+
+    def __init__(self, ctx: "Ctx"):
+        self.ctx = ctx
+
+    def __enter__(self):
+        self.previous = self.ctx.no_expand
+        self.ctx.no_expand = not self.ctx.analyzer.expand_row_selection
+
+    def __exit__(self, *exc):
+        self.ctx.no_expand = self.previous
+
+
 def parse_expression(text: str | None):
     if not text:
         return None

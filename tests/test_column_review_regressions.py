@@ -289,6 +289,7 @@ def test_assertion_reliance_is_stated_at_the_top_and_effects_are_listed(tmp_path
     asserted = next(s for s in t.steps if s["writer_kind"] == "asserted")
     ev = asserted["evidence"][0]
     assert ev["root"] is None and ev["path"].endswith("assert_dynamic/assertions.json")
+    assert (tmp_path / ev["path"]).resolve() == (root / "assertions.json").resolve()   # relative to the page
     diagnostics = json.loads((tmp_path / "scan-diagnostics.json").read_text(encoding="utf-8"))
     effects = diagnostics["assertion_effects"]["A1"]
     assert [e["kind"] for e in effects] == ["dynamic_sql"] and effects[0]["location"] == "load.sql:13"
@@ -298,7 +299,37 @@ def test_statements_behind_repeated_gaps_are_grouped(tmp_path):
     t = review("dynamic_two_columns", "demo.output.result_value", tmp_path, *DB)
     dynamic = t.gaps("dynamic_sql")
     assert len(dynamic) == 2 and len({g["evidence"][0]["statement_id"] for g in dynamic}) == 1
-    assert "2 gaps come from 1 statement" in t.markdown
+    assert "2 gaps that cite a statement come from 1 statement" in t.markdown
     assert "  - `load.sql:6` — 2 gaps (dynamic_sql) on 2 nodes" in t.markdown
     summary = t.data["completeness"]
     assert summary["value_gaps_by_kind"] == {"dynamic_sql": 2}
+
+
+# ---- real-source feedback, round 6
+
+def test_row_selection_ctes_are_not_traced_by_default(tmp_path):
+    t = review("row_selection_cte", "demo.output.result_value", tmp_path, *DB)
+    on_path = set(reach(t, roles=("value", "condition", "window")))
+    assert all(s["target"] in on_path for s in t.steps), "steps off the value path"
+    assert "wildcard_without_schema" not in t.gap_kinds
+    assert t.complete
+    # With --trace-row-selection the CTE is expanded; its SELECT f.* has no known schema, so the result
+    # is a wildcard gap that affects row selection only.
+    t = review("row_selection_cte", "demo.output.result_value", tmp_path / "rs", *DB, "--trace-row-selection")
+    wildcard = t.gaps("wildcard_without_schema")
+    assert wildcard and all(g["affects"] == "row_selection" for g in wildcard)
+    assert t.complete
+
+
+def test_dynamic_sql_that_can_only_be_empty_is_not_a_gap(tmp_path):
+    t = review("dead_dynamic", "demo.output.result_value", tmp_path, *DB)
+    assert "dynamic_sql" not in t.gap_kinds and t.complete
+    diagnostics = json.loads((tmp_path / "scan-diagnostics.json").read_text(encoding="utf-8"))
+    assert any(i["kind"] == "dead_dynamic_sql" for i in diagnostics["statement_issues"])
+
+
+def test_dynamic_sql_assigned_real_text_or_from_a_parameter_stays_a_gap(tmp_path):
+    t = review("dead_dynamic", "demo.output2.result_value", tmp_path / "live", *DB)
+    assert "dynamic_sql" in t.gap_kinds and not t.complete
+    t = review("dead_dynamic", "demo.output3.result_value", tmp_path / "param", *DB)
+    assert "dynamic_sql" in t.gap_kinds and not t.complete

@@ -103,6 +103,10 @@ def main(argv: list[str] | None = None) -> int:
             asserted.extend(assertions.load(path))
         except (OSError, ValueError) as exc:
             parser.error(f"--assertions: {exc}")
+    # Cite assertion files relative to the output folder, where the pages are written.
+    out_dir = Path(args.output).resolve()
+    for assertion in asserted:
+        assertion.source = Path(os.path.relpath(Path(assertion.source).resolve(), out_dir)).as_posix()
     duplicate = sorted({a.id for a in asserted if [b.id for b in asserted].count(a.id) > 1})
     if duplicate:
         parser.error(f"--assertions: duplicate assertion ids across files: {', '.join(duplicate)}")
@@ -205,7 +209,9 @@ def main(argv: list[str] | None = None) -> int:
             "assertion_effects": {k: sorted(v, key=lambda g: (g["kind"], g["location"]))
                                   for k, v in sorted(tracer.assertion_effects.items())},
             "statement_issues": [
-                {"kind": i.kind, "message": i.message, "targets": list(i.targets),
+                {"kind": "dead_dynamic_sql" if catalog.dead_dynamic(i) else i.kind,
+                 "message": ("Dynamic SQL that can only execute an empty string or NULL; not a writer."
+                             if catalog.dead_dynamic(i) else i.message), "targets": list(i.targets),
                  "evidence": catalog.evidence(i.unit, i.statement, role=i.kind).to_dict()}
                 for i in sorted(catalog.issues, key=lambda i: (i.unit.root_label, i.unit.rel_path, i.statement.start))
             ],

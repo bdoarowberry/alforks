@@ -65,6 +65,15 @@
 - "Where proof ends" lists the statements behind the most gaps.
 - `scan-diagnostics.json` lists `assertion_effects`; assertion evidence uses the real file path.
 
+## Fixed after feedback round 6
+
+- Row-selection clauses no longer expand CTEs and derived tables (unless `--trace-row-selection`):
+  their upstream steps and gaps were traced off the value path, inflating step and gap counts.
+- Dynamic SQL that can only execute an empty string or NULL is reported as `dead_dynamic_sql` in
+  scan diagnostics, not as a gap.
+- "Statements behind the most gaps" counts only gaps that cite a statement.
+- Assertion evidence paths are relative to the output folder (where the pages are).
+
 ## Known open issues
 
 - Corpus chain 08 ends in `missing_definition` (recall 0.6). Not investigated.

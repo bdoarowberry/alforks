@@ -311,7 +311,8 @@ def _section_identity(t: _Trace, json_name: str | None) -> list[str]:
         out.append(">")
         out.append(f"> **This trace relies on {_plural(comp['asserted_steps'], 'asserted step')}** (assertions {ids}). "
                    "Asserted steps were stated by a person in an assertions file, not proved from SQL"
-                   + (f"; {_plural(comp.get('gaps_resolved_by_assertions', 0), 'gap')} are marked resolved by them."
+                   + (f"; {_plural(comp['gaps_resolved_by_assertions'], 'gap')} "
+                      f"{'is' if comp['gaps_resolved_by_assertions'] == 1 else 'are'} marked resolved by them."
                       if comp.get("gaps_resolved_by_assertions") else "."))
     out.append(">")
     out.append("> A *stop* at the requested boundary, or at a source with no writer in the scanned files, "
@@ -950,9 +951,13 @@ def _where_proof_ends(t: _Trace, gaps: list[dict]) -> list[str]:
         if gap.get("node"):
             entry["nodes"].add(gap["node"])
     repeated = sorted(by_statement.values(), key=lambda e: (-e["gaps"], t.location(e["ev"])))
-    if len(gaps) > len(by_statement) and repeated:
-        out.append(f"- Statements behind the most gaps ({_plural(len(gaps), 'gap')} come from "
-                   f"{_plural(len(by_statement), 'statement')}; resolving or asserting these first helps most):")
+    cited = sum(e["gaps"] for e in by_statement.values())
+    if cited > len(by_statement) and repeated:
+        uncited = len(gaps) - cited
+        out.append(f"- Statements behind the most gaps ({_plural(cited, 'gap')} that cite a statement come from "
+                   f"{_plural(len(by_statement), 'statement')}"
+                   + (f"; {_plural(uncited, 'other gap')} cite no statement and are listed by node above" if uncited else "")
+                   + "; resolving or asserting these first helps most):")
         for entry in repeated[:10]:
             out.append(f"  - {_code(t.location(entry['ev']))} — {_plural(entry['gaps'], 'gap')} "
                        f"({_text(', '.join(sorted(entry['kinds'])))}) on {_plural(len(entry['nodes']), 'node')}")
