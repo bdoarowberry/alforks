@@ -30,6 +30,7 @@ from dataclasses import dataclass, field
 import json
 from pathlib import Path
 import random
+import re
 import shutil
 import sys
 
@@ -171,6 +172,7 @@ class Src:
     prefix: str                     # ground-truth node prefix
     feats: frozenset = frozenset()
     kind: str = "table"
+    hint: str = ""                  # table hint rendered after the alias
 
     def col(self, name: str) -> Column | None:
         return next((c for c in self.cols if c.name == name), None)
@@ -267,7 +269,7 @@ class Truth:
                 self.node_feats[node].add("multiple_writers")
 
     def analyze(self, start: str) -> dict:
-        value, cond, static, features, objects = set(), set(), set(), set(), set()
+        value, cond, static, features, objects, static_objects = set(), set(), set(), set(), set(), set()
         seen = set()
         stack = [(start, False, False)]
         while stack:
@@ -277,6 +279,8 @@ class Truth:
             seen.add((node, via_cond, opaque))
             if self.persistent(node):
                 objects.add(node.rsplit(".", 1)[0])
+                if not opaque:
+                    static_objects.add(node.rsplit(".", 1)[0])
             features |= self.node_feats.get(node, set())
             if node != start and self.is_source(node):
                 (cond if via_cond else value).add(node)
@@ -290,7 +294,7 @@ class Truth:
                 stack.append((src, via_cond or role != "value", opaque or bool(feats & set(OPAQUE_FEATURES))))
         layers = self._layers(start)
         return {"value_leaves": value, "condition_leaves": cond - value, "static_leaves": static,
-                "features": features, "objects": objects, "layers": layers}
+                "features": features, "objects": objects, "static_objects": static_objects, "layers": layers}
 
     def _layers(self, start: str) -> tuple[int, int] | None:
         memo: dict[str, tuple[int, int] | None] = {}
@@ -421,11 +425,10 @@ class Generator:
 
     def src(self, obj: DbObject, alias: str, ctx: Ctx, hint: bool = True) -> Src:
         sql, feats = self.ref(obj, ctx)
-        if hint and obj.kind == "table" and self.chance("nolock"):
-            sql += " WITH (NOLOCK)"
+        table_hint = " WITH (NOLOCK)" if hint and obj.kind == "table" and self.chance("nolock") else ""
         if obj.kind == "view":
             feats = feats | {"via_view"}
-        return Src(alias, sql, list(obj.columns), obj.key, feats, obj.kind)
+        return Src(alias, sql, list(obj.columns), obj.key, feats, obj.kind, table_hint)
 
     def temp_src(self, scope: str, name: str, alias: str, cols: list[Column], feats=()) -> Src:
         return Src(alias, name, cols, f"temp:{scope}::{name.lower()}", frozenset(feats), "temp")
@@ -574,24 +577,24 @@ class Generator:
     def colref(self, src: Src, col: Column, single: bool) -> tuple[str, bool]:
         text, styled = self.ident(col.name)
         if single and self.chance("bare_column"):
+            self._bare = True
             return text, styled
         return f"{src.alias}.{text}", styled
 
     def make_expr(self, ctx: Ctx, srcs: list[Src], picker: Picker) -> Expr:
+        self._bare = False
         expr = self._make_expr(ctx, srcs, picker)
+        expr.bare = self._bare
         return expr
 
     def _make_expr(self, ctx: Ctx, srcs: list[Src], picker: Picker) -> Expr:
         single = len(srcs) == 1
         inputs: list = []
         feats: set = set()
-        bare = []
 
         def r(item, role="value") -> str:
             src, col = item
             text, styled = self.colref(src, col, single)
-            if not text.startswith(src.alias + "."):
-                bare.append(True)
             extra = {"bracketed_or_mixed_case"} if styled else set()
             inputs.append((f"{src.prefix}.{col.name}", role, src.feats | extra))
             return text
@@ -665,8 +668,9 @@ class Generator:
                 kind = "const"
             else:
                 fn = self.udfs["clean" if item[1].typ == "str" else "round"]
-                if item[1].typ == "str" and self.rng.random() < 0.3:
-                    fn = self.udfs["weight"]
+                region = next(((s_, c_) for s_ in srcs for c_ in s_.cols if c_.name == "region_cd"), None)
+                if region is not None and self.rng.random() < 0.25:
+                    fn, item = self.udfs["weight"], region
                 fn_sql, ffeats = self.ref(fn, ctx, allow_one_part=False)
                 feats = {"scalar_udf"} | ({"udf_reads_table"} if fn.name == "fn_region_weight" else set())
                 sql = f"{fn_sql}({r(item)})"
@@ -717,9 +721,10 @@ class Generator:
             col = primary.col(name)
             if col is None:
                 continue
+            self._bare = False
             text, styled = self.colref(primary, col, single)
             out.append((name, Expr(text, [(f"{primary.prefix}.{name}", "value", primary.feats)], set(),
-                                   col.typ, "pass", name, plain=name)))
+                                   col.typ, "pass", name, plain=name, bare=self._bare)))
             used.add(name)
         pool = [(s, c) for s in (pool_srcs or srcs) for c in s.cols
                 if c.name not in carry and c.name not in NO_PROPAGATE and not c.identity]
@@ -731,7 +736,7 @@ class Generator:
         if sum(1 for _, e in out if e.typ in ("num", "int") and e.inputs) < 2:
             for s, c in pool:
                 if c.typ == "num" and c.name not in used:
-                    text, _ = self.colref(s, c, single)
+                    text, _ = self.colref(s, c, False)
                     out.append((c.name, Expr(text, [(f"{s.prefix}.{c.name}", "value", s.feats)], set(),
                                              "num", "pass", c.name, plain=c.name)))
                     used.add(c.name)
@@ -914,8 +919,8 @@ class Generator:
         items = self.project(ctx, [a, b], rng.randint(5, 10))
         body.stmt(f"IF OBJECT_ID('tempdb..{raw_name}') IS NOT NULL DROP TABLE {raw_name};")
         join = rng.choice(["LEFT JOIN", "LEFT OUTER JOIN", "INNER JOIN"])
-        body.stmt(f"SELECT {self.select_items(items)}\nINTO {raw_name}\nFROM {a.sql} AS a\n"
-                  f"{join} {b.sql} AS b ON b.rec_id = a.rec_id\n"
+        body.stmt(f"SELECT {self.select_items(items)}\nINTO {raw_name}\nFROM {a.sql} AS a{a.hint}\n"
+                  f"{join} {b.sql} AS b{b.hint} ON b.rec_id = a.rec_id\n"
                   f"WHERE a.is_deleted = 0\n  AND a.event_dt >= ISNULL(@from_dt, '19000101');")
         self.record(f"temp:{proc.key}::{raw_name}", items, ctx, {"select_into_temp", "join", "filter"}, proc.key)
         raw = self.temp_src(proc.key, raw_name, "r", self.cols_from(items))
@@ -970,7 +975,7 @@ class Generator:
             ref_obj = rng.choice([self.region_map, self.region_weights])
             rm = self.src(ref_obj, "rm", ctx)
             srcs.append(rm)
-            ref_join = f"\nLEFT JOIN {rm.sql} AS rm ON rm.region_cd = s.region_cd"
+            ref_join = f"\nLEFT JOIN {rm.sql} AS rm{rm.hint} ON rm.region_cd = s.region_cd"
         pool = [s] + srcs[1:]
         items = self.project(ctx, srcs, rng.randint(4, 9), pool_srcs=pool)
         cols = self.cols_from(items)
@@ -986,7 +991,7 @@ class Generator:
         core_table = self.new_object(self.core_db, "core", subj, "table", "core", subj, core_cols)
         target_sql = self.ref(core_table, ctx)[0]
         names = [n for n, _ in items]
-        from_clause = f"FROM {s.sql} AS s{ref_join}\nWHERE s.rec_id IS NOT NULL"
+        from_clause = f"FROM {s.sql} AS s{s.hint}{ref_join}\nWHERE s.rec_id IS NOT NULL"
 
         def emit_insert(items_, feats_extra=()):
             positional = self.chance("positional_insert")
@@ -1012,7 +1017,7 @@ class Generator:
                 self.record(core_table.key, items_, ctx, {"insert_select_target_list"} | set(feats_extra), proc.key)
 
         def emit_merge(items_):
-            derived = rng.random() < 0.5
+            derived = bool(ref_join) or any(e.bare for _, e in items_) or rng.random() < 0.5
             if derived:
                 dprefix = f"derived:{proc.key}:{len(body.lines)}::src"
                 using = f"(\n    SELECT {self.select_items(items_, pad='           ')}\n    {from_clause.replace(chr(10), chr(10) + '    ')}\n) AS src"
@@ -1021,12 +1026,8 @@ class Generator:
                 mapped = self.passthrough(dsrc, names)
             else:
                 using = f"{s.sql} AS src"
-                mapped = []
-                for n, e in items_:
-                    mapped.append((n, Expr(e.sql.replace("s.", "src.").replace("rm.", "src."), e.inputs, e.feats,
-                                           e.typ, e.kind, e.base, e.plain)))
-                if ref_join:  # direct USING cannot see the reference join; keep the derived form
-                    return emit_merge_derived_only(items_)
+                mapped = [(n, Expr(re.sub(r"(?<![\w.\]])s\.", "src.", e.sql), e.inputs, e.feats, e.typ, e.kind,
+                                   e.base, e.plain)) for n, e in items_]
             sets = ",\n        ".join(f"tgt.{self.cid(n)} = {e.sql}" for n, e in mapped if n != "rec_id")
             values = ", ".join(e.sql for _, e in mapped)
             body.stmt(f"MERGE {target_sql} AS tgt\nUSING {using}\n    ON tgt.rec_id = src.rec_id\n"
@@ -1035,14 +1036,6 @@ class Generator:
                       f"    VALUES ({values}, SYSDATETIME());")
             self.record(core_table.key, [(n, e) for n, e in mapped if n != "rec_id"], ctx, {"merge_update"}, proc.key)
             self.record(core_table.key, mapped, ctx, {"merge_insert"}, proc.key)
-
-        def emit_merge_derived_only(items_):
-            saved = rng.random
-            rng.random = lambda: 0.0  # force the derived branch once
-            try:
-                emit_merge(items_)
-            finally:
-                rng.random = saved
 
         if self.chance("if_else"):
             alt = []
@@ -1092,7 +1085,7 @@ class Generator:
         if "COALESCE" in expr_sql:
             inputs.append((f"{core_table.key}.{target.name}", "value", frozenset()))
         body.stmt(f"UPDATE c\n   SET c.{self.cid(target.name)} = {expr_sql}\nFROM {self.ref(core_table, ctx)[0]} AS c\n"
-                  f"INNER JOIN {p.sql} AS p ON p.rec_id = c.rec_id\nWHERE p.override_reason IS NOT NULL;")
+                  f"INNER JOIN {p.sql} AS p{p.hint} ON p.rec_id = c.rec_id\nWHERE p.override_reason IS NOT NULL;")
         self.truth.write(f"{core_table.key}.{target.name}", inputs, {"update_from", "patch_writer"}, proc.key)
         self.emit(proc, self.proc_text(proc, ["@run_id int = NULL"], body))
         self.live_procs[proc.db].append(proc)
@@ -1123,11 +1116,11 @@ class Generator:
         ctx = self.place(base)
         c = self.src(base_src_obj, "c", ctx, hint=False)
         srcs = [c]
-        from_sql = f"FROM {c.sql} AS c"
+        from_sql = f"FROM {c.sql} AS c{c.hint}"
         if rng.random() < 0.4:
             cal = self.src(self.calendar, "cal", ctx, hint=False)
             srcs.append(cal)
-            from_sql += f"\nLEFT JOIN {cal.sql} AS cal ON cal.cal_date = CAST(c.event_dt AS date)"
+            from_sql += f"\nLEFT JOIN {cal.sql} AS cal{cal.hint} ON cal.cal_date = CAST(c.event_dt AS date)"
         items = self.project(ctx, srcs, rng.randint(4, 9))
         base.columns = self.cols_from(items)
         text, extra = self.view_text(base, items, from_sql, "\nWHERE c.rec_id > 0", ctx)
@@ -1140,13 +1133,13 @@ class Generator:
         ctx = self.place(wide)
         b = self.src(base, "b", ctx)
         srcs = [b]
-        from_sql = f"FROM {b.sql} AS b"
+        from_sql = f"FROM {b.sql} AS b{b.hint}"
         others = [s for s in self.subjects if s.get("base")]
         items = self.project(ctx, srcs, rng.randint(3, 8))
         if others and self.chance("cross_subject_join"):
             other = rng.choice(others)["base"]
             o = self.src(other, "o", ctx)
-            from_sql += f"\nLEFT JOIN {o.sql} AS o ON o.rec_id = b.rec_id"
+            from_sql += f"\nLEFT JOIN {o.sql} AS o{o.hint} ON o.rec_id = b.rec_id"
             used = {n for n, _ in items}
             for col in [c_ for c_ in o.cols if c_.name not in CARRY and c_.typ == "num"][:2]:
                 name = f"{other.subject.split('_')[0]}_{col.name}"[:50]
@@ -1154,7 +1147,8 @@ class Generator:
                     continue
                 used.add(name)
                 text_, _ = self.colref(o, col, False)
-                items.append((name, Expr(text_, [(f"{o.prefix}.{col.name}", "value", o.feats)], {"rename"}, col.typ,
+                items.append((name, Expr(text_, [(f"{o.prefix}.{col.name}", "value", o.feats)],
+                                         {"rename", "cross_subject_join"}, col.typ,
                                          "rename", col.name)))
             srcs.append(o)
         wide.columns = self.cols_from(items)
@@ -1182,7 +1176,7 @@ class Generator:
             w = self.src(wide, "w", fctx)
             items = self.project(fctx, [w], rng.randint(4, 9))
             names = ", ".join(self.cid(n) for n, _ in items)
-            fbody.stmt(f"INSERT INTO {stage_name} ({names})\nSELECT {self.select_items(items)}\nFROM {w.sql} AS w\n"
+            fbody.stmt(f"INSERT INTO {stage_name} ({names})\nSELECT {self.select_items(items)}\nFROM {w.sql} AS w{w.hint}\n"
                        f"WHERE w.event_dt >= @from_dt;")
             self.record(stage_prefix, items, fctx, {"caller_temp_nested_exec", "insert_select_target_list"}, fill.key)
             self.emit(fill, self.proc_text(fill, ["@from_dt date"], fbody))
@@ -1194,7 +1188,7 @@ class Generator:
         else:
             w = self.src(wide, "w", ctx)
             items = self.project(ctx, [w], rng.randint(4, 9))
-            body.stmt(f"SELECT {self.select_items(items)}\nINTO {stage_name}\nFROM {w.sql} AS w\n"
+            body.stmt(f"SELECT {self.select_items(items)}\nINTO {stage_name}\nFROM {w.sql} AS w{w.hint}\n"
                       f"WHERE w.event_dt >= @from_dt;")
             self.record(stage_prefix, items, ctx, {"select_into_temp"}, main.key)
             stage_cols = self.cols_from(items)
@@ -1217,6 +1211,9 @@ class Generator:
         special = {"insert_exec": "bonus_amt", "dynamic_sql": "dyn_metric", "cursor": "cursor_adj_amt",
                    "parse_error": "batch_fix_amt"}
         extra_cols += [self.column(special[k], "num") for k, on in features.items() if on]
+        clash = {c.name for c in extra_cols} & set(calc_names)
+        if clash:
+            raise RuntimeError(f"generator bug: fact column clash {sorted(clash)}")
         fact_cols = calc.cols + extra_cols + [self.column("load_ts", "date")]
         if self.chance("identity_fact"):
             fact_cols.insert(0, self.column("fact_id", "int", identity=True))
@@ -1229,7 +1226,7 @@ class Generator:
             ebody = Body()
             bsrc = self.src(base, "b", ectx)
             num = next((c for c in base.columns if c.typ == "num"), None) or base.columns[0]
-            ebody.stmt(f"SELECT b.rec_id,\n       b.{self.cid(num.name)} * 0.1 AS bonus_amt\nFROM {bsrc.sql} AS b\n"
+            ebody.stmt(f"SELECT b.rec_id,\n       b.{self.cid(num.name)} * 0.1 AS bonus_amt\nFROM {bsrc.sql} AS b{bsrc.hint}\n"
                        f"WHERE b.event_dt >= @from_dt;")
             self.emit(extra, self.proc_text(extra, ["@from_dt date"], ebody))
             extra_name = f"#{subj}_extra"
@@ -1271,7 +1268,7 @@ class Generator:
         # region label from a reference table (UPDATE ... FROM, cross database)
         rm = self.src(self.region_map, "rm", ctx)
         body.stmt(f"UPDATE f\n   SET f.region_label = COALESCE(rm.region_name, rm.region_group, N'UNKNOWN')\n"
-                  f"FROM {fact_sql} AS f\nINNER JOIN {rm.sql} AS rm ON rm.region_cd = f.region_cd;")
+                  f"FROM {fact_sql} AS f\nINNER JOIN {rm.sql} AS rm{rm.hint} ON rm.region_cd = f.region_cd;")
         self.truth.write(f"{fact.key}.region_label",
                          [(f"{self.region_map.key}.region_name", "value", rm.feats),
                           (f"{self.region_map.key}.region_group", "value", rm.feats)],
@@ -1345,7 +1342,7 @@ class Generator:
         aggs = ",\n       ".join(f"SUM(f.{self.cid(c.name)})" for c in picks)
         body.stmt(f"TRUNCATE TABLE {target};")
         body.stmt(f"INSERT INTO {target}{collist}\nSELECT f.region_cd,\n       {month},\n       {aggs},\n"
-                  f"       COUNT(*),\n       SYSDATETIME()\nFROM {f.sql} AS f\nGROUP BY f.region_cd, {month};")
+                  f"       COUNT(*),\n       SYSDATETIME()\nFROM {f.sql} AS f{f.hint}\nGROUP BY f.region_cd, {month};")
         feats = {"aggregate", "insert_select_positional" if positional else "insert_select_target_list"}
         self.truth.write(f"{summary.key}.region_cd", [(f"{fact.key}.region_cd", "value", f.feats)], feats, proc.key)
         self.truth.write(f"{summary.key}.event_month", [(f"{fact.key}.event_dt", "value", f.feats)], feats, proc.key)
@@ -1377,14 +1374,14 @@ class Generator:
                 if targets:
                     target = self.rng.choice(targets)
                     body.stmt(f"UPDATE c\n   SET c.{self.cid(target.name)} = a.amt_gross\n"
-                              f"FROM {self.ref(core, ctx)[0]} AS c\nINNER JOIN {a.sql} AS a ON a.rec_id = c.rec_id;")
+                              f"FROM {self.ref(core, ctx)[0]} AS c\nINNER JOIN {a.sql} AS a{a.hint} ON a.rec_id = c.rec_id;")
                     self.truth.write(f"{core.key}.{target.name}", [(f"{land.key}.amt_gross", "value", a.feats)],
                                      {"update_from", "dead_proc"}, proc.key)
             dead_table = self.new_object(self.core_db, "zz_archive", f"{subj}_snapshot_v{k}", "table", "dead", subj)
             items = self.project(ctx, [a], self.rng.randint(2, 5))
             dead_table.columns = self.cols_from(items)
             body.stmt(f"INSERT INTO {self.ref(dead_table, ctx)[0]} ({', '.join(self.cid(n_) for n_, _ in items)})\n"
-                      f"SELECT {self.select_items(items)}\nFROM {a.sql} AS a;")
+                      f"SELECT {self.select_items(items)}\nFROM {a.sql} AS a{a.hint};")
             self.record(dead_table.key, items, ctx, {"insert_select_target_list"}, proc.key)
             self.emit(proc, self.proc_text(proc, [], body))
             self.emit_table(dead_table, near=proc)
@@ -1417,7 +1414,7 @@ class Generator:
                     if self.rng.random() < 0.3:
                         w = self.src(self.region_weights, "w", ctx)
                         body.stmt(f"UPDATE f\n   SET f.{self.cid(col.name)} = f.{self.cid(col.name)} * ISNULL(w.weight_factor, 1)\n"
-                                  f"FROM {fsql} AS f\nLEFT JOIN {w.sql} AS w ON w.region_cd = f.region_cd\n"
+                                  f"FROM {fsql} AS f\nLEFT JOIN {w.sql} AS w{w.hint} ON w.region_cd = f.region_cd\n"
                                   f"WHERE f.load_ts >= DATEADD(day, -1, SYSDATETIME());")
                         self.truth.write(f"{fact.key}.{col.name}",
                                          [(f"{fact.key}.{col.name}", "value", frozenset()),
@@ -1479,8 +1476,12 @@ class Generator:
                     node, table, col, result = candidates[i]
                     if any(node == c[0] for c in chosen) or per_subject[table.subject] >= 2 or not predicate(result):
                         continue
+                    if table.layer == "mart_summary" and sum(1 for c in chosen if c[1].layer == "mart_summary") \
+                            >= max(1, self.n_chains // 3):
+                        continue
                     new = len(result["features"] - covered)
-                    score = (new, result["layers"][1], len(result["value_leaves"]))
+                    leaves = len(result["value_leaves"] | result["condition_leaves"])
+                    score = (new, min(leaves, 4), result["layers"][1], min(leaves, 12))
                     if best_score is None or score > best_score:
                         best, best_score = i, score
                 if best is None:
@@ -1493,7 +1494,8 @@ class Generator:
         clean = max(1, self.n_chains // 4)
         take(lambda r: not (r["features"] & set(OPAQUE_FEATURES)) and "multiple_writers" not in r["features"], clean)
         for feature in OPAQUE_FEATURES + ("multiple_writers", "select_star", "caller_temp_nested_exec",
-                                          "insert_select_positional", "if_else", "scalar_udf", "cross_subject"):
+                                          "insert_select_positional", "if_else", "scalar_udf", "cross_subject_join",
+                                          "computed_column", "wildcard_insert", "patch_writer", "dead_proc"):
             if len(chosen) >= self.n_chains:
                 break
             if feature not in covered:
@@ -1544,6 +1546,22 @@ class Generator:
         self.write_files()
         return self.manifest(chains, long_procs)
 
+    def table_target_truth(self) -> list[dict]:
+        targets = self.table_targets[:: max(1, len(self.table_targets) // 10)][:10]
+        out = []
+        by_key = {o.key: o for o in self.objects}
+        for key in targets:
+            upstream: set = set()
+            for col in by_key[key].columns:
+                upstream |= self.truth.analyze(f"{key}.{col.name}")["static_objects"]
+            upstream.discard(key)
+            obj = by_key[key]
+            out.append({"object": key, "table_tool_target": f"{obj.schema}.{obj.name}",
+                        "upstream_objects": sorted(upstream),
+                        "note": "objects reachable through static column lineage; a table-level tool should "
+                                "find at least these (it may find more, e.g. join-only tables)"})
+        return out
+
     def manifest(self, chains: list[dict], long_procs: int) -> dict:
         by_kind: dict = defaultdict(int)
         by_db: dict = defaultdict(int)
@@ -1581,7 +1599,7 @@ class Generator:
                 "emitted_statements_estimate": self.statement_count,
                 "truth_column_nodes": len(set(self.truth.writers) | set(self.truth.edges)),
             },
-            "table_targets": self.table_targets[:: max(1, len(self.table_targets) // 10)][:10],
+            "table_targets": self.table_target_truth(),
             "chains": chains,
             "notes": [
                 "expected_leaves: every persistent column with no writer reachable from the chain column through "
