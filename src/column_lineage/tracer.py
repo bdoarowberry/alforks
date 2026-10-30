@@ -321,6 +321,10 @@ class Tracer:
                        "parse_error": "An unparsed statement in {where} appears to write {obj}.",
                        "insert_exec": "INSERT ... EXEC in {where} writes {obj} from a procedure result set; columns are not mapped.",
                        }.get(issue.kind, issue.message)
+            evaluation = self.catalog.dynamic_evaluation(issue)
+            if evaluation is not None and evaluation.status == "open":
+                wording = ("Dynamic SQL in {where} names {obj} as a write target; the texts known from the code are "
+                           "analysed, but others may be executed (see the open pieces).")
             where = issue.statement.procedure or issue.unit.rel_path
             gaps.append(Gap(issue.kind, wording.format(where=where, obj=ref.name), node,
                             [self.catalog.evidence(issue.unit, issue.statement, role=issue.kind)],
