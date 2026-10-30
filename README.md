@@ -33,6 +33,7 @@ The useful options:
 | Option | Meaning |
 |---|---|
 | `--column X` | Target column; repeat for several. 2–4 part object names; brackets allowed. |
+| `--columns-file FILE` | Target columns, one per line (`#` comments allowed). All are traced in one run and share the parsing. |
 | `--source-root DIR ...` | Files or folders to scan (`.sql .tsql .ddl .prc .proc`). |
 | `--database-map PATH=DB ...` | Files under `PATH` (relative to a source root, or absolute) belong to database `DB`. Use this when a repository has one folder per database and the code uses two-part names. |
 | `--default-database DB` | Database for two-part names with no other context. |
@@ -125,6 +126,24 @@ description in `src/column_lineage/assertions.py`.
      from the other writers stay open.
 - **Privacy:** an assertions file names real objects. It belongs with the source and must not
   be shared outside it.
+
+### Comparing with known lineage
+
+```bash
+python -m column_lineage.compare --expected expected.json --traces out
+```
+
+`expected.json` lists, for each target column, the source columns its known lineage gives, at the same
+level as the requested boundary. The format is described in `src/column_lineage/compare.py`. It names
+real objects, so keep it local.
+
+The command writes two files:
+- `comparison-details.json` (local, with names): for every expected source, how it was found or why
+  it was missed, plus every extra source the trace reached.
+- `comparison-summary.json` (counts and your generic labels only): safe to share.
+
+`missing_unexplained` means an expected source was not reached and nothing in the trace explains
+why. It is the strongest sign of a tool error.
 
 ### Handing results back
 

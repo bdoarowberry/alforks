@@ -154,7 +154,49 @@ def build(catalog, traces: list[dict], samples: int = 25) -> dict:
         "unparsed_statements_by_keyword": dict(sorted(statements.items())),
         "parse_error_classes": dict(errors.most_common(40)),
         "unparsed_samples": sample_list,
+        "totals": _totals(traces),
         "traces": trace_summary,
+    }
+
+
+def _totals(traces: list[dict]) -> dict:
+    """Across all traces: outcomes, which gap kinds block how many traces, and shared statements."""
+    blocked: Counter = Counter()
+    gaps: Counter = Counter()
+    statements: dict[str, set] = {}
+    traces_per_statement: Counter = Counter()
+    outcome: Counter = Counter()
+    for data in traces:
+        completeness = data["completeness"]
+        blocking = {**completeness.get("value_gaps_by_kind", {}), **completeness.get("context_gaps_by_kind", {})}
+        if completeness["status"] == "complete":
+            outcome["complete_relying_on_assertions" if completeness.get("relies_on_assertions") else "complete"] += 1
+        elif blocking:
+            outcome["incomplete"] += 1
+        else:
+            outcome["incomplete_without_value_gaps"] += 1
+        for kind in blocking:
+            blocked[kind] += 1
+        seen_here = set()
+        for gap in data.get("gaps", []):
+            gaps[gap["kind"]] += 1
+            for ev in gap.get("evidence", [])[:1]:
+                key = ev.get("statement_id") or f"{ev.get('path')}:{ev.get('start_line')}"
+                statements.setdefault(gap["kind"], set()).add(key)
+                if gap.get("affects") != "row_selection":
+                    seen_here.add(key)
+        for key in seen_here:
+            traces_per_statement[key] += 1
+    shared = sorted(traces_per_statement.values(), reverse=True)
+    return {
+        "traces": len(traces),
+        "outcomes": dict(sorted(outcome.items())),
+        "traces_blocked_by_gap_kind": dict(sorted(blocked.items())),
+        "gaps_by_kind": dict(sorted(gaps.items())),
+        "distinct_gap_statements_by_kind": {k: len(v) for k, v in sorted(statements.items())},
+        "statements_blocking_most_traces": shared[:10],
+        "note": "statements_blocking_most_traces lists, for the ten statements behind value or context gaps "
+                "in the most traces, how many traces each blocks (counts only).",
     }
 
 

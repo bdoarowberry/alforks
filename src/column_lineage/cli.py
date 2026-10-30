@@ -24,7 +24,9 @@ from .tracer import Tracer
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="column_lineage",
                                      description="Trace a SQL column back to the columns and inputs that produce it.")
-    parser.add_argument("--column", action="append", required=True, metavar="OBJECT.COLUMN",
+    parser.add_argument("--columns-file", metavar="FILE",
+                        help="Text file of target columns, one per line (blank lines and # comments ignored)")
+    parser.add_argument("--column", action="append", default=[], metavar="OBJECT.COLUMN",
                         help="Target column, e.g. db.schema.table.column (repeatable)")
     parser.add_argument("--source-root", nargs="+", action="extend", required=True, help="SQL files or directories to scan")
     parser.add_argument("--output", default="column-lineage-output", help="Output directory")
@@ -89,6 +91,15 @@ def main(argv: list[str] | None = None) -> int:
     logging.getLogger("sqlglot").setLevel(logging.ERROR)
     parser = build_parser()
     args = parser.parse_args(argv)
+    if args.columns_file:
+        try:
+            lines = Path(args.columns_file).read_text(encoding="utf-8-sig").splitlines()
+        except OSError as exc:
+            parser.error(f"--columns-file: {exc}")
+        args.column += [line.split("#", 1)[0].strip() for line in lines if line.split("#", 1)[0].strip()]
+    args.column = list(dict.fromkeys(args.column))
+    if not args.column:
+        parser.error("give at least one --column or a --columns-file")
     if args.max_depth is not None and args.max_depth < 0:
         parser.error("--max-depth must be nonnegative")
     mapping = []
