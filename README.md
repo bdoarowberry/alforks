@@ -92,6 +92,13 @@ top of the page, or `completeness.status` in the JSON.
 - **Gaps** are where proof ends: dynamic SQL, parse failures, `INSERT ... EXEC`, missing
   definitions, ambiguous names or writers, `*` or positional inserts without a known
   schema, user functions, linked servers.
+- **Dynamic SQL built only from literals** is evaluated: when every possible text of the executed
+  string can be enumerated from the code (literals, `+`/`CONCAT`, `QUOTENAME`, `REPLACE`, `CHAR`,
+  `CAST`; variables assigned those, also under IF/ELSE; procedure parameters from their callers or
+  default; at most 16 alternatives), its statements are analysed as writers at the EXEC. Those
+  steps are `inferred`, carry the alternative's condition in their branch context and a note
+  "evaluated from dynamic SQL built at file:line". The `dynamic_sql` gap is removed only when all
+  alternatives are known; otherwise its detail names the unknown piece and why.
 
 ### Assertions: steps SQL cannot prove
 

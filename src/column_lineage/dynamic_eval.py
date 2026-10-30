@@ -509,7 +509,11 @@ class Evaluator:
             return values
         kind, length = declared
         if kind == "other":
-            raise Unknown(f"{name}: declared with a non-string type")
+            # A numeric variable keeps a numeric literal (it becomes text only through CAST/CONVERT);
+            # text assigned to it would be converted at runtime, which is not evaluated.
+            if all(v.value is None or isinstance(v.value, Num) for v in values):
+                return values
+            raise Unknown(f"{name}: declared with a non-string type but assigned text")
         if length is None:
             return values
         return [Alt(v.value[:length] if isinstance(v.value, str) else v.value, v.conds, v.built) for v in values]

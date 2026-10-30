@@ -74,11 +74,22 @@
 - "Statements behind the most gaps" counts only gaps that cite a statement.
 - Assertion evidence paths are relative to the output folder (where the pages are).
 
+## Added: static evaluation of dynamic SQL (prototype)
+
+- `src/column_lineage/dynamic_eval.py`: dynamic SQL whose every possible text is built from literals
+  (also via variables, IF/ELSE, parameters with literal callers or defaults; at most 16 alternatives)
+  is parsed and analysed as writers at the EXEC; the steps are `inferred`. See the design doc,
+  "Dynamic SQL evaluation". Fixtures: `fixtures/column/dynamic/`; tests: `tests/test_column_dynamic_eval.py`.
+- Parameter defaults that are string literals (`@p sysname = N'x',`) were cut to `N`; fixed.
+
 ## Known open issues
 
 - Corpus chain 08 ends in `missing_definition` (recall 0.6). Not investigated.
 - Dynamic SQL that builds its projection from metadata cannot be followed. This is by design: it is
-  reported as a `dynamic_sql` gap at the EXEC.
+  reported as a `dynamic_sql` gap at the EXEC (its detail now says which piece is unknown).
+- A dynamic SQL issue's literal "targets" are guessed from all string literals in its scope; text like
+  `'INSERT INTO ' + @t` yields the bogus target `into`, and an issue with any target is not reported as a
+  scope-level gap. Unchanged by the evaluator (it only matters when evaluation is incomplete).
 
 ## Still to do
 
