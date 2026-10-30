@@ -42,6 +42,7 @@ JOIN_KEY = "join_key"          # equality columns of ON / MERGE ON / correlated 
 GROUP_BY = "group_by"
 HAVING = "having"
 QUALIFY = "qualify"
+TOP_ORDER = "top_order"        # ORDER BY of a TOP n / OFFSET-FETCH query
 MERGE_CONDITION = "merge_condition"  # WHEN MATCHED AND ... predicates
 
 # Gap kinds. A gap is a place where proof stops for a reason other than the
@@ -53,6 +54,11 @@ GAP_KINDS = (
     "column_count_mismatch", "opaque_function", "table_valued_function", "external_object",
     "unresolved_variable", "runtime_branch", "cycle", "depth_limit", "column_not_written",
 )
+
+
+def quote_part(part: str) -> str:
+    """Bracket an identifier part that would otherwise be ambiguous in a dotted id."""
+    return f"[{part.replace(']', ']]')}]" if ("." in part or "]" in part or "[" in part) else part
 
 
 def stable_id(prefix: str, *parts: Any) -> str:
@@ -79,9 +85,9 @@ class ObjectRef:
     @property
     def key(self) -> str:
         if self.kind in ("temp_table", "table_variable", "cte", "derived"):
-            return f"{self.kind}:{self.scope}::{self.name}"
+            return f"{self.kind}:{self.scope}::{quote_part(self.name)}"
         parts = [p for p in (self.server, self.database or "?", self.schema or "?", self.name)]
-        return ".".join(p for p in parts if p is not None)
+        return ".".join(quote_part(p) for p in parts if p is not None)
 
     @property
     def display(self) -> str:
@@ -110,7 +116,7 @@ class Node:
     @property
     def id(self) -> str:
         if self.object is not None:
-            return f"{self.object.key}.{self.name}"
+            return f"{self.object.key}.{quote_part(self.name)}"
         if self.kind in (VARIABLE, PARAMETER):
             return f"{self.kind}:{self.scope}::{self.name}"
         return f"{self.kind}:{self.name}"
@@ -184,8 +190,9 @@ class RowSelection:
 class Step:
     """One mapping: how ``target`` gets its value from ``inputs`` in one writer and branch."""
     target: Node
-    writer_kind: str               # insert_select, insert_values, select_into, update, merge_update, merge_insert,
-                                   # view, cte, derived, variable_assignment, parameter_binding
+    writer_kind: str               # insert_select, insert_values, insert_omitted, select_into, update, merge_update,
+                                   # merge_insert, view, cte, derived, variable_assignment, parameter_binding,
+                                   # parameter_default, computed_column
     expression: str                # the value expression as written, or the source column for a projection
     operation: str                 # direct, rename, cast, case, coalesce, arithmetic, function, aggregate, constant,
                                    # string, window, subquery, expression

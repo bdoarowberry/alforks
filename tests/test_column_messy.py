@@ -235,7 +235,9 @@ def test_parameter_bound_by_callers(tmp_path):
 
 def test_parameter_without_caller_stops(tmp_path):
     t = trace("parameter_binding", "demo.output.other_value", tmp_path)
-    step = t.only_step_for(t.target_id)
+    # load_output's INSERT omits other_value, so it is also an alternative (NULL); take the UPDATE.
+    assert {s["writer_kind"] for s in t.steps_for(t.target_id)} == {"update", "insert_omitted"}
+    step = next(s for s in t.steps_for(t.target_id) if s["writer_kind"] == "update")
     param = t.one_id("parameter:", "::@other_input")
     assert inputs(step, "value") == [param]
     assert t.steps_for(param) == []

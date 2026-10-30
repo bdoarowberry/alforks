@@ -25,11 +25,58 @@ from .model import Evidence, ObjectRef
 USE = re.compile(r"^[ \t]*USE[ \t]+(?P<db>\[(?:[^\]]|\]\])*\]|\"[^\"]+\"|[A-Za-z_][\w$#@]*)", re.I | re.M)
 DYNAMIC = re.compile(r"\s*EXEC(?:UTE)?\s*(?:\(|(?:\[?sys\]?\s*\.\s*)?\[?sp_executesql\]?(?!\w)|@\w+\s*;?\s*$|@\w+\s+(?!=))", re.I)
 INSERT_EXEC = re.compile(rf"\s*INSERT\s+(?:INTO\s+)?(?P<target>{IDENT})(?:\s*\([^)]*\))?\s+EXEC(?:UTE)?\b", re.I)
+TOP = r"(?:TOP\s*\([^)]*\)\s*(?:PERCENT\s+)?)?"
 WRITE_TARGET = re.compile(
-    rf"\b(?:INSERT\s+(?:INTO\s+)?|UPDATE\s+|MERGE\s+(?:INTO\s+)?|\bINTO\s+)(?P<target>{IDENT})", re.I)
+    rf"\b(?:INSERT\s+{TOP}(?:INTO\s+)?|UPDATE\s+{TOP}|MERGE\s+{TOP}(?:INTO\s+)?|\bINTO\s+)(?P<target>{IDENT})", re.I)
 SYNONYM = re.compile(rf"\bCREATE\s+SYNONYM\s+(?P<name>{IDENT})\s+FOR\s+(?P<target>{IDENT})", re.I)
 ALTER_ADD = re.compile(rf"\bALTER\s+TABLE\s+(?P<name>{IDENT})\s+ADD\s+(?P<body>[^;]*)", re.I)
 TEMP_MARK = "#"
+COMPOUND = re.compile(r"(?P<lhs>@[\w$#@]+|(?:\[[^\]]+\]|[A-Za-z_][\w$#]*)(?:\.(?:\[[^\]]+\]|[A-Za-z_][\w$#]*))*)"
+                      r"\s*(?P<op>[-+*/%&|^])=(?!=)")
+CURSOR = re.compile(r"\bDECLARE\s+(?P<cursor>[A-Za-z_][\w$#@]*)\s+(?:INSENSITIVE\s+|SCROLL\s+)*CURSOR\b[^;]*?"
+                    r"(?P<for>\bFOR\s+)(?=SELECT\b|WITH\b|\()", re.I | re.S)
+FETCH = re.compile(r"\bFETCH\s+(?:(?:NEXT|PRIOR|FIRST|LAST|ABSOLUTE\s+\S+|RELATIVE\s+\S+)\s+)?(?:FROM\s+)?(?:GLOBAL\s+)?"
+                   r"(?P<cursor>[A-Za-z_][\w$#@]*)\s+INTO\s+(?P<vars>@[\w$#@]+(?:\s*,\s*@[\w$#@]+)*)", re.I)
+ALTER_VIEW = re.compile(rf"\bALTER\s+VIEW\s+{IDENT}\s*(?:\([^)]*\)\s*)?(?:WITH\s+[\w\s,]+?\s+)?AS\b", re.I)
+DROP_TEMP = re.compile(r"\bDROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?(?P<name>#[A-Za-z_][\w$#@]*)", re.I)
+
+
+def procedure_scopes(text: str, masked: str) -> list[tuple[int, str, str]]:
+    """(start, normalized name, scope name) for each procedure; repeated names get @line."""
+    found = [(m.start(), normalize_name(m.group("name"))) for m in DEFINITION.finditer(masked)
+             if m.group("kind").lower().startswith("proc")]
+    counts: dict[str, int] = defaultdict(int)
+    for _, name in found:
+        counts[name] += 1
+    return [(start, name, name if counts[name] == 1 else f"{name}@{text.count(chr(10), 0, start) + 1}")
+            for start, name in found]
+
+
+def parameter_defaults(header: str, statement: Statement) -> dict:
+    """@param -> (default expression, header statement) from a CREATE PROCEDURE header."""
+    masked = mask_noncode(header)
+    defaults = {}
+    params = list(re.finditer(r"(?<![\w@])@[A-Za-z_][\w$#@]*", masked))
+    for i, param in enumerate(params):
+        end = params[i + 1].start() if i + 1 < len(params) else len(masked)
+        segment = masked[param.end():end]
+        eq = segment.find("=")
+        if eq < 0:
+            continue
+        start = param.end() + eq + 1
+        stop = param.end() + len(segment.rstrip().rstrip(",").rstrip())
+        tail = re.search(r"\b(?:OUTPUT|OUT|READONLY)\b|\bAS\s*$|\)\s*(?:AS\s*)?$|,\s*$", masked[start:stop], re.I)
+        value_end = start + tail.start() if tail else stop
+        value = header[start:value_end].strip().rstrip(",")
+        if not value:
+            continue
+        try:
+            parsed = sqlglot.parse_one(f"SELECT {value}", read="tsql", error_level=ErrorLevel.RAISE)
+        except (SqlglotError, ValueError, RecursionError):
+            continue
+        if isinstance(parsed, exp.Select) and parsed.expressions:
+            defaults[param.group().lower()] = (parsed.expressions[0], statement)
+    return defaults
 
 
 def ident_text(node) -> str | None:
@@ -113,6 +160,7 @@ class ProcInfo:
     params: list[str]
     start: int
     line: int
+    defaults: dict = field(default_factory=dict)   # @param -> (expression, header Statement)
 
 
 @dataclass
@@ -142,6 +190,7 @@ class Writer:
     unit: Unit
     procedure: str | None
     order: int
+    via: tuple | None = None   # ("cte", name) or ("view", view key): written through an updatable CTE/view
 
     @property
     def controls(self) -> tuple[str, ...]:
@@ -164,8 +213,9 @@ class Assignment:
     statement: Statement
     unit: Unit
     value: exp.Expression | None
-    select: exp.Select | None   # SELECT @v = col FROM ... context
-    kind: str          # set, select, declare, fetch, exec_output
+    select: exp.Expression | None   # SELECT @v = col FROM ... / UPDATE ... SET @v = col context
+    kind: str          # set, select, declare, fetch, update, exec_output
+    note: str | None = None
 
 
 @dataclass
@@ -204,6 +254,10 @@ class Catalog:
         self.stats = {"files": 0, "statements": 0, "parsed": 0, "fallback": 0}
         self.fallback_samples: list[tuple[Statement, Unit]] = []
         self.file_errors: list[tuple[str, str, str]] = []
+        self.rewritten: set[tuple[str, int]] = set()       # statements parsed after a compound-assignment rewrite
+        self.temp_resets: dict[tuple[str, str], list[int]] = defaultdict(list)  # (scope, #name) -> DROP/CREATE offsets
+        self.fallback_by_scope: dict[str, list[Statement]] = defaultdict(list)
+        self._view_bases: dict[str, list[str]] | None = None
 
     # ---------------------------------------------------------------- loading
     def _mapped_database(self, root: Path, rel: str, absolute: str) -> str | None:
@@ -227,10 +281,21 @@ class Catalog:
         # Scopes embed the absolute path; make them portable so identities are stable across machines.
         prefix = f"{source.path}::"
         portable = f"{root_label}/{rel}::"
-        index.statements = [replace(s, scope=portable + s.scope[len(prefix):]) if s.scope.startswith(prefix) else s
-                            for s in index.statements]
         text = source.text
         masked = mask_noncode(text)
+        proc_scopes = procedure_scopes(text, masked)
+        statements = []
+        for statement in index.statements:
+            if statement.scope.startswith(prefix):
+                name = statement.scope[len(prefix):]
+                if not name.startswith("<batch@"):
+                    owner = [p for p in proc_scopes if p[0] <= statement.start]
+                    name = owner[-1][2] if owner else name
+                statement = replace(statement, scope=portable + name)
+            if statement.parse_status != "parsed":
+                statement = self._rewrite_compound(root_label, rel, statement)
+            statements.append(statement)
+        index.statements = statements
         uses = [(m.start(), norm(split_name(m.group("db"))[0])) for m in USE.finditer(masked)]
         unit = Unit(root_label, root, rel, str(source.path), text, masked, index, uses,
                     self._mapped_database(root, rel, str(source.path)))
@@ -249,10 +314,118 @@ class Catalog:
         for order, statement in enumerate(index.statements):
             self.stats["statements"] += 1
             self.stats["parsed" if statement.parse_status == "parsed" else "fallback"] += 1
+            if statement.parse_status != "parsed":
+                self.fallback_by_scope[statement.scope].append(statement)
             try:
                 self._statement(unit, statement, order)
             except Exception as exc:  # noqa: BLE001 - one bad statement must not stop the scan
                 self._issue("unsupported_statement", unit, statement, (), f"Statement could not be indexed: {type(exc).__name__}")
+        for step in (self._cursors, self._temp_drops, self._alter_views):
+            try:
+                step(unit)
+            except Exception as exc:  # noqa: BLE001
+                self.file_errors.append((root_label, rel, f"{step.__name__}: {type(exc).__name__}"))
+
+    # ------------------------------------------------------------ add_file helpers
+    def _rewrite_compound(self, root_label: str, rel: str, statement: Statement) -> Statement:
+        """Parse `x += y` (unsupported by SQLGlot) as `x = x + y`; evidence keeps statement lines."""
+        masked = mask_noncode(statement.text)
+        matches = list(COMPOUND.finditer(masked))
+        if not matches:
+            return statement
+        text = statement.text
+        for match in reversed(matches):
+            lhs = text[match.start("lhs"):match.end("lhs")]
+            text = text[:match.start()] + f"{lhs} = {lhs} {match.group('op')} " + text[match.end():]
+        try:
+            tree = sqlglot.parse_one(text, read="tsql", error_level=ErrorLevel.RAISE)
+        except (SqlglotError, ValueError, RecursionError):
+            return statement
+        if tree is None or isinstance(tree, exp.Command):
+            return statement
+        self.rewritten.add((root_label + "/" + rel, statement.start))
+        return replace(statement, tree=tree, parse_status="parsed", parse_error=None)
+
+    def _scope_at(self, unit: Unit, offset: int) -> tuple[str | None, str | None, Statement | None]:
+        """Scope and procedure of the indexed statement nearest before ``offset``."""
+        before = [s for s in unit.index.statements if s.start <= offset]
+        if before:
+            return before[-1].scope, before[-1].procedure, before[-1]
+        return None, None, None
+
+    def _cursors(self, unit: Unit) -> None:
+        cursors: dict[str, list[tuple[int, Statement | None, exp.Expression | None]]] = defaultdict(list)
+        for match in CURSOR.finditer(unit.masked):
+            query_at = match.end("for")
+            statement = next((s for s in unit.index.statements if s.start <= query_at < s.end), None)
+            select = None
+            if statement is not None and statement.start == query_at and statement.tree is not None:
+                select = statement.tree
+            elif statement is not None:
+                try:
+                    select = sqlglot.parse_one(unit.text[query_at:statement.end], read="tsql", error_level=ErrorLevel.RAISE)
+                    statement = replace(statement, start=query_at, text=unit.text[query_at:statement.end],
+                                        line=unit.line_at(query_at), tree=select)
+                except (SqlglotError, ValueError, RecursionError):
+                    select = None
+            cursors[match.group("cursor").lower()].append((match.start(), statement, select))
+        for match in FETCH.finditer(unit.masked):
+            scope, procedure, near = self._scope_at(unit, match.start())
+            if scope is None:
+                continue
+            declared = [c for c in cursors.get(match.group("cursor").lower(), []) if c[0] < match.start()]
+            names = [v.strip().lower() for v in match.group("vars").split(",")]
+            line = unit.line_at(match.start())
+            fetch_statement = Statement(unit.path, line, match.start(), match.end(), unit.text[match.start():match.end()],
+                                        procedure, scope, "parsed")
+            if not declared or declared[-1][2] is None:
+                for name in names:
+                    self.assignments[(scope, name)].append(Assignment(name, scope, fetch_statement, unit, None, None, "fetch",
+                                                                      f"FETCH at line {line} from a cursor whose query was not analysed"))
+                continue
+            _, statement, select = declared[-1]
+            first = select
+            while isinstance(first, (exp.Union, exp.Except, exp.Intersect)):
+                first = first.this
+            items = first.expressions if isinstance(first, exp.Select) else []
+            for i, name in enumerate(names):
+                value = items[i] if i < len(items) else None
+                value = value.this if isinstance(value, exp.Alias) else value
+                holder = replace(statement, scope=scope, procedure=procedure)
+                self.assignments[(scope, name)].append(Assignment(
+                    name, scope, holder if value is not None else fetch_statement, unit, value,
+                    first if isinstance(first, exp.Select) else None, "fetch",
+                    f"FETCH at line {line} from cursor {match.group('cursor')} (column {i + 1} of its query)"))
+
+    def _alter_views(self, unit: Unit) -> None:
+        """ALTER VIEW defines a view like CREATE VIEW; the indexer keeps only its SELECT."""
+        for match in ALTER_VIEW.finditer(unit.masked):
+            body = next((st for st in unit.index.statements if st.start >= match.end() and
+                         not unit.masked[match.end():st.start].strip()), None)
+            if body is None:
+                continue
+            original = unit.text[match.start():body.end]
+            text = "CREATE" + original[len("ALTER"):]
+            try:
+                tree = sqlglot.parse_one(text, read="tsql", error_level=ErrorLevel.RAISE)
+            except (SqlglotError, ValueError, RecursionError):
+                continue
+            if not isinstance(tree, exp.Create) or str(tree.args.get("kind") or "").upper() != "VIEW":
+                continue
+            statement = replace(body, start=match.start(), line=unit.line_at(match.start()), text=original, tree=tree,
+                                parse_status="parsed")
+            table = tree.this.this if isinstance(tree.this, exp.Schema) else tree.this
+            if isinstance(table, exp.Table):
+                ref = self.ref_from_table(table, unit, statement)
+                ref = ObjectRef(ref.name, ref.schema, ref.database, ref.server, "view", None, ref.database_source)
+                self._register(ref)
+                self._add_writer(Writer(ref, "view", statement, unit, statement.procedure, 0))
+
+    def _temp_drops(self, unit: Unit) -> None:
+        for match in DROP_TEMP.finditer(unit.masked):
+            scope, _, _ = self._scope_at(unit, match.start())
+            if scope:
+                self.temp_resets[(scope, norm(match.group("name")))].append(match.start())
 
     # ------------------------------------------------------------- identities
     def ref(self, server, database, schema, name, unit: Unit, statement: Statement | None,
@@ -315,6 +488,14 @@ class Catalog:
         seen.add(scope)
         proc = self.proc_by_scope.get(scope)
         if proc is None:
+            batch = re.search(r"::<batch@(\d+)>$", scope)
+            if batch:
+                # A script's GO batches share one session, so #temp tables persist between them.
+                prefix = scope[:batch.start()]
+                earlier = sorted((int(m.group(1)), other) for other, names in self.temp_creators.items()
+                                 if name in names and other.startswith(prefix + "::<batch@")
+                                 for m in [re.search(r"<batch@(\d+)>$", other)] if m and int(m.group(1)) < int(batch.group(1)))
+                return [earlier[-1][1]] if earlier else []
             return []
         found: list[str] = []
         for call in self.calls_by_callee.get(proc.key, []):
@@ -331,7 +512,7 @@ class Catalog:
                  role: str = "statement", excerpt: str | None = None) -> Evidence:
         start_line = statement.line
         end_line = statement.line + statement.text.rstrip().count("\n")
-        if node is not None:
+        if node is not None and (f"{unit.root_label}/{unit.rel_path}", statement.start) not in self.rewritten:
             positions = [n.meta.get("start") for n in node.walk() if isinstance(n.meta.get("start"), int)]
             ends = [n.meta.get("end") for n in node.walk() if isinstance(n.meta.get("end"), int)]
             if positions and ends and 0 <= min(positions) <= max(ends) < len(statement.text):
@@ -363,10 +544,16 @@ class Catalog:
             # Parameter defaults cannot reference variables, so every @name in the header is a parameter.
             params = list(dict.fromkeys(m.group().lower() for m in
                                         re.finditer(r"(?<![\w@])@[A-Za-z_][\w$#@]*", mask_noncode(header))))
-            ref = self.ref_from_text(match.group("name"), unit, None)
+            fake = Statement(unit.path, unit.line_at(match.start()), match.start(), match.start(), "", None, "", "parsed")
+            ref = self.ref_from_text(match.group("name"), unit, fake)
             ref = ObjectRef(ref.name, ref.schema, ref.database, ref.server, "procedure", None, ref.database_source)
-            scope = f"{unit.root_label}/{unit.rel_path}::{normalize_name(match.group('name'))}"
+            names = {start: name for start, _, name in procedure_scopes(unit.text, masked)}
+            scope = f"{unit.root_label}/{unit.rel_path}::{names.get(match.start(), normalize_name(match.group('name')))}"
             info = ProcInfo(proc_key(ref), ref, scope, unit, params, match.start(), unit.line_at(match.start()))
+            if end:
+                header_statement = Statement(unit.path, unit.line_at(match.start()), match.start(), end,
+                                             unit.text[match.start():end], match.group("name"), scope, "parsed")
+                info.defaults = parameter_defaults(unit.text[match.start():end], header_statement)
             self.procedures[info.key].append(info)
             self.proc_by_scope[scope] = info
 
@@ -412,6 +599,11 @@ class Catalog:
             kind = str(tree.args.get("kind") or "").upper()
             if kind == "TABLE":
                 self._create_table(unit, statement, tree)
+                schema = tree.this
+                if isinstance(schema, exp.Schema) and isinstance(schema.this, exp.Table):
+                    ref = self.ref_from_table(schema.this, unit, statement)
+                    if ref.kind == "temp_table":
+                        self.temp_resets[(statement.scope, ref.name)].append(statement.start)
                 return
             if kind == "VIEW":
                 table = tree.this.this if isinstance(tree.this, exp.Schema) else tree.this
@@ -440,18 +632,27 @@ class Catalog:
         if isinstance(tree, exp.Insert):
             target = tree.this.this if isinstance(tree.this, exp.Schema) else tree.this
             if isinstance(target, exp.Table) and not isinstance(target.this, exp.Func):
+                if self._via_cte(tree, target, "insert", unit, statement, order):
+                    return
                 self._add_writer(Writer(self._writer_ref(self.ref_from_table(target, unit, statement), unit, statement),
                                         "insert", statement, unit, statement.procedure, order))
             return
         if isinstance(tree, exp.Update):
+            for item in tree.expressions:
+                if isinstance(item, exp.EQ) and isinstance(item.this, exp.Parameter):
+                    self._assign(unit, statement, item.this.sql(dialect="tsql"), item.expression, tree, "update")
             target = update_target(tree)
             if isinstance(target, exp.Table):
+                if self._via_cte(tree, target, "update", unit, statement, order):
+                    return
                 self._add_writer(Writer(self._writer_ref(self.ref_from_table(target, unit, statement), unit, statement),
                                         "update", statement, unit, statement.procedure, order))
             return
         if isinstance(tree, exp.Merge):
             target = tree.this
             if isinstance(target, exp.Table):
+                if self._via_cte(tree, target, "merge", unit, statement, order):
+                    return
                 self._add_writer(Writer(self._writer_ref(self.ref_from_table(target, unit, statement), unit, statement),
                                         "merge", statement, unit, statement.procedure, order))
             return
@@ -465,12 +666,42 @@ class Catalog:
                 self._add_writer(Writer(ref, "select_into", statement, unit, statement.procedure, order))
                 if ref.kind == "temp_table":
                     self.temp_creators[statement.scope].add(ref.name)
+                    self.temp_resets[(statement.scope, ref.name)].append(statement.start)
                 return
             if isinstance(tree, exp.Select):
                 for item in tree.expressions:
                     if isinstance(item, exp.EQ) and isinstance(item.this, exp.Parameter):
                         self._assign(unit, statement, item.this.sql(dialect="tsql"), item.expression, tree, "select")
             return
+
+    def _via_cte(self, tree, target: exp.Table, kind: str, unit: Unit, statement: Statement, order: int) -> bool:
+        """A write whose target is a CTE writes the CTE's base table(s)."""
+        _, database, schema, name = table_parts(target)
+        if database or schema:
+            return False
+        with_ = tree.args.get("with_")
+        ctes = {norm(c.alias_or_name): c for c in (with_.expressions if with_ is not None else [])}
+        cte = ctes.get(norm(name))
+        if cte is None:
+            return False
+        query = cte.this
+        while isinstance(query, (exp.Union, exp.Except, exp.Intersect)):
+            query = query.this
+        tables = []
+        if isinstance(query, exp.Select):
+            from_ = query.args.get("from_")
+            if from_ is not None and isinstance(from_.this, exp.Table):
+                tables.append(from_.this)
+            for join in list(query.args.get("joins") or []) + (list(from_.this.args.get("joins") or []) if from_ is not None and isinstance(from_.this, exp.Expression) else []):
+                if isinstance(join.this, exp.Table):
+                    tables.append(join.this)
+        for table in tables:
+            _, _, _, base_name = table_parts(table)
+            if norm(base_name) in ctes:
+                continue
+            ref = self._writer_ref(self.ref_from_table(table, unit, statement), unit, statement)
+            self._add_writer(Writer(ref, kind, statement, unit, statement.procedure, order, ("cte", norm(name))))
+        return True
 
     def _literal_targets(self, unit: Unit, statement: Statement) -> tuple[str, ...]:
         """Object names that string literals in the same scope name as write targets.
@@ -560,11 +791,12 @@ class Catalog:
                 if isinstance(default, exp.Expression):
                     self._assign(unit, statement, name, default, None, "declare")
 
-    def _assign(self, unit, statement, name, value, select, kind) -> None:
+    def _assign(self, unit, statement, name, value, select, kind, note=None) -> None:
         name = name.lower()
         if name.startswith("@@"):
             return
-        self.assignments[(statement.scope, name)].append(Assignment(name, statement.scope, statement, unit, value, select, kind))
+        self.assignments[(statement.scope, name)].append(Assignment(name, statement.scope, statement, unit, value, select,
+                                                                    kind, note))
 
     def _call(self, unit: Unit, statement: Statement, tree: exp.Execute) -> None:
         target = tree.this
@@ -585,14 +817,62 @@ class Catalog:
                 args.append((None, arg))
                 if output and isinstance(arg, exp.Parameter):
                     self._assign(unit, statement, arg.sql(dialect="tsql"), None, None, "exec_output")
+        returned = re.match(r"\s*EXEC(?:UTE)?\s+(@[\w$#@]+)\s*=", mask_noncode(statement.text), re.I)
+        if returned:
+            self._assign(unit, statement, returned.group(1), None, None, "exec_output")
         call = Call(statement.scope, callee, statement, unit, args)
         self.calls_by_callee[proc_key(callee)].append(call)
         self.calls_by_caller[statement.scope].append(call)
 
     # ---------------------------------------------------------------- queries
+    def aliases_of(self, ref: ObjectRef) -> list[str]:
+        """Other keys under which writes to ``ref`` are recorded: same name with no database
+        context (when only this database is known for it) and synonyms that resolve to it."""
+        keys = []
+        if ref.kind in ("table", "view") and ref.database and ref.schema and not ref.server:
+            if self.known_databases.get((ref.schema, ref.name)) == {ref.database}:
+                keys.append(ObjectRef(ref.name, ref.schema, None, None).key)
+            for syn_key, (target, _, _) in self.synonyms.items():
+                if self.canonical(target)[0].key == ref.key and syn_key != ref.key:
+                    keys.append(syn_key)
+        return keys
+
+    def view_bases(self) -> dict[str, list[str]]:
+        """View key -> keys of tables in its top-level FROM/JOIN (for writes through a view)."""
+        if self._view_bases is None:
+            self._view_bases = defaultdict(list)
+            for key, writers in self.writers.items():
+                for writer in writers:
+                    if writer.kind != "view" or writer.via:
+                        continue
+                    query = writer.statement.tree.args.get("expression")
+                    while isinstance(query, (exp.Union, exp.Except, exp.Intersect)):
+                        query = query.this
+                    if not isinstance(query, exp.Select):
+                        continue
+                    from_ = query.args.get("from_")
+                    tables = [from_.this] if from_ is not None and isinstance(from_.this, exp.Table) else []
+                    joins = list(query.args.get("joins") or [])
+                    if from_ is not None and isinstance(from_.this, exp.Expression):
+                        joins += list(from_.this.args.get("joins") or [])
+                    tables += [j.this for j in joins if isinstance(j.this, exp.Table)]
+                    for table in tables:
+                        base, _ = self.canonical(self.ref_from_table(table, writer.unit, writer.statement))
+                        self._view_bases[key].append(base.key)
+        return self._view_bases
+
     def writers_for(self, ref: ObjectRef) -> list[Writer]:
         """Writers of an object; for a #temp table, includes callees writing into it."""
         found = list(self.writers.get(ref.key, []))
+        for key in self.aliases_of(ref):
+            found.extend(self.writers.get(key, []))
+        if ref.kind in ("table", "view"):
+            for view_key, bases in self.view_bases().items():
+                if ref.key in bases and view_key != ref.key:
+                    for writer in self.writers.get(view_key, []):
+                        if writer.kind in ("insert", "update", "merge") and not writer.via:
+                            found.append(Writer(ref, writer.kind, writer.statement, writer.unit, writer.procedure,
+                                                writer.order, ("view", view_key)))
         if ref.kind == "temp_table":
             for scope in sorted(self.temp_writer_scopes.get(ref.name, ())):
                 if scope == ref.scope or ref.name in self.temp_creators.get(scope, ()):
@@ -613,7 +893,10 @@ class Catalog:
 
     def schema_for(self, ref: ObjectRef) -> tuple[list[ColumnInfo] | None, str, TableSchema | None]:
         """Declared ordered columns. Status: declared, ambiguous, missing."""
-        schemas = self.schemas.get(ref.key, [])
+        schemas = list(self.schemas.get(ref.key, []))
+        if not schemas:
+            for key in self.aliases_of(ref):
+                schemas.extend(self.schemas.get(key, []))
         creates = [s for s in schemas if s.source in ("create_table", "table_variable")]
         if ref.kind == "temp_table":
             creates = [s for s in creates if s.statement.scope == ref.scope]
@@ -630,7 +913,8 @@ class Catalog:
         return columns, "declared", creates[0]
 
     def is_known(self, ref: ObjectRef) -> bool:
-        return bool(self.schemas.get(ref.key) or self.writers.get(ref.key) or ref.key in self.synonyms)
+        keys = [ref.key] + self.aliases_of(ref)
+        return any(self.schemas.get(k) or self.writers.get(k) or k in self.synonyms for k in keys)
 
 
 def proc_key(ref: ObjectRef) -> str:
@@ -658,6 +942,10 @@ def update_target(tree: exp.Update) -> exp.Expression | None:
     if from_ is not None:
         sources.extend(j.this for j in from_.args.get("joins") or [])
     matches = [s for s in sources if isinstance(s, exp.Table) and s.alias and s.alias.lower() == (name or "").lower()]
+    if not matches:
+        # An unaliased table's exposed name is its object name: UPDATE output ... FROM demo.output
+        matches = [s for s in sources if isinstance(s, exp.Table) and not s.alias and
+                   (table_parts(s)[3] or "").lower() == (name or "").lower() and (table_parts(s)[2] or table_parts(s)[1])]
     return matches[0] if len(matches) == 1 else target
 
 

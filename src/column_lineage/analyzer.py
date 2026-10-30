@@ -9,13 +9,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+import sqlglot
 from sqlglot import exp
 
 from table_lineage.index import Statement
 
 from .catalog import Catalog, ColumnInfo, Unit, Writer, ident_text, norm, statement_id, table_parts, update_target
 from .model import (
-    AMBIGUOUS, COLUMN, CONDITION, CONSTANT, FILTER, GROUP_BY, HAVING, INFERRED, JOIN_KEY, JOIN_PREDICATE,
+    TOP_ORDER, AMBIGUOUS, COLUMN, CONDITION, CONSTANT, FILTER, GROUP_BY, HAVING, INFERRED, JOIN_KEY, JOIN_PREDICATE,
     LOCAL_COLUMN, MERGE_CONDITION, PARAMETER, PARTIAL, TEMP_COLUMN, UNKNOWN, UNRESOLVED, VALUE, VARIABLE,
     VERIFIED, WINDOW, Gap, Input, Node, ObjectRef, RowSelection, Step, worst,
 )
@@ -114,6 +115,17 @@ class Ctx:
         self.local_done: dict[tuple[str, str], Node] = {}
         self.local_active: set[tuple[str, str]] = set()
         self.cycles: list[list[str]] = []
+        self._positions: dict[int, int] | None = None
+
+    def position(self, node) -> int:
+        """Stable ordinal of an AST node within its statement, so reused aliases stay distinct."""
+        if self._positions is None:
+            tree = self.statement.tree
+            self._positions = {id(n): i for i, n in enumerate(tree.walk())} if tree is not None else {}
+        return self._positions.get(id(node), -1)
+
+    def local_scope(self, node) -> str:
+        return f"{self.stmt_id}@{self.position(node)}"
 
     def gap(self, kind: str, message: str, node: Node | None = None, expr: exp.Expression | None = None,
             detail: dict | None = None) -> str:
@@ -148,6 +160,14 @@ class Scope:
             self.add_from(from_.this)
         for join in join_list(select):
             self.add_from(join.this)
+
+    def could_supply(self, name: str) -> bool:
+        scope = self
+        while scope is not None:
+            if any(s.columns is not None and name in s.columns for s in scope.sources):
+                return True
+            scope = scope.parent
+        return False
 
     def find_alias(self, qualifier: str) -> list[Source]:
         q = qualifier.lower()
@@ -195,7 +215,19 @@ class Scope:
         if len(known) == 1 and not unknown:
             return self.ctx.analyzer.source_column(known[0], name, self, column, expand_local)
         if len(self.sources) == 1:
-            return self.ctx.analyzer.source_column(self.sources[0], name, self, column, expand_local)
+            only = self.sources[0]
+            if only.columns is not None and only.reliable and name not in only.columns:
+                return None  # not supplied here: an outer (correlated) reference
+            if only.columns is None and self.parent is not None and self.parent.could_supply(name):
+                # SQL binds to the inner source if it has the column, else the outer one; with no
+                # schema for the inner source we cannot tell which.
+                inner = self.ctx.analyzer.source_column(only, name, self, column, expand_local)
+                outer = self.parent.bind(column, expand_local)
+                node = Node(UNKNOWN, column.sql(dialect="tsql"))
+                gap = self.ctx.gap("ambiguous_column", f"Unqualified {name} in a subquery binds to {only.alias} if it "
+                                   "has that column (its schema is unknown), otherwise to the outer query.", node, column)
+                return [Binding(b.node, AMBIGUOUS, gap, "inner or outer binding") for b in inner + outer]
+            return self.ctx.analyzer.source_column(only, name, self, column, expand_local)
         if len(known) == 1 and unknown:
             # Working SQL cannot have two sources supplying an unqualified name, so the known one is
             # the binding provided the unknown sources lack it; that is an assumption, not proof.
@@ -290,11 +322,11 @@ class Analyzer:
             ctes = dict(scope_ctes(scope))
             local = Local("derived", name, inner, alias_columns, ctes,
                           scope if isinstance(node, exp.Lateral) else scope.parent,
-                          ObjectRef(name, kind="derived", scope=ctx.stmt_id))
+                          ObjectRef(name, kind="derived", scope=ctx.local_scope(node)))
             return Source(name, "local", columns=self.local_names(local, ctx), reliable=True, local=local, names=(name,))
         if isinstance(node, exp.Values):
             name = alias or f"values{len(scope.sources) + 1}"
-            local = Local("values", name, node, alias_columns, {}, None, ObjectRef(name, kind="derived", scope=ctx.stmt_id))
+            local = Local("values", name, node, alias_columns, {}, None, ObjectRef(name, kind="derived", scope=ctx.local_scope(node)))
             return Source(name, "local", columns=alias_columns, reliable=bool(alias_columns), local=local, names=(name,))
         n = Node(UNKNOWN, node.sql(dialect="tsql") if isinstance(node, exp.Expression) else str(node))
         gap = ctx.gap("unsupported_statement", f"Unsupported row source {type(node).__name__}.", n,
@@ -323,8 +355,9 @@ class Analyzer:
                         name_sets.append(tuple(names))
                     else:
                         name_sets.append(None)
+                added = [c.name for sch in self.catalog.schemas.get(key, []) if sch.source == "alter_add" for c in sch.columns]
                 if definers and None not in name_sets and len(set(name_sets)) == 1:
-                    result = (list(name_sets[0]), True)
+                    result = (list(name_sets[0]) + [c for c in added if c not in name_sets[0]], True)
                 elif definers and name_sets and all(n is not None for n in name_sets):
                     result = (sorted({c for names in name_sets for c in names}), False)
         finally:
@@ -540,6 +573,10 @@ class Analyzer:
             for b in scope.bind(e):
                 out.append(Input(b.node, role, e.sql(dialect="tsql"), branch, b.status, b.gap, b.note))
             return
+        if isinstance(e, exp.Neg) and isinstance(unparen(e.this), exp.Literal):
+            if role == VALUE and const_ok:
+                out.append(Input(Node(CONSTANT, e.sql(dialect="tsql")), VALUE, e.sql(dialect="tsql"), branch))
+            return
         if isinstance(e, (exp.Literal, exp.Null, exp.Boolean)):
             if role == VALUE and const_ok:
                 out.append(Input(Node(CONSTANT, e.sql(dialect="tsql")), VALUE, e.sql(dialect="tsql"), branch))
@@ -664,7 +701,10 @@ class Analyzer:
                         isinstance(unparen(clause.this), exp.Column) and isinstance(unparen(clause.expression), exp.Column):
                     kind = JOIN_KEY
                 inputs: list[Input] = []
-                self.walk(clause, CONDITION, None, scope, ctx, inputs, [], False)
+                nested: list[RowSelection] = []
+                self.walk(clause, CONDITION, None, scope, ctx, inputs, nested, False)
+                out.extend(RowSelection(r.node, kind if role != JOIN_PREDICATE else JOIN_PREDICATE, text + " :: " + r.expression,
+                                        r.evidence, r.status, r.gap) for r in nested)
                 evidence = ctx.evidence(clause, role)
                 seen = set()
                 for item in inputs:
@@ -695,6 +735,13 @@ class Analyzer:
         having = select.args.get("having")
         if having is not None:
             add(having.this, HAVING, "HAVING ")
+        limit = select.args.get("limit")
+        order = select.args.get("order")
+        if limit is not None and order is not None:
+            # TOP n ... ORDER BY decides which rows survive.
+            top = limit.expression.sql(dialect="tsql") if isinstance(limit, exp.Limit) and limit.expression is not None else "n"
+            for part in order.expressions:
+                add(part.this if isinstance(part, exp.Ordered) else part, TOP_ORDER, f"TOP {top} ORDER BY ")
         return out
 
     # ===================================================== writer dispatch
@@ -702,6 +749,11 @@ class Analyzer:
         """All steps by which ``writer`` sets ``column``; empty when it does not write it."""
         ctx = Ctx(self, writer.unit, writer.statement, writer.controls)
         tree = writer.statement.tree
+        if writer.via:
+            through = self.through_column(writer, column, ctx)
+            if through is None:
+                return [], ctx.gaps, ctx.cycles
+            column = through
         try:
             if writer.kind == "insert":
                 self._insert(tree, column, target, ctx, writer)
@@ -716,6 +768,46 @@ class Analyzer:
         except RecursionError:
             ctx.gap("depth_limit", "Expression nesting is too deep to analyse.", target)
         return ctx.steps, ctx.gaps, ctx.cycles
+
+    def through_column(self, writer: Writer, column: str, ctx: Ctx) -> str | None:
+        """Output column of the CTE/view written by ``writer`` that is base column ``column``."""
+        kind, name = writer.via
+        if kind == "cte":
+            local = statement_ctes(writer.statement.tree, ctx).get(name)
+            if local is None:
+                return None
+            query, aliases, ctes, parent = local.query, local.column_aliases, local_ctes(local, branches(local.query)[0]), None
+            inner_ctx = ctx
+        else:
+            views = [w for w in self.catalog.writers.get(name, []) if w.kind == "view"]
+            if len(views) != 1:
+                return None
+            view = views[0]
+            tree = view.statement.tree
+            query = tree.args.get("expression")
+            aliases = [norm(ident_text(c)) for c in tree.this.expressions] if isinstance(tree.this, exp.Schema) and tree.this.expressions else None
+            inner_ctx = Ctx(self, view.unit, view.statement)
+            ctes = statement_ctes(query, inner_ctx)
+        first = branches(query)[0]
+        if not isinstance(first, exp.Select):
+            return None
+        scope = Scope(inner_ctx, local_ctes_from(first, None, ctes))
+        scope.add_select_sources(first)
+        items = self.projection(first, scope)
+        matches = []
+        for i, item in enumerate(items):
+            expr = item.expr
+            if item.source is not None and item.column == column:
+                refs = item.source.refs
+            elif isinstance(expr, exp.Column) and norm(ident_text(expr.this)) == column:
+                refs = [(b.node.object, b.status) for b in scope.bind(expr, expand_local=False) if b.node.object is not None]
+            else:
+                continue
+            if any(r.key == writer.ref.key for r, _ in refs):
+                out_name = aliases[i] if aliases and i < len(aliases) else item.name
+                if out_name:
+                    matches.append(out_name)
+        return matches[0] if len(matches) == 1 else None
 
     def _query_steps(self, query, names: list[str] | None, position: int | None, column: str, target: Node,
                      ctx: Ctx, writer_kind: str, method: str, ctes: dict, expected: int | None = None) -> None:
@@ -769,6 +861,7 @@ class Analyzer:
         if isinstance(tree.this, exp.Schema) and tree.this.expressions:
             names = [norm(ident_text(c)) for c in tree.this.expressions]
             if column not in names:
+                self._omitted(column, target, ctx, writer, tree)
                 return
             self._query_steps(query, None, names.index(column), column, target, ctx,
                               "insert_values" if isinstance(query, exp.Values) else "insert_select",
@@ -792,6 +885,43 @@ class Analyzer:
                 step.status = worst(step.status, INFERRED)
                 step.notes.append("Matched by position against the declared column order, skipping identity, "
                                   "computed and rowversion columns.")
+
+    def _omitted(self, column, target, ctx, writer, tree) -> None:
+        """An INSERT whose column list omits the target column adds rows holding its default or NULL."""
+        if writer.via:
+            return
+        columns, status, schema = self.catalog.schema_for(writer.ref)
+        info = next((c for c in columns or [] if c.name == column), None)
+        if info is not None and (info.identity or info.computed or info.rowversion):
+            return  # generated values are explained by the column definition, not by this INSERT
+        if info is not None and info.default:
+            value = parse_expression(info.default) or exp.Null()
+            what = f"its default {info.default}"
+        else:
+            value = exp.Null()
+            what = "NULL (no default is declared)" if info is not None else "its default or NULL (schema unknown)"
+        step = Step(target=target, writer_kind="insert_omitted", expression=value.sql(dialect="tsql"), operation="constant",
+                    inputs=[Input(Node(CONSTANT, value.sql(dialect="tsql")), VALUE, value.sql(dialect="tsql"), None)],
+                    branch_context=list(ctx.controls), mapping_method="omitted_from_insert",
+                    status=VERIFIED if info is not None else INFERRED, procedure=ctx.statement.procedure,
+                    evidence=[ctx.evidence(tree.this, "target_column_list")], order=ctx.statement.start)
+        step.notes.append(f"This INSERT does not list {column}, so the rows it adds hold {what}.")
+        ctx.steps.append(step)
+
+    def computed_step(self, ref: ObjectRef, info: ColumnInfo, schema, target: Node) -> tuple[list[Step], list[Gap]]:
+        """A computed column's value comes from its definition over the same row."""
+        ctx = Ctx(self, schema.unit, schema.statement)
+        value = parse_expression(info.computed)
+        if value is None:
+            ctx.gap("parse_error", f"Computed column definition of {info.name} could not be parsed.", target)
+            return [], ctx.gaps
+        scope = Scope(ctx, {})
+        columns = [c.name for c in self.catalog.schema_for(ref)[0] or []]
+        scope.sources.append(Source(ref.name, "object", [(ref, VERIFIED)], columns, True, names=(ref.name,)))
+        step = self.make_step(target, "computed_column", value, scope, ctx, "column_definition", [])
+        step.notes.append("Computed column: evaluated from other columns of the same row.")
+        ctx.steps.append(step)
+        return ctx.steps, ctx.gaps
 
     def _select_into(self, tree, column, target, ctx) -> None:
         ctes = statement_ctes(tree, ctx)
@@ -916,19 +1046,40 @@ class Analyzer:
     def assignment_steps(self, assignment, target: Node) -> tuple[list[Step], list[Gap]]:
         ctx = Ctx(self, assignment.unit, assignment.statement, assignment.unit.controls.get(assignment.statement.start, ()))
         if assignment.kind == "exec_output":
-            gap = ctx.gap("unresolved_variable", f"{target.name} is set by a procedure OUTPUT parameter, which is not traced.",
+            gap = ctx.gap("unresolved_variable", f"{target.name} is set by a procedure OUTPUT parameter or return code, which is not traced.",
                           target)
             return [], ctx.gaps
         if assignment.value is None:
+            ctx.gap("unresolved_variable", f"{target.name} is set by {assignment.note or assignment.kind}; the value "
+                    "could not be analysed.", target)
             return [], ctx.gaps
         scope = Scope(ctx, {})
         if assignment.select is not None:
             scope = Scope(ctx, local_ctes_from(assignment.select, None, statement_ctes(assignment.statement.tree, ctx)))
             scope.add_select_sources(assignment.select)
+            if isinstance(assignment.select, exp.Update):
+                target_table = update_target(assignment.select)
+                if isinstance(target_table, exp.Table) and not any(
+                        s.alias in {norm(target_table.alias_or_name), norm(table_parts(target_table)[3])} for s in scope.sources):
+                    scope.add_from(target_table)
         step = self.make_step(target, "variable_assignment", assignment.value, scope, ctx, "assignment", [])
+        if assignment.note:
+            step.notes.append(assignment.note)
         if assignment.select is not None:
             step.row_selection.extend(self.row_selection(assignment.select, scope, ctx))
-            step.notes.append("SELECT @variable = ... keeps the value from the last row read when several rows qualify.")
+            if assignment.kind == "fetch":
+                step.notes.append("Each FETCH reads the next cursor row; the variable takes values from many rows.")
+            else:
+                step.notes.append("Assigning a variable from a multi-row statement keeps the value from the last row "
+                                  "processed.")
+        ctx.steps.append(step)
+        return ctx.steps, ctx.gaps
+
+    def default_step(self, proc, value: exp.Expression, statement, target: Node, note: str):
+        ctx = Ctx(self, proc.unit, statement)
+        step = self.make_step(target, "parameter_default", value, Scope(ctx, {}), ctx, "parameter_default", [],
+                              procedure=proc.ref.display)
+        step.notes.append(f"Default value of {target.name}, {note}.")
         ctx.steps.append(step)
         return ctx.steps, ctx.gaps
 
@@ -941,6 +1092,16 @@ class Analyzer:
 
 
 # ----------------------------------------------------------------- helpers
+def parse_expression(text: str | None):
+    if not text:
+        return None
+    try:
+        parsed = sqlglot.parse_one(f"SELECT {text}", read="tsql")
+    except Exception:  # noqa: BLE001
+        return None
+    return parsed.expressions[0] if isinstance(parsed, exp.Select) and parsed.expressions else None
+
+
 def join_list(select: exp.Expression) -> list[exp.Join]:
     """Joins of a query level; SQLGlot may attach them to the statement, the FROM, or the FROM's table."""
     joins = list(select.args.get("joins") or [])
@@ -976,7 +1137,7 @@ def statement_ctes(tree, ctx: Ctx, inherited: dict | None = None) -> dict:
             columns = [norm(ident_text(c)) for c in alias.columns] if isinstance(alias, exp.TableAlias) and alias.columns else None
             visible = dict(ctes)
             local = Local("cte", name, cte.this, columns, visible, None,
-                          ObjectRef(name, kind="cte", scope=ctx.stmt_id))
+                          ObjectRef(name, kind="cte", scope=ctx.local_scope(cte)))
             ctes[name] = local
             # A recursive CTE may reference itself.
             visible[name] = local

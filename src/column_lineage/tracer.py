@@ -6,6 +6,8 @@ import fnmatch
 import re
 
 from .analyzer import Analyzer
+from table_lineage.index import mask_noncode
+
 from .catalog import Catalog, norm, split_name
 from .model import (
     AMBIGUOUS, COLUMN, CONSTANT, INFERRED, LOCAL_COLUMN, PARAMETER, TEMP_COLUMN, UNKNOWN, UNRESOLVED, VALUE,
@@ -161,7 +163,7 @@ class Tracer:
         path, offset, scope = position
         if node.kind == TEMP_COLUMN and node.object is not None and node.object.scope == scope:
             return position
-        if node.kind == VARIABLE and node.scope == scope:
+        if node.kind in (VARIABLE, PARAMETER) and node.scope == scope:
             return position
         return None
 
@@ -174,7 +176,7 @@ class Tracer:
             elif node.kind == VARIABLE:
                 found = self._expand_variable(node, before)
             elif node.kind == PARAMETER:
-                found = self._expand_parameter(node)
+                found = self._expand_parameter(node, before)
             else:
                 found = ([], [], [], [])
             self._memo[memo_key] = found
@@ -212,10 +214,15 @@ class Tracer:
         cycles: list[list[str]] = []
         writers = self.catalog.writers_for(ref)
         if before is not None and ref.kind == "temp_table":
-            path, offset, scope = before
-            writers = [w for w in writers if not (w.unit.path == path and w.statement.scope == scope and
-                                                  w.statement.start > offset and
-                                                  not any(c.startswith("WHILE") for c in w.controls))]
+            writers = [w for w in writers if self._temp_writer_reaches(w, ref, before)]
+        columns_declared, _, schema = self.catalog.schema_for(ref)
+        info = next((c for c in columns_declared or [] if c.name == column), None)
+        if info is not None and info.computed:
+            try:
+                found, found_gaps = self.analyzer.computed_step(ref, info, schema, node)
+            except Exception as exc:  # noqa: BLE001
+                return [], gaps + [internal_gap(self.catalog, schema.unit, schema.statement, node, exc)], [], []
+            return found, gaps + found_gaps, [], []
         writing = []
         for writer in sorted(writers, key=lambda w: (w.unit.path, w.statement.start)):
             try:
@@ -247,10 +254,10 @@ class Tracer:
                             f"{node.display} is written by {len(names)} procedures/scripts ({', '.join(names)}), at least "
                             "one of which overwrites existing rows; which value survives depends on run order.",
                             node, [self.catalog.evidence(w.unit, w.statement, role="writer") for w, _ in writing][:10]))
-        elif len(writing) > 1:
-            ordered = sorted(writing, key=lambda ws: ws[0].statement.start)
-            for writer, step in ordered[1:]:
-                if writer.kind in OVERWRITING:
+        elif len({id(w.statement) for w, _ in writing}) > 1:
+            first = min(w.statement.start for w, _ in writing)
+            for writer, step in writing:
+                if writer.statement.start > first and step.writer_kind in ("update", "merge_update"):
                     step.notes.append("Runs after earlier writers in the same scope and overwrites the rows it matches.")
         if not writing:
             columns, schema_status, _ = self.catalog.schema_for(ref)
@@ -275,15 +282,61 @@ class Tracer:
                                   f"{len(writers)} statement(s) write this object but none sets this column."))
         return steps, gaps, stops, cycles
 
+    def _temp_writer_reaches(self, writer, ref, before) -> bool:
+        path, offset, scope = before
+        resets = self.catalog.temp_resets.get((ref.scope, ref.name), [])
+        if writer.unit.path == path and writer.statement.scope == scope:
+            in_loop = any(c.startswith("WHILE") for c in writer.controls)
+            if writer.statement.start > offset and not in_loop:
+                return False
+            # DROP TABLE or re-creation between this write and the read discards it.
+            return not any(writer.statement.start < r < offset for r in resets)
+        if writer.statement.scope != ref.scope and scope == ref.scope:
+            calls = [c for c in self.catalog.calls_by_caller.get(ref.scope, [])
+                     if any(p.scope == writer.statement.scope for p in self.catalog.procs_for(c.callee))]
+            if calls:
+                before_read = [c.statement.start for c in calls if c.statement.start < offset]
+                if not before_read:
+                    return False   # the callee only runs after this read
+                return not any(max(before_read) < r < offset for r in resets)
+        return True
+
+    def _reaching(self, node: Node, before):
+        """Assignments that can supply the value read at ``before``, and whether one of them
+        definitely replaces any earlier value (so callers' arguments no longer reach)."""
+        assignments = list(self.catalog.assignments.get((node.scope, node.name), []))
+        if before is None:
+            return assignments, False
+        path, offset, scope = before
+        unit = self.catalog.units_by_path.get(path)
+        read_controls = clean_controls(unit.controls.get(offset, ()) if unit else ())
+        prior = sorted([a for a in assignments if a.unit.path == path and a.statement.start < offset],
+                       key=lambda a: a.statement.start)
+        loops = {c for c in read_controls if c.startswith("WHILE")}
+        later = [a for a in assignments if a not in prior and loops and
+                 loops & set(a.unit.controls.get(a.statement.start, ()))]
+        dominating = None
+        for a in prior:
+            controls = clean_controls(a.unit.controls.get(a.statement.start, ()))
+            if read_controls[:len(controls)] == controls and not (set(controls) & loops - set(read_controls)):
+                dominating = a
+        if dominating is not None:
+            prior = [a for a in prior if a.statement.start >= dominating.statement.start]
+        return prior + later, dominating is not None
+
+    def _unparsed_assignment_gaps(self, node: Node) -> list[Gap]:
+        pattern = re.compile(re.escape(node.name) + r"(?![\w$#@])\s*[-+*/%&|^]?=(?!=)", re.I)
+        gaps = []
+        for statement in self.catalog.fallback_by_scope.get(node.scope, []):
+            if pattern.search(mask_noncode(statement.text)):
+                unit = self.catalog.units_by_path.get(statement.path)
+                gaps.append(Gap("parse_error", f"An unparsed statement may assign {node.name}.", node,
+                                [self.catalog.evidence(unit, statement, role="parse_error")] if unit else []))
+        return gaps
+
     def _expand_variable(self, node: Node, before):
-        assignments = self.catalog.assignments.get((node.scope, node.name), [])
-        if before is not None:
-            path, offset, scope = before
-            prior = [a for a in assignments if not (a.unit.path == path and a.statement.start >= offset)]
-            in_loop = [a for a in assignments if a not in prior and any(c.startswith("WHILE") for c in
-                                                                         a.unit.controls.get(a.statement.start, ()))]
-            assignments = prior + in_loop
-        steps, gaps = [], []
+        assignments, _ = self._reaching(node, before)
+        steps, gaps = [], self._unparsed_assignment_gaps(node)
         for assignment in assignments:
             try:
                 found, found_gaps = self.analyzer.assignment_steps(assignment, node)
@@ -295,30 +348,38 @@ class Tracer:
                 step._position = (assignment.unit.path, assignment.statement.start, assignment.statement.scope)
             steps.extend(found)
             gaps.extend(found_gaps)
-        if not assignments:
+        if not assignments and not gaps:
             gaps.append(Gap("unresolved_variable", f"No assignment of {node.name} was found before it is read "
-                            "(cursor FETCH, OUTPUT parameter or dynamic SQL may set it).", node))
+                            "(it is NULL unless dynamic SQL or an unanalysed statement sets it).", node))
         elif len([a for a in assignments if a.kind != "exec_output"]) > 1:
             for step in steps:
                 step.notes.append(f"{node.name} is assigned {len(assignments)} times before this read; each assignment "
                                   "is shown as an alternative.")
         return steps, gaps, [], []
 
-    def _expand_parameter(self, node: Node):
+    def _expand_parameter(self, node: Node, before=None):
         proc = self.catalog.proc_by_scope.get(node.scope)
         if proc is None:
             return [], [Gap("unresolved_variable", f"{node.name} is not a parameter of a known procedure.", node)], [], []
+        # Assignments in the body come first; an unconditional one hides the caller's argument.
+        steps, gaps, _, _ = self._expand_variable(node, before) if self.catalog.assignments.get((node.scope, node.name)) \
+            else ([], self._unparsed_assignment_gaps(node), [], [])
+        gaps = [g for g in gaps if g.kind != "unresolved_variable"]
+        _, replaced = self._reaching(node, before)
+        stops: list[Stop] = []
+        if replaced:
+            return steps, gaps, stops, []
         try:
             position = proc.params.index(node.name)
         except ValueError:
             position = None
-        steps, gaps, stops = [], [], []
-        calls = list(self.catalog.calls_by_callee.get(proc.key, []))
-        if not calls and proc.ref.database:
+        calls = [(c, False) for c in self.catalog.calls_by_callee.get(proc.key, [])]
+        if proc.ref.database:
             unknown = ".".join(p for p in ("?", proc.ref.schema or "?", proc.ref.name))
-            calls = list(self.catalog.calls_by_callee.get(unknown, []))
+            calls += [(c, len(self.catalog.procs_for(c.callee)) > 1) for c in self.catalog.calls_by_callee.get(unknown, [])]
         bound = 0
-        for call in calls:
+        omitted = []
+        for call, ambiguous in calls:
             value = None
             for name, arg in call.args:
                 if name == node.name:
@@ -326,6 +387,7 @@ class Tracer:
             if value is None and position is not None and position < len(call.args) and call.args[position][0] is None:
                 value = call.args[position][1]
             if value is None:
+                omitted.append(call)
                 continue
             try:
                 found, found_gaps = self.analyzer.argument_step(call, value, node)
@@ -335,14 +397,37 @@ class Tracer:
             for step in found:
                 step._scope = call.statement.scope
                 step._position = (call.unit.path, call.statement.start, call.statement.scope)
+                if ambiguous:
+                    candidates = sorted(p.ref.display for p in self.catalog.procs_for(call.callee))
+                    gap = Gap("ambiguous_object", f"This EXEC has no database context and matches {len(candidates)} "
+                              f"procedures ({', '.join(candidates)}); it may not call this one.", node,
+                              [self.catalog.evidence(call.unit, call.statement, role="call")], {"candidates": candidates})
+                    gaps.append(gap)
+                    step.status = worst(step.status, AMBIGUOUS)
+                    step.gaps = sorted(set(step.gaps) | {gap.id})
             steps.extend(found)
             gaps.extend(found_gaps)
             bound += 1
+        default = proc.defaults.get(node.name)
+        if default is not None and (omitted or not bound):
+            try:
+                found, found_gaps = self.analyzer.default_step(proc, default[0], default[1], node,
+                                                               "used when a caller omits it" if omitted else
+                                                               "used if the (unknown) caller omits it")
+                steps.extend(found)
+                gaps.extend(found_gaps)
+            except Exception as exc:  # noqa: BLE001
+                gaps.append(internal_gap(self.catalog, proc.unit, default[1], node, exc))
         if not bound:
             stops.append(Stop(node, "parameter_without_caller",
                               "No EXEC in the scanned files passes this parameter (it may be set by a job, an SSIS "
                               "package or an application, or left to its default)."))
         return steps, gaps, stops, []
+
+
+def clean_controls(controls) -> tuple[str, ...]:
+    """Control labels that make execution conditional (TRY blocks run unconditionally)."""
+    return tuple(c for c in controls if c != "TRY")
 
 
 def internal_gap(catalog, unit, statement, node, exc) -> Gap:
