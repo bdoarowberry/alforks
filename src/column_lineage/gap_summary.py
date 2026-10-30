@@ -1,0 +1,121 @@
+"""Sanitized summary of gaps and unsupported SQL, safe to hand back without the source.
+
+Identifiers become ID1, ID2, ... (numbered per sample), string literals become '?'
+and numbers become 0. No object, column, path or file name is written.
+"""
+from __future__ import annotations
+
+from collections import Counter
+import re
+
+import sqlglot
+from sqlglot.tokens import TokenType
+
+KEYWORD = re.compile(r"[A-Za-z_]+")
+
+
+def anonymize(sql: str, limit: int = 400) -> str:
+    try:
+        tokens = sqlglot.Dialect.get_or_raise("tsql").tokenizer().tokenize(sql)
+    except Exception:  # noqa: BLE001 - the tokenizer may fail on exactly the SQL we want to report
+        return _fallback(sql, limit)
+    names: dict[str, str] = {}
+    out = []
+    for token in tokens:
+        kind = token.token_type
+        if kind in (TokenType.VAR, TokenType.IDENTIFIER) or (kind == TokenType.PARAMETER):
+            key = token.text.lower()
+            names.setdefault(key, f"ID{len(names) + 1}")
+            out.append(names[key])
+        elif kind in (TokenType.STRING, TokenType.NATIONAL_STRING):
+            out.append("'?'")
+        elif kind == TokenType.NUMBER:
+            out.append("0")
+        elif token.text.startswith("#") or token.text.startswith("@"):
+            key = token.text.lower()
+            names.setdefault(key, f"ID{len(names) + 1}")
+            out.append(token.text[0] + names[key])
+        else:
+            out.append(token.text.upper() if KEYWORD.fullmatch(token.text) else token.text)
+    text = " ".join(out)
+    return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
+def _fallback(sql: str, limit: int) -> str:
+    words = re.findall(r"[A-Za-z_]+|\S", re.sub(r"'(?:''|[^'])*'", "'?'", sql))
+    upper = {"SELECT", "INSERT", "INTO", "UPDATE", "DELETE", "MERGE", "FROM", "WHERE", "JOIN", "ON", "SET",
+             "EXEC", "EXECUTE", "AS", "AND", "OR", "CASE", "WHEN", "THEN", "ELSE", "END", "WITH", "VALUES"}
+    out = [w.upper() if w.upper() in upper else ("ID" if w[0].isalpha() or w[0] == "_" else w) for w in words]
+    text = " ".join(out)
+    return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
+def _error_class(error: str | None) -> str:
+    if not error:
+        return "unsupported command"
+    error = re.sub(r"\x1b\[[0-9;]*m", "", error)
+    first = error.split(".")[0]
+    first = re.sub(r"'[^']*'", "'?'", first)
+    first = re.sub(r"Line \d+, Col: \d+", "", first)
+    return first.strip()[:120]
+
+
+def build(catalog, traces: list[dict], samples: int = 25) -> dict:
+    statements = Counter()
+    errors = Counter()
+    sample_list = []
+    seen = set()
+    for statement, unit in catalog.fallback_samples:
+        keyword = (statement.text.strip().split(None, 1) or ["?"])[0].upper()
+        keyword = keyword if KEYWORD.fullmatch(keyword) else "?"
+        statements[keyword] += 1
+        error_class = _error_class(statement.parse_error)
+        errors[error_class] += 1
+        shape = anonymize(statement.text)
+        if len(sample_list) < samples and (keyword, error_class) not in seen:
+            seen.add((keyword, error_class))
+            sample_list.append({"keyword": keyword, "error_class": error_class, "anonymized_sql": shape})
+    issue_kinds = Counter(issue.kind for issue in catalog.issues)
+    trace_summary = []
+    for data in traces:
+        completeness = data["completeness"]
+        trace_summary.append({
+            "status": completeness["status"],
+            "overall_step_status": completeness["overall_step_status"],
+            "steps": len(data["steps"]),
+            "steps_by_status": completeness["steps_by_status"],
+            "gaps_by_kind": completeness["gaps_by_kind"],
+            "stops_by_reason": completeness["stops_by_reason"],
+            "operations": dict(sorted(Counter(s["operation"] for s in data["steps"]).items())),
+            "writer_kinds": dict(sorted(Counter(s["writer_kind"] for s in data["steps"]).items())),
+            "max_depth_reached": _depth(data),
+        })
+    return {
+        "schema_version": "column-lineage-gap-summary/1.0",
+        "note": "Contains no object, column, path or file names. Anonymized SQL replaces identifiers with IDn.",
+        "scan": {k: v for k, v in catalog.stats.items()},
+        "statement_issues_by_kind": dict(sorted(issue_kinds.items())),
+        "unparsed_statements_by_keyword": dict(sorted(statements.items())),
+        "parse_error_classes": dict(errors.most_common(40)),
+        "unparsed_samples": sample_list,
+        "traces": trace_summary,
+    }
+
+
+def _depth(data: dict) -> int:
+    by_target: dict[str, list[dict]] = {}
+    for step in data["steps"]:
+        by_target.setdefault(step["target"], []).append(step)
+    best = 0
+    frontier = [(data["target"]["id"], 0)]
+    seen = set()
+    while frontier:
+        node, depth = frontier.pop()
+        if node in seen:
+            continue
+        seen.add(node)
+        best = max(best, depth)
+        for step in by_target.get(node, []):
+            for item in step["inputs"]:
+                frontier.append((item["node"], depth + 1))
+    return best
