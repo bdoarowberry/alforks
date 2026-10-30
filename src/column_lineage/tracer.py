@@ -10,18 +10,24 @@ from table_lineage.index import mask_noncode
 
 from .catalog import Catalog, norm, split_name
 from .model import (
-    AMBIGUOUS, COLUMN, CONSTANT, INFERRED, LOCAL_COLUMN, PARAMETER, TEMP_COLUMN, UNKNOWN, UNRESOLVED, VALUE,
-    VARIABLE, VERIFIED, WINDOW, CONDITION, Boundary, Gap, Node, ObjectRef, Stop, TraceResult, worst,
+    AMBIGUOUS, ASSERTED, COLUMN, CONSTANT, FILTER, INFERRED, LOCAL_COLUMN, PARAMETER, TEMP_COLUMN, UNKNOWN, UNRESOLVED,
+    VALUE, VARIABLE, VERIFIED, WINDOW, CONDITION, Boundary, Evidence, Gap, Input, Node, ObjectRef, RowSelection, Step,
+    Stop, TraceResult, worst,
 )
 
 OVERWRITING = ("update", "merge")
 
 
 class Tracer:
-    def __init__(self, catalog: Catalog, analyzer: Analyzer | None = None, trace_row_selection: bool = False):
+    def __init__(self, catalog: Catalog, analyzer: Analyzer | None = None, trace_row_selection: bool = False,
+                 assertions: list | None = None):
         self.catalog = catalog
         self.analyzer = analyzer or Analyzer(catalog)
         self.trace_row_selection = trace_row_selection
+        self.assertions = list(assertions or [])
+        self._asserted: dict[str, list] | None = None
+        self.assertion_errors: list[str] = []
+        self.assertions_seen: set[str] = set()
         self._memo: dict[tuple, tuple] = {}   # shared between traces in one run
 
     # ------------------------------------------------------------- targets
@@ -115,6 +121,9 @@ class Tracer:
                 result.stops.append(Stop(node, "max_depth", f"depth {depth}"))
                 continue
             steps, gaps, stops, cycles = self.expand(node, before)
+            asserted = self.asserted_for(node)
+            if asserted:
+                steps, gaps, stops = self.apply_assertions(node, asserted, steps, gaps, stops, result)
             for gap in gaps:
                 result.add_gap(gap)
             for stop in stops:
@@ -144,13 +153,19 @@ class Tracer:
                     if self.trace_row_selection and row.node.kind in (COLUMN, TEMP_COLUMN, VARIABLE, PARAMETER):
                         queue.append((row.node, self.read_point(row.node, position), depth + 1))
         # Dynamic SQL with a computed target in any procedure this trace passed through.
+        used = [a for a in self.assertions if a.id in result.assertions_used and a.writer_path]
         for scope in sorted(scopes_seen):
             for issue in self.catalog.dynamic_by_scope.get(scope, []):
                 if issue.targets:
                     continue
-                result.add_gap(Gap("dynamic_sql", "A procedure on this path executes dynamic SQL whose target is "
-                                   "built at runtime; it may write columns on this path.", None,
-                                   [self.catalog.evidence(issue.unit, issue.statement, role="dynamic_sql")]))
+                gap = Gap("dynamic_sql", "A procedure on this path executes dynamic SQL whose target is "
+                          "built at runtime; it may write columns on this path.", None,
+                          [self.catalog.evidence(issue.unit, issue.statement, role="dynamic_sql")])
+                explained = next((a for a in used if gap.kind in a.resolves and a.explains(gap.evidence)), None)
+                if explained is not None:
+                    result.resolved_gaps.append({**gap.to_dict(), "affects": "context", "resolved_by": explained.id})
+                    continue
+                result.add_gap(gap)
         result.cycles.extend(c for c in find_cycles(edges) if c not in result.cycles)
         result.stops = dedupe_stops(result.stops)
         self._explain_ends(result)
@@ -173,6 +188,87 @@ class Tracer:
                 continue
             result.add_gap(Gap("unexplained_end", "The trace ends here without a recorded reason; treat paths "
                                "through this node as unproven.", node))
+
+    # ---------------------------------------------------------- assertions
+    def _spec_node(self, spec, require_known: bool = False) -> Node | None:
+        column = spec.column
+        if column.lower().startswith("constant:"):
+            return Node(CONSTANT, column.split(":", 1)[1].strip())
+        parts = split_name(column)
+        if parts and parts[0].startswith("#"):
+            if len(parts) != 2:
+                return None
+            name, col = norm(parts[0]), norm(parts[1])
+            want = norm(spec.procedure or "")
+            # A #temp table filled only by dynamic SQL has no static writer, so look at creators too.
+            candidates = {w.ref.scope for ws in self.catalog.writers.values() for w in ws
+                          if w.ref.kind == "temp_table" and w.ref.name == name}
+            candidates |= {scope for scope, names in self.catalog.temp_creators.items() if name in names}
+            scopes = sorted(s for s in candidates
+                            if not want or (s or "").split("::")[-1].split("@")[0] == want)
+            if len(scopes) != 1:
+                return None
+            return Node(TEMP_COLUMN, col, ObjectRef(name, kind="temp_table", scope=scopes[0]))
+        node, status, _ = self.target_node(column)
+        if node is None or node.kind == UNKNOWN or status == AMBIGUOUS or (require_known and status == UNRESOLVED):
+            return None
+        return node
+
+    def asserted_for(self, node: Node) -> list:
+        if not self.assertions:
+            return []
+        if self._asserted is None:
+            self._asserted = {}
+            for assertion in self.assertions:
+                target = self._spec_node(assertion.target, require_known=True)
+                if target is None:
+                    self.assertion_errors.append(f"{assertion.id}: target {assertion.target.column!r} could not be "
+                                                 "resolved to one column in the scanned files")
+                    continue
+                self._asserted.setdefault(target.id, []).append(assertion)
+        return self._asserted.get(node.id, [])
+
+    def apply_assertions(self, node: Node, assertions: list, steps, gaps, stops, result: TraceResult):
+        """Add asserted steps for ``node`` and move the gaps they explain to resolved_gaps."""
+        steps, gaps = list(steps), list(gaps)
+        for assertion in assertions:
+            self.assertions_seen.add(assertion.id)
+            result.assertions_used.append(assertion.id)
+            evidence = Evidence(assertion.source, assertion.line, assertion.line,
+                                (assertion.reason or "asserted mapping")[:240], "assertion", None, "assertions")
+            for i, alt in enumerate(assertion.alternatives, 1):
+                inputs = []
+                for spec in alt.inputs:
+                    source = self._spec_node(spec)
+                    if source is None:
+                        self.assertion_errors.append(f"{assertion.id}: input {spec.column!r} could not be resolved")
+                        source = Node(UNKNOWN, spec.column)
+                    inputs.append(Input(source, VALUE, spec.column, alt.branch, ASSERTED))
+                rows = []
+                for spec in alt.row_selection:
+                    source = self._spec_node(spec)
+                    if source is not None:
+                        rows.append(RowSelection(source, FILTER, f"asserted: {spec.column}", evidence, ASSERTED))
+                label = f"asserted alternative {i} of {len(assertion.alternatives)}"
+                step = Step(target=node, writer_kind="asserted", expression=alt.expression or
+                            " / ".join(s.column for s in alt.inputs), operation=alt.operation or "asserted",
+                            inputs=inputs, row_selection=rows,
+                            branch_context=[label + (f": {alt.branch}" if alt.branch else "")],
+                            mapping_method="assertion", status=ASSERTED, procedure=None, evidence=[evidence],
+                            order=assertion.line * 100 + i)
+                step.notes.append(f"Assertion {assertion.id}" + (f" by {assertion.asserted_by}" if assertion.asserted_by else "")
+                                  + (f": {assertion.reason.rstrip('.')}" if assertion.reason else "") + ". Not proved from SQL.")
+                steps.append(step)
+            kept = []
+            for gap in gaps:
+                if gap.node is not None and gap.node.id == node.id and gap.kind in assertion.resolves \
+                        and assertion.explains(gap.evidence):
+                    result.resolved_gaps.append({**gap.to_dict(), "affects": "value", "resolved_by": assertion.id})
+                else:
+                    kept.append(gap)
+            gaps = kept
+        stops = [s for s in stops if s.reason not in ("source_without_writer",)]
+        return steps, gaps, stops
 
     @staticmethod
     def read_point(node: Node, position):

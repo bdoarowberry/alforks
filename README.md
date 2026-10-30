@@ -42,6 +42,8 @@ The useful options:
 | `--max-depth N` | Stop after N mapping steps. |
 | `--trace-row-selection` | Also trace filter and join columns upstream (larger output). |
 | `--gap-summary` | Also write `gap-summary.json`, a summary with no names in it, safe to share. |
+| `--assertions FILE ...` | Human-asserted mappings for steps SQL cannot prove (see below). |
+| `--jobs N` | Parser worker processes (default: CPUs, at most 8; `1` = none). |
 | `--fail-on-incomplete` | Exit 3 if any trace is incomplete. |
 | `--include` / `--exclude GLOB ...` | Filter files. |
 | `--verbose` | Print timings and a per-trace summary. |
@@ -88,6 +90,32 @@ top of the page, or `completeness.status` in the JSON.
 - **Gaps** are where proof ends: dynamic SQL, parse failures, `INSERT ... EXEC`, missing
   definitions, ambiguous names or writers, `*` or positional inserts without a known
   schema, user functions, linked servers.
+
+### Assertions: steps SQL cannot prove
+
+Some steps can never be proved from SQL text:
+- dynamic SQL whose column list comes from metadata;
+- objects defined and loaded outside the scanned files.
+
+Someone who knows the system can state those steps in a JSON file and pass it with
+`--assertions FILE` (repeatable). See `docs/examples/assertions.example.json` and the format
+description in `src/column_lineage/assertions.py`.
+
+- **Target and alternatives:** each assertion names a target column (`#temp` targets also take a
+  `procedure`). It lists one alternative per possible branch: its input columns, and optionally
+  row-selection columns, a branch label, an expression and an operation.
+- **Tracing:** the tracer continues through every alternative. Those steps get the status
+  `asserted` and cite the assertions file as their evidence.
+- **Gaps:** gaps on the target that the assertion explains (by default dynamic SQL, unparsed
+  statements, external objects and missing definitions; narrow it with `resolves` and
+  `writer: {path, line}`) move to `resolved_gaps`, labelled with the assertion id. Nothing is
+  deleted.
+- **Completeness:** a complete result says it relies on N asserted steps. Unused or unresolvable
+  assertions are listed in `scan-diagnostics.json`.
+- **Coverage:** for metadata-driven SQL, list **every** branch the metadata can produce, not
+  only one observed run.
+- **Privacy:** an assertions file names real objects. It belongs with the source and must not
+  be shared outside it.
 
 ### Handing results back
 

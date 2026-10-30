@@ -15,10 +15,11 @@ SCHEMA_VERSION = "column-lineage/1.0"
 # Step and trace statuses, strongest first.
 VERIFIED = "verified"      # every input is bound from explicit SQL evidence
 INFERRED = "inferred"      # bound using a stated rule (positional schema, default schema, caller temp table)
+ASSERTED = "asserted"      # stated by a person in an assertions file; not proved from SQL
 PARTIAL = "partial"        # some inputs are bound, others are gaps
 AMBIGUOUS = "ambiguous"    # more than one candidate binding or writer order exists
 UNRESOLVED = "unresolved"  # no binding could be established
-STATUS_ORDER = (VERIFIED, INFERRED, PARTIAL, AMBIGUOUS, UNRESOLVED)
+STATUS_ORDER = (VERIFIED, INFERRED, ASSERTED, PARTIAL, AMBIGUOUS, UNRESOLVED)
 
 # Node kinds.
 COLUMN = "column"              # column of a persistent table or view
@@ -282,6 +283,8 @@ class TraceResult:
     cycles: list[list[str]] = field(default_factory=list)
     target_status: str = VERIFIED  # how the target itself was resolved
     target_gaps: list[str] = field(default_factory=list)
+    resolved_gaps: list[dict] = field(default_factory=list)   # gaps explained by assertions (kept, not deleted)
+    assertions_used: list[str] = field(default_factory=list)
 
     def add_node(self, node: Node) -> str:
         self.nodes.setdefault(node.id, node)
@@ -357,15 +360,18 @@ class TraceResult:
         overall = worst(self.target_status, *step_statuses) if value_steps else UNRESOLVED
         if not value_steps and self.target_status == VERIFIED and not blocking:
             overall = VERIFIED  # the target is itself a source or boundary column
-        if blocking and overall in (VERIFIED, INFERRED):
+        if blocking and overall in (VERIFIED, INFERRED, ASSERTED):
             overall = PARTIAL
-        complete = overall in (VERIFIED, INFERRED) and not blocking
+        complete = overall in (VERIFIED, INFERRED, ASSERTED) and not blocking
+        asserted = sum(1 for s in value_steps if s.status == ASSERTED)
         return {"status": "complete" if complete else "incomplete", "overall_step_status": overall,
                 "steps_by_status": dict(sorted(statuses.items())), "gaps_by_kind": dict(sorted(counts.items())),
                 "value_gaps_by_kind": dict(sorted(by_effect["value"].items())),
                 "context_gaps_by_kind": dict(sorted(by_effect["context"].items())),
                 "row_selection_gaps_by_kind": dict(sorted(by_effect["row_selection"].items())),
                 "row_selection_status": "incomplete" if by_effect["row_selection"] else "complete",
+                "asserted_steps": asserted, "relies_on_assertions": asserted > 0,
+                "gaps_resolved_by_assertions": len(self.resolved_gaps),
                 "stops_by_reason": dict(sorted(_count(s.reason for s in self.stops).items())),
                 "note": "Complete means every value path ends at the requested boundary or at a source "
                         "object with no writer in the scanned files, with no value-path or context gaps. "
@@ -391,6 +397,8 @@ class TraceResult:
             "gaps": [{**g.to_dict(), "affects": effects[g.id]}
                      for g in sorted(self.gaps.values(), key=lambda g: (g.kind, g.id))],
             "cycles": sorted(self.cycles),
+            "resolved_gaps": sorted(self.resolved_gaps, key=lambda g: (g["kind"], g["id"])),
+            "assertions_used": sorted(set(self.assertions_used)),
         }
 
 

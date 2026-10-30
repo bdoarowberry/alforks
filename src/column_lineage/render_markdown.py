@@ -35,7 +35,7 @@ TREE_MAX_LINES = 400         # hard cap on overview tree lines
 MERMAID_MAX_STEPS = 40       # the Mermaid diagram is only drawn up to this many steps
 SUMMARY_MAX_ITEMS = 8        # items listed per Short-answer bullet before "and N more"
 
-STATUS_ORDER = ("verified", "inferred", "partial", "ambiguous", "unresolved")
+STATUS_ORDER = ("verified", "inferred", "asserted", "partial", "ambiguous", "unresolved")
 ROW_ROLE_ORDER = ("filter", "join_key", "join_predicate", "group_by", "having", "qualify", "merge_condition")
 ROW_ROLE_LABEL = {
     "filter": "filter (WHERE)",
@@ -281,7 +281,12 @@ def _result_text(t: _Trace) -> tuple[str, int]:
     n_rows = sum((comp.get("row_selection_gaps_by_kind") or {}).values())
     row_note = f"; {_plural(n_rows, 'row-selection gap')} reported separately" if n_rows else ""
     if comp.get("status") == "complete":
-        return "Complete" + (f" (value lineage{row_note})" if n_rows else ""), n_gaps
+        qualifiers = []
+        if comp.get("asserted_steps"):
+            qualifiers.append(f"relies on {_plural(comp['asserted_steps'], 'asserted step')}")
+        if n_rows:
+            qualifiers.append(f"value lineage{row_note}")
+        return "Complete" + (f" ({'; '.join(qualifiers)})" if qualifiers else ""), n_gaps
     if n_gaps:
         n_value = n_gaps - n_rows
         return f"Incomplete — {_plural(n_value, 'value-path gap')}{row_note}", n_gaps
@@ -914,13 +919,22 @@ def _where_proof_ends(t: _Trace, gaps: list[dict]) -> list[str]:
 
     weak: dict[tuple[str, str], list[dict]] = {}
     for step in t.ordered:
-        if step["id"] in value_step_ids and (step.get("status") or "verified") in ("inferred", "partial", "ambiguous"):
+        if step["id"] in value_step_ids and (step.get("status") or "verified") in ("inferred", "asserted", "partial", "ambiguous"):
             weak.setdefault((step.get("status"), step.get("mapping_method") or "?"), []).append(step)
     if weak:
         total = sum(len(v) for v in weak.values())
         out.append(f"- Weaker links on the value paths (not ends, but not verified): {_plural(total, 'step')}")
         for (status, method), steps in sorted(weak.items(), key=lambda kv: (_status_rank(kv[0][0]), kv[0][1])):
             out.append(f"  - {_text(status)} — {_text(method)}: {_join_list([t.step_link(s) for s in steps], 12)}")
+
+    resolved = t.data.get("resolved_gaps") or []
+    if resolved:
+        out.append(f"- Explained by assertions, not proved from SQL: {_plural(len(resolved), 'gap')}")
+        for gap in sorted(resolved, key=lambda g: (g.get("resolved_by") or "", g.get("kind") or "")):
+            ev = (gap.get("evidence") or [None])[0]
+            where = f" at {_code(t.location(ev))}" if ev else ""
+            node = f" on {_code(t.display(gap['node']))}" if gap.get("node") else ""
+            out.append(f"  - {_text(gap.get('kind') or 'gap')}{node}{where} — assertion {_code(gap.get('resolved_by') or '?')}")
 
     if len(out) > 2:
         out.append("")

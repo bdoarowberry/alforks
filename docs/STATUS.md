@@ -50,6 +50,13 @@
   - the tracer guarantees every value-path end has a stop or a gap: otherwise an `unexplained_end`
     gap is recorded.
 
+## Added after feedback round 4
+
+- Variables whose names start with a digit (`@2_periods_ago`) parse; their names are kept.
+- `--assertions FILE`: human-asserted mappings for dynamic SQL and external objects. Asserted steps
+  are marked `asserted`, explained gaps move to `resolved_gaps`, and completeness reports how far
+  the result relies on assertions.
+
 ## Known open issues
 
 - Corpus chain 08 ends in `missing_definition` (recall 0.6). Not investigated.

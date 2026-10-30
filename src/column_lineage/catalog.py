@@ -212,10 +212,19 @@ def ident_text(node) -> str | None:
         name = node.this
         return ("#" + name) if node.args.get("temporary") and not name.startswith("#") else name
     if isinstance(node, exp.Parameter):
-        return node.sql(dialect="tsql", comments=False)
+        return restore_variable(node.sql(dialect="tsql", comments=False))
     if isinstance(node, exp.Expression):
         return node.name or node.sql(dialect="tsql", comments=False)
     return str(node)
+
+
+DIGIT_VARIABLE = re.compile(r"(?<![\w@])@(?=\d)")
+DIGIT_PLACEHOLDER = "@__d"
+
+
+def restore_variable(name: str) -> str:
+    """Undo the placeholder given to variables whose names start with a digit (@2_x)."""
+    return name.replace(DIGIT_PLACEHOLDER, "@") if DIGIT_PLACEHOLDER in name else name
 
 
 def table_parts(table: exp.Table) -> tuple[str | None, str | None, str | None, str]:
@@ -543,6 +552,12 @@ class Catalog:
         for match in reversed(compound):
             lhs = text[match.start("lhs"):match.end("lhs")]
             text = text[:match.start()] + f"{lhs} = {lhs} {match.group('op')} " + text[match.end():]
+        # SQLGlot splits @2_name into '@', '2' and '_name'; give such variables a parseable
+        # placeholder name (restored by restore_variable wherever names are read).
+        digits = list(DIGIT_VARIABLE.finditer(mask_noncode(text)))
+        for match in reversed(digits):
+            text = text[:match.start()] + DIGIT_PLACEHOLDER + text[match.end():]
+        compound = compound or digits
         if text == statement.text:
             return None
         tree = parse_or_none(text)
@@ -1020,7 +1035,7 @@ class Catalog:
             for name_node in names:
                 if not isinstance(name_node, exp.Parameter):
                     continue
-                name = name_node.sql(dialect="tsql", comments=False)
+                name = restore_variable(name_node.sql(dialect="tsql", comments=False))
                 if isinstance(kind, exp.Schema):
                     ref = ObjectRef(norm(name), kind="table_variable", scope=statement.scope)
                     columns = [column_info(d, 0) for d in kind.expressions if isinstance(d, exp.ColumnDef)]
@@ -1034,7 +1049,7 @@ class Catalog:
                     self._assign(unit, statement, name, default, None, "declare")
 
     def _assign(self, unit, statement, name, value, select, kind, note=None) -> None:
-        name = name.lower()
+        name = restore_variable(name).lower()
         if name.startswith("@@"):
             return
         self.assignments[(statement.scope, name)].append(Assignment(name, statement.scope, statement, unit, value, select,
@@ -1052,7 +1067,7 @@ class Catalog:
             if isinstance(arg, exp.Alias) and str(arg.alias).upper() in ("OUTPUT", "OUT"):
                 arg, output = arg.this, True
             if isinstance(arg, exp.EQ) and isinstance(arg.this, exp.Parameter):
-                args.append((arg.this.sql(dialect="tsql", comments=False).lower(), arg.expression))
+                args.append((restore_variable(arg.this.sql(dialect="tsql", comments=False)).lower(), arg.expression))
                 if output and isinstance(arg.expression, exp.Parameter):
                     self._assign(unit, statement, arg.expression.sql(dialect="tsql", comments=False), None, None, "exec_output")
             else:

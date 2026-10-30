@@ -1,0 +1,18 @@
+{
+  "schema_version": "column-lineage-assertions/1.0",
+  "assertions": [
+    {
+      "id": "A1",
+      "target": "#stage.metric",
+      "procedure": "demo.load_dynamic",
+      "writer": {"path": "load.sql", "line": 13},
+      "reason": "The configuration table selects one of two sources; both are listed.",
+      "asserted_by": "data owner",
+      "alternatives": [
+        {"branch": "configuration selects source_x", "inputs": ["demo.source_x.col_a"], "row_selection": ["demo.source_x.flag"]},
+        {"branch": "configuration selects source_y", "inputs": ["demo.source_y.col_b"]}
+      ]
+    },
+    {"id": "A2", "target": "demo.nowhere.col", "alternatives": [{"inputs": ["constant:0"]}]}
+  ]
+}

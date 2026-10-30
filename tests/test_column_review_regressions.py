@@ -2,6 +2,8 @@
 
 Fixtures are in fixtures/column/review/<case>/.
 """
+import json
+
 from column_helpers import FIXTURES, inputs, row_selection_pairs, trace
 
 DB = ("--default-database", "db")
@@ -221,3 +223,47 @@ def test_worker_processes_print_no_sql(tmp_path):
     proc = run_with_workers(src, tmp_path / "out")
     assert proc.returncode == 0, proc.stderr[-2000:]
     assert proc.stderr.strip() == ""
+
+
+# ---- real-source feedback, round 4
+
+def test_variables_whose_names_start_with_a_digit(tmp_path):
+    t = review("digit_variable", "demo.output.result_value", tmp_path, *DB)
+    assert t.data["scan"]["fallback"] == 0
+    step = next(s for s in t.steps_for(t.target_id))
+    assert {"db.demo.source.input_a", "db.demo.source.input_b"} <= set(inputs(step, "value"))
+    assert any(i.endswith("::@2_periods_ago") for i in inputs(step, "condition"))
+    assert not any("__d" in i for i in t.all_ids())
+
+
+# ---- assertions for lineage SQL cannot prove
+
+def test_dynamic_sql_without_assertions_is_incomplete(tmp_path):
+    t = review("assert_dynamic", "demo.output.result_value", tmp_path, *DB)
+    assert "dynamic_sql" in t.gap_kinds and not t.complete
+
+
+def test_assertions_continue_the_trace_and_resolve_the_gap(tmp_path):
+    root = FIXTURES / "review" / "assert_dynamic"
+    t = review("assert_dynamic", "demo.output.result_value", tmp_path, *DB, "--assertions", str(root / "assertions.json"))
+    found = reach(t)
+    assert {"db.demo.source_x.col_a", "db.demo.source_y.col_b"} <= found
+    asserted = [s for s in t.steps if s["writer_kind"] == "asserted"]
+    assert len(asserted) == 2 and all(s["status"] == "asserted" for s in asserted)
+    assert "dynamic_sql" not in t.gap_kinds
+    assert [g["resolved_by"] for g in t.data["resolved_gaps"]] and all(g["resolved_by"] == "A1" for g in t.data["resolved_gaps"])
+    comp = t.data["completeness"]
+    assert t.complete and comp["relies_on_assertions"] and comp["asserted_steps"] == 2
+    assert "relies on 2 asserted steps" in t.markdown
+    diagnostics = json.loads((tmp_path / "scan-diagnostics.json").read_text(encoding="utf-8"))
+    assert diagnostics["assertions_not_used"] == ["A2"]
+    assert any(e.startswith("A2:") for e in diagnostics["assertion_errors"])
+
+
+def test_malformed_assertions_file_is_a_usage_error(tmp_path):
+    bad = tmp_path / "bad.json"
+    bad.write_text('{"assertions": [{"id": "X", "target": "a.b.c"}]}', encoding="utf-8")
+    from column_helpers import cli_args, run_cli
+    args = cli_args(FIXTURES / "review" / "assert_dynamic", "demo.output.result_value", tmp_path / "o",
+                    "--assertions", str(bad))
+    assert run_cli(args) == 2

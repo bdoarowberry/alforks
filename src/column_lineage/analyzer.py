@@ -14,7 +14,7 @@ from sqlglot import exp
 
 from table_lineage.index import Statement
 
-from .catalog import Catalog, ColumnInfo, Unit, Writer, ident_text, norm, statement_id, table_parts, update_target
+from .catalog import restore_variable, Catalog, ColumnInfo, Unit, Writer, ident_text, norm, statement_id, table_parts, update_target
 from .model import (
     TOP_ORDER, AMBIGUOUS, COLUMN, CONDITION, CONSTANT, FILTER, GROUP_BY, HAVING, INFERRED, JOIN_KEY, JOIN_PREDICATE,
     LOCAL_COLUMN, MERGE_CONDITION, PARAMETER, PARTIAL, TEMP_COLUMN, UNKNOWN, UNRESOLVED, VALUE, VARIABLE,
@@ -607,7 +607,7 @@ class Analyzer:
         if isinstance(e, exp.DataType) or isinstance(e, exp.Var):
             return
         if isinstance(e, exp.Parameter):
-            name = e.sql(dialect="tsql", comments=False).lower()
+            name = restore_variable(e.sql(dialect="tsql", comments=False)).lower()
             if name.startswith("@@"):
                 if role == VALUE and const_ok:
                     out.append(Input(Node(CONSTANT, name), VALUE, name, branch, VERIFIED, None, "system function"))

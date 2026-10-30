@@ -1,0 +1,54 @@
+{
+  "schema_version": "column-lineage-assertions/1.0",
+  "assertions": [
+    {
+      "id": "A1",
+      "target": "#stage.metric",
+      "procedure": "schema1.load_proc",
+      "writer": {
+        "path": "folder/load_proc.sql",
+        "line": 120
+      },
+      "resolves": [
+        "dynamic_sql"
+      ],
+      "reason": "The configuration table chooses one of two sources; every possible branch is listed.",
+      "asserted_by": "data owner (role)",
+      "alternatives": [
+        {
+          "branch": "configuration selects source_x",
+          "inputs": [
+            "db1.schema1.source_x.col_a"
+          ],
+          "row_selection": [
+            "db1.schema1.source_x.flag"
+          ]
+        },
+        {
+          "branch": "configuration selects source_y",
+          "inputs": [
+            "db1.schema1.source_y.col_b"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "A2",
+      "target": "db2.schema2.external_table.amount",
+      "resolves": [
+        "external_object",
+        "missing_definition"
+      ],
+      "reason": "Loaded by an external process from the listed staging column (confirmed with its owner).",
+      "asserted_by": "platform team (role)",
+      "alternatives": [
+        {
+          "inputs": [
+            "db1.schema1.staging_table.amount_raw"
+          ],
+          "operation": "cast"
+        }
+      ]
+    }
+  ]
+}

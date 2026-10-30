@@ -15,7 +15,7 @@ import time
 from table_lineage.progress import ProgressReporter
 from table_lineage.sources import DEFAULT_EXCLUDES, FilesystemSourceProvider
 
-from . import gap_summary
+from . import assertions, gap_summary
 from .catalog import Catalog, prepare_in_worker
 from .model import UNKNOWN, UNRESOLVED, Boundary, Gap, Node, TraceResult
 from .tracer import Tracer
@@ -39,6 +39,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--include", nargs="+", action="extend", default=[])
     parser.add_argument("--exclude", nargs="+", action="extend", default=[])
     parser.add_argument("--include-dated-snapshots", action="store_true")
+    parser.add_argument("--assertions", nargs="+", action="extend", default=[], metavar="FILE",
+                        help="JSON file(s) of human-asserted mappings for steps SQL cannot prove (see README)")
     parser.add_argument("--gap-summary", action="store_true", help="Write sanitized gap-summary.json")
     parser.add_argument("--fail-on-incomplete", action="store_true")
     parser.add_argument("--no-progress", action="store_true")
@@ -92,6 +94,15 @@ def main(argv: list[str] | None = None) -> int:
             parser.error(f"--database-map expects PATH=DB, got {item!r}")
         path, db = item.rsplit("=", 1)
         mapping.append((path, db))
+    asserted = []
+    for path in args.assertions:
+        try:
+            asserted.extend(assertions.load(path))
+        except (OSError, ValueError) as exc:
+            parser.error(f"--assertions: {exc}")
+    duplicate = sorted({a.id for a in asserted if [b.id for b in asserted].count(a.id) > 1})
+    if duplicate:
+        parser.error(f"--assertions: duplicate assertion ids across files: {', '.join(duplicate)}")
     roots = [Path(r).resolve() for r in args.source_root]
     for root in roots:
         if not root.exists():
@@ -150,7 +161,8 @@ def main(argv: list[str] | None = None) -> int:
                         "trace_row_selection": args.trace_row_selection},
         }
         boundary = Boundary(tuple(d.lower() for d in args.stop_at_database), tuple(args.stop_at_object), args.max_depth)
-        tracer = Tracer(catalog, trace_row_selection=args.trace_row_selection)
+        tracer = Tracer(catalog, trace_row_selection=args.trace_row_selection, assertions=asserted)
+        scan["assertions"] = len(asserted)
         output = Path(args.output)
         output.mkdir(parents=True, exist_ok=True)
         traces = []
@@ -184,6 +196,8 @@ def main(argv: list[str] | None = None) -> int:
             "schema_version": "column-lineage-scan/1.0",
             "scan": scan,
             "file_errors": [{"root": r, "path": p, "error": e} for r, p, e in sorted(catalog.file_errors)],
+            "assertion_errors": sorted(set(tracer.assertion_errors)),
+            "assertions_not_used": sorted(a.id for a in asserted if a.id not in tracer.assertions_seen),
             "statement_issues": [
                 {"kind": i.kind, "message": i.message, "targets": list(i.targets),
                  "evidence": catalog.evidence(i.unit, i.statement, role=i.kind).to_dict()}
