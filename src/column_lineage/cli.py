@@ -85,6 +85,27 @@ def root_labels(roots: list[Path]) -> dict[Path, str]:
     return labels
 
 
+def blocking_statements(traces: list[dict], limit: int = 20) -> list[dict]:
+    """Statements behind value or context gaps, by how many traces they block (local diagnostics)."""
+    found: dict[str, dict] = {}
+    for data in traces:
+        seen = set()
+        for gap in data.get("gaps", []):
+            if gap.get("affects") == "row_selection":
+                continue
+            for ev in gap.get("evidence", [])[:1]:
+                key = ev.get("statement_id") or f"{ev.get('path')}:{ev.get('start_line')}"
+                entry = found.setdefault(key, {"location": f"{ev.get('root') + '/' if ev.get('root') else ''}"
+                                                           f"{ev.get('path')}:{ev.get('start_line')}",
+                                               "excerpt": ev.get("excerpt"), "kinds": set(), "traces": 0})
+                entry["kinds"].add(gap["kind"])
+                if key not in seen:
+                    seen.add(key)
+                    entry["traces"] += 1
+    ranked = sorted(found.values(), key=lambda e: (-e["traces"], e["location"]))[:limit]
+    return [{**e, "kinds": sorted(e["kinds"])} for e in ranked]
+
+
 def main(argv: list[str] | None = None) -> int:
     # SQLGlot logs a warning for every statement it falls back on; parse failures are reported in
     # scan-diagnostics.json instead.
@@ -219,6 +240,7 @@ def main(argv: list[str] | None = None) -> int:
             "assertions_not_used": sorted(a.id for a in asserted if a.id not in tracer.assertions_seen),
             "assertion_effects": {k: sorted(v, key=lambda g: (g["kind"], g["location"]))
                                   for k, v in sorted(tracer.assertion_effects.items())},
+            "statements_blocking_most_traces": blocking_statements(traces),
             "statement_issues": [
                 {"kind": "dead_dynamic_sql" if catalog.dead_dynamic(i) else i.kind,
                  "message": ("Dynamic SQL that can only execute an empty string or NULL; not a writer."

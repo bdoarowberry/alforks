@@ -121,8 +121,11 @@ def compare_one(expected: dict, trace: dict | None) -> tuple[dict, dict]:
         "open_value_and_context_gaps_by_kind": dict(sorted(blocking.items())),
         "row_selection_gaps": sum(completeness.get("row_selection_gaps_by_kind", {}).values()),
     })
-    summary["result"] = ("exact" if outcome.get("found", 0) == len(expected_sources) and not extra else
-                         "partial" if outcome.get("found") else "none_found")
+    if not expected_sources:
+        summary["result"] = "no_baseline"   # nothing to compare against; extras are listed in the details
+    else:
+        summary["result"] = ("exact" if outcome.get("found", 0) == len(expected_sources) and not extra else
+                             "partial" if outcome.get("found") else "none_found")
     return summary, details
 
 

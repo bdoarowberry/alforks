@@ -57,3 +57,20 @@ def test_comparison_attributes_misses_to_open_gaps(tmp_path):
     column = summary["per_column"][0]
     assert column["sources"] == {"missing_behind_gaps": 1}
     assert column["open_value_and_context_gaps_by_kind"] == {"dynamic_sql": 1}
+
+
+def test_column_without_baseline_is_not_called_exact(tmp_path):
+    out = tmp_path / "out"
+    run(FIXTURES / "cross_database", ["report_db.demo.output.result_value"], out,
+        "--database-map", "report=report_db", "stage=stage_db", "land=land_db")
+    summary, _ = compare(out, [{"target": "report_db.demo.output.result_value", "sources": []}])
+    assert summary["per_column"][0]["result"] == "no_baseline"
+
+
+def test_diagnostics_rank_statements_by_traces_blocked(tmp_path):
+    out = tmp_path / "out"
+    run(FIXTURES / "review" / "dynamic_two_columns", ["demo.output.result_value", "demo.work.part_a"], out,
+        "--default-database", "db")
+    diagnostics = json.loads((out / "scan-diagnostics.json").read_text(encoding="utf-8"))
+    top = diagnostics["statements_blocking_most_traces"][0]
+    assert top["traces"] == 2 and top["kinds"] == ["dynamic_sql"] and top["location"].endswith("load.sql:6")

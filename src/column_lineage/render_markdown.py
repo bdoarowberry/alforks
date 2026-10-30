@@ -250,7 +250,11 @@ class _Trace:
     def evidence_md(self, ev: dict | None, excerpt: bool = True) -> str:
         if not ev:
             return "—"
-        out = _code(self.location(ev))
+        if ev.get("role") == "assertion" and ev.get("path"):
+            # Assertion files are cited relative to the page, so make them a working link.
+            out = f"[{_text(self.location(ev))}]({_link_target(ev['path'])})"
+        else:
+            out = _code(self.location(ev))
         if excerpt and ev.get("excerpt"):
             out += " " + _code(ev["excerpt"], EXCERPT_LIMIT)
         return out
