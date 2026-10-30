@@ -655,6 +655,11 @@ class Evaluator:
         except Exception as exc:  # noqa: BLE001
             raise Unknown(f"the evaluated SQL could not be split into statements ({type(exc).__name__})") from None
         statements = merge_split_inserts(index.statements, sql, masked)
+        uncovered = uncovered_text(masked, statements)
+        if uncovered:
+            # The indexer skips statements it does not know (USE, ALTER VIEW, CREATE PROCEDURE, GRANT, ...);
+            # silently skipping them could change what the rest of the string means.
+            raise Unknown(f"the evaluated SQL contains {shorten(uncovered, 60)!r}, which is not analysed")
         if not statements:
             raise Unknown("no statement was recognised in the evaluated SQL")
         env: dict[str, list[Alt]] = {}
@@ -722,10 +727,37 @@ class Evaluator:
                           "own batch (or to sp_executesql parameters) and are not traced")
         if isinstance(tree, exp.Select) and not tree.args.get("into"):
             return []   # a result set: no column is written
-        return [(text, tree)]
+        if isinstance(tree, (exp.Delete, exp.TruncateTable, exp.Drop)):
+            return []   # removes rows or objects: no column value is written
+        kind = str(tree.args.get("kind") or "").upper() if isinstance(tree, exp.Create) else ""
+        if isinstance(tree, (exp.Insert, exp.Update, exp.Merge, exp.Select, exp.Union, exp.Except, exp.Intersect)) \
+                or kind in ("TABLE", "VIEW") or (isinstance(tree, exp.Execute) and isinstance(tree.this, exp.Table)):
+            return [(text, tree)]
+        what = f"CREATE {kind}" if kind else type(tree).__name__.upper()
+        raise Unknown(f"the evaluated SQL contains a {what} statement, which is not analysed as dynamic SQL: "
+                      f"{shorten(' '.join(text.split()), 60)}")
 
 
 INITIAL = object()
+
+HARMLESS = re.compile(
+    r"(?:(?:BEGIN|COMMIT|ROLLBACK|SAVE)(?:\s+(?:TRAN|TRANSACTION|WORK)\b.*)?|END|GO|PRINT\b.*|"
+    r"TRUNCATE\s+TABLE\s+\S+|DROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?\S+|"
+    r"CREATE\s+(?:UNIQUE\s+)?(?:(?:NON)?CLUSTERED\s+)?(?:COLUMNSTORE\s+)?INDEX\b.*)", re.I)
+
+
+def uncovered_text(masked: str, statements) -> str:
+    """Code outside every indexed statement that is not a harmless line (BEGIN/END, TRUNCATE, CREATE INDEX...)."""
+    covered = [False] * len(masked)
+    for st in statements:
+        for i in range(max(st.start, 0), min(st.end, len(masked))):
+            covered[i] = True
+    rest = "".join(" " if covered[i] else c for i, c in enumerate(masked))
+    for chunk in re.split(r"[;\n]", rest):
+        chunk = chunk.strip()
+        if chunk and not HARMLESS.fullmatch(chunk):
+            return chunk
+    return ""
 
 
 def is_argument_name(node: exp.Parameter) -> bool:

@@ -24,3 +24,16 @@ BEGIN
     EXEC (@sql);
 END;
 GO
+
+CREATE PROCEDURE demo.load_inside_branch
+    @mode int
+AS
+BEGIN
+    DECLARE @sql nvarchar(max) = N'INSERT INTO demo.output_b (id, result_value) SELECT id, input_b FROM demo.source_b';
+    IF @mode = 2
+    BEGIN
+        SET @sql = N'INSERT INTO demo.output_a (id, result_value) SELECT id, input_a FROM demo.source_a';
+        EXEC (@sql);
+    END;
+END;
+GO
