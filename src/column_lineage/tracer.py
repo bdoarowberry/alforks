@@ -90,12 +90,10 @@ class Tracer:
         result.add_node(result.target)
         result.target_status = target_status
         result.target_gaps = [result.add_gap(g) for g in target_gaps]
-        if target is None or target_status == UNRESOLVED and target.kind == UNKNOWN:
-            return result
-        if target_status == AMBIGUOUS:
+        if target is None or target_status in (UNRESOLVED, AMBIGUOUS):
             return result
         visited: set[tuple] = set()
-        visited_objects: set[str] = set()
+        step_ids: set[str] = set()
         scopes_seen: set[str] = set()
         edges: dict[str, set[str]] = {}
         queue: deque = deque([(target, None, 0)])
@@ -114,7 +112,7 @@ class Tracer:
             if boundary.max_depth is not None and depth >= boundary.max_depth:
                 result.stops.append(Stop(node, "max_depth", f"depth {depth}"))
                 continue
-            steps, gaps, stops, cycles = self.expand(node, before, visited_objects)
+            steps, gaps, stops, cycles = self.expand(node, before)
             for gap in gaps:
                 result.add_gap(gap)
             for stop in stops:
@@ -123,12 +121,11 @@ class Tracer:
                 if cycle not in result.cycles:
                     result.cycles.append(cycle)
             for step in steps:
-                if any(s.id == step.id for s in result.steps):
+                if step.id in step_ids:
                     continue
+                step_ids.add(step.id)
                 result.steps.append(step)
                 result.add_node(step.target)
-                for evidence in step.evidence:
-                    pass
                 scope = getattr(step, "_scope", None)
                 if scope:
                     scopes_seen.add(scope)
@@ -169,25 +166,19 @@ class Tracer:
         return None
 
     # -------------------------------------------------------------- expand
-    def expand(self, node: Node, before, visited_objects: set[str]):
+    def expand(self, node: Node, before):
         memo_key = (node.id, before)
-        if memo_key in self._memo:
-            steps, gaps, stops, cycles, objects = self._memo[memo_key]
-        else:
+        if memo_key not in self._memo:
             if node.kind in (COLUMN, TEMP_COLUMN):
-                steps, gaps, stops, cycles = self._expand_column(node, before)
+                found = self._expand_column(node, before)
             elif node.kind == VARIABLE:
-                steps, gaps, stops, cycles = self._expand_variable(node, before)
+                found = self._expand_variable(node, before)
             elif node.kind == PARAMETER:
-                steps, gaps, stops, cycles = self._expand_parameter(node)
+                found = self._expand_parameter(node)
             else:
-                steps, gaps, stops, cycles = [], [], [], []
-            objects = None
-            self._memo[memo_key] = (steps, gaps, stops, cycles, objects)
-        extra: list[Gap] = []
-        if node.object is not None and node.kind in (COLUMN, TEMP_COLUMN) and node.object.key not in visited_objects:
-            visited_objects.add(node.object.key)
-        return steps, gaps + extra, stops, cycles
+                found = ([], [], [], [])
+            self._memo[memo_key] = found
+        return self._memo[memo_key]
 
     def _object_gaps(self, node: Node) -> list[Gap]:
         ref = node.object
@@ -227,7 +218,11 @@ class Tracer:
                                                   not any(c.startswith("WHILE") for c in w.controls))]
         writing = []
         for writer in sorted(writers, key=lambda w: (w.unit.path, w.statement.start)):
-            found, found_gaps, found_cycles = self.analyzer.writer_steps(writer, column, node)
+            try:
+                found, found_gaps, found_cycles = self.analyzer.writer_steps(writer, column, node)
+            except Exception as exc:  # noqa: BLE001 - one unanalysable writer must not stop the trace
+                gaps.append(internal_gap(self.catalog, writer.unit, writer.statement, node, exc))
+                continue
             gaps.extend(found_gaps)
             cycles.extend(found_cycles)
             for step in found:
@@ -290,7 +285,11 @@ class Tracer:
             assignments = prior + in_loop
         steps, gaps = [], []
         for assignment in assignments:
-            found, found_gaps = self.analyzer.assignment_steps(assignment, node)
+            try:
+                found, found_gaps = self.analyzer.assignment_steps(assignment, node)
+            except Exception as exc:  # noqa: BLE001
+                gaps.append(internal_gap(self.catalog, assignment.unit, assignment.statement, node, exc))
+                continue
             for step in found:
                 step._scope = assignment.statement.scope
                 step._position = (assignment.unit.path, assignment.statement.start, assignment.statement.scope)
@@ -328,7 +327,11 @@ class Tracer:
                 value = call.args[position][1]
             if value is None:
                 continue
-            found, found_gaps = self.analyzer.argument_step(call, value, node)
+            try:
+                found, found_gaps = self.analyzer.argument_step(call, value, node)
+            except Exception as exc:  # noqa: BLE001
+                gaps.append(internal_gap(self.catalog, call.unit, call.statement, node, exc))
+                continue
             for step in found:
                 step._scope = call.statement.scope
                 step._position = (call.unit.path, call.statement.start, call.statement.scope)
@@ -340,6 +343,12 @@ class Tracer:
                               "No EXEC in the scanned files passes this parameter (it may be set by a job, an SSIS "
                               "package or an application, or left to its default)."))
         return steps, gaps, stops, []
+
+
+def internal_gap(catalog, unit, statement, node, exc) -> Gap:
+    return Gap("unsupported_statement", f"The analyzer could not process this statement ({type(exc).__name__}: "
+               f"{str(exc)[:120]}); lineage through it is unknown.", node,
+               [catalog.evidence(unit, statement, role="statement")], {"error": type(exc).__name__})
 
 
 def dedupe_stops(stops: list[Stop]) -> list[Stop]:

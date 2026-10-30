@@ -203,6 +203,7 @@ class Catalog:
         self.unknown_db_writers: dict[tuple[str, str], list[Writer]] = defaultdict(list)
         self.stats = {"files": 0, "statements": 0, "parsed": 0, "fallback": 0}
         self.fallback_samples: list[tuple[Statement, Unit]] = []
+        self.file_errors: list[tuple[str, str, str]] = []
 
     # ---------------------------------------------------------------- loading
     def _mapped_database(self, root: Path, rel: str, absolute: str) -> str | None:
@@ -216,7 +217,12 @@ class Catalog:
 
     def add_file(self, source: SourceFile, root: Path, root_label: str) -> None:
         index = SourceIndex()
-        index.add(source, include_ddl=True)
+        rel = source.path.name if root.is_file() else source.path.relative_to(root).as_posix()
+        try:
+            index.add(source, include_ddl=True)
+        except Exception as exc:  # noqa: BLE001 - one bad file must not stop the scan
+            self.file_errors.append((root_label, rel, f"{type(exc).__name__}: {str(exc)[:200]}"))
+            index = SourceIndex()
         rel = source.path.name if root.is_file() else source.path.relative_to(root).as_posix()
         # Scopes embed the absolute path; make them portable so identities are stable across machines.
         prefix = f"{source.path}::"
@@ -228,18 +234,24 @@ class Catalog:
         uses = [(m.start(), norm(split_name(m.group("db"))[0])) for m in USE.finditer(masked)]
         unit = Unit(root_label, root, rel, str(source.path), text, masked, index, uses,
                     self._mapped_database(root, rel, str(source.path)))
-        unit.controls = control_contexts(text, masked, index.statements)
+        try:
+            unit.controls = control_contexts(text, masked, index.statements)
+        except Exception as exc:  # noqa: BLE001 - control context is optional
+            self.file_errors.append((root_label, rel, f"control flow: {type(exc).__name__}"))
         self.units.append(unit)
         self.units_by_path[unit.path] = unit
         self.stats["files"] += 1
-        self._procedures(unit)
-        self._synonyms(unit)
+        for step in (self._procedures, self._synonyms):
+            try:
+                step(unit)
+            except Exception as exc:  # noqa: BLE001
+                self.file_errors.append((root_label, rel, f"{step.__name__}: {type(exc).__name__}"))
         for order, statement in enumerate(index.statements):
             self.stats["statements"] += 1
             self.stats["parsed" if statement.parse_status == "parsed" else "fallback"] += 1
             try:
                 self._statement(unit, statement, order)
-            except (SqlglotError, ValueError, AttributeError, TypeError, RecursionError) as exc:
+            except Exception as exc:  # noqa: BLE001 - one bad statement must not stop the scan
                 self._issue("unsupported_statement", unit, statement, (), f"Statement could not be indexed: {type(exc).__name__}")
 
     # ------------------------------------------------------------- identities

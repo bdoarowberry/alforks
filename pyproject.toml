@@ -5,9 +5,9 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "table-lineage"
 version = "0.1.0"
-description = "Static recursive T-SQL table lineage analyzer"
+description = "Static T-SQL table and column lineage analyzers"
 requires-python = ">=3.11"
-dependencies = ["sqlglot>=26.0.0"]
+dependencies = ["sqlglot>=30.25,<31"]
 
 [project.optional-dependencies]
 parser = ["sqlglot>=26.0.0"]
@@ -15,6 +15,7 @@ test = ["pytest>=8.0"]
 
 [project.scripts]
 table-lineage = "table_lineage.cli:main"
+column-lineage = "column_lineage.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

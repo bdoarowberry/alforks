@@ -14,7 +14,7 @@ from table_lineage.sources import DEFAULT_EXCLUDES, FilesystemSourceProvider
 
 from . import gap_summary
 from .catalog import Catalog
-from .model import Boundary
+from .model import UNKNOWN, UNRESOLVED, Boundary, Gap, Node, TraceResult
 from .tracer import Tracer
 
 
@@ -118,6 +118,7 @@ def main(argv: list[str] | None = None) -> int:
             "parsed": catalog.stats["parsed"],
             "fallback": catalog.stats["fallback"],
             "statement_issues": len(catalog.issues),
+            "file_errors": len(catalog.file_errors),
             "source_revision": source_revision(roots),
             "options": {"default_database": args.default_database, "default_schema": args.default_schema,
                         "database_map": [f"{p}={d}" for p, d in mapping],
@@ -136,7 +137,13 @@ def main(argv: list[str] | None = None) -> int:
             render_markdown = None
         for spec in args.column:
             progress.start_phase("analyzing", completed=len(files), total=len(files), current=spec)
-            result = tracer.trace(spec, boundary, scan)
+            try:
+                result = tracer.trace(spec, boundary, scan)
+            except Exception as exc:  # noqa: BLE001 - report the failure in the trace instead of stopping the run
+                result = TraceResult(Node(UNKNOWN, spec), spec, boundary, scan)
+                result.target_status = UNRESOLVED
+                result.target_gaps = [result.add_gap(Gap("unsupported_statement",
+                                      f"The trace failed with {type(exc).__name__}: {str(exc)[:200]}"))]
             data = result.to_dict()
             traces.append(data)
             incomplete = incomplete or data["completeness"]["status"] != "complete"
@@ -151,6 +158,7 @@ def main(argv: list[str] | None = None) -> int:
         diagnostics = {
             "schema_version": "column-lineage-scan/1.0",
             "scan": scan,
+            "file_errors": [{"root": r, "path": p, "error": e} for r, p, e in sorted(catalog.file_errors)],
             "statement_issues": [
                 {"kind": i.kind, "message": i.message, "targets": list(i.targets),
                  "evidence": catalog.evidence(i.unit, i.statement, role=i.kind).to_dict()}
