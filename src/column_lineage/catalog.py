@@ -59,6 +59,20 @@ GLUE = re.compile(r"(?im)^[ \t]*(?P<word>TRUNCATE|DECLARE|SET|EXEC|EXECUTE|WHILE
 DROP_TEMP = re.compile(r"\bDROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?(?P<name>#[A-Za-z_][\w$#@]*)", re.I)
 
 
+def prepare_in_worker(job):
+    """Process-pool entry point: parse and repair one file with a scratch catalog."""
+    path, text, root, root_label, settings = job
+    scratch = Catalog(*settings)
+    source = SourceFile(Path(path), text)
+    try:
+        prepared = scratch.prepare(source, Path(root), root_label)
+    except Exception as exc:  # noqa: BLE001
+        prepared = {"index": SourceIndex(), "repaired": 0, "rewritten": [], "outputs": [],
+                    "errors": [(root_label, scratch._rel(source, Path(root)), f"{type(exc).__name__}: {str(exc)[:200]}")]}
+    prepared["foreign"] = True
+    return prepared
+
+
 def merge_split_inserts(statements: list[Statement], text: str, masked: str) -> list[Statement]:
     """Rejoin an INSERT the indexer cut off from the SELECT/VALUES/WITH that follows it."""
     out: list[Statement] = []
@@ -371,14 +385,42 @@ class Catalog:
         return best[1] if best else None
 
     def add_file(self, source: SourceFile, root: Path, root_label: str) -> None:
+        self.add_prepared(source, root, root_label, self.prepare(source, root, root_label))
+
+    def prepare(self, source: SourceFile, root: Path, root_label: str) -> dict:
+        """Per-file parsing and repair. Independent of other files, so it can run in a worker process."""
+        before = (self.stats["repaired"], len(self.rewritten), len(self.pending_outputs), len(self.file_errors))
+        index = self._parse_file(source, root, root_label)
+        return {"index": index, "repaired": self.stats["repaired"] - before[0],
+                "rewritten": [r for r in self.rewritten if r[0] == f"{root_label}/{self._rel(source, root)}"],
+                "outputs": self.pending_outputs[before[2]:], "errors": self.file_errors[before[3]:]}
+
+    @staticmethod
+    def _rel(source: SourceFile, root: Path) -> str:
+        return source.path.name if root.is_file() else source.path.relative_to(root).as_posix()
+
+    def add_prepared(self, source: SourceFile, root: Path, root_label: str, prepared: dict) -> None:
+        """Index a prepared file into the catalog (sequential, in file order)."""
+        index = prepared["index"]
+        rel = self._rel(source, root)
+        if prepared.get("foreign"):
+            # Prepared in a worker: merge its side effects.
+            self.stats["repaired"] += prepared["repaired"]
+            self.rewritten.update(prepared["rewritten"])
+            self.pending_outputs.extend(prepared["outputs"])
+            self.file_errors.extend(prepared["errors"])
+        text = source.text
+        masked = mask_noncode(text)
+        self._ingest(source, root, root_label, rel, index, text, masked)
+
+    def _parse_file(self, source: SourceFile, root: Path, root_label: str) -> SourceIndex:
         index = SourceIndex()
-        rel = source.path.name if root.is_file() else source.path.relative_to(root).as_posix()
+        rel = self._rel(source, root)
         try:
             index.add(source, include_ddl=True)
         except Exception as exc:  # noqa: BLE001 - one bad file must not stop the scan
             self.file_errors.append((root_label, rel, f"{type(exc).__name__}: {str(exc)[:200]}"))
             index = SourceIndex()
-        rel = source.path.name if root.is_file() else source.path.relative_to(root).as_posix()
         # Scopes embed the absolute path; make them portable so identities are stable across machines.
         prefix = f"{source.path}::"
         portable = f"{root_label}/{rel}::"
@@ -398,6 +440,9 @@ class Catalog:
                 continue
             statements.append(statement)
         index.statements = statements
+        return index
+
+    def _ingest(self, source, root, root_label, rel, index, text, masked) -> None:
         uses = [(m.start(), norm(split_name(m.group("db"))[0])) for m in USE.finditer(masked)]
         unit = Unit(root_label, root, rel, str(source.path), text, masked, index, uses,
                     self._mapped_database(root, rel, str(source.path)))

@@ -6,6 +6,8 @@ import json
 import logging
 from pathlib import Path
 import re
+from concurrent.futures import ProcessPoolExecutor
+import os
 import subprocess
 import sys
 import time
@@ -14,7 +16,7 @@ from table_lineage.progress import ProgressReporter
 from table_lineage.sources import DEFAULT_EXCLUDES, FilesystemSourceProvider
 
 from . import gap_summary
-from .catalog import Catalog
+from .catalog import Catalog, prepare_in_worker
 from .model import UNKNOWN, UNRESOLVED, Boundary, Gap, Node, TraceResult
 from .tracer import Tracer
 
@@ -41,6 +43,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--fail-on-incomplete", action="store_true")
     parser.add_argument("--no-progress", action="store_true")
     parser.add_argument("--progress-interval", type=float, default=15.0)
+    parser.add_argument("--jobs", type=int, default=None,
+                        help="Worker processes for parsing (default: number of CPUs, at most 8; 1 = no workers)")
     parser.add_argument("--verbose", action="store_true")
     return parser
 
@@ -109,10 +113,25 @@ def main(argv: list[str] | None = None) -> int:
         if not files:
             parser.error("No SQL source files matched the selected roots and filters.")
         progress.start_phase("parsing", completed=0, total=len(files))
+        jobs = args.jobs if args.jobs is not None else min(8, os.cpu_count() or 1)
+        prepared_stream = None
+        if jobs > 1 and len(files) >= 20:
+            settings = (args.default_database, args.default_schema, mapping)
+            work = [(str(source.path), source.text, str(root), labels[root], settings) for root, source in files]
+            try:
+                pool = ProcessPoolExecutor(max_workers=jobs)
+                prepared_stream = pool.map(prepare_in_worker, work, chunksize=8)
+            except (OSError, ValueError, NotImplementedError):
+                prepared_stream = None
         for done, (root, source) in enumerate(files, 1):
             progress.start_item(source.path.name, completed=done - 1, total=len(files))
-            catalog.add_file(source, root, labels[root])
+            if prepared_stream is not None:
+                catalog.add_prepared(source, root, labels[root], next(prepared_stream))
+            else:
+                catalog.add_file(source, root, labels[root])
             progress.complete_item(done)
+        if prepared_stream is not None:
+            pool.shutdown()
         progress.start_phase("analyzing", completed=len(files), total=len(files))
         parse_seconds = time.monotonic() - started
         scan = {

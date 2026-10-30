@@ -182,8 +182,11 @@ Ordered target-first, then upstream by depth.
 
 ### Where proof ends
 
-- Stopped — requested boundary: `staging.demo.source.input_a` (database staging is in the requested boundary) and `staging.demo.source.input_b` (database staging is in the requested boundary)
-- Proof is missing at: `@override_value (in reporting.demo.apply_overrides)`
+- Stopped — requested boundary:
+  - `staging.demo.source.input_a` (database staging is in the requested boundary)
+  - `staging.demo.source.input_b` (database staging is in the requested boundary)
+- Proof is missing at:
+  - `@override_value (in reporting.demo.apply_overrides)` — dynamic_sql (value path)
 
 Proof ends at the 1 node listed above with gaps; value paths through them are unproven. The result is **Incomplete — 1 value-path gap**. Stops mark where the trace ended, not ultimate source-system fields.
 

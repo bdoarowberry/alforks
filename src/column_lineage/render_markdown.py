@@ -871,13 +871,21 @@ def _section_gaps(t: _Trace, json_name: str | None) -> list[str]:
                 text += f" ({_text(stop['detail'])})"
             by_reason.setdefault(stop.get("reason") or "stop", []).append(text)
         for reason in sorted(by_reason):
-            out.append(f"- Stopped — {STOP_LABEL.get(reason, _text(reason))}: {_join_list(by_reason[reason], 50)}")
+            out.append(f"- Stopped — {STOP_LABEL.get(reason, _text(reason))}:")
+            out += [f"  - {item}" for item in sorted(set(by_reason[reason]))]
     gap_nodes = sorted({g["node"] for g in gaps if g.get("node")})
     if gap_nodes:
-        out.append("- Proof is missing at: " + _join_list([_code(t.display(n)) for n in gap_nodes], 50))
+        out.append("- Proof is missing at:")
+        for node in gap_nodes:
+            node_gaps = [g for g in gaps if g.get("node") == node]
+            kinds = ", ".join(sorted({_text(g.get("kind") or "gap") for g in node_gaps}))
+            scope = "row selection only" if all(g.get("affects") == "row_selection" for g in node_gaps) else "value path"
+            out.append(f"  - {_code(t.display(node))} — {kinds} ({scope})")
     gap_free = [g for g in gaps if not g.get("node")]
     if gap_free:
-        out.append(f"- {_plural(len(gap_free), 'gap')} not tied to a node (scan or statement level).")
+        out.append("- Not tied to a node (scan or statement level):")
+        for gap in sorted(gap_free, key=lambda g: (g.get("kind") or "", g.get("id") or "")):
+            out.append(f"  - {_text(gap.get('kind') or 'gap')}: {_text(gap.get('message') or '')}")
     if t.stops or gaps:
         out.append("")
     result, _ = _result_text(t)
