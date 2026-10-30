@@ -139,6 +139,8 @@ def build(catalog, traces: list[dict], samples: int = 25) -> dict:
             "stops_by_reason": completeness["stops_by_reason"],
             "asserted_steps": completeness.get("asserted_steps", 0),
             "gaps_resolved_by_assertions": completeness.get("gaps_resolved_by_assertions", 0),
+            "gap_statements_by_kind": _gap_statements(data),
+            "context_gaps_by_kind": completeness.get("context_gaps_by_kind", {}),
             "row_selection_gaps_by_kind": completeness.get("row_selection_gaps_by_kind", {}),
             "operations": dict(sorted(Counter(s["operation"] for s in data["steps"]).items())),
             "writer_kinds": dict(sorted(Counter(s["writer_kind"] for s in data["steps"]).items())),
@@ -154,6 +156,15 @@ def build(catalog, traces: list[dict], samples: int = 25) -> dict:
         "unparsed_samples": sample_list,
         "traces": trace_summary,
     }
+
+
+def _gap_statements(data: dict) -> dict[str, int]:
+    """Distinct statements behind the gaps of each kind (counts only)."""
+    seen: dict[str, set] = {}
+    for gap in data.get("gaps", []):
+        for ev in gap.get("evidence", [])[:1]:
+            seen.setdefault(gap["kind"], set()).add(ev.get("statement_id") or (ev.get("path"), ev.get("start_line")))
+    return {kind: len(ids) for kind, ids in sorted(seen.items())}
 
 
 def _depth(data: dict) -> int:

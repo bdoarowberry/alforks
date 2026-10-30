@@ -288,8 +288,12 @@ def _result_text(t: _Trace) -> tuple[str, int]:
             qualifiers.append(f"value lineage{row_note}")
         return "Complete" + (f" ({'; '.join(qualifiers)})" if qualifiers else ""), n_gaps
     if n_gaps:
-        n_value = n_gaps - n_rows
-        return f"Incomplete — {_plural(n_value, 'value-path gap')}{row_note}", n_gaps
+        n_context = sum((comp.get("context_gaps_by_kind") or {}).values())
+        n_value = n_gaps - n_rows - n_context
+        parts = [_plural(n_value, "value-path gap")] if n_value or not n_context else []
+        if n_context:
+            parts.append(_plural(n_context, "context gap"))
+        return f"Incomplete — {', '.join(parts)}{row_note}", n_gaps
     overall = comp.get("overall_step_status") or "unknown"
     return f"Incomplete — no gaps recorded, overall step status {overall}", n_gaps
 
@@ -302,6 +306,13 @@ def _section_identity(t: _Trace, json_name: str | None) -> list[str]:
     result, _ = _result_text(t)
     out = [f"> **Result: {result}**" + (f" (overall step status: {_text(comp['overall_step_status'])})"
                                          if comp.get("overall_step_status") else "")]
+    if comp.get("asserted_steps"):
+        ids = ", ".join(_code(i) for i in sorted(data.get("assertions_used") or [])) or "see Detailed steps"
+        out.append(">")
+        out.append(f"> **This trace relies on {_plural(comp['asserted_steps'], 'asserted step')}** (assertions {ids}). "
+                   "Asserted steps were stated by a person in an assertions file, not proved from SQL"
+                   + (f"; {_plural(comp.get('gaps_resolved_by_assertions', 0), 'gap')} are marked resolved by them."
+                      if comp.get("gaps_resolved_by_assertions") else "."))
     out.append(">")
     out.append("> A *stop* at the requested boundary, or at a source with no writer in the scanned files, "
                "is where this trace ended. It is not a claim that those columns are ultimate "
@@ -926,6 +937,27 @@ def _where_proof_ends(t: _Trace, gaps: list[dict]) -> list[str]:
         out.append(f"- Weaker links on the value paths (not ends, but not verified): {_plural(total, 'step')}")
         for (status, method), steps in sorted(weak.items(), key=lambda kv: (_status_rank(kv[0][0]), kv[0][1])):
             out.append(f"  - {_text(status)} — {_text(method)}: {_join_list([t.step_link(s) for s in steps], 12)}")
+
+    by_statement: dict[str, dict] = {}
+    for gap in gaps:
+        ev = (gap.get("evidence") or [None])[0]
+        if not ev:
+            continue
+        key = ev.get("statement_id") or t.location(ev)
+        entry = by_statement.setdefault(key, {"ev": ev, "kinds": set(), "nodes": set(), "gaps": 0})
+        entry["kinds"].add(gap.get("kind") or "gap")
+        entry["gaps"] += 1
+        if gap.get("node"):
+            entry["nodes"].add(gap["node"])
+    repeated = sorted(by_statement.values(), key=lambda e: (-e["gaps"], t.location(e["ev"])))
+    if len(gaps) > len(by_statement) and repeated:
+        out.append(f"- Statements behind the most gaps ({_plural(len(gaps), 'gap')} come from "
+                   f"{_plural(len(by_statement), 'statement')}; resolving or asserting these first helps most):")
+        for entry in repeated[:10]:
+            out.append(f"  - {_code(t.location(entry['ev']))} — {_plural(entry['gaps'], 'gap')} "
+                       f"({_text(', '.join(sorted(entry['kinds'])))}) on {_plural(len(entry['nodes']), 'node')}")
+        if len(repeated) > 10:
+            out.append(f"  - {len(repeated) - 10} more statements (see Gaps)")
 
     resolved = t.data.get("resolved_gaps") or []
     if resolved:

@@ -267,3 +267,38 @@ def test_malformed_assertions_file_is_a_usage_error(tmp_path):
     args = cli_args(FIXTURES / "review" / "assert_dynamic", "demo.output.result_value", tmp_path / "o",
                     "--assertions", str(bad))
     assert run_cli(args) == 2
+
+
+# ---- real-source feedback, round 5
+
+def test_linked_server_objects_are_external_unless_declared_local(tmp_path):
+    base = FIXTURES / "review" / "linked_server"
+    t = trace(base / "main", "demo.output.result_value", tmp_path / "a", *DB, "--source-root", str(base / "remote"))
+    assert "external_object" in t.gap_kinds and not t.complete
+    t = trace(base / "main", "demo.output.result_value", tmp_path / "b", *DB, "--source-root", str(base / "remote"),
+              "--local-server", "lnk")
+    assert "external_object" not in t.gap_kinds
+    assert "remote_db.dbo.staging.raw_amount" in reach(t)
+
+
+def test_assertion_reliance_is_stated_at_the_top_and_effects_are_listed(tmp_path):
+    root = FIXTURES / "review" / "assert_dynamic"
+    t = review("assert_dynamic", "demo.output.result_value", tmp_path, *DB, "--assertions", str(root / "assertions.json"))
+    top = t.markdown.split("## 2.", 1)[0]
+    assert "This trace relies on 2 asserted steps" in top
+    asserted = next(s for s in t.steps if s["writer_kind"] == "asserted")
+    ev = asserted["evidence"][0]
+    assert ev["root"] is None and ev["path"].endswith("assert_dynamic/assertions.json")
+    diagnostics = json.loads((tmp_path / "scan-diagnostics.json").read_text(encoding="utf-8"))
+    effects = diagnostics["assertion_effects"]["A1"]
+    assert [e["kind"] for e in effects] == ["dynamic_sql"] and effects[0]["location"] == "load.sql:13"
+
+
+def test_statements_behind_repeated_gaps_are_grouped(tmp_path):
+    t = review("dynamic_two_columns", "demo.output.result_value", tmp_path, *DB)
+    dynamic = t.gaps("dynamic_sql")
+    assert len(dynamic) == 2 and len({g["evidence"][0]["statement_id"] for g in dynamic}) == 1
+    assert "2 gaps come from 1 statement" in t.markdown
+    assert "  - `load.sql:6` — 2 gaps (dynamic_sql) on 2 nodes" in t.markdown
+    summary = t.data["completeness"]
+    assert summary["value_gaps_by_kind"] == {"dynamic_sql": 2}

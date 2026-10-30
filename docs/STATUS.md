@@ -57,6 +57,14 @@
   are marked `asserted`, explained gaps move to `resolved_gaps`, and completeness reports how far
   the result relies on assertions.
 
+## Added after feedback round 5
+
+- `--local-server NAME`: linked-server references resolve to scanned local databases.
+- Pages state reliance on assertions at the top and count value-path, context and row-selection
+  gaps separately.
+- "Where proof ends" lists the statements behind the most gaps.
+- `scan-diagnostics.json` lists `assertion_effects`; assertion evidence uses the real file path.
+
 ## Known open issues
 
 - Corpus chain 08 ends in `missing_definition` (recall 0.6). Not investigated.

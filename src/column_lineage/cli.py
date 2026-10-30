@@ -35,6 +35,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--database-map", nargs="+", action="extend", default=[], metavar="PATH=DB",
                         help="Files under PATH (relative to a source root, or absolute) belong to database DB")
     parser.add_argument("--default-schema", default="dbo")
+    parser.add_argument("--local-server", nargs="+", action="extend", default=[], metavar="NAME",
+                        help="Linked-server name(s) whose four-part references mean the same databases as the "
+                             "scanned files (add the remote database's SQL as another --source-root)")
     parser.add_argument("--trace-row-selection", action="store_true")
     parser.add_argument("--include", nargs="+", action="extend", default=[])
     parser.add_argument("--exclude", nargs="+", action="extend", default=[])
@@ -109,7 +112,7 @@ def main(argv: list[str] | None = None) -> int:
             parser.error(f"Source root does not exist: {root}")
     labels = root_labels(roots)
     started = time.monotonic()
-    catalog = Catalog(args.default_database, args.default_schema, mapping)
+    catalog = Catalog(args.default_database, args.default_schema, mapping, tuple(args.local_server))
     with ProgressReporter(enabled=not args.no_progress, interval=args.progress_interval) as progress:
         progress.start_phase("discovering", completed=0, total=None)
         files = []
@@ -127,7 +130,7 @@ def main(argv: list[str] | None = None) -> int:
         jobs = args.jobs if args.jobs is not None else min(8, os.cpu_count() or 1)
         prepared_stream = None
         if jobs > 1 and len(files) >= 20:
-            settings = (args.default_database, args.default_schema, mapping)
+            settings = (args.default_database, args.default_schema, mapping, tuple(args.local_server))
             work = [(str(source.path), source.text, str(root), labels[root], settings) for root, source in files]
             try:
                 pool = ProcessPoolExecutor(max_workers=jobs)
@@ -157,6 +160,7 @@ def main(argv: list[str] | None = None) -> int:
             "file_errors": len(catalog.file_errors),
             "source_revision": source_revision(roots),
             "options": {"default_database": args.default_database, "default_schema": args.default_schema,
+                        "local_servers": sorted({s.lower() for s in args.local_server}),
                         "database_map": [f"{p}={d}" for p, d in mapping],
                         "trace_row_selection": args.trace_row_selection},
         }
@@ -198,6 +202,8 @@ def main(argv: list[str] | None = None) -> int:
             "file_errors": [{"root": r, "path": p, "error": e} for r, p, e in sorted(catalog.file_errors)],
             "assertion_errors": sorted(set(tracer.assertion_errors)),
             "assertions_not_used": sorted(a.id for a in asserted if a.id not in tracer.assertions_seen),
+            "assertion_effects": {k: sorted(v, key=lambda g: (g["kind"], g["location"]))
+                                  for k, v in sorted(tracer.assertion_effects.items())},
             "statement_issues": [
                 {"kind": i.kind, "message": i.message, "targets": list(i.targets),
                  "evidence": catalog.evidence(i.unit, i.statement, role=i.kind).to_dict()}

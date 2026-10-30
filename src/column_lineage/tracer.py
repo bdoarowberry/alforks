@@ -28,6 +28,7 @@ class Tracer:
         self._asserted: dict[str, list] | None = None
         self.assertion_errors: list[str] = []
         self.assertions_seen: set[str] = set()
+        self.assertion_effects: dict[str, list[dict]] = {}   # assertion id -> gaps it resolved
         self._memo: dict[tuple, tuple] = {}   # shared between traces in one run
 
     # ------------------------------------------------------------- targets
@@ -164,6 +165,7 @@ class Tracer:
                 explained = next((a for a in used if gap.kind in a.resolves and a.explains(gap.evidence)), None)
                 if explained is not None:
                     result.resolved_gaps.append({**gap.to_dict(), "affects": "context", "resolved_by": explained.id})
+                    self._record_effect(explained.id, gap, result.requested)
                     continue
                 result.add_gap(gap)
         result.cycles.extend(c for c in find_cycles(edges) if c not in result.cycles)
@@ -228,6 +230,14 @@ class Tracer:
                 self._asserted.setdefault(target.id, []).append(assertion)
         return self._asserted.get(node.id, [])
 
+    def _record_effect(self, assertion_id: str, gap: Gap, trace: str) -> None:
+        ev = gap.evidence[0] if gap.evidence else None
+        entry = {"trace": trace, "kind": gap.kind, "node": gap.node.id if gap.node else None,
+                 "location": ev.location if ev else None}
+        effects = self.assertion_effects.setdefault(assertion_id, [])
+        if entry not in effects:
+            effects.append(entry)
+
     def apply_assertions(self, node: Node, assertions: list, steps, gaps, stops, result: TraceResult):
         """Add asserted steps for ``node`` and move the gaps they explain to resolved_gaps."""
         steps, gaps = list(steps), list(gaps)
@@ -235,7 +245,7 @@ class Tracer:
             self.assertions_seen.add(assertion.id)
             result.assertions_used.append(assertion.id)
             evidence = Evidence(assertion.source, assertion.line, assertion.line,
-                                (assertion.reason or "asserted mapping")[:240], "assertion", None, "assertions")
+                                (assertion.reason or "asserted mapping")[:240], "assertion", None, None)
             for i, alt in enumerate(assertion.alternatives, 1):
                 inputs = []
                 for spec in alt.inputs:
@@ -264,6 +274,7 @@ class Tracer:
                 if gap.node is not None and gap.node.id == node.id and gap.kind in assertion.resolves \
                         and assertion.explains(gap.evidence):
                     result.resolved_gaps.append({**gap.to_dict(), "affects": "value", "resolved_by": assertion.id})
+                    self._record_effect(assertion.id, gap, result.requested)
                 else:
                     kept.append(gap)
             gaps = kept

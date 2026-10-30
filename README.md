@@ -42,6 +42,7 @@ The useful options:
 | `--max-depth N` | Stop after N mapping steps. |
 | `--trace-row-selection` | Also trace filter and join columns upstream (larger output). |
 | `--gap-summary` | Also write `gap-summary.json`, a summary with no names in it, safe to share. |
+| `--local-server NAME ...` | Linked-server names whose four-part references mean the databases being scanned. Add that database's SQL as another `--source-root`, so its objects are traced instead of reported as external. |
 | `--assertions FILE ...` | Human-asserted mappings for steps SQL cannot prove (see below). |
 | `--jobs N` | Parser worker processes (default: CPUs, at most 8; `1` = none). |
 | `--fail-on-incomplete` | Exit 3 if any trace is incomplete. |
@@ -114,6 +115,14 @@ description in `src/column_lineage/assertions.py`.
   assertions are listed in `scan-diagnostics.json`.
 - **Coverage:** for metadata-driven SQL, list **every** branch the metadata can produce, not
   only one observed run.
+- **Scoping to one writer:** when a target has several dynamic or unparsed writers and an assertion
+  covers only one:
+  1. Copy the gap's **Where:** location from "Where proof ends" (`path:line`, with the path relative to
+     its source root) into `writer: {"path": ..., "line": ...}`. Any line inside that statement matches.
+  2. Leave `resolves` at its default, or narrow it, e.g. `["dynamic_sql"]`.
+  3. Rerun and check `assertion_effects` in `scan-diagnostics.json`. It lists, per assertion, every gap
+     it resolved (trace, kind, node, location), so you can confirm only the intended gap moved. Gaps
+     from the other writers stay open.
 - **Privacy:** an assertions file names real objects. It belongs with the source and must not
   be shared outside it.
 

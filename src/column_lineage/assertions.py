@@ -134,7 +134,7 @@ def load(path: str | Path) -> list[Assertion]:
         out.append(Assertion(ident, target, alternatives, writer.get("path"),
                              int(writer["line"]) if writer.get("line") is not None else None,
                              tuple(resolves) if resolves else DEFAULT_RESOLVES,
-                             item.get("reason"), item.get("asserted_by"), path.name, line))
+                             item.get("reason"), item.get("asserted_by"), path.as_posix(), line))
     return out
 
 

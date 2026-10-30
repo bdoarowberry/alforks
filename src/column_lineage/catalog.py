@@ -364,7 +364,8 @@ class StatementIssue:
 
 class Catalog:
     def __init__(self, default_database: str | None = None, default_schema: str = "dbo",
-                 database_map: list[tuple[str, str]] | None = None):
+                 database_map: list[tuple[str, str]] | None = None, local_servers: tuple[str, ...] = ()):
+        self.local_servers = {norm(s) for s in local_servers}
         self.default_database = norm(default_database)
         self.default_schema = norm(default_schema) or "dbo"
         self.database_map = [(p.replace("\\", "/").rstrip("/").lower(), norm(db)) for p, db in (database_map or [])]
@@ -696,6 +697,8 @@ class Catalog:
         if name.startswith("#") and not name.startswith("##"):
             scope = statement.scope if statement else None
             return ObjectRef(norm(name), kind="temp_table", scope=scope)
+        if server and norm(server) in self.local_servers:
+            server = None  # a linked server that points at the databases being scanned
         db_source = "explicit" if database else None
         if not database:
             database, db_source = unit.database_at(statement.start if statement else 0, self.default_database)
