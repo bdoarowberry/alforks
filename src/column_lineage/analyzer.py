@@ -14,7 +14,7 @@ from sqlglot import exp
 
 from table_lineage.index import Statement
 
-from .catalog import restore_variable, Catalog, ColumnInfo, Unit, Writer, ident_text, norm, statement_id, table_parts, update_target
+from .catalog import controls_of, restore_variable, Catalog, ColumnInfo, Unit, Writer, ident_text, norm, statement_id, table_parts, update_target
 from .model import (
     TOP_ORDER, AMBIGUOUS, COLUMN, CONDITION, CONSTANT, FILTER, GROUP_BY, HAVING, INFERRED, JOIN_KEY, JOIN_PREDICATE,
     LOCAL_COLUMN, MERGE_CONDITION, PARAMETER, PARTIAL, TEMP_COLUMN, UNKNOWN, UNRESOLVED, VALUE, VARIABLE,
@@ -1075,7 +1075,7 @@ class Analyzer:
 
     # ======================================================== variables etc.
     def assignment_steps(self, assignment, target: Node) -> tuple[list[Step], list[Gap]]:
-        ctx = Ctx(self, assignment.unit, assignment.statement, assignment.unit.controls.get(assignment.statement.start, ()))
+        ctx = Ctx(self, assignment.unit, assignment.statement, controls_of(assignment.unit, assignment.statement))
         if assignment.kind == "exec_output":
             gap = ctx.gap("unresolved_variable", f"{target.name} is set by a procedure OUTPUT parameter or return code, which is not traced.",
                           target)
@@ -1115,7 +1115,7 @@ class Analyzer:
         return ctx.steps, ctx.gaps
 
     def argument_step(self, call, value: exp.Expression, target: Node) -> tuple[list[Step], list[Gap]]:
-        ctx = Ctx(self, call.unit, call.statement, call.unit.controls.get(call.statement.start, ()))
+        ctx = Ctx(self, call.unit, call.statement, controls_of(call.unit, call.statement))
         step = self.make_step(target, "parameter_binding", value, Scope(ctx, {}), ctx, "argument", [],
                               procedure=call.statement.procedure)
         ctx.steps.append(step)

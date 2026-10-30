@@ -343,7 +343,7 @@ class Writer:
 
     @property
     def controls(self) -> tuple[str, ...]:
-        return self.unit.controls.get(self.statement.start, ())
+        return controls_of(self.unit, self.statement)
 
 
 @dataclass
@@ -410,6 +410,7 @@ class Catalog:
         self.fallback_by_scope: dict[str, list[Statement]] = defaultdict(list)
         self._view_bases: dict[str, list[str]] | None = None
         self._dead_dynamic: dict[int, bool] = {}
+        self._evaluations: dict[int, object] | None = None   # id(issue) -> dynamic_eval.Evaluation
 
     # ---------------------------------------------------------------- loading
     def _mapped_database(self, root: Path, rel: str, absolute: str) -> str | None:
@@ -789,7 +790,11 @@ class Catalog:
                  role: str = "statement", excerpt: str | None = None) -> Evidence:
         start_line = statement.line
         end_line = statement.line + statement.text.rstrip().count("\n")
-        if node is not None and (f"{unit.root_label}/{unit.rel_path}", statement.start) not in self.rewritten:
+        evaluated = getattr(statement, "origin_line", None)
+        if evaluated:
+            # Text evaluated from dynamic SQL: cite the EXEC's lines; the excerpt is the evaluated SQL.
+            start_line, end_line = statement.origin_line, max(statement.origin_end_line, statement.origin_line)
+        elif node is not None and (f"{unit.root_label}/{unit.rel_path}", statement.start) not in self.rewritten:
             positions = [n.meta.get("start") for n in node.walk() if isinstance(n.meta.get("start"), int)]
             ends = [n.meta.get("end") for n in node.walk() if isinstance(n.meta.get("end"), int)]
             if positions and ends and 0 <= min(positions) <= max(ends) < len(statement.text):
@@ -1161,6 +1166,46 @@ class Catalog:
         self._dead_dynamic[id(issue)] = dead
         return dead
 
+    def evaluate_dynamic(self) -> None:
+        """Evaluate every dynamic SQL statement whose text can be enumerated (once, after loading).
+
+        The statements of each enumerated string are indexed as writers at the EXEC, in its scope.
+        """
+        if self._evaluations is not None:
+            return
+        from .dynamic_eval import Evaluator
+        self._evaluations = {}
+        evaluator = Evaluator(self)
+        pending = []
+        for issue in list(self.issues):
+            if issue.kind != "dynamic_sql" or self.dead_dynamic(issue):
+                continue
+            evaluation = evaluator.evaluate(issue)
+            self._evaluations[id(issue)] = evaluation
+            if evaluation.usable:
+                pending.append((issue, evaluation))
+        for issue, evaluation in pending:
+            order = next((i for i, s in enumerate(issue.unit.index.statements) if s.start == issue.statement.start), 0)
+            for alternative in evaluation.alternatives:
+                for statement in alternative.statements:
+                    try:
+                        self._statement(issue.unit, statement, order)
+                    except Exception as exc:  # noqa: BLE001
+                        self._issue("unsupported_statement", issue.unit, statement, (),
+                                    f"Evaluated dynamic SQL could not be indexed: {type(exc).__name__}")
+
+    def dynamic_evaluation(self, issue: StatementIssue):
+        """The evaluation of a dynamic_sql issue (None when not evaluated)."""
+        if issue.kind != "dynamic_sql":
+            return None
+        self.evaluate_dynamic()
+        return self._evaluations.get(id(issue))
+
+    def dynamic_resolved(self, issue: StatementIssue) -> bool:
+        """Dynamic SQL every possible text of which was enumerated and analysed as writers."""
+        evaluation = self.dynamic_evaluation(issue)
+        return bool(evaluation is not None and evaluation.complete)
+
     def writers_for(self, ref: ObjectRef) -> list[Writer]:
         """Writers of an object; for a #temp table, includes callees writing into it."""
         found = list(self.writers.get(ref.key, []))
@@ -1217,12 +1262,20 @@ class Catalog:
         return any(self.schemas.get(k) or self.writers.get(k) or k in self.synonyms for k in keys)
 
 
+def controls_of(unit: Unit, statement: Statement) -> tuple[str, ...]:
+    """Control-flow labels of a statement; evaluated dynamic SQL carries its own (EXEC's plus its alternative's)."""
+    controls = getattr(statement, "controls", None)
+    return tuple(controls) if controls is not None else unit.controls.get(statement.start, ())
+
+
 def proc_key(ref: ObjectRef) -> str:
     return ".".join(p for p in (ref.server, ref.database or "?", ref.schema or "?", ref.name) if p is not None)
 
 
 def statement_id(unit: Unit, statement: Statement) -> str:
     raw = f"{unit.root_label}|{unit.rel_path}|{statement.start}|{statement.end}"
+    if getattr(statement, "eval_key", None):
+        raw += f"|dynamic:{statement.eval_key}"   # one EXEC can yield several evaluated statements
     return "stmt-" + hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
 
 

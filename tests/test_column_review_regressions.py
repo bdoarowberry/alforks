@@ -328,8 +328,12 @@ def test_dynamic_sql_that_can_only_be_empty_is_not_a_gap(tmp_path):
     assert any(i["kind"] == "dead_dynamic_sql" for i in diagnostics["statement_issues"])
 
 
-def test_dynamic_sql_assigned_real_text_or_from_a_parameter_stays_a_gap(tmp_path):
+def test_dynamic_sql_assigned_real_text_is_evaluated_and_from_a_parameter_stays_a_gap(tmp_path):
+    # Real literal text is now evaluated statically (see tests/test_column_dynamic_eval.py): it becomes an
+    # inferred step instead of a gap.
     t = review("dead_dynamic", "demo.output2.result_value", tmp_path / "live", *DB)
-    assert "dynamic_sql" in t.gap_kinds and not t.complete
+    assert "dynamic_sql" not in t.gap_kinds
+    evaluated = [s for s in t.steps if any("evaluated from dynamic sql" in n.lower() for n in s["notes"])]
+    assert evaluated and all(s["status"] == "inferred" for s in evaluated)
     t = review("dead_dynamic", "demo.output3.result_value", tmp_path / "param", *DB)
     assert "dynamic_sql" in t.gap_kinds and not t.complete
