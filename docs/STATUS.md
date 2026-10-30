@@ -74,6 +74,16 @@
 - "Statements behind the most gaps" counts only gaps that cite a statement.
 - Assertion evidence paths are relative to the output folder (where the pages are).
 
+## Fixed after feedback round 7 (75-column batch)
+
+- **A writer after an IF condition on the same line was silently dropped.** For
+  `IF NOT EXISTS (SELECT …) INSERT …`, the indexer starts at the inner SELECT; the fragment was
+  classed as non-lineage, so the target looked like a source with no writer and the trace could
+  claim "complete". The statement after the condition is now recovered, with its IF context.
+- Text that names a write target is never classed as non-lineage.
+- `compare`: `no_baseline` for columns without expected sources.
+- Diagnostics rank the statements blocking the most traces, with their locations.
+
 ## Known open issues
 
 - Corpus chain 08 ends in `missing_definition` (recall 0.6). Not investigated.

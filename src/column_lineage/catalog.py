@@ -106,12 +106,39 @@ def merge_split_inserts(statements: list[Statement], text: str, masked: str) -> 
     return out
 
 
+STATEMENT_KEYWORD = re.compile(r"(?<![\w@#$.])(?:INSERT|UPDATE|DELETE|MERGE|SELECT|EXEC(?:UTE)?|SET|DECLARE|WITH|"
+                               r"TRUNCATE)\b", re.I)
+
+
+def unmatched_close(masked: str) -> int | None:
+    """Offset of the first ')' with no matching '(' before it."""
+    depth = 0
+    for i, char in enumerate(masked):
+        if char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+            if depth < 0:
+                return i
+    return None
+
+
+def depth_at(masked: str, start: int, end: int) -> int:
+    segment = masked[start:end]
+    return segment.count("(") - segment.count(")")
+
+
 def non_lineage(text: str) -> bool:
     """Statements that never carry column lineage, or a condition fragment like `... ) ) OR (...`
-    split off an IF/WHILE by the indexer (more closing than opening parentheses)."""
+    split off an IF/WHILE by the indexer (more closing than opening parentheses).
+
+    Never true for text that names a write target: a writer glued after a non-lineage statement
+    must stay visible (traced, or at worst reported as a parse error), never silently dropped."""
+    masked = mask_noncode(text)
+    if write_targets(masked):
+        return False
     if NON_LINEAGE.match(text):
         return True
-    masked = mask_noncode(text)
     return masked.count(")") > masked.count("(")
 
 
@@ -473,6 +500,7 @@ class Catalog:
                     name = owner[-1][2] if owner else name
                 statement = replace(statement, scope=portable + name)
             if statement.parse_status != "parsed":
+                statement = self._after_condition(statement)
                 statements.extend(self._repair(root_label, rel, statement))
                 continue
             statements.append(statement)
@@ -518,6 +546,25 @@ class Catalog:
                 self.file_errors.append((root_label, rel, f"{step.__name__}: {type(exc).__name__}"))
 
     # ------------------------------------------------------------ add_file helpers
+    def _after_condition(self, statement: Statement) -> Statement:
+        """`IF [NOT] EXISTS (SELECT ...) INSERT ...` on one line reaches us as `SELECT ...) INSERT ...`:
+        the indexer starts at the SELECT inside the condition. Drop the condition's tail and keep the
+        statement that follows it, which may be a writer."""
+        masked = mask_noncode(statement.text)
+        close = unmatched_close(masked)
+        if close is None:
+            return statement
+        follow = STATEMENT_KEYWORD.search(masked, close + 1)
+        if follow is None or depth_at(masked, close + 1, follow.start()) != 0:
+            return statement
+        offset = follow.start()
+        text = statement.text[offset:]
+        tree = parse_or_none(text)
+        return replace(statement, start=statement.start + offset, text=text,
+                       line=statement.line + statement.text.count("\n", 0, offset), tree=tree,
+                       parse_status="parsed" if tree is not None else statement.parse_status,
+                       parse_error=None if tree is not None else statement.parse_error)
+
     def _repair(self, root_label: str, rel: str, statement: Statement) -> list[Statement]:
         """Recover statements SQLGlot rejects, without changing what they mean for lineage.
 

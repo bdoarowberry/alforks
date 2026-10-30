@@ -333,3 +333,20 @@ def test_dynamic_sql_assigned_real_text_or_from_a_parameter_stays_a_gap(tmp_path
     assert "dynamic_sql" in t.gap_kinds and not t.complete
     t = review("dead_dynamic", "demo.output3.result_value", tmp_path / "param", *DB)
     assert "dynamic_sql" in t.gap_kinds and not t.complete
+
+
+# ---- real-source feedback, round 7: a writer must never be dropped silently
+
+def test_writer_after_an_if_condition_on_one_line_is_traced(tmp_path):
+    t = review("condition_then_writer", "db1.schema1.destination.reference_no", tmp_path)
+    assert "db1.schema1.stage.source_ref" in reach(t)
+    step = t.only_step_for(t.target_id)
+    assert any(c.startswith("IF NOT EXISTS") for c in step["branch_context"])
+    t = review("condition_then_writer", "db1.schema1.destination.amount", tmp_path / "update")
+    assert "db1.schema1.stage.amount" in reach(t)
+
+
+def test_writer_glued_after_non_lineage_statements_is_not_dropped(tmp_path):
+    t = review("condition_then_writer", "db1.schema1.destination.note", tmp_path)
+    assert t.steps_for(t.target_id) or t.gap_kinds & {"parse_error", "unsupported_statement"}
+    assert (t.target_id, "source_without_writer") not in t.stop_pairs()
