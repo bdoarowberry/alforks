@@ -1,0 +1,176 @@
+<?xml version="1.0"?>
+<DTS:Executable xmlns:DTS="www.microsoft.com/SqlServer/Dts"
+  DTS:refId="Package"
+  DTS:CreationName="Microsoft.Package"
+  DTS:DTSID="{6A1F0E00-0000-4000-8005-000000000001}"
+  DTS:ExecutableType="Microsoft.Package"
+  DTS:ObjectName="load_variable">
+  <DTS:Property
+    DTS:Name="PackageFormatVersion">8</DTS:Property>
+  <DTS:ConnectionManagers>
+    <DTS:ConnectionManager
+      DTS:refId="Package.ConnectionManagers[demo_db]"
+      DTS:CreationName="OLEDB"
+      DTS:DTSID="{6A1F0E00-0000-4000-8005-0000000000C1}"
+      DTS:ObjectName="demo_db">
+      <DTS:ObjectData>
+        <DTS:ConnectionManager
+          DTS:ConnectionString="Data Source=server_a;Initial Catalog=demo_db;Provider=SQLNCLI11.1;Integrated Security=SSPI;" />
+      </DTS:ObjectData>
+    </DTS:ConnectionManager>
+  </DTS:ConnectionManagers>
+  <DTS:Variables>
+    <DTS:Variable
+      DTS:CreationName=""
+      DTS:DTSID="{6A1F0E00-0000-4000-8005-0000000000A1}"
+      DTS:IncludeInDebugDump="2345"
+      DTS:Namespace="User"
+      DTS:ObjectName="region">
+      <DTS:VariableValue
+        DTS:DataType="8">north</DTS:VariableValue>
+    </DTS:Variable>
+    <DTS:Variable
+      DTS:CreationName=""
+      DTS:DTSID="{6A1F0E00-0000-4000-8005-0000000000A2}"
+      DTS:EvaluateAsExpression="True"
+      DTS:Expression="&quot;SELECT order_id, amount FROM demo.orders WHERE region_code = '&quot; + @[User::region] + &quot;'&quot;"
+      DTS:IncludeInDebugDump="2345"
+      DTS:Namespace="User"
+      DTS:ObjectName="source_query">
+      <DTS:VariableValue
+        DTS:DataType="8">SELECT order_id, amount FROM demo.orders WHERE region_code = 'north'</DTS:VariableValue>
+    </DTS:Variable>
+  </DTS:Variables>
+  <DTS:Executables>
+    <DTS:Executable
+      DTS:refId="Package\Load from variable"
+      DTS:CreationName="Microsoft.Pipeline"
+      DTS:DTSID="{6A1F0E00-0000-4000-8005-0000000000E1}"
+      DTS:ExecutableType="Microsoft.Pipeline"
+      DTS:ObjectName="Load from variable">
+      <DTS:ObjectData>
+        <pipeline
+          version="1">
+          <components>
+            <component
+              refId="Package\Load from variable\Query by region"
+              componentClassID="Microsoft.OLEDBSource"
+              contactInfo="OLE DB Source;Microsoft Corporation; Microsoft SQL Server; (C) Microsoft Corporation; All Rights Reserved; http://www.microsoft.com/sql/support;7"
+              name="Query by region"
+              version="7">
+              <properties>
+                <property
+                  dataType="System.String"
+                  name="SqlCommandVariable">User::source_query</property>
+                <property
+                  dataType="System.Int32"
+                  name="AccessMode"
+                  typeConverter="AccessMode">3</property>
+              </properties>
+              <connections>
+                <connection
+                  refId="Package\Load from variable\Query by region.Connections[OleDbConnection]"
+                  connectionManagerID="Package.ConnectionManagers[demo_db]"
+                  connectionManagerRefId="Package.ConnectionManagers[demo_db]"
+                  name="OleDbConnection" />
+              </connections>
+              <outputs>
+                <output
+                  refId="Package\Load from variable\Query by region.Outputs[OLE DB Source Output]"
+                  name="OLE DB Source Output">
+                  <outputColumns>
+                    <outputColumn
+                      refId="Package\Load from variable\Query by region.Outputs[OLE DB Source Output].Columns[order_id]"
+                      dataType="i4"
+                      externalMetadataColumnId="Package\Load from variable\Query by region.Outputs[OLE DB Source Output].ExternalColumns[order_id]"
+                      lineageId="Package\Load from variable\Query by region.Outputs[OLE DB Source Output].Columns[order_id]"
+                      name="order_id" />
+                    <outputColumn
+                      refId="Package\Load from variable\Query by region.Outputs[OLE DB Source Output].Columns[amount]"
+                      dataType="numeric"
+                      externalMetadataColumnId="Package\Load from variable\Query by region.Outputs[OLE DB Source Output].ExternalColumns[amount]"
+                      lineageId="Package\Load from variable\Query by region.Outputs[OLE DB Source Output].Columns[amount]"
+                      name="amount" />
+                  </outputColumns>
+                  <externalMetadataColumns
+                    isUsed="True">
+                    <externalMetadataColumn
+                      refId="Package\Load from variable\Query by region.Outputs[OLE DB Source Output].ExternalColumns[order_id]"
+                      dataType="i4"
+                      name="order_id" />
+                    <externalMetadataColumn
+                      refId="Package\Load from variable\Query by region.Outputs[OLE DB Source Output].ExternalColumns[amount]"
+                      dataType="numeric"
+                      name="amount" />
+                  </externalMetadataColumns>
+                </output>
+              </outputs>
+            </component>
+            <component
+              refId="Package\Load from variable\Write variable target"
+              componentClassID="Microsoft.OLEDBDestination"
+              contactInfo="OLE DB Destination;Microsoft Corporation; Microsoft SQL Server; (C) Microsoft Corporation; All Rights Reserved; http://www.microsoft.com/sql/support;4"
+              name="Write variable target"
+              version="4">
+              <properties>
+                <property
+                  dataType="System.String"
+                  name="OpenRowset">[demo].[variable_target]</property>
+                <property
+                  dataType="System.Int32"
+                  name="AccessMode"
+                  typeConverter="AccessMode">3</property>
+              </properties>
+              <connections>
+                <connection
+                  refId="Package\Load from variable\Write variable target.Connections[OleDbConnection]"
+                  connectionManagerID="Package.ConnectionManagers[demo_db]"
+                  connectionManagerRefId="Package.ConnectionManagers[demo_db]"
+                  name="OleDbConnection" />
+              </connections>
+              <inputs>
+                <input
+                  refId="Package\Load from variable\Write variable target.Inputs[OLE DB Destination Input]"
+                  hasSideEffects="true"
+                  name="OLE DB Destination Input">
+                  <inputColumns>
+                    <inputColumn
+                      refId="Package\Load from variable\Write variable target.Inputs[OLE DB Destination Input].Columns[order_id]"
+                      cachedDataType="i4"
+                      cachedName="order_id"
+                      externalMetadataColumnId="Package\Load from variable\Write variable target.Inputs[OLE DB Destination Input].ExternalColumns[order_id]"
+                      lineageId="Package\Load from variable\Query by region.Outputs[OLE DB Source Output].Columns[order_id]" />
+                    <inputColumn
+                      refId="Package\Load from variable\Write variable target.Inputs[OLE DB Destination Input].Columns[amount]"
+                      cachedDataType="numeric"
+                      cachedName="amount"
+                      externalMetadataColumnId="Package\Load from variable\Write variable target.Inputs[OLE DB Destination Input].ExternalColumns[amount]"
+                      lineageId="Package\Load from variable\Query by region.Outputs[OLE DB Source Output].Columns[amount]" />
+                  </inputColumns>
+                  <externalMetadataColumns
+                    isUsed="True">
+                    <externalMetadataColumn
+                      refId="Package\Load from variable\Write variable target.Inputs[OLE DB Destination Input].ExternalColumns[order_id]"
+                      dataType="i4"
+                      name="order_id" />
+                    <externalMetadataColumn
+                      refId="Package\Load from variable\Write variable target.Inputs[OLE DB Destination Input].ExternalColumns[amount]"
+                      dataType="numeric"
+                      name="amount" />
+                  </externalMetadataColumns>
+                </input>
+              </inputs>
+            </component>
+          </components>
+          <paths>
+            <path
+              refId="Package\Load from variable.Paths[OLE DB Source Output]"
+              endId="Package\Load from variable\Write variable target.Inputs[OLE DB Destination Input]"
+              name="OLE DB Source Output"
+              startId="Package\Load from variable\Query by region.Outputs[OLE DB Source Output]" />
+          </paths>
+        </pipeline>
+      </DTS:ObjectData>
+    </DTS:Executable>
+  </DTS:Executables>
+</DTS:Executable>

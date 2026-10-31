@@ -1,0 +1,247 @@
+<?xml version="1.0"?>
+<DTS:Executable xmlns:DTS="www.microsoft.com/SqlServer/Dts"
+  DTS:refId="Package"
+  DTS:CreationName="Microsoft.Package"
+  DTS:DTSID="{6A1F0E00-0000-4000-8003-000000000001}"
+  DTS:ExecutableType="Microsoft.Package"
+  DTS:ObjectName="load_lookup">
+  <DTS:Property
+    DTS:Name="PackageFormatVersion">8</DTS:Property>
+  <DTS:ConnectionManagers>
+    <DTS:ConnectionManager
+      DTS:refId="Package.ConnectionManagers[demo_db]"
+      DTS:CreationName="OLEDB"
+      DTS:DTSID="{6A1F0E00-0000-4000-8003-0000000000C1}"
+      DTS:ObjectName="demo_db">
+      <DTS:ObjectData>
+        <DTS:ConnectionManager
+          DTS:ConnectionString="Data Source=server_a;Initial Catalog=demo_db;Provider=SQLNCLI11.1;Integrated Security=SSPI;" />
+      </DTS:ObjectData>
+    </DTS:ConnectionManager>
+  </DTS:ConnectionManagers>
+  <DTS:Executables>
+    <DTS:Executable
+      DTS:refId="Package\Add region"
+      DTS:CreationName="Microsoft.Pipeline"
+      DTS:DTSID="{6A1F0E00-0000-4000-8003-0000000000E1}"
+      DTS:ExecutableType="Microsoft.Pipeline"
+      DTS:ObjectName="Add region">
+      <DTS:ObjectData>
+        <pipeline
+          version="1">
+          <components>
+            <component
+              refId="Package\Add region\Read orders"
+              componentClassID="Microsoft.OLEDBSource"
+              contactInfo="OLE DB Source;Microsoft Corporation; Microsoft SQL Server; (C) Microsoft Corporation; All Rights Reserved; http://www.microsoft.com/sql/support;7"
+              name="Read orders"
+              version="7">
+              <properties>
+                <property
+                  dataType="System.String"
+                  name="OpenRowset">[demo].[orders]</property>
+                <property
+                  dataType="System.Int32"
+                  name="AccessMode"
+                  typeConverter="AccessMode">0</property>
+              </properties>
+              <connections>
+                <connection
+                  refId="Package\Add region\Read orders.Connections[OleDbConnection]"
+                  connectionManagerID="Package.ConnectionManagers[demo_db]"
+                  connectionManagerRefId="Package.ConnectionManagers[demo_db]"
+                  name="OleDbConnection" />
+              </connections>
+              <outputs>
+                <output
+                  refId="Package\Add region\Read orders.Outputs[OLE DB Source Output]"
+                  name="OLE DB Source Output">
+                  <outputColumns>
+                    <outputColumn
+                      refId="Package\Add region\Read orders.Outputs[OLE DB Source Output].Columns[order_id]"
+                      dataType="i4"
+                      externalMetadataColumnId="Package\Add region\Read orders.Outputs[OLE DB Source Output].ExternalColumns[order_id]"
+                      lineageId="Package\Add region\Read orders.Outputs[OLE DB Source Output].Columns[order_id]"
+                      name="order_id" />
+                    <outputColumn
+                      refId="Package\Add region\Read orders.Outputs[OLE DB Source Output].Columns[region_code]"
+                      dataType="str"
+                      length="10"
+                      externalMetadataColumnId="Package\Add region\Read orders.Outputs[OLE DB Source Output].ExternalColumns[region_code]"
+                      lineageId="Package\Add region\Read orders.Outputs[OLE DB Source Output].Columns[region_code]"
+                      name="region_code" />
+                  </outputColumns>
+                  <externalMetadataColumns
+                    isUsed="True">
+                    <externalMetadataColumn
+                      refId="Package\Add region\Read orders.Outputs[OLE DB Source Output].ExternalColumns[order_id]"
+                      dataType="i4"
+                      name="order_id" />
+                    <externalMetadataColumn
+                      refId="Package\Add region\Read orders.Outputs[OLE DB Source Output].ExternalColumns[region_code]"
+                      dataType="str"
+                      length="10"
+                      name="region_code" />
+                  </externalMetadataColumns>
+                </output>
+              </outputs>
+            </component>
+            <component
+              refId="Package\Add region\Find region"
+              componentClassID="Microsoft.Lookup"
+              contactInfo="Lookup;Microsoft Corporation; Microsoft SQL Server; (C) Microsoft Corporation; All Rights Reserved; http://www.microsoft.com/sql/support;6"
+              description="Looks up values in a reference dataset by using exact matching."
+              name="Find region"
+              usesDispositions="true"
+              version="6">
+              <properties>
+                <property
+                  dataType="System.String"
+                  name="SqlCommand">SELECT r.region_code, r.region_label FROM demo.region AS r</property>
+                <property
+                  dataType="System.Int32"
+                  name="CacheType"
+                  typeConverter="CacheType">0</property>
+                <property
+                  dataType="System.Int32"
+                  name="NoMatchBehavior"
+                  typeConverter="LookupNoMatchBehavior">1</property>
+              </properties>
+              <connections>
+                <connection
+                  refId="Package\Add region\Find region.Connections[OleDbConnection]"
+                  connectionManagerID="Package.ConnectionManagers[demo_db]"
+                  connectionManagerRefId="Package.ConnectionManagers[demo_db]"
+                  name="OleDbConnection" />
+              </connections>
+              <inputs>
+                <input
+                  refId="Package\Add region\Find region.Inputs[Lookup Input]"
+                  name="Lookup Input">
+                  <inputColumns>
+                    <inputColumn
+                      refId="Package\Add region\Find region.Inputs[Lookup Input].Columns[region_code]"
+                      cachedDataType="str"
+                      cachedLength="10"
+                      cachedName="region_code"
+                      lineageId="Package\Add region\Read orders.Outputs[OLE DB Source Output].Columns[region_code]">
+                      <properties>
+                        <property
+                          dataType="System.String"
+                          name="JoinToReferenceColumn">region_code</property>
+                        <property
+                          dataType="System.Null"
+                          name="CopyFromReferenceColumn" />
+                      </properties>
+                    </inputColumn>
+                  </inputColumns>
+                  <externalMetadataColumns />
+                </input>
+              </inputs>
+              <outputs>
+                <output
+                  refId="Package\Add region\Find region.Outputs[Lookup Match Output]"
+                  errorOrTruncationOperation="Lookup"
+                  exclusionGroup="1"
+                  name="Lookup Match Output"
+                  synchronousInputId="Package\Add region\Find region.Inputs[Lookup Input]">
+                  <outputColumns>
+                    <outputColumn
+                      refId="Package\Add region\Find region.Outputs[Lookup Match Output].Columns[region_label]"
+                      dataType="str"
+                      length="50"
+                      lineageId="Package\Add region\Find region.Outputs[Lookup Match Output].Columns[region_label]"
+                      name="region_label">
+                      <properties>
+                        <property
+                          dataType="System.String"
+                          name="CopyFromReferenceColumn">region_label</property>
+                      </properties>
+                    </outputColumn>
+                  </outputColumns>
+                  <externalMetadataColumns />
+                </output>
+                <output
+                  refId="Package\Add region\Find region.Outputs[Lookup No Match Output]"
+                  exclusionGroup="1"
+                  name="Lookup No Match Output"
+                  synchronousInputId="Package\Add region\Find region.Inputs[Lookup Input]">
+                  <externalMetadataColumns />
+                </output>
+              </outputs>
+            </component>
+            <component
+              refId="Package\Add region\Write lookup"
+              componentClassID="Microsoft.OLEDBDestination"
+              contactInfo="OLE DB Destination;Microsoft Corporation; Microsoft SQL Server; (C) Microsoft Corporation; All Rights Reserved; http://www.microsoft.com/sql/support;4"
+              name="Write lookup"
+              version="4">
+              <properties>
+                <property
+                  dataType="System.String"
+                  name="OpenRowset">[demo].[lookup_target]</property>
+                <property
+                  dataType="System.Int32"
+                  name="AccessMode"
+                  typeConverter="AccessMode">3</property>
+              </properties>
+              <connections>
+                <connection
+                  refId="Package\Add region\Write lookup.Connections[OleDbConnection]"
+                  connectionManagerID="Package.ConnectionManagers[demo_db]"
+                  connectionManagerRefId="Package.ConnectionManagers[demo_db]"
+                  name="OleDbConnection" />
+              </connections>
+              <inputs>
+                <input
+                  refId="Package\Add region\Write lookup.Inputs[OLE DB Destination Input]"
+                  hasSideEffects="true"
+                  name="OLE DB Destination Input">
+                  <inputColumns>
+                    <inputColumn
+                      refId="Package\Add region\Write lookup.Inputs[OLE DB Destination Input].Columns[order_id]"
+                      cachedDataType="i4"
+                      cachedName="order_id"
+                      externalMetadataColumnId="Package\Add region\Write lookup.Inputs[OLE DB Destination Input].ExternalColumns[order_id]"
+                      lineageId="Package\Add region\Read orders.Outputs[OLE DB Source Output].Columns[order_id]" />
+                    <inputColumn
+                      refId="Package\Add region\Write lookup.Inputs[OLE DB Destination Input].Columns[region_label]"
+                      cachedDataType="str"
+                      cachedLength="50"
+                      cachedName="region_label"
+                      externalMetadataColumnId="Package\Add region\Write lookup.Inputs[OLE DB Destination Input].ExternalColumns[region_label]"
+                      lineageId="Package\Add region\Find region.Outputs[Lookup Match Output].Columns[region_label]" />
+                  </inputColumns>
+                  <externalMetadataColumns
+                    isUsed="True">
+                    <externalMetadataColumn
+                      refId="Package\Add region\Write lookup.Inputs[OLE DB Destination Input].ExternalColumns[order_id]"
+                      dataType="i4"
+                      name="order_id" />
+                    <externalMetadataColumn
+                      refId="Package\Add region\Write lookup.Inputs[OLE DB Destination Input].ExternalColumns[region_label]"
+                      dataType="str"
+                      length="50"
+                      name="region_label" />
+                  </externalMetadataColumns>
+                </input>
+              </inputs>
+            </component>
+          </components>
+          <paths>
+            <path
+              refId="Package\Add region.Paths[OLE DB Source Output]"
+              endId="Package\Add region\Find region.Inputs[Lookup Input]"
+              name="OLE DB Source Output"
+              startId="Package\Add region\Read orders.Outputs[OLE DB Source Output]" />
+            <path
+              refId="Package\Add region.Paths[Lookup Match Output]"
+              endId="Package\Add region\Write lookup.Inputs[OLE DB Destination Input]"
+              name="Lookup Match Output"
+              startId="Package\Add region\Find region.Outputs[Lookup Match Output]" />
+          </paths>
+        </pipeline>
+      </DTS:ObjectData>
+    </DTS:Executable>
+  </DTS:Executables>
+</DTS:Executable>

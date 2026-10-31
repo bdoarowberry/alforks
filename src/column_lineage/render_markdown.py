@@ -52,6 +52,9 @@ STOP_LABEL = {
     "constant": "constant value",
     "parameter_without_caller": "parameter with no caller in the scanned files",
     "max_depth": "maximum depth reached",
+    "external_file": "external file read by an SSIS package",
+    "package_parameter": "SSIS project or package parameter",
+    "package_runtime": "value set by SSIS at run time",
 }
 
 SECTION_TITLES = (
@@ -343,6 +346,12 @@ def _section_identity(t: _Trace, json_name: str | None) -> list[str]:
     if counts:
         scope += "; " + ", ".join(counts)
     rows.append(("Scan scope", scope))
+    packages = scan.get("packages")
+    if isinstance(packages, dict):
+        rows.append(("SSIS packages", (", ".join(_code(r) for r in sorted(map(str, packages.get("roots") or [])))
+                                       or "—") + f"; {packages.get('in_scope', 0)} in scope, "
+                                                 f"{packages.get('excluded', 0)} excluded, "
+                                                 f"{packages.get('scanned', 0)} found"))
 
     parts = []
     if boundary.get("databases"):
@@ -859,6 +868,17 @@ NEXT_EVIDENCE = {
     "cycle": "manual review of the cycle",
     "depth_limit": "manual review; the expression is too deeply nested to analyse",
     "unexplained_end": "manual review of the last step; please report this as a tool defect",
+    "unsupported_package_step": "what the cited SSIS component or task does (script code, component settings), "
+                                "or an assertion for the mapping",
+    "ambiguous_package_copy": "which package copy is deployed and runs (deployment records, catalog or job "
+                              "configuration); then narrow with --package-include / --package-exclude",
+    "package_runtime_value": "the run-time value of the cited variable or expression (execution logs, environment "
+                             "configuration), or an assertion",
+    "package_expression": "the SSIS expression at the cited line, read by hand",
+    "package_metadata": "the cited package element; its metadata links (lineage ids, paths, connections) are "
+                        "incomplete",
+    "package_column_not_mapped": "whether something else sets this column after the load (defaults, triggers, "
+                                 "later UPDATEs); the package leaves it at its default or NULL",
 }
 
 

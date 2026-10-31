@@ -1,0 +1,161 @@
+<?xml version="1.0"?>
+<DTS:Executable xmlns:DTS="www.microsoft.com/SqlServer/Dts"
+  DTS:refId="Package"
+  DTS:CreationName="Microsoft.Package"
+  DTS:DTSID="{6A1F0E00-0000-4000-8004-000000000001}"
+  DTS:ExecutableType="Microsoft.Package"
+  DTS:ObjectName="load_query">
+  <DTS:Property
+    DTS:Name="PackageFormatVersion">8</DTS:Property>
+  <DTS:ConnectionManagers>
+    <DTS:ConnectionManager
+      DTS:refId="Package.ConnectionManagers[source_conn]"
+      DTS:CreationName="OLEDB"
+      DTS:DTSID="{6A1F0E00-0000-4000-8004-0000000000C1}"
+      DTS:ObjectName="source_conn">
+      <DTS:ObjectData>
+        <DTS:ConnectionManager
+          DTS:ConnectionString="Data Source=server_a;Provider=SQLNCLI11.1;Integrated Security=SSPI;" />
+      </DTS:ObjectData>
+    </DTS:ConnectionManager>
+  </DTS:ConnectionManagers>
+  <DTS:Executables>
+    <DTS:Executable
+      DTS:refId="Package\Load query"
+      DTS:CreationName="Microsoft.Pipeline"
+      DTS:DTSID="{6A1F0E00-0000-4000-8004-0000000000E1}"
+      DTS:ExecutableType="Microsoft.Pipeline"
+      DTS:ObjectName="Load query">
+      <DTS:ObjectData>
+        <pipeline
+          version="1">
+          <components>
+            <component
+              refId="Package\Load query\Query orders"
+              componentClassID="Microsoft.OLEDBSource"
+              contactInfo="OLE DB Source;Microsoft Corporation; Microsoft SQL Server; (C) Microsoft Corporation; All Rights Reserved; http://www.microsoft.com/sql/support;7"
+              name="Query orders"
+              version="7">
+              <properties>
+                <property
+                  dataType="System.String"
+                  name="OpenRowset"></property>
+                <property
+                  dataType="System.String"
+                  name="SqlCommand"
+                  UITypeEditor="Microsoft.DataTransformationServices.Controls.ModalMultilineStringEditor">SELECT o.order_id,
+       o.amount * 2 AS doubled_amount
+FROM demo.orders AS o
+WHERE o.status_code = 'A'</property>
+                <property
+                  dataType="System.Int32"
+                  name="AccessMode"
+                  typeConverter="AccessMode">2</property>
+              </properties>
+              <connections>
+                <connection
+                  refId="Package\Load query\Query orders.Connections[OleDbConnection]"
+                  connectionManagerID="Package.ConnectionManagers[source_conn]"
+                  connectionManagerRefId="Package.ConnectionManagers[source_conn]"
+                  name="OleDbConnection" />
+              </connections>
+              <outputs>
+                <output
+                  refId="Package\Load query\Query orders.Outputs[OLE DB Source Output]"
+                  name="OLE DB Source Output">
+                  <outputColumns>
+                    <outputColumn
+                      refId="Package\Load query\Query orders.Outputs[OLE DB Source Output].Columns[order_id]"
+                      dataType="i4"
+                      externalMetadataColumnId="Package\Load query\Query orders.Outputs[OLE DB Source Output].ExternalColumns[order_id]"
+                      lineageId="Package\Load query\Query orders.Outputs[OLE DB Source Output].Columns[order_id]"
+                      name="order_id" />
+                    <outputColumn
+                      refId="Package\Load query\Query orders.Outputs[OLE DB Source Output].Columns[doubled_amount]"
+                      dataType="numeric"
+                      externalMetadataColumnId="Package\Load query\Query orders.Outputs[OLE DB Source Output].ExternalColumns[doubled_amount]"
+                      lineageId="Package\Load query\Query orders.Outputs[OLE DB Source Output].Columns[doubled_amount]"
+                      name="doubled_amount" />
+                  </outputColumns>
+                  <externalMetadataColumns
+                    isUsed="True">
+                    <externalMetadataColumn
+                      refId="Package\Load query\Query orders.Outputs[OLE DB Source Output].ExternalColumns[order_id]"
+                      dataType="i4"
+                      name="order_id" />
+                    <externalMetadataColumn
+                      refId="Package\Load query\Query orders.Outputs[OLE DB Source Output].ExternalColumns[doubled_amount]"
+                      dataType="numeric"
+                      name="doubled_amount" />
+                  </externalMetadataColumns>
+                </output>
+              </outputs>
+            </component>
+            <component
+              refId="Package\Load query\Write query"
+              componentClassID="Microsoft.OLEDBDestination"
+              contactInfo="OLE DB Destination;Microsoft Corporation; Microsoft SQL Server; (C) Microsoft Corporation; All Rights Reserved; http://www.microsoft.com/sql/support;4"
+              name="Write query"
+              version="4">
+              <properties>
+                <property
+                  dataType="System.String"
+                  name="OpenRowset">[demo].[query_target]</property>
+                <property
+                  dataType="System.Int32"
+                  name="AccessMode"
+                  typeConverter="AccessMode">3</property>
+              </properties>
+              <connections>
+                <connection
+                  refId="Package\Load query\Write query.Connections[OleDbConnection]"
+                  connectionManagerID="Package.ConnectionManagers[source_conn]"
+                  connectionManagerRefId="Package.ConnectionManagers[source_conn]"
+                  name="OleDbConnection" />
+              </connections>
+              <inputs>
+                <input
+                  refId="Package\Load query\Write query.Inputs[OLE DB Destination Input]"
+                  hasSideEffects="true"
+                  name="OLE DB Destination Input">
+                  <inputColumns>
+                    <inputColumn
+                      refId="Package\Load query\Write query.Inputs[OLE DB Destination Input].Columns[order_id]"
+                      cachedDataType="i4"
+                      cachedName="order_id"
+                      externalMetadataColumnId="Package\Load query\Write query.Inputs[OLE DB Destination Input].ExternalColumns[order_id]"
+                      lineageId="Package\Load query\Query orders.Outputs[OLE DB Source Output].Columns[order_id]" />
+                    <inputColumn
+                      refId="Package\Load query\Write query.Inputs[OLE DB Destination Input].Columns[doubled_amount]"
+                      cachedDataType="numeric"
+                      cachedName="doubled_amount"
+                      externalMetadataColumnId="Package\Load query\Write query.Inputs[OLE DB Destination Input].ExternalColumns[doubled_amount]"
+                      lineageId="Package\Load query\Query orders.Outputs[OLE DB Source Output].Columns[doubled_amount]" />
+                  </inputColumns>
+                  <externalMetadataColumns
+                    isUsed="True">
+                    <externalMetadataColumn
+                      refId="Package\Load query\Write query.Inputs[OLE DB Destination Input].ExternalColumns[order_id]"
+                      dataType="i4"
+                      name="order_id" />
+                    <externalMetadataColumn
+                      refId="Package\Load query\Write query.Inputs[OLE DB Destination Input].ExternalColumns[doubled_amount]"
+                      dataType="numeric"
+                      name="doubled_amount" />
+                  </externalMetadataColumns>
+                </input>
+              </inputs>
+            </component>
+          </components>
+          <paths>
+            <path
+              refId="Package\Load query.Paths[OLE DB Source Output]"
+              endId="Package\Load query\Write query.Inputs[OLE DB Destination Input]"
+              name="OLE DB Source Output"
+              startId="Package\Load query\Query orders.Outputs[OLE DB Source Output]" />
+          </paths>
+        </pipeline>
+      </DTS:ObjectData>
+    </DTS:Executable>
+  </DTS:Executables>
+</DTS:Executable>

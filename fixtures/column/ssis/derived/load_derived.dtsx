@@ -1,0 +1,243 @@
+<?xml version="1.0"?>
+<DTS:Executable xmlns:DTS="www.microsoft.com/SqlServer/Dts"
+  DTS:refId="Package"
+  DTS:CreationName="Microsoft.Package"
+  DTS:DTSID="{6A1F0E00-0000-4000-8002-000000000001}"
+  DTS:ExecutableType="Microsoft.Package"
+  DTS:ObjectName="load_derived">
+  <DTS:Property
+    DTS:Name="PackageFormatVersion">8</DTS:Property>
+  <DTS:ConnectionManagers>
+    <DTS:ConnectionManager
+      DTS:refId="Package.ConnectionManagers[demo_db]"
+      DTS:CreationName="OLEDB"
+      DTS:DTSID="{6A1F0E00-0000-4000-8002-0000000000C1}"
+      DTS:ObjectName="demo_db">
+      <DTS:ObjectData>
+        <DTS:ConnectionManager
+          DTS:ConnectionString="Data Source=server_a;Initial Catalog=demo_db;Provider=SQLNCLI11.1;Integrated Security=SSPI;" />
+      </DTS:ObjectData>
+    </DTS:ConnectionManager>
+  </DTS:ConnectionManagers>
+  <DTS:Executables>
+    <DTS:Executable
+      DTS:refId="Package\Derive amount"
+      DTS:CreationName="Microsoft.Pipeline"
+      DTS:DTSID="{6A1F0E00-0000-4000-8002-0000000000E1}"
+      DTS:ExecutableType="Microsoft.Pipeline"
+      DTS:ObjectName="Derive amount">
+      <DTS:ObjectData>
+        <pipeline
+          version="1">
+          <components>
+            <component
+              refId="Package\Derive amount\Read orders"
+              componentClassID="Microsoft.OLEDBSource"
+              contactInfo="OLE DB Source;Microsoft Corporation; Microsoft SQL Server; (C) Microsoft Corporation; All Rights Reserved; http://www.microsoft.com/sql/support;7"
+              name="Read orders"
+              version="7">
+              <properties>
+                <property
+                  dataType="System.String"
+                  name="OpenRowset">[demo].[orders]</property>
+                <property
+                  dataType="System.Int32"
+                  name="AccessMode"
+                  typeConverter="AccessMode">0</property>
+              </properties>
+              <connections>
+                <connection
+                  refId="Package\Derive amount\Read orders.Connections[OleDbConnection]"
+                  connectionManagerID="Package.ConnectionManagers[demo_db]"
+                  connectionManagerRefId="Package.ConnectionManagers[demo_db]"
+                  name="OleDbConnection" />
+              </connections>
+              <outputs>
+                <output
+                  refId="Package\Derive amount\Read orders.Outputs[OLE DB Source Output]"
+                  name="OLE DB Source Output">
+                  <outputColumns>
+                    <outputColumn
+                      refId="Package\Derive amount\Read orders.Outputs[OLE DB Source Output].Columns[order_id]"
+                      dataType="i4"
+                      externalMetadataColumnId="Package\Derive amount\Read orders.Outputs[OLE DB Source Output].ExternalColumns[order_id]"
+                      lineageId="Package\Derive amount\Read orders.Outputs[OLE DB Source Output].Columns[order_id]"
+                      name="order_id" />
+                    <outputColumn
+                      refId="Package\Derive amount\Read orders.Outputs[OLE DB Source Output].Columns[amount]"
+                      dataType="numeric"
+                      externalMetadataColumnId="Package\Derive amount\Read orders.Outputs[OLE DB Source Output].ExternalColumns[amount]"
+                      lineageId="Package\Derive amount\Read orders.Outputs[OLE DB Source Output].Columns[amount]"
+                      name="amount" />
+                    <outputColumn
+                      refId="Package\Derive amount\Read orders.Outputs[OLE DB Source Output].Columns[flag]"
+                      dataType="i4"
+                      externalMetadataColumnId="Package\Derive amount\Read orders.Outputs[OLE DB Source Output].ExternalColumns[flag]"
+                      lineageId="Package\Derive amount\Read orders.Outputs[OLE DB Source Output].Columns[flag]"
+                      name="flag" />
+                  </outputColumns>
+                  <externalMetadataColumns
+                    isUsed="True">
+                    <externalMetadataColumn
+                      refId="Package\Derive amount\Read orders.Outputs[OLE DB Source Output].ExternalColumns[order_id]"
+                      dataType="i4"
+                      name="order_id" />
+                    <externalMetadataColumn
+                      refId="Package\Derive amount\Read orders.Outputs[OLE DB Source Output].ExternalColumns[amount]"
+                      dataType="numeric"
+                      name="amount" />
+                    <externalMetadataColumn
+                      refId="Package\Derive amount\Read orders.Outputs[OLE DB Source Output].ExternalColumns[flag]"
+                      dataType="i4"
+                      name="flag" />
+                  </externalMetadataColumns>
+                </output>
+              </outputs>
+            </component>
+            <component
+              refId="Package\Derive amount\Choose amount"
+              componentClassID="Microsoft.DerivedColumn"
+              contactInfo="Derived Column;Microsoft Corporation; Microsoft SQL Server; (C) Microsoft Corporation; All Rights Reserved; http://www.microsoft.com/sql/support;0"
+              description="Creates new column values by applying expressions to transformation input columns."
+              name="Choose amount"
+              usesDispositions="true">
+              <inputs>
+                <input
+                  refId="Package\Derive amount\Choose amount.Inputs[Derived Column Input]"
+                  name="Derived Column Input">
+                  <inputColumns>
+                    <inputColumn
+                      refId="Package\Derive amount\Choose amount.Inputs[Derived Column Input].Columns[order_id]"
+                      cachedDataType="i4"
+                      cachedName="order_id"
+                      lineageId="Package\Derive amount\Read orders.Outputs[OLE DB Source Output].Columns[order_id]"
+                      usageType="readWrite">
+                      <properties>
+                        <property
+                          containsID="true"
+                          dataType="System.String"
+                          name="Expression">#{Package\Derive amount\Read orders.Outputs[OLE DB Source Output].Columns[order_id]} * 10</property>
+                        <property
+                          containsID="true"
+                          dataType="System.String"
+                          name="FriendlyExpression">order_id * 10</property>
+                      </properties>
+                    </inputColumn>
+                    <inputColumn
+                      refId="Package\Derive amount\Choose amount.Inputs[Derived Column Input].Columns[amount]"
+                      cachedDataType="numeric"
+                      cachedName="amount"
+                      lineageId="Package\Derive amount\Read orders.Outputs[OLE DB Source Output].Columns[amount]" />
+                    <inputColumn
+                      refId="Package\Derive amount\Choose amount.Inputs[Derived Column Input].Columns[flag]"
+                      cachedDataType="i4"
+                      cachedName="flag"
+                      lineageId="Package\Derive amount\Read orders.Outputs[OLE DB Source Output].Columns[flag]" />
+                  </inputColumns>
+                  <externalMetadataColumns />
+                </input>
+              </inputs>
+              <outputs>
+                <output
+                  refId="Package\Derive amount\Choose amount.Outputs[Derived Column Output]"
+                  exclusionGroup="1"
+                  name="Derived Column Output"
+                  synchronousInputId="Package\Derive amount\Choose amount.Inputs[Derived Column Input]">
+                  <outputColumns>
+                    <outputColumn
+                      refId="Package\Derive amount\Choose amount.Outputs[Derived Column Output].Columns[chosen_amount]"
+                      dataType="numeric"
+                      errorOrTruncationOperation="Computation"
+                      errorRowDisposition="FailComponent"
+                      lineageId="Package\Derive amount\Choose amount.Outputs[Derived Column Output].Columns[chosen_amount]"
+                      name="chosen_amount"
+                      truncationRowDisposition="FailComponent">
+                      <properties>
+                        <property
+                          containsID="true"
+                          dataType="System.String"
+                          name="Expression">#{Package\Derive amount\Read orders.Outputs[OLE DB Source Output].Columns[flag]} == 1 ? #{Package\Derive amount\Read orders.Outputs[OLE DB Source Output].Columns[amount]} : (DT_NUMERIC,18,2)0</property>
+                        <property
+                          containsID="true"
+                          dataType="System.String"
+                          name="FriendlyExpression">flag == 1 ? amount : (DT_NUMERIC,18,2)0</property>
+                      </properties>
+                    </outputColumn>
+                  </outputColumns>
+                  <externalMetadataColumns />
+                </output>
+              </outputs>
+            </component>
+            <component
+              refId="Package\Derive amount\Write derived"
+              componentClassID="Microsoft.OLEDBDestination"
+              contactInfo="OLE DB Destination;Microsoft Corporation; Microsoft SQL Server; (C) Microsoft Corporation; All Rights Reserved; http://www.microsoft.com/sql/support;4"
+              name="Write derived"
+              version="4">
+              <properties>
+                <property
+                  dataType="System.String"
+                  name="OpenRowset">[demo].[derived_target]</property>
+                <property
+                  dataType="System.Int32"
+                  name="AccessMode"
+                  typeConverter="AccessMode">3</property>
+              </properties>
+              <connections>
+                <connection
+                  refId="Package\Derive amount\Write derived.Connections[OleDbConnection]"
+                  connectionManagerID="Package.ConnectionManagers[demo_db]"
+                  connectionManagerRefId="Package.ConnectionManagers[demo_db]"
+                  name="OleDbConnection" />
+              </connections>
+              <inputs>
+                <input
+                  refId="Package\Derive amount\Write derived.Inputs[OLE DB Destination Input]"
+                  hasSideEffects="true"
+                  name="OLE DB Destination Input">
+                  <inputColumns>
+                    <inputColumn
+                      refId="Package\Derive amount\Write derived.Inputs[OLE DB Destination Input].Columns[order_id]"
+                      cachedDataType="i4"
+                      cachedName="order_id"
+                      externalMetadataColumnId="Package\Derive amount\Write derived.Inputs[OLE DB Destination Input].ExternalColumns[order_id]"
+                      lineageId="Package\Derive amount\Read orders.Outputs[OLE DB Source Output].Columns[order_id]" />
+                    <inputColumn
+                      refId="Package\Derive amount\Write derived.Inputs[OLE DB Destination Input].Columns[chosen_amount]"
+                      cachedDataType="numeric"
+                      cachedName="chosen_amount"
+                      externalMetadataColumnId="Package\Derive amount\Write derived.Inputs[OLE DB Destination Input].ExternalColumns[chosen_amount]"
+                      lineageId="Package\Derive amount\Choose amount.Outputs[Derived Column Output].Columns[chosen_amount]" />
+                  </inputColumns>
+                  <externalMetadataColumns
+                    isUsed="True">
+                    <externalMetadataColumn
+                      refId="Package\Derive amount\Write derived.Inputs[OLE DB Destination Input].ExternalColumns[order_id]"
+                      dataType="i4"
+                      name="order_id" />
+                    <externalMetadataColumn
+                      refId="Package\Derive amount\Write derived.Inputs[OLE DB Destination Input].ExternalColumns[chosen_amount]"
+                      dataType="numeric"
+                      name="chosen_amount" />
+                  </externalMetadataColumns>
+                </input>
+              </inputs>
+            </component>
+          </components>
+          <paths>
+            <path
+              refId="Package\Derive amount.Paths[OLE DB Source Output]"
+              endId="Package\Derive amount\Choose amount.Inputs[Derived Column Input]"
+              name="OLE DB Source Output"
+              startId="Package\Derive amount\Read orders.Outputs[OLE DB Source Output]" />
+            <path
+              refId="Package\Derive amount.Paths[Derived Column Output]"
+              endId="Package\Derive amount\Write derived.Inputs[OLE DB Destination Input]"
+              name="Derived Column Output"
+              startId="Package\Derive amount\Choose amount.Outputs[Derived Column Output]" />
+          </paths>
+        </pipeline>
+      </DTS:ObjectData>
+    </DTS:Executable>
+  </DTS:Executables>
+</DTS:Executable>

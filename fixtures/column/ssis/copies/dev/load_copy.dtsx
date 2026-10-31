@@ -1,0 +1,152 @@
+<?xml version="1.0"?>
+<DTS:Executable xmlns:DTS="www.microsoft.com/SqlServer/Dts"
+  DTS:refId="Package"
+  DTS:CreationName="Microsoft.Package"
+  DTS:DTSID="{6A1F0E00-0000-4000-8006-000000000001}"
+  DTS:ExecutableType="Microsoft.Package"
+  DTS:ObjectName="load_copy">
+  <DTS:Property
+    DTS:Name="PackageFormatVersion">8</DTS:Property>
+  <DTS:ConnectionManagers>
+    <DTS:ConnectionManager
+      DTS:refId="Package.ConnectionManagers[demo_db]"
+      DTS:CreationName="OLEDB"
+      DTS:DTSID="{6A1F0E00-0000-4000-8006-0000000000C1}"
+      DTS:ObjectName="demo_db">
+      <DTS:ObjectData>
+        <DTS:ConnectionManager
+          DTS:ConnectionString="Data Source=server_dev;Initial Catalog=demo_db;Provider=SQLNCLI11.1;Integrated Security=SSPI;" />
+      </DTS:ObjectData>
+    </DTS:ConnectionManager>
+    <DTS:ConnectionManager
+      DTS:refId="Package.ConnectionManagers[file_b]"
+      DTS:CreationName="FLATFILE"
+      DTS:DTSID="{6A1F0E00-0000-4000-8006-0000000000C2}"
+      DTS:ObjectName="file_b">
+      <DTS:ObjectData>
+        <DTS:ConnectionManager
+          DTS:Format="Delimited"
+          DTS:ColumnNamesInFirstDataRow="True"
+          DTS:ConnectionString="D:\dev\inbound\file_b.csv">
+          <DTS:FlatFileColumns>
+            <DTS:FlatFileColumn
+              DTS:ColumnType="Delimited"
+              DTS:ColumnDelimiter="_x000D__x000A_"
+              DTS:MaximumWidth="10"
+              DTS:DataType="129"
+              DTS:ObjectName="code"
+              DTS:DTSID="{6A1F0E00-0000-4000-8006-0000000000D1}"
+              DTS:CreationName="" />
+          </DTS:FlatFileColumns>
+        </DTS:ConnectionManager>
+      </DTS:ObjectData>
+    </DTS:ConnectionManager>
+  </DTS:ConnectionManagers>
+  <DTS:Executables>
+    <DTS:Executable
+      DTS:refId="Package\Load copy"
+      DTS:CreationName="Microsoft.Pipeline"
+      DTS:DTSID="{6A1F0E00-0000-4000-8006-0000000000E1}"
+      DTS:ExecutableType="Microsoft.Pipeline"
+      DTS:ObjectName="Load copy">
+      <DTS:ObjectData>
+        <pipeline
+          version="1">
+          <components>
+            <component
+              refId="Package\Load copy\Read file_b"
+              componentClassID="Microsoft.FlatFileSource"
+              contactInfo="Flat File Source;Microsoft Corporation; Microsoft SQL Server; (C) Microsoft Corporation; All Rights Reserved; http://www.microsoft.com/sql/support;1"
+              name="Read file_b"
+              version="1">
+              <connections>
+                <connection
+                  refId="Package\Load copy\Read file_b.Connections[FlatFileConnection]"
+                  connectionManagerID="Package.ConnectionManagers[file_b]"
+                  connectionManagerRefId="Package.ConnectionManagers[file_b]"
+                  name="FlatFileConnection" />
+              </connections>
+              <outputs>
+                <output
+                  refId="Package\Load copy\Read file_b.Outputs[Flat File Source Output]"
+                  name="Flat File Source Output">
+                  <outputColumns>
+                    <outputColumn
+                      refId="Package\Load copy\Read file_b.Outputs[Flat File Source Output].Columns[code]"
+                      dataType="str"
+                      length="10"
+                      externalMetadataColumnId="Package\Load copy\Read file_b.Outputs[Flat File Source Output].ExternalColumns[code]"
+                      lineageId="Package\Load copy\Read file_b.Outputs[Flat File Source Output].Columns[code]"
+                      name="code" />
+                  </outputColumns>
+                  <externalMetadataColumns
+                    isUsed="True">
+                    <externalMetadataColumn
+                      refId="Package\Load copy\Read file_b.Outputs[Flat File Source Output].ExternalColumns[code]"
+                      dataType="str"
+                      length="10"
+                      name="code" />
+                  </externalMetadataColumns>
+                </output>
+              </outputs>
+            </component>
+            <component
+              refId="Package\Load copy\Write copy"
+              componentClassID="Microsoft.OLEDBDestination"
+              contactInfo="OLE DB Destination;Microsoft Corporation; Microsoft SQL Server; (C) Microsoft Corporation; All Rights Reserved; http://www.microsoft.com/sql/support;4"
+              name="Write copy"
+              version="4">
+              <properties>
+                <property
+                  dataType="System.String"
+                  name="OpenRowset">[demo].[copy_target]</property>
+                <property
+                  dataType="System.Int32"
+                  name="AccessMode"
+                  typeConverter="AccessMode">3</property>
+              </properties>
+              <connections>
+                <connection
+                  refId="Package\Load copy\Write copy.Connections[OleDbConnection]"
+                  connectionManagerID="Package.ConnectionManagers[demo_db]"
+                  connectionManagerRefId="Package.ConnectionManagers[demo_db]"
+                  name="OleDbConnection" />
+              </connections>
+              <inputs>
+                <input
+                  refId="Package\Load copy\Write copy.Inputs[OLE DB Destination Input]"
+                  hasSideEffects="true"
+                  name="OLE DB Destination Input">
+                  <inputColumns>
+                    <inputColumn
+                      refId="Package\Load copy\Write copy.Inputs[OLE DB Destination Input].Columns[code]"
+                      cachedDataType="str"
+                      cachedLength="10"
+                      cachedName="code"
+                      externalMetadataColumnId="Package\Load copy\Write copy.Inputs[OLE DB Destination Input].ExternalColumns[copy_value]"
+                      lineageId="Package\Load copy\Read file_b.Outputs[Flat File Source Output].Columns[code]" />
+                  </inputColumns>
+                  <externalMetadataColumns
+                    isUsed="True">
+                    <externalMetadataColumn
+                      refId="Package\Load copy\Write copy.Inputs[OLE DB Destination Input].ExternalColumns[copy_value]"
+                      dataType="str"
+                      length="10"
+                      name="copy_value" />
+                  </externalMetadataColumns>
+                </input>
+              </inputs>
+            </component>
+          </components>
+          <paths>
+            <path
+              refId="Package\Load copy.Paths[Flat File Source Output]"
+              endId="Package\Load copy\Write copy.Inputs[OLE DB Destination Input]"
+              name="Flat File Source Output"
+              startId="Package\Load copy\Read file_b.Outputs[Flat File Source Output]" />
+          </paths>
+        </pipeline>
+      </DTS:ObjectData>
+    </DTS:Executable>
+  </DTS:Executables>
+</DTS:Executable>

@@ -303,6 +303,12 @@ class PackageCatalog:
         if note:
             notes = notes + [note]
             status = worst(status, INFERRED)
+        if ref.database_source == "unified":
+            notes = notes + [f"The destination's database is unknown; {ref.database} is the only database known for "
+                             f"{ref.schema}.{ref.name}."]
+            status = worst(status, INFERRED)
+        elif ref.database_source == "default":
+            status = worst(status, INFERRED)
         mapping = {}
         for ic in port.columns:
             name = port.external_name(ic)
@@ -424,7 +430,10 @@ class PackageCatalog:
         if ref is None or ref.kind not in ("table", "view"):
             return found
         keys = [ref.key] + self.catalog.aliases_of(ref)
-        dests = [(d, VERIFIED, None) for k in dict.fromkeys(keys) for d in self.destinations.get(k, [])]
+        # A destination named without database context matches only when one database is known for the
+        # name (the catalog's unification rule), so that binding is inferred.
+        dests = [(d, VERIFIED if k == ref.key else INFERRED, None)
+                 for k in dict.fromkeys(keys) for d in self.destinations.get(k, [])]
         extra_gaps: list[Gap] = []
         if ref.database and ref.schema:
             unknown = ObjectRef(ref.name, ref.schema, None, None).key
@@ -438,7 +447,10 @@ class PackageCatalog:
                               {"candidates": dbs})
                     extra_gaps.append(gap)
                     dests.append((d, AMBIGUOUS, gap.id))
-        if not dests:
+        files = self._package_files()
+        package_sql = [s for s in steps if s.target.id == node.id and s.evidence
+                       and (s.evidence[0].root, s.evidence[0].path) in files]
+        if not dests and len({files[(s.evidence[0].root, s.evidence[0].path)] for s in package_sql}) < 2:
             return found
         writing, loading = [], []
         for d, status, gap_id in dests:
@@ -450,12 +462,16 @@ class PackageCatalog:
             s, g = self._destination_steps(node, d, ic)
             for step in s:
                 step.status = worst(step.status, status)
+                if status == INFERRED and d.ref.database is None:
+                    step.notes.append(f"The destination names {d.table_text} without a database; it is matched to "
+                                      f"{ref.display} because that is the only database known for the name.")
                 if gap_id:
                     step.gaps = sorted(set(step.gaps) | {gap_id})
             new_steps.extend(s)
             new_gaps.extend(g)
             new_gaps.extend(d.package.issues)
-        copies = sorted({d.package.label for d, *_ in writing})
+        copies = sorted({d.package.label for d, *_ in writing} |
+                        {files[(s.evidence[0].root, s.evidence[0].path)] for s in package_sql})
         if len(copies) > 1:
             gap = Gap("ambiguous_package_copy",
                       f"{len(copies)} package files in scope write {node.display} ({', '.join(copies)}). They may be "
@@ -465,8 +481,9 @@ class PackageCatalog:
                       [self.evidence(d.package, d.component.line, f"destination {d.component.name} ({d.table_text})",
                                      "destination") for d, *_ in writing][:10],
                       {"copies": copies})
+            gap.evidence.extend(s.evidence[0] for s in package_sql[:5])
             new_gaps.append(gap)
-            for step in new_steps:
+            for step in new_steps + package_sql:
                 if step.target.id == node.id:
                     step.status = worst(step.status, AMBIGUOUS)
                     step.gaps = sorted(set(step.gaps) | {gap.id})
@@ -514,6 +531,10 @@ class PackageCatalog:
                                 f"{d.component.name}: {d.table_text}.{node.name} <- {ic.name}", "destination", [r],
                                 status=d.status, notes=d.notes)
         return [step], gaps
+
+    def _package_files(self) -> dict:
+        """(root label, root-relative path) -> package label, to recognise steps from Execute SQL tasks."""
+        return {(p.root_label, p.rel): p.label for p in self.packages}
 
     # ---------------------------------------------------------- step helpers
     def _step(self, pkg: Package, flow: Flow, comp: Component, target: Node, writer_kind: str, expression: str,
@@ -814,6 +835,7 @@ class PackageCatalog:
             return [step], gaps, []
         inputs, resolved, gaps = [], [], []
         for ref in refs:
+            ref.branch = self._display(flow, ref.branch) if ref.branch else None
             if ref.kind == "literal":
                 inputs.append(Input(Node(CONSTANT, ref.value), VALUE, ref.text, ref.branch))
                 continue

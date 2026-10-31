@@ -105,6 +105,11 @@ def dts(el: El, name: str) -> str | None:
     return None
 
 
+def items(el: El, holder: str, tag: str) -> list[El]:
+    """``<holder><tag/>...</holder>`` children (2012+), or ``<tag/>`` direct children (2008)."""
+    return el.path(holder, tag) + el.findall(tag)
+
+
 def truthy(value: str | None) -> bool:
     return (value or "").strip().lower() in ("true", "-1", "1")
 
@@ -373,21 +378,16 @@ def read_package(data: bytes) -> PackageFile:
     root = parse_xml(data)
     if root.tag != "Executable":
         raise PackageError("not an SSIS package (root element is not DTS:Executable)")
-    fmt = "2012+" if root.get("refId") is not None or dts(root, "PackageFormatVersion") not in (None, "2", "3") \
-        else "2008"
-    if root.get("refId") is None and dts(root, "PackageFormatVersion") is None:
-        fmt = "2008"
+    fmt = "2012+" if root.get("refId") is not None else "2008"
     pkg = PackageFile(fmt, dts(root, "ObjectName") or "Package", [], {}, set(), [], [], [], [], {}, False, [])
     pkg.configurations = any(True for _ in root.iter("Configuration"))
 
-    for holder in root.findall("ConnectionManagers"):
-        for cm in holder.findall("ConnectionManager"):
-            pkg.connections.append(_connection(cm))
-    for holder in root.findall("PackageParameters"):
-        for param in holder.findall("PackageParameter"):
-            name = dts(param, "ObjectName")
-            if name:
-                pkg.parameters.add(f"$Package::{name}")
+    for cm in items(root, "ConnectionManagers", "ConnectionManager"):
+        pkg.connections.append(_connection(cm))
+    for param in items(root, "PackageParameters", "PackageParameter"):
+        name = dts(param, "ObjectName")
+        if name:
+            pkg.parameters.add(f"$Package::{name}")
     _executables(root, None, pkg)
     _setters(root, pkg)
     return pkg
@@ -413,13 +413,12 @@ def _connection(cm: El) -> Connection:
 
 
 def _variables(el: El, pkg: PackageFile) -> None:
-    for holder in el.findall("Variables"):
-        for var in holder.findall("Variable"):
-            name = f"{dts(var, 'Namespace') or 'User'}::{dts(var, 'ObjectName') or '?'}"
-            value_el = var.find("VariableValue")
-            expression = dts(var, "Expression") if truthy(dts(var, "EvaluateAsExpression")) else None
-            pkg.variables.setdefault(name, Variable(name, value_el.text if value_el is not None else None,
-                                                    expression, dts(var, "DTSID"), var.line))
+    for var in items(el, "Variables", "Variable"):
+        name = f"{dts(var, 'Namespace') or 'User'}::{dts(var, 'ObjectName') or '?'}"
+        value_el = var.find("VariableValue")
+        expression = dts(var, "Expression") if truthy(dts(var, "EvaluateAsExpression")) else None
+        pkg.variables.setdefault(name, Variable(name, value_el.text if value_el is not None else None,
+                                                expression, dts(var, "DTSID"), var.line))
 
 
 def _executables(el: El, parent: Task | None, pkg: PackageFile) -> None:
@@ -431,37 +430,35 @@ def _executables(el: El, parent: Task | None, pkg: PackageFile) -> None:
     else:
         parent_task = parent
     _variables(el, pkg)
-    for holder in el.findall("Executables"):
-        for ex in holder.findall("Executable"):
-            name = dts(ex, "ObjectName") or "?"
-            path = f"{parent_task.path}\\{name}"
-            etype = _executable_type(ex)
-            task = Task(ex.get("refId") or path, dts(ex, "DTSID"), name, path, _task_kind(ex, etype, parent_task),
-                        etype, ex.line, truthy(dts(ex, "Disabled")), parent_task, ex, _property_expressions(ex))
-            pkg.tasks.append(task)
-            if task.kind == "data_flow":
-                try:
-                    pkg.flows.append(_flow(task))
-                except PackageError as exc:
-                    pkg.issues.append(("unsupported_package_step", f"Data flow {path} could not be read: {exc}", ex.line))
-            elif task.kind == "execute_sql":
-                sql = _sql_task(task)
-                if sql is not None:
-                    pkg.sql_tasks.append(sql)
-            _executables(ex, task, pkg)
-    for holder in el.findall("PrecedenceConstraints"):
-        for pc in holder.findall("PrecedenceConstraint"):
-            source, target = pc.get("From"), pc.get("To")
-            if source is None or target is None:
-                for ref in pc.findall("Executable"):
-                    if truthy(ref.get("IsFrom")):
-                        source = ref.get("IDREF")
-                    else:
-                        target = ref.get("IDREF")
-            if source and target:
-                pkg.constraints.append(Constraint(source, target, dts(pc, "Value") or "0", dts(pc, "EvalOp"),
-                                                  dts(pc, "Expression"), dts(pc, "LogicalAnd") is None
-                                                  or truthy(dts(pc, "LogicalAnd")), pc.line))
+    for ex in items(el, "Executables", "Executable"):
+        name = dts(ex, "ObjectName") or "?"
+        path = f"{parent_task.path}\\{name}"
+        etype = _executable_type(ex)
+        task = Task(ex.get("refId") or path, dts(ex, "DTSID"), name, path, _task_kind(ex, etype, parent_task),
+                    etype, ex.line, truthy(dts(ex, "Disabled")), parent_task, ex, _property_expressions(ex))
+        pkg.tasks.append(task)
+        if task.kind == "data_flow":
+            try:
+                pkg.flows.append(_flow(task))
+            except PackageError as exc:
+                pkg.issues.append(("unsupported_package_step", f"Data flow {path} could not be read: {exc}", ex.line))
+        elif task.kind == "execute_sql":
+            sql = _sql_task(task)
+            if sql is not None:
+                pkg.sql_tasks.append(sql)
+        _executables(ex, task, pkg)
+    for pc in items(el, "PrecedenceConstraints", "PrecedenceConstraint"):
+        source, target = pc.get("From"), pc.get("To")
+        if source is None or target is None:
+            for ref in pc.findall("Executable"):
+                if truthy(ref.get("IsFrom")):
+                    source = ref.get("IDREF")
+                else:
+                    target = ref.get("IDREF")
+        if source and target:
+            pkg.constraints.append(Constraint(source, target, dts(pc, "Value") or "0", dts(pc, "EvalOp"),
+                                              dts(pc, "Expression"), dts(pc, "LogicalAnd") is None
+                                              or truthy(dts(pc, "LogicalAnd")), pc.line))
 
 
 def _sql_task(task: Task) -> SqlTask | None:
@@ -561,6 +558,9 @@ def _flow(task: Task) -> Flow:
                 (comp.inputs if kind == "input" else comp.outputs).append(port)
                 flow.ports[port.id] = port
         flow.components.append(comp)
+    for col in flow.input_cols.values():
+        if not col.name and col.lineage in flow.lineage:
+            col.name = flow.lineage[col.lineage].name   # 2008 input columns carry no cached name
     for p in pipeline.path("paths", "path"):
         start, end = p.get("startId"), p.get("endId")
         if start in flow.ports and end in flow.ports:
