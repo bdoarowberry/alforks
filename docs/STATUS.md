@@ -149,7 +149,13 @@
   Lookup), 2 binding-order false edges and several hidden runtime unknowns; all fixed with
   regression fixtures in `fixtures/column/ssis_review/` (`tests/test_column_ssis_review.py`).
   Runtime values (parameters, system/expression variables, configurations) are gaps, not stops.
-- Not yet run on real packages.
+- First real run (one production project, 3 packages): the file-to-staging column traces through
+  conversion to the file column, all three links verified against the XML by the tester; unmapped
+  table columns stay `package_column_not_mapped`. Fixed after it: disabled tasks no longer add
+  context gaps to traces through their package; `gap-summary.json` lists anonymized shapes of SSIS
+  expressions the parser rejects (`packages.unparsed_expression_samples`); `compare` accepts file
+  sources (`<file connection>.<column>`) and counts file stops as reached ends.
+- Filegroup clauses on their own (`ON [PRIMARY]`) are non-lineage.
 
 ## Known open issues
 

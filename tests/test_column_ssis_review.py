@@ -285,3 +285,13 @@ def test_gap_summary_stays_nameless_with_review_cases(tmp_path):
         assert name not in text, name
     summary = json.loads(text)["packages"]
     assert summary["disabled_data_flows"] == 1 and summary["unreadable_table_names"] == 1
+
+
+def test_disabled_task_without_targets_is_not_a_gap_on_traces(tmp_path):
+    """Tester round: a disabled audit task in the same package put unsupported_package_step context gaps
+    on every trace through the package. A disabled task does not run as saved: it stays a package issue."""
+    root = REVIEW.parent / "ssis_review" / "disabled_audit"
+    t = trace(REVIEW.parent / "ssis" / "sql", "demo_db.demo.stage.amount", tmp_path, "--package-root", str(root))
+    assert "unsupported_package_step" not in t.gap_kinds
+    assert t.complete
+    assert t.data["scan"]["packages"]["disabled_tasks"] == 1

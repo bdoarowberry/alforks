@@ -74,3 +74,15 @@ def test_diagnostics_rank_statements_by_traces_blocked(tmp_path):
     diagnostics = json.loads((out / "scan-diagnostics.json").read_text(encoding="utf-8"))
     top = diagnostics["statements_blocking_most_traces"][0]
     assert top["traces"] == 2 and top["kinds"] == ["dynamic_sql"] and top["location"].endswith("load.sql:6")
+
+
+def test_comparison_accepts_file_sources(tmp_path):
+    """A known source may be a flat-file column read by a package (`<file connection>.<column>`)."""
+    out = tmp_path / "out"
+    run(FIXTURES / "ssis" / "sql", ["demo_db.demo.stage.amount"], out,
+        "--package-root", str(FIXTURES / "ssis" / "basic"))
+    summary, details = compare(out, [
+        {"target": "demo_db.demo.stage.amount", "label": "C01", "kind": "file load", "sources": ["file_a.source_amount"]},
+    ])
+    [column] = summary["per_column"]
+    assert column["result"] == "exact" and column["sources"] == {"found": 1}

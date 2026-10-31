@@ -14,8 +14,10 @@ expected.json (kept local; it names real objects):
     }
 
 ``target`` is the spec passed to --column (the trace file is found by the same file-name rule).
-``sources`` are the columns the known lineage gives, at the same level as the requested
-boundary. A source may omit the database (schema.table.column) to match any database.
+``sources`` are the terminal sources the known lineage gives for the column. They need not all be at
+the requested boundary: a column may draw from several branches ending in different databases or
+files. A source may omit the database (schema.table.column) to match any database; a flat-file column
+read by an SSIS package is written ``<file connection>.<column>``.
 ``label`` and ``kind`` are free text that goes into the summary, so keep them generic.
 
 For each expected source the comparison reports one of:
@@ -53,7 +55,8 @@ def _norm(value: str) -> str:
 def _matches(node_id: str, expected: str) -> bool:
     node = _norm(node_id)
     want = _norm(expected)
-    return node == want or node.endswith("." + want)
+    # Package file columns are flat_file:<package>::<connection>.<column>: match on the part after "::".
+    return node == want or node.endswith("." + want) or node.endswith("::" + want)
 
 
 def _walk(trace: dict) -> tuple[dict[str, set[str]], set[str], set[str]]:
@@ -120,7 +123,7 @@ def compare_one(expected: dict, trace: dict | None) -> tuple[dict, dict]:
         details["sources"][source] = {"result": result, "matched_nodes": sorted(reached)}
     expected_sources = expected.get("sources", [])
     value_leaves = [n for n in leaves if roles[n] & {"value", "candidate"} and not n.startswith(("constant:", "unknown:"))
-                    and stops.get(n) in ("boundary", "source_without_writer")]
+                    and stops.get(n) in ("boundary", "source_without_writer", "external_file")]
     extra = sorted(n for n in value_leaves if not any(_matches(n, s) for s in expected_sources))
     details["extra"] = extra
     summary.update({

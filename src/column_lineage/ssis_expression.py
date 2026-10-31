@@ -299,3 +299,47 @@ def friendly(text: str, names: dict[str, str]) -> str:
 def lineage_refs(text: str) -> list[str]:
     """Lineage ids written in an expression, found without parsing (for unparseable text)."""
     return [strip_lineage(m.group()) for m in re.finditer(r"#\{[^}]*\}|#\d+", text)]
+
+
+SHAPE_KEEP = re.compile(r"(?:DT_\w+|NULL|ISNULL|REPLACENULL|LEN|TRIM|LTRIM|RTRIM|UPPER|LOWER|SUBSTRING|LEFT|RIGHT|REPLACE|"
+                        r"FINDSTRING|TOKEN|TOKENCOUNT|REVERSE|REPLICATE|CODEPOINT|HEX|ABS|CEILING|FLOOR|ROUND|POWER|SQRT|"
+                        r"EXP|LN|LOG|SIGN|SQUARE|GETDATE|GETUTCDATE|DATEADD|DATEDIFF|DATEPART|DAY|MONTH|YEAR|TRUE|FALSE)$",
+                        re.I)
+
+
+def shape(text: str, error: str | None = None) -> str:
+    """Anonymized shape of an expression for sanitized summaries: column, variable and lineage references
+    become IDn, strings "?" and numbers 0; operators, casts and built-in function names stay. ``<<HERE>>``
+    marks the position named in ``error``. Characters the tokenizer rejects are shown only when they are
+    punctuation."""
+    at = re.search(r" at (\d+)", error or "")
+    mark = int(at.group(1)) if at else None
+    names: dict[str, str] = {}
+    out, pos = [], 0
+    while pos < len(text):
+        if mark is not None and pos >= mark:
+            out.append("<<HERE>>")
+            mark = None
+        m = TOKEN.match(text, pos)
+        if not m:
+            char = text[pos]
+            out.append(char if not char.isalnum() and char != "_" else "?")
+            pos += 1
+            continue
+        kind, value = m.lastgroup, m.group()
+        if kind == "str":
+            out.append('"?"')
+        elif kind == "num":
+            out.append("0")
+        elif kind in ("lineage", "var", "column") or (kind == "ident" and not SHAPE_KEEP.match(value)):
+            names.setdefault(value.lower(), f"ID{len(names) + 1}")
+            out.append(("@" if kind == "var" else "") + names[value.lower()])
+        elif kind != "ws":
+            out.append(value.upper() if kind == "ident" else value)
+        pos = m.end()
+    return " ".join(out)[:300]
+
+
+def error_class(error: str) -> str:
+    """The parser's error without the token text (which may be a name)."""
+    return re.sub(r"'[^']*'|\"[^\"]*\"", "'?'", re.sub(r" at \d+", "", error))[:80]

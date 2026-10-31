@@ -57,6 +57,8 @@ NON_LINEAGE = re.compile(
     r"DROP\s+CONSTRAINT|(?:WITH\s+)?(?:NO)?CHECK|REBUILD|SET\s*\()|"
     # Index options split off a CREATE INDEX / constraint: WITH (PAD_INDEX = OFF, ...) ON [PRIMARY]
     r"WITH\s*\(\s*[A-Za-z_]+\s*=\s*(?:ON|OFF|\d+)\b|"
+    # ... and a filegroup clause on its own: ON [PRIMARY] [TEXTIMAGE_ON [PRIMARY]]
+    r"ON\s+(?:\[[^\]]+\]|[A-Za-z_]\w*)(?:\s*\([^()]*\))?(?:\s+TEXTIMAGE_ON\s+(?:\[[^\]]+\]|[A-Za-z_]\w*))?\s*;?\s*$|"
     r"SET\s+(?:NOCOUNT|XACT_ABORT|ANSI_\w+|QUOTED_IDENTIFIER|ARITHABORT|CONCAT_NULL_YIELDS_NULL|NUMERIC_ROUNDABORT|"
     r"TRANSACTION|IDENTITY_INSERT|DATEFORMAT|DATEFIRST|LANGUAGE|LOCK_TIMEOUT|DEADLOCK_PRIORITY|ROWCOUNT|STATISTICS|"
     r"FMTONLY|NOEXEC|IMPLICIT_TRANSACTIONS|CURSOR_CLOSE_ON_COMMIT|TEXTSIZE|CONTEXT_INFO)\b)", re.I)

@@ -118,6 +118,7 @@ class PackageCatalog:
         self.runtime_targets: dict[str, list] = {}       # object key -> destinations whose table is a run-time value
         self.disabled_destinations: dict[str, list] = {}  # object key -> destinations in disabled data flows
         self.disabled_sql: dict[str, list] = {}           # object name -> disabled tasks whose SQL writes it
+        self.expression_failures: dict[tuple[str, str], int] = {}  # (error class, anonymized shape) -> count
         self._files: dict | None = None
         self._names: dict[int, dict] = {}
         self.file_errors: list[tuple[str, str, str]] = []
@@ -553,7 +554,9 @@ class PackageCatalog:
                     step.gaps = sorted(set(step.gaps) | {gap_id})
             new_steps.extend(s)
             new_gaps.extend(g)
-            new_gaps.extend(d.package.issues)
+            # Package issues are context for its writers, except disabled tasks: they do not run as saved
+            # (they are reported in the package diagnostics and in no-writer stops instead).
+            new_gaps.extend(g for g in d.package.issues if not g.detail.get("disabled"))
         copies = sorted({d.package.label for d, *_ in writing} |
                         {files[(s.evidence[0].root, s.evidence[0].path)] for s in package_sql})
         if len(copies) > 1:
@@ -866,6 +869,11 @@ class PackageCatalog:
         gap = next((g for g in r.gaps if not g.detail.get("raised_in_row_selection")), None)
         return Input(Node(UNKNOWN, expression), role, expression, branch, UNRESOLVED, gap.id if gap else None), []
 
+    def _expression_failed(self, text: str, exc: Exception) -> None:
+        """Remember an anonymized sample of an expression the parser rejected (for gap-summary.json)."""
+        key = (sx.error_class(str(exc)), sx.shape(text, str(exc)))
+        self.expression_failures[key] = self.expression_failures.get(key, 0) + 1
+
     def _gap(self, kind: str, message: str, node: Node | None, pkg: Package, line: int, excerpt: str,
              detail: dict | None = None, row: bool = False) -> Gap:
         detail = dict(detail or {})
@@ -1026,6 +1034,7 @@ class PackageCatalog:
         try:
             refs = sx.references(text)
         except sx.ExpressionError as exc:
+            self._expression_failed(text, exc)
             gap = self._gap("package_expression", f"The expression of {comp.name} could not be parsed ({exc}); the "
                             "columns it reads are not identified.", None, pkg, comp.line, text, row=row)
             label = f"unparsed condition of {comp.name}"
@@ -1130,6 +1139,7 @@ class PackageCatalog:
             refs = sx.references(text, tree)
             operation = sx.operation(tree)
         except sx.ExpressionError as exc:
+            self._expression_failed(text, exc)
             gap = self._gap("package_expression", f"The expression for {col.name} in {comp.name} could not be parsed "
                             f"({exc}); only the lineage ids written in it are shown, without roles.", node, pkg,
                             prop.line, shown)
@@ -1584,6 +1594,7 @@ class PackageCatalog:
                 refs = sx.references(var.expression)
                 operation = sx.operation(sx.parse(var.expression))
             except sx.ExpressionError as exc:
+                self._expression_failed(var.expression, exc)
                 gaps.append(self._gap("package_expression", f"The expression of variable {name} could not be parsed "
                                       f"({exc}).", node, pkg, line, var.expression))
                 return [], gaps, []
@@ -1668,7 +1679,11 @@ class PackageCatalog:
                 "execute_sql_indexed": self.counts["execute_sql_indexed"], "components_by_class": known,
                 **{k: self.counts[k] for k in ("disabled_data_flows", "disabled_tasks", "unreadable_table_names",
                                                "duplicate_paths", "oledb_commands", "execute_package_tasks")},
-                "package_issues_by_kind": dict(sorted(issues.items()))}
+                "package_issues_by_kind": dict(sorted(issues.items())),
+                # Anonymized shapes of expressions the parser rejected (IDn for names, "?" for strings).
+                "unparsed_expression_samples": [
+                    {"error_class": error, "anonymized_expression": text, "count": n}
+                    for (error, text), n in sorted(self.expression_failures.items(), key=lambda kv: -kv[1])[:10]]}
 
 
 class _TaskOnly:
