@@ -239,3 +239,15 @@
 - Handback package for the tester LLM:
   - how to run;
   - how to send back `gap-summary.json`.
+
+## After the tester's review of overview v2
+
+- Assertion provenance: assertions record `origin` (ai_assisted / person) and `review` (unreviewed /
+  reviewed); pages say "recorded in an assertions file, not proved from code" plus who made it and its
+  review state, or "not recorded" (no longer "a person's statement").
+- Mermaid labels carry no entity codes (`#`, `|`, brackets render raw; checked with Mermaid 10 in a
+  browser); identifiers are no longer cut short in tables; the "more families" node is labelled as a
+  summary, not a source.
+- Plain answer = three bullets: headline, sources with family links (each named once), value rules.
+  A scope-complete trace with unproven origins leads with "Trace stopped at unresolved sources".
+

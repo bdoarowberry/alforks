@@ -304,6 +304,7 @@ class TraceResult:
     target_gaps: list[str] = field(default_factory=list)
     resolved_gaps: list[dict] = field(default_factory=list)   # gaps explained by assertions (kept, not deleted)
     assertions_used: list[str] = field(default_factory=list)
+    assertion_provenance: dict = field(default_factory=dict)   # id -> who made it, review status
 
     def add_node(self, node: Node) -> str:
         self.nodes.setdefault(node.id, node)
@@ -444,6 +445,7 @@ class TraceResult:
             "cycles": sorted(self.cycles),
             "resolved_gaps": sorted(self.resolved_gaps, key=lambda g: (g["kind"], g["id"])),
             "assertions_used": sorted(set(self.assertions_used)),
+            "assertion_provenance": [self.assertion_provenance[k] for k in sorted(self.assertion_provenance)],
         }
 
 

@@ -54,7 +54,7 @@ import re
 import sys
 
 from .render_markdown import (NEXT_EVIDENCE, SECTION_ANCHORS, _anchor, _cell, _code, _link_target, _one_line,
-                              _plural, _status_rank, _text, _Trace, _truncate)
+                              _plural, _status_rank, _text, _Trace, _truncate, assertion_provenance_text)
 
 INDEX_SCHEMA = "column-lineage-routes/1.0"
 FAMILY_SCHEMA = "column-lineage-route-families/1.0"
@@ -81,8 +81,9 @@ DETAIL_FAMILY_ROUTES = 25    # member routes listed per family on the detailed p
 LABEL_LIMIT = 60             # characters of a branch label
 CONDITION_LIMIT = 90         # characters of a row-selection condition
 CONSTANT_LIMIT = 30          # characters of a constant shown as a value
-NAME_LIMIT = 90              # characters of an object or column name
-DIAGRAM_NAME_LIMIT = 60      # characters of a name inside a diagram node
+NAME_LIMIT = 200             # characters of an object or column name (tables keep identifiers whole)
+DIAGRAM_NAME_LIMIT = 110     # characters of a name inside a diagram node
+DIAGRAM_RULE_LIMIT = 140     # characters of an edge label (the family table has the full rule)
 ROUTE_CAP = 400              # distinct object sequences kept per node while enumerating routes
 END_LABEL_CAP = 6            # branch labels kept per end while enumerating routes
 INDEX_MAX_SHARED = 25        # shared objects / writers listed per group in routes-index.md
@@ -113,7 +114,7 @@ STATUS_TEXT = {
 STATUS_SHORT = {
     "verified": "verified (proved from code)",
     "inferred": "inferred (rule-based, not proved by explicit code)",
-    "asserted": "asserted (a person's statement, not code)",
+    "asserted": "asserted (recorded in an assertions file, not proved from code)",
     "partial": "partial (some inputs not proved)",
     "ambiguous": "ambiguous (candidates, none proved)",
     "unresolved": "unresolved",
@@ -121,7 +122,7 @@ STATUS_SHORT = {
 FAMILY_STATUS_TEXT = {
     "verified": "verified (proved from code)",
     "inferred": "inferred (rule-based, not proved by explicit code)",
-    "asserted": "asserted (a person's statement, not code)",
+    "asserted": "asserted (recorded in an assertions file, not proved from code)",
     "partial": "partial (an open point or unproved input on the way)",
     "ambiguous": "ambiguous (candidates or run order not proved)",
     "unresolved": "unresolved (not proved)",
@@ -139,7 +140,7 @@ ROW_TEXT = {
 STATUS_MEANING = {
     "inferred": "inferred = bound by a stated rule (column position, default schema or database, a caller's "
                 "temp table, evaluated dynamic SQL), not by explicit code",
-    "asserted": "asserted = stated by a person in an assertions file, not proved from code",
+    "asserted": "asserted = a mapping recorded in an assertions file (AI-assisted or by a person; see the assertion), not proved from code",
     "partial": "partial = some inputs of the step are not proved",
     "ambiguous": "ambiguous = several candidates, none proved",
     "unresolved": "unresolved = no binding could be established",
@@ -186,7 +187,7 @@ END_ORDER = ("boundary", "declared", "source_without_writer", "external_file", "
 
 # Value-rule tags of a route family, in display order: (short label, phrase).
 RULE_TAGS = {
-    "assertion": ("asserted mapping", "an asserted mapping (a person's statement, not code)"),
+    "assertion": ("asserted mapping", "an asserted mapping (recorded in an assertions file, not code)"),
     "override": ("override (later UPDATE)", "overwritten by an UPDATE that runs after the other writers"),
     "override_unordered": ("UPDATE (run order not proved)",
                            "an UPDATE that may overwrite other writers (run order not proved)"),
@@ -1081,7 +1082,22 @@ def _no_route_sentence(a: Analysis) -> str:
     return "No writer of this field could be established in the selected sources; its value is not traced."
 
 
-def _section_answer(a: Analysis) -> list[str]:
+def _answer_headline(a: Analysis, unproven: int, total: int) -> str:
+    """The first words a reader sees: where proof stands, never "complete" alone when origins are unproven."""
+    comp = a.comp
+    boundary = sum(f["route_count"] for f in a.families if f["role"] == "value" and f["stop"] == "boundary")
+    if comp.get("status") != "complete":
+        return f"**{_result_head(a)}.**"
+    if comp.get("result") == "complete_within_selected_scope" and unproven:
+        where = ("no route reaches the requested boundary" if not boundary else
+                 f"{_plural(boundary, 'route')} {'reaches' if boundary == 1 else 'reach'} the requested boundary")
+        return (f"**Trace stopped at unresolved sources:** {unproven} of {_plural(total, 'route')} end where no "
+                f"writer, file producer or caller was found, so the origin is not proved there; {where}. "
+                "(Technically complete within the selected sources: no open point inside them.)")
+    return f"**{_result_head(a)}.**"
+
+
+def _section_answer(a: Analysis, detailed: str = "") -> list[str]:
     if not a.families:
         return [_no_route_sentence(a)]
     value_fams = [f for f in a.families if f["role"] == "value"]
@@ -1105,31 +1121,59 @@ def _section_answer(a: Analysis) -> list[str]:
         else:
             text = _group_text(source)
         rules = [ANSWER_WORDS.get(h, h) for h in sorted(group["headlines"], key=_headline_rank)]
-        names.append(f"{text} ({', '.join(rules)})")
+        links = ", ".join(_fam_link(f, detailed) for f in group["fams"][:4]) + (", …" if len(group["fams"]) > 4 else "")
+        names.append(f"{text} ({', '.join(rules)}; {links})")
     more = len(ordered) - MAX_ANSWER_SOURCES
-    sources = _and_list(names, MAX_ANSWER_SOURCES) if more <= 0 else ", ".join(names) + f" and {_plural(more, 'more source family', 'more source families')}"
+    sources = "; ".join(names) + (f"; and {_plural(more, 'more source family', 'more source families')} "
+                                  "(see Route families)" if more > 0 else "")
+    total = sum(f["route_count"] for f in value_fams)
+    unproven = sum(f["route_count"] for f in value_fams
+                   if f["stop"] in ("source_without_writer", "external_file", "parameter_without_caller"))
     def routes(test) -> int:
         return sum(f["route_count"] for f in value_fams if test(f["stop"]))
-    parts = []
+    stops = []
     for n, one, many in (
-            (routes(lambda s: s in ("source_without_writer", "external_file", "parameter_without_caller")),
-             "ends where no writer, file producer or caller was found", "end where no writer, file producer or caller "
-             "was found"),
             (routes(lambda s: s.startswith("gap:") or s == "open"), "stops at an open point", "stop at open points"),
             (routes(lambda s: s == "cycle"), "stops at a loop", "stop at loops"),
             (routes(lambda s: s == "max_depth"), "is cut at the depth limit", "are cut at the depth limit"),
             (routes(lambda s: s == "declared"), "ends at a terminal declared for this run (upstream not traced)",
              "end at terminals declared for this run (upstream not traced)")):
         if n:
-            parts.append(f"{_plural(n, 'route')} {one if n == 1 else many}")
-    first = f"{_result_head(a)}: the value is traced back to {sources or 'no value source (conditions only)'}"
-    if parts:
-        first += " — " + _and_list(parts, 5) + ", so the origin is not proved there"
-    out = [first + "."]
-    changes = _answer_changes(a)
-    if changes:
-        out.append(_sentence("value rules that change the result: " + "; ".join(changes)))
-    return [" ".join(out)]
+            stops.append(f"{_plural(n, 'route')} {one if n == 1 else many}")
+    if unproven and a.comp.get("result") != "complete_within_selected_scope":
+        stops.insert(0, f"{_plural(unproven, 'route')} {'ends' if unproven == 1 else 'end'} where no writer, file "
+                        "producer or caller was found, so the origin is not proved there")
+    out = [f"- {_answer_headline(a, unproven, total)}" + (f" Also: {_and_list(stops, 5)}." if stops else ""),
+           f"- **Sources:** {sources or 'no value source (conditions only)'}."]
+    rules = _answer_rules(a)
+    if rules:
+        out.append(f"- **Value rules:** {'; '.join(rules)} — details under What changes the value.")
+    return out
+
+
+def _answer_rules(a: Analysis) -> list[str]:
+    """The kinds of rule that change the value, without repeating the columns named under Sources."""
+    tags = {tg for f in a.families if f["role"] in ("value", "condition") for tg in f["value_rule"]}
+    out = []
+    if {"case_when", "case_else"} & tags or any(f["role"] == "condition" for f in a.families):
+        consts = sorted({_code((a.t.nodes.get(n) or {}).get("name") or n, CONSTANT_LIMIT) for f in a.families
+                         if f["source"]["kind"] == "constant" and {"case_when", "case_else"} & set(f["value_rule"])
+                         for n in f["ends"]})
+        out.append("a CASE/IIF choice picks between the alternatives"
+                   + (f" (it can set {_limited(consts, 2)})" if consts else ""))
+    if any(tg.startswith("fallback") for tg in tags):
+        out.append("a COALESCE/ISNULL fallback when earlier values are null")
+    if "override" in tags:
+        out.append("a later UPDATE overwrites the rows it matches")
+    if "override_unordered" in tags:
+        out.append("an UPDATE may overwrite the value (run order not proved)")
+    if {"merge_update", "merge_insert"} & tags:
+        out.append("a MERGE writes matched and new rows")
+    if "package" in tags:
+        out.append("package transformations on file or package routes")
+    if {"aggregate", "window_calc"} & tags:
+        out.append("aggregation over rows")
+    return out[:5]
 
 
 def _answer_changes(a: Analysis) -> list[str]:
@@ -1214,8 +1258,9 @@ def _section_coverage(a: Analysis, detailed: str) -> list[str]:
             "complete_to_declared_boundary": "**Complete to terminals declared for this run** — how they are "
                                              "populated upstream is not proved",
             "complete_to_requested_depth": "**Cut at the requested depth** on some routes — not traced further",
-            "complete_within_selected_scope": "**Complete only within the selected sources** — every route ends at "
-                                              "a stop, but the unresolved origins below are not proved"}.get(
+            "complete_within_selected_scope": "**Trace stopped at unresolved sources** — technically complete "
+                                              "within the selected sources (every route ends at a stop), but the "
+                                              "unresolved origins below are not proved"}.get(
             comp.get("result"), _text(comp.get("result") or "complete"))
     statuses = comp.get("steps_by_status") or {}
     step_text = ", ".join(f"{statuses.get(s, 0)} {s}" for s in ("verified", "inferred", "asserted"))
@@ -1297,12 +1342,14 @@ def _section_evidence_needed(a: Analysis, detailed: str) -> list[str]:
 
 # --------------------------------------------------------------------------- 5. route families diagram
 
-_MERMAID_SAFE = {'"': "#34;", "|": "#124;", "[": "#91;", "]": "#93;", "{": "#123;", "}": "#125;", "<": "#60;",
-                 ">": "#62;", "`": "#96;", "#": "#35;", "&": "#38;", ";": ",", "…": "...", "←": "from", "\\": "/"}
+# Inside a quoted Mermaid label, # | [ ] { } & and backticks render as written (checked with Mermaid 10
+# in a browser); only a quote ends the label, "#name;" is read as an entity and < > are HTML. Readable
+# substitutes keep the diagram source legible for people who read it unrendered.
+_MERMAID_SAFE = {'"': "'", ";": ",", "<": "‹", ">": "›", "…": "...", "←": "from", "\\": "/"}
 
 
 def mermaid_text(value) -> str:
-    """Text safe inside a quoted Mermaid label: quotes, pipes, brackets and braces become entity codes."""
+    """Text safe inside a quoted Mermaid label, with no entity codes."""
     return "".join(_MERMAID_SAFE.get(ch, ch) for ch in _one_line(value))
 
 
@@ -1332,7 +1379,7 @@ def _diagram_edge_label(fam: dict) -> str:
     text = f"{fam['value_rule_text']} - {fam['stop_text']}"
     if fam["status"] != "verified":
         text += f" - {fam['status']}"
-    return mermaid_text(_truncate(text, 80))
+    return mermaid_text(_truncate(text, DIAGRAM_RULE_LIMIT))
 
 
 def family_mermaid(a: Analysis) -> list[str]:
@@ -1351,9 +1398,16 @@ def family_mermaid(a: Analysis) -> list[str]:
     rest = a.families[MAX_DIAGRAM_FAMILIES:]
     if rest:
         routes = sum(f["route_count"] for f in rest)
-        lines.append(f'  MORE["{mermaid_text(f"{len(rest)} more families, {routes} routes: see the detailed page")}"] -.- T')
+        kinds = Counter(_end_short(f["stop"] if not f["stop"].startswith("gap:") else "gap") for f in rest)
+        what = ", ".join(f"{n} {k}" for k, n in kinds.most_common(3))
+        label = (f"Summary, not a source: {len(rest)} more route families ({routes} routes; {what}) - "
+                 "each listed in the family table below")
+        lines.append(f'  MORE["{mermaid_text(label)}"] -.- T')
     lines.append("  classDef target stroke-width:3px")
     lines.append("  class T target")
+    if rest:
+        lines.append("  classDef summary stroke-dasharray:6 4")
+        lines.append("  class MORE summary")
     for kind, style in (("unresolved", "stroke-dasharray:5 3"), ("declared", "stroke-dasharray:2 2"),
                         ("constant", "stroke-dasharray:1 3")):
         if classes.get(kind):
@@ -1631,11 +1685,12 @@ def _section_uncertainty(a: Analysis, detailed: str) -> list[str]:
         ids = ", ".join(_code(i) for i in sorted(data.get("assertions_used") or [])) or "—"
         out.append(f"- **Assertions:** relies on {_plural(asserted, 'asserted step')} (assertion ids {ids}"
                    + (f"; record: {', '.join(f'[{_text(f)}]({_link_target(f)})' for f in files)}" if files else "")
-                   + ") — a person's statement, not proved from code"
+                   + ") — mappings recorded in an assertions file, not proved from code ("
+                   + assertion_provenance_text(data) + ")"
                    + (f"; {_plural(comp['gaps_resolved_by_assertions'], 'gap')} marked explained by them"
                       if comp.get("gaps_resolved_by_assertions") else "") + ".")
     else:
-        out.append("- **Assertions:** none used; nothing here rests on a person's statement.")
+        out.append("- **Assertions:** none used; nothing here rests on an asserted mapping.")
     counts = _end_kinds(a)
     no_writer, files = counts.get("source_without_writer", 0), counts.get("external_file", 0)
     if no_writer or files:
@@ -1828,7 +1883,7 @@ def render_overview(data: dict, json_name: str | None = None, glossary: list[dic
     out = [f"# Column overview: {_code(a.t.display(a.t.target_id))}", ""]
     sections = (
         ("Field and definition", _section_field(a, entry, others)),
-        ("Plain answer", _section_answer(a)),
+        ("Plain answer", _section_answer(a, detailed)),
         ("Coverage", _section_coverage(a, detailed)),
         ("Main evidence needed", _section_evidence_needed(a, detailed)),
         ("Route families", _section_families(a, detailed)),
@@ -1981,7 +2036,7 @@ def build_index(items: list[dict], glossary: list[dict] | None = None) -> dict:
         "note": "What to look at first, by the number of columns affected. Unresolved origins are ends with no "
                 "writer in the selected sources, external files, parameters without callers, depth cuts, loops "
                 "and open points (declared terminals are listed too: their upstream is not proved). Assertions "
-                "are a person's statements awaiting review, not code. Definitions are awaiting owner approval when "
+                "are recorded mappings awaiting independent review (unless the assertions file marks them reviewed), not code. Definitions are awaiting owner approval when "
                 "the glossary has no approved entry.",
         "unresolved_origins": by_count(list(unresolved.values())),
         "ambiguous_writer_order": by_count(list(writer_order.values())),
@@ -2057,7 +2112,7 @@ def _render_attention(index: dict, member) -> list[str]:
     out += ["", f"### Assertions awaiting review ({len(rows)})", ""]
     if rows:
         for row in rows[:INDEX_MAX_ATTENTION]:
-            out.append(f"- assertion {_code(row['assertion'])} (a person's statement, not code); {columns(row)}")
+            out.append(f"- assertion {_code(row['assertion'])} (recorded mapping, not code); {columns(row)}")
         if len(rows) > INDEX_MAX_ATTENTION:
             out.append(f"- and {len(rows) - INDEX_MAX_ATTENTION} more — see routes-index.json")
     else:

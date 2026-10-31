@@ -24,7 +24,7 @@ Options that matter on real estates:
 | Linked servers that point at scanned databases | `--local-server NAME` |
 | Leave out copies that are not on the execution path | `--exclude GLOB` |
 | SSIS packages | `--package-root DIR`, `--package-include/--package-exclude GLOB` (select the deployed copies), `--connection-map NAME=DB` (only when documented) |
-| Steps the code cannot prove (dynamic SQL, external loads) | `--assertions FILE` (code-reviewed, each scoped to a writer) |
+| Steps the code cannot prove (dynamic SQL, external loads) | `--assertions FILE` (each scoped to a writer; record `origin`: ai_assisted or person, and `review`: unreviewed or reviewed; pages show both, or "not recorded") |
 | Sources the reviewer accepts as terminals for this investigation | `--declared-terminals FILE` |
 | Where to stop | `--stop-at-database DB`, `--stop-at-object GLOB` |
 | Run order fixed by an entry procedure's calls | `--entry-point PROCEDURE` |

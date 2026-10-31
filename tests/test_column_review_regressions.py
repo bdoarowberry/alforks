@@ -354,3 +354,22 @@ def test_writer_glued_after_non_lineage_statements_is_not_dropped(tmp_path):
     t = review("condition_then_writer", "db1.schema1.destination.note", tmp_path)
     assert t.steps_for(t.target_id) or t.gap_kinds & {"parse_error", "unsupported_statement"}
     assert (t.target_id, "source_without_writer") not in t.stop_pairs()
+
+
+def test_assertion_provenance_is_shown_not_assumed(tmp_path):
+    """Assertions may be AI-assisted and unreviewed: pages say who made them and whether they were
+    reviewed, as the file records it, and "not recorded" when it does not (never "a person's statement")."""
+    root = FIXTURES / "review" / "assert_dynamic"
+    data = json.loads((root / "assertions.json").read_text(encoding="utf-8"))
+    plain = review("assert_dynamic", "demo.output.result_value", tmp_path / "a", *DB, "--assertions", str(root / "assertions.json"))
+    page = (tmp_path / "a" / "demo.output.result_value.overview.md").read_text(encoding="utf-8")
+    assert "not recorded" in page and "a person's statement" not in page
+    for item in data["assertions"]:
+        item.update({"origin": "ai_assisted", "review": "unreviewed"})
+    marked = tmp_path / "marked.json"
+    marked.write_text(json.dumps(data), encoding="utf-8")
+    t = review("assert_dynamic", "demo.output.result_value", tmp_path / "b", *DB, "--assertions", str(marked))
+    assert t.data["assertion_provenance"][0]["origin"] == "ai_assisted"
+    for name in ("demo.output.result_value.overview.md", "demo.output.result_value.lineage.md"):
+        text = (tmp_path / "b" / name).read_text(encoding="utf-8")
+        assert "AI-assisted" in text and "not independently reviewed" in text

@@ -265,6 +265,7 @@ class Tracer:
         for assertion in assertions:
             self.assertions_seen.add(assertion.id)
             result.assertions_used.append(assertion.id)
+            result.assertion_provenance[assertion.id] = assertion.provenance()
             evidence = Evidence(assertion.source, assertion.line, assertion.line,
                                 (assertion.reason or "asserted mapping")[:240], "assertion", None, None)
             for i, alt in enumerate(assertion.alternatives, 1):

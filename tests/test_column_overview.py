@@ -129,7 +129,7 @@ MERMAID_NODE = re.compile(
     r'(?P<close>"\)\]|"/\]|"\]\)|"\]\]|"\}\}|"\])'
     r'(?: (?P<arrow>-->|-\.->|-\.-)(?:\|"(?P<edge>[^"]*)"\|)? (?P<to>[A-Za-z][A-Za-z0-9_]*))?$')
 MERMAID_STYLE = re.compile(r"^  (classDef [a-z]+ [a-z0-9:\- ]+|class [A-Za-z0-9,]+ [a-z]+)$")
-MERMAID_SAFE = re.compile(r"^[\w .,:'()/?@$*+=%!~-]*$")  # letters of any script are fine
+MERMAID_SAFE = re.compile(r"^[\w .,:'()/?@$*+=%!~\-#|\[\]{}&`‹›]*$")   # characters checked to render raw
 
 
 def mermaid_block(md: str) -> list[str]:
@@ -140,7 +140,7 @@ def mermaid_block(md: str) -> list[str]:
 
 def check_mermaid(lines: list[str]) -> dict[str, dict]:
     """A small validator for the family diagram: fenced flowchart LR, one statement per line, known shapes,
-    balanced quotes, labels made only of safe characters and entity codes, unique ids, every edge into T."""
+    balanced quotes, labels made only of characters that render raw (no entity codes), unique ids, every edge into T."""
     assert lines[0] == "```mermaid" and lines[1] == "flowchart LR" and lines[-1] == "```", lines[:2]
     nodes: dict[str, dict] = {}
     for line in lines[2:-1]:
@@ -151,8 +151,8 @@ def check_mermaid(lines: list[str]) -> dict[str, dict]:
         assert match, f"not a valid statement: {line!r}"
         assert MERMAID_SHAPES[match["open"]] == match["close"], line
         for text in (match["label"], match["edge"] or ""):
-            plain = re.sub(r"#[a-z0-9]+;", "", text)
-            assert MERMAID_SAFE.match(plain), f"unsafe label characters in {text!r}"
+            assert not re.search(r"#\w+;", text), f"entity code or entity-like text in {text!r}"
+            assert MERMAID_SAFE.match(text), f"unsafe label characters in {text!r}"
         assert match["id"] not in nodes, f"duplicate id {match['id']}"
         nodes[match["id"]] = {"shape": match["open"], "label": match["label"], "arrow": match["arrow"],
                               "edge": match["edge"], "to": match["to"]}
@@ -244,7 +244,7 @@ def test_no_writer_end_never_reads_as_confirmed_source(tmp_path):
     run(fixture("case_choice"), "demo.output.result_value", tmp_path)
     md = overview(tmp_path, "demo.output.result_value")
     answer, coverage = section(md, "Plain answer"), section(md, "Coverage")
-    assert answer.strip().startswith("Complete only within the selected sources:")
+    assert answer.strip().startswith("- **Trace stopped at unresolved sources:**")
     assert "where no writer, file producer or caller was found, so the origin is not proved there" in answer
     assert "it is not an originating system" in coverage
     assert "unresolved origin even when the step reaching it is verified" in coverage
@@ -279,12 +279,12 @@ def test_inferred_and_asserted_are_never_shown_as_proved():
     # Different evidence status: separate families, and the diagram says so on the edge.
     families = {row[1]: row for row in table_rows(md, "Route families")}
     assert "inferred (rule-based" in families["DB: `db.s.a.x`"][4]
-    assert "asserted (a person" in families["DB: `db.s.b.y`"][4]
+    assert "asserted (recorded in an assertions file" in families["DB: `db.s.b.y`"][4]
     edges = "\n".join(mermaid_block(md))
     assert '- inferred"| T' in edges and 'asserted mapping - upstream writer unknown - asserted"| T' in edges
     rows = end_rows(md)
     assert "inferred (rule-based, not proved by explicit code)" in rows["a.x"] and "verified" not in rows["a.x"]
-    assert "asserted (a person's statement, not code)" in rows["b.y"] and "verified" not in rows["b.y"]
+    assert "asserted (recorded in an assertions file, not proved from code)" in rows["b.y"] and "verified" not in rows["b.y"]
     routes = section(md, "Routes: how the value arrives")
     assert "verified" not in routes
     assert "assertions file assertions.json (asserted, not code)" in routes
@@ -476,7 +476,7 @@ def test_overview_short_with_thousands_of_writers(tmp_path):
                                   f"CREATE PROCEDURE demo.load_rows AS\nBEGIN\n{rows}\nEND\nGO\n", encoding="utf-8")
     run(sql, "demo.demo.target.val", tmp_path / "out", "--default-database", "demo", "--jobs", "1")
     page = overview(tmp_path / "out", "demo.demo.target.val")
-    assert len(page.splitlines()) < MAX_LINES and f"{n} constants such as `'v0'` and `'v1'` (direct)" in section(page, "Plain answer")
+    assert len(page.splitlines()) < MAX_LINES and f"{n} constants such as `'v0'` and `'v1'` (direct; [F1]" in section(page, "Plain answer")
     assert f"{n} value routes in 1 route family" in section(page, "Coverage")
     assert "And 1490 more end points (constant: 1490)" in page
 
@@ -512,22 +512,22 @@ def test_first_screen_answers_what_feeds_where_proof_stops_and_what_is_assumed(t
     assert "**Definition not approved.**" in field
     # What feeds it: every source family, with the rules that change the value.
     answer = section(md, "Plain answer")
-    assert answer.count(". ") + answer.strip().endswith(".") <= 2  # one or two sentences
-    assert answer.strip().startswith("Complete only within the selected sources: the value is traced back to "
-                                     "`core_db.crm` (primary, fallback, later UPDATE override)")
-    for family in ("the constant `0` (CASE branch)", "file connection `limit_feed` read by package "
-                   "`load_file_limit.dtsx` (package mapping)", "`partner_db.stage` (direct)"):
+    lines = [l for l in answer.strip().splitlines() if l.strip()]
+    assert len(lines) <= 3 and all(l.startswith("- **") for l in lines)   # two or three short bullets
+    assert lines[0].startswith("- **Trace stopped at unresolved sources:** 5 of 6 routes end where no writer")
+    assert "no route reaches the requested boundary" in lines[0]
+    assert lines[1].startswith("- **Sources:** `core_db.crm` (primary, fallback, later UPDATE override; [F")
+    for family in ("the constant `0` (CASE branch; [F", "file connection `limit_feed` read by package "
+                   "`load_file_limit.dtsx` (package mapping; [F", "`partner_db.stage` (direct; [F"):
         assert family in answer
-    assert "COALESCE/ISNULL falls back to `core_db.crm.account.default_limit`" in answer
-    assert "an UPDATE that runs after the other writers overwrites the rows it matches" in answer
-    assert "can set the constant `0`" in answer
-    # Where proof stops.
-    assert "5 routes end where no writer, file producer or caller was found, so the origin is not proved there" in answer
+    assert "a COALESCE/ISNULL fallback" in lines[2] and "a later UPDATE overwrites the rows it matches" in lines[2]
+    assert "it can set `0`" in lines[2]
+    assert "core_db.crm.account" not in lines[2]                        # columns are named once, under Sources
     coverage = section(md, "Coverage")
     assert ("7 value routes in 7 route families · 0 at the requested boundary · 0 declared terminals · 6 unresolved "
             "origins (5 with no writer in the selected sources, 1 external file) · 1 constant · steps: 7 verified, "
             "0 inferred, 0 asserted") in coverage
-    assert "**Complete only within the selected sources**" in coverage
+    assert "**Trace stopped at unresolved sources**" in coverage
     # What is assumed: nothing is asserted or inferred here, and the page says so.
     evidence = section(md, "Evidence and uncertainty")
     assert "**7 verified**, **0 inferred**, **0 asserted**" in evidence and "none used" in evidence
@@ -604,7 +604,7 @@ def test_family_diagram_is_valid_small_and_parallel(tmp_path):
     nodes = check_mermaid(mermaid_block(md))
     assert len(nodes) == 12 and "MORE" in nodes and nodes["MORE"]["arrow"] == "-.-"
     assert len(md.splitlines()) < MAX_LINES
-    assert "more families" in nodes["MORE"]["label"] and "(m.lineage.md#route-families)" in section(md, "Route families")
+    assert nodes["MORE"]["label"].startswith("Summary, not a source:") and "(m.lineage.md#route-families)" in section(md, "Route families")
 
 
 def test_sources_table_separates_databases_files_and_constants(tmp_path):
@@ -671,7 +671,7 @@ def test_incomplete_trace_stays_visibly_incomplete():
     """The sample reaches the requested boundary on two branches, but a dynamic-SQL override is unresolved."""
     md = render_overview(sample_trace().to_dict(), "sample-trace.lineage.json", detailed_page="sample-trace.md")
     answer, coverage = section(md, "Plain answer"), section(md, "Coverage")
-    assert answer.strip().startswith("Not fully traced (1 open point on the value routes, so sources may be missing)")
+    assert answer.strip().startswith("- **Not fully traced (1 open point on the value routes, so sources may be missing).**")
     assert "**Incomplete**" in coverage and "2 ends do reach the requested boundary, but the trace as a whole is not " \
         "complete" in coverage
     assert "Complete" not in coverage.split("**Incomplete**")[0]
@@ -711,7 +711,7 @@ def test_trace_json_gets_an_additive_route_families_block(tmp_path):
     data = json.loads((tmp_path / f"{stem_for(OVB_COLUMN)}.lineage.json").read_text(encoding="utf-8"))
     assert set(data) == {"schema_version", "requested", "target", "target_status", "target_gaps", "boundary", "scan",
                          "completeness", "nodes", "steps", "stops", "gaps", "cycles", "resolved_gaps",
-                         "assertions_used", "route_families"}
+                         "assertions_used", "assertion_provenance", "route_families"}
     block = data["route_families"]
     assert block["schema_version"] == "column-lineage-route-families/1.0"
     steps = {s["id"] for s in data["steps"]}
@@ -767,7 +767,7 @@ def test_index_needs_attention(tmp_path):
         assert heading in md
     assert "- `core_db.crm` — upstream writer unknown (4 routes); 1 column: " \
            f"[{OVB_COLUMN}]({stem_for(OVB_COLUMN)}.overview.md)" in md
-    assert "assertion `a1` (a person's statement, not code)" in md
+    assert "assertion `a1` (recorded mapping, not code)" in md
     assert "a shared signature is not a shared transformation or meaning" in md
     # Written by the CLI too, and counted (names left out) in the gap summary.
     run_ovb(tmp_path / "cli", "--gap-summary")
@@ -809,5 +809,6 @@ def test_mermaid_escapes_awkward_names():
                             evidence=[ev("p.sql", 1, "INSERT ...")]))
     trace.stops.append(Stop(src, "source_without_writer"))
     nodes = check_mermaid(mermaid_block(render_overview(trace.to_dict())))
-    assert "#34;" in nodes["T"]["label"] and "#124;" in nodes["T"]["label"]
-    assert "#91;" in nodes["F1"]["label"] and "#60;" in nodes["F1"]["label"] and "#35;" in nodes["F1"]["label"]
+    # Readable, entity-free: a quote becomes an apostrophe, < > become ‹ ›, ; becomes a comma; the rest stays.
+    assert "odd'name" in nodes["T"]["label"] and "c|1" in nodes["T"]["label"]
+    assert "s[x]" in nodes["F1"]["label"] and "a‹b›#,`c" in nodes["F1"]["label"]

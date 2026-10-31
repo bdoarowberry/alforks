@@ -7,7 +7,9 @@
 
 ## Plain answer
 
-Not fully traced (1 open point on the value routes, so sources may be missing): the value is traced back to `staging.demo` (CASE branch, CASE default) and variables (UPDATE of unproved run order) — 1 route stops at an open point, so the origin is not proved there. Value rules that change the result: a CASE/IIF choice on `staging.demo.source.input_a` picks between the alternatives; an UPDATE may overwrite the value (run order not proved) with `@override_value (in reporting.demo.apply_overrides)`.
+- **Not fully traced (1 open point on the value routes, so sources may be missing).** Also: 1 route stops at an open point.
+- **Sources:** `staging.demo` (CASE branch, CASE default; [F1](sample-trace.md#fam-7ff0de8a8f), [F2](sample-trace.md#fam-c93c713b4c)); variables (UPDATE of unproved run order; [F3](sample-trace.md#fam-fcaa68cfb4)).
+- **Value rules:** a CASE/IIF choice picks between the alternatives; an UPDATE may overwrite the value (run order not proved) — details under What changes the value.
 
 ## Coverage
 
@@ -69,7 +71,7 @@ These conditions decide **which rows** are included; they do not compute the val
 
 - **Steps on the value routes:** 3 — **2 verified**, **0 inferred**, **0 asserted**, 1 partial. Verified = proved from explicit code. Partial = some inputs of the step are not proved.
 - **Not proved from code:** partial [S2](sample-trace.md#step-a92b7a4a25e85778) — never read these as code-proved.
-- **Assertions:** none used; nothing here rests on a person's statement.
+- **Assertions:** none used; nothing here rests on an asserted mapping.
 - **Open points:** 1 on the value, 0 of context, 0 on row selection only (which rows, not the value) — [gaps and next evidence](sample-trace.md#gaps).
 - **Source locations:** `procedures/load_output.sql` (2 steps, lines 5–14), `procedures/apply_overrides.sql` (1 step, line 12) — every step's location and excerpt is on the [detailed page](sample-trace.md#detailed-steps).
 

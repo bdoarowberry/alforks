@@ -173,6 +173,9 @@ description in `src/column_lineage/assertions.py`.
   deleted.
 - **Completeness:** a complete result says it relies on N asserted steps. Unused or unresolvable
   assertions are listed in `scan-diagnostics.json`.
+- **Provenance:** record who made each mapping (`"origin": "ai_assisted"` or `"person"`) and whether
+  it has been independently reviewed (`"review": "unreviewed"` or `"reviewed"`, with `reviewed_by`).
+  Pages show both, or "not recorded"; the trace JSON lists them under `assertion_provenance`.
 - **Coverage:** for metadata-driven SQL, list **every** branch the metadata can produce, not
   only one observed run.
 - **Scoping to one writer:** when a target has several dynamic or unparsed writers and an assertion

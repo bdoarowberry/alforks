@@ -318,6 +318,25 @@ def _result_text(t: _Trace) -> tuple[str, int]:
     return f"Incomplete — no gaps recorded, overall step status {overall}", n_gaps
 
 
+def assertion_provenance_text(data: dict) -> str:
+    """Who made the assertions a trace relies on and whether they were reviewed, as the assertions
+    file records it; "not recorded" when it does not."""
+    rows = data.get("assertion_provenance") or []
+    if not rows:
+        return "who made them and whether they were reviewed is not recorded"
+    origin = {"ai_assisted": "AI-assisted", "person": "made by a person"}
+    made: dict[str, int] = {}
+    review: dict[str, int] = {}
+    for row in rows:
+        key = origin.get(row.get("origin"), "maker not recorded")
+        made[key] = made.get(key, 0) + 1
+        rkey = {"reviewed": "independently reviewed", "unreviewed": "not independently reviewed"}.get(
+            row.get("review"), "review not recorded")
+        review[rkey] = review.get(rkey, 0) + 1
+    fmt = lambda counts: ", ".join(f"{n} {k}" for k, n in sorted(counts.items(), key=lambda kv: -kv[1]))
+    return f"{fmt(made)}; {fmt(review)}"
+
+
 def _section_identity(t: _Trace, json_name: str | None) -> list[str]:
     data = t.data
     comp = data.get("completeness") or {}
@@ -330,7 +349,8 @@ def _section_identity(t: _Trace, json_name: str | None) -> list[str]:
         ids = ", ".join(_code(i) for i in sorted(data.get("assertions_used") or [])) or "see Detailed steps"
         out.append(">")
         out.append(f"> **This trace relies on {_plural(comp['asserted_steps'], 'asserted step')}** (assertions {ids}). "
-                   "Asserted steps were stated by a person in an assertions file, not proved from SQL"
+                   "Asserted steps are mappings recorded in an assertions file, not proved from SQL ("
+                   + assertion_provenance_text(data) + ")"
                    + (f"; {_plural(comp['gaps_resolved_by_assertions'], 'gap')} "
                       f"{'is' if comp['gaps_resolved_by_assertions'] == 1 else 'are'} marked resolved by them."
                       if comp.get("gaps_resolved_by_assertions") else "."))

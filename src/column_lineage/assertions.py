@@ -1,8 +1,9 @@
-"""Human-asserted mappings for lineage that static analysis cannot prove.
+"""Asserted mappings for lineage that static analysis cannot prove.
 
 Some steps can never be proved from SQL text: dynamic SQL whose column list comes from
-metadata, objects defined and loaded outside the scanned files. An assertions file lets
-someone who knows the system state those steps. The tracer then continues through them,
+metadata, objects defined and loaded outside the scanned files. An assertions file records
+those steps, with who made each mapping (a person or AI-assisted) and whether it has been
+independently reviewed; reports show both, and "not recorded" when they are absent. The tracer then continues through them,
 marking every asserted step `asserted` and moving the gaps it explains to `resolved_gaps`;
 nothing is deleted, and a complete result says that it relies on assertions.
 
@@ -19,6 +20,9 @@ File format (JSON):
           "resolves": ["dynamic_sql"],                  # optional: gap kinds it explains
           "reason": "why this is believed",
           "asserted_by": "a role, not a person's name",
+          "origin": "ai_assisted",                      # optional: ai_assisted | person (who made the mapping)
+          "review": "unreviewed",                       # optional: unreviewed | reviewed
+          "reviewed_by": "a role",                      # optional, with review = reviewed
           "alternatives": [
             {"branch": "metadata selects source X",
              "inputs": ["db.schema.source_x.col_a"],
@@ -71,6 +75,14 @@ class Assertion:
     asserted_by: str | None = None
     source: str = ""
     line: int = 1
+    origin: str | None = None        # ai_assisted | person | None (not recorded)
+    review: str | None = None        # unreviewed | reviewed | None (not recorded)
+    reviewed_by: str | None = None
+
+    def provenance(self) -> dict:
+        return {"id": self.id, "asserted_by": self.asserted_by, "origin": self.origin or "not recorded",
+                "review": self.review or "not recorded", "reviewed_by": self.reviewed_by, "source": self.source,
+                "line": self.line}
 
     def explains(self, evidence) -> bool:
         """Whether a gap's evidence points at the statement this assertion explains."""
@@ -141,11 +153,17 @@ def load(path: str | Path) -> list[Assertion]:
         resolves = item.get("resolves")
         if resolves is not None and (not isinstance(resolves, list) or not all(isinstance(r, str) for r in resolves)):
             raise ValueError(f"{where}: 'resolves' must be a list of gap kinds, e.g. [\"dynamic_sql\"]")
+        origin, review = item.get("origin"), item.get("review")
+        if origin is not None and origin not in ("ai_assisted", "person"):
+            raise ValueError(f"{where}: 'origin' must be \"ai_assisted\" or \"person\"")
+        if review is not None and review not in ("unreviewed", "reviewed"):
+            raise ValueError(f"{where}: 'review' must be \"unreviewed\" or \"reviewed\"")
         line = _line_of(text, ident)
         out.append(Assertion(ident, target, alternatives, writer.get("path"),
                              int(writer["line"]) if writer.get("line") is not None else None,
                              tuple(resolves) if resolves else DEFAULT_RESOLVES,
-                             item.get("reason"), item.get("asserted_by"), path.as_posix(), line))
+                             item.get("reason"), item.get("asserted_by"), path.as_posix(), line,
+                             origin, review, item.get("reviewed_by")))
     return out
 
 
