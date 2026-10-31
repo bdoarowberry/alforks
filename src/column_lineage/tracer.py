@@ -190,7 +190,8 @@ class Tracer:
         result.stops = dedupe_stops(result.stops)
         self._explain_ends(result)
         for stop in result.stops:
-            stop.declared_terminal = declared_terminal(self.terminals, stop.node)
+            if stop.reason in ("source_without_writer", "external_file", "boundary"):
+                stop.declared_terminal = declared_terminal(self.terminals, stop.node)
         return result
 
     @staticmethod
@@ -547,6 +548,10 @@ class Tracer:
         found = writer_search(self.catalog, ref, column, writers)
         stop.writer_search = found
         scope = "the selected scanned SQL sources" + (" and packages" if getattr(self, "packages", None) else "")
+        unreadable = self.catalog.stats.get("files_without_statements", 0)
+        if unreadable:
+            scope += (f" ({unreadable} non-empty file(s) yielded no statements and could not be searched; see "
+                      "files_without_statements in the scan)")
         if not found:
             stop.detail = f"{stop.detail} Searched {scope}; no statement there writes an object of this name."
             return

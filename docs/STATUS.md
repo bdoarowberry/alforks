@@ -171,6 +171,26 @@
   `ambiguous_writer_order` gap stays and says why. All writers' sources remain on the trace (an
   overwrite replaces only the rows it matches). Test: `tests/test_column_entry_point.py`.
 
+## Fixed after adversarial review 5 (tests: tests/test_column_review5.py, fixtures/column/review5/)
+
+- Encoding: a stray Windows-1252 byte no longer turns a UTF-8 file into cp1252 (mojibake identifiers,
+  lost writer); any NUL byte means UTF-16 (UTF-16 without BOM and mostly non-Latin text was read as UTF-8).
+  No-writer stops say when files yielded no statements.
+- Function summaries: CLR (`EXTERNAL NAME`) and RETURN-less bodies are opaque; several different
+  definitions (CREATE then ALTER) are opaque; three-part calls must match the function's database;
+  parameters used only in IF/WHILE conditions are condition inputs; `DEFAULT` arguments are constants.
+- Result labels: `reached_requested_boundary` only when every non-constant end is the boundary; depth cuts
+  are `complete_to_requested_depth`; declarations apply only to no-writer, file and boundary stops.
+- Compound assignment followed by a `--` comment parsed again (literal-aware trimming).
+- Procedure options in any order (`WITH RECOMPILE, EXECUTE AS ...`, `ENCRYPTION`, `NATIVE_COMPILATION`,
+  `BEGIN ATOMIC WITH (...)`) no longer swallow the first body statement.
+- `--declared-terminals`: bad JSON is a usage error; `#temp` patterns work in text files.
+- `server..schema.name` via `--local-server`: the database stays unknown instead of `--default-database`.
+- `compare`: two-part sources match only package file columns; `<package>::<connection>.<column>` pins one package.
+- Writer search looks statements up by binary search.
+- Not fixed yet: the detailed Markdown page grows quadratically with thousands of single-row writers into
+  one table (each step row links every other step).
+
 ## Known open issues
 
 - Corpus chain 08 ends in `missing_definition` (recall 0.6). Not investigated.

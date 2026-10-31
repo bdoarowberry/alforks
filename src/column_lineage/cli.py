@@ -326,21 +326,30 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def load_terminals(path: Path) -> list[tuple[str, str]]:
-    """(lower-cased glob, reason) pairs. Text: one glob per line, '# reason' optional. JSON:
+    """(lower-cased glob, reason) pairs. Text: one glob per line, then optionally ' # reason' (the '#'
+    must follow whitespace, so #temp patterns work); lines starting with '# ' are comments. JSON:
     {"terminals": [{"pattern": "...", "reason": "..."}]}."""
     text = path.read_text(encoding="utf-8-sig")
-    if text.lstrip().startswith("{"):
+
+    def clean(pattern: str) -> str:
+        return pattern.strip().lower().replace("[", "").replace("]", "")
+
+    if text.lstrip().startswith(("{", "[")):
         data = json.loads(text)
-        items = data.get("terminals")
-        if not isinstance(items, list) or not all(isinstance(i, dict) and i.get("pattern") for i in items):
-            raise ValueError('expected {"terminals": [{"pattern": ..., "reason": ...}]}')
-        return [(i["pattern"].strip().lower().replace("[", "").replace("]", ""),
-                 str(i.get("reason") or "declared terminal")) for i in items]
+        items = data.get("terminals") if isinstance(data, dict) else None
+        if not isinstance(items, list) or not all(
+                isinstance(i, dict) and isinstance(i.get("pattern"), str) and i["pattern"].strip() for i in items):
+            raise ValueError('expected {"terminals": [{"pattern": "<glob>", "reason": "..."}]} with string patterns')
+        return [(clean(i["pattern"]), str(i.get("reason") or "declared terminal")) for i in items]
     out = []
     for line in text.splitlines():
-        pattern, _, reason = line.partition("#")
-        if pattern.strip():
-            out.append((pattern.strip().lower().replace("[", "").replace("]", ""), reason.strip() or "declared terminal"))
+        stripped = line.strip()
+        if not stripped or stripped.startswith("# ") or stripped == "#":
+            continue
+        separator = re.search(r"\s#", stripped)
+        pattern = stripped[:separator.start()] if separator else stripped
+        reason = stripped[separator.end():] if separator else ""
+        out.append((clean(pattern), reason.strip() or "declared terminal"))
     return out
 
 

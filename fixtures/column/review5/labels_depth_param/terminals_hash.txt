@@ -1,0 +1,2 @@
+#tmp_feed.*  # temp table filled by the caller
+*load_out*  # parameter set by the scheduler

@@ -687,8 +687,10 @@ class Analyzer:
         if isinstance(e, exp.Dot) and isinstance(e.expression, (exp.Anonymous, exp.Func)):
             fname = f"{e.this.sql(dialect='tsql', comments=False)}.{e.expression.name}"
             args = list(e.expression.expressions or [])
-            schema = split_name(e.this.sql(dialect="tsql", comments=False))[-1]
-            summary = function_summary(self.catalog, schema, e.expression.name)
+            qualifier = split_name(e.this.sql(dialect="tsql", comments=False))
+            schema = qualifier[-1]
+            database = qualifier[-2] if len(qualifier) > 1 and qualifier[-2] else None
+            summary = function_summary(self.catalog, schema, e.expression.name, database=database)
             if isinstance(summary, str):
                 ctx.gap("opaque_function", f"User function {fname} is applied; its body is not traced ({summary}), "
                         "so other inputs it reads are not shown.", None, e)
@@ -705,8 +707,13 @@ class Analyzer:
             ctx.step_notes.append(note)
             ctx.step_inferred = True
             for i, arg in enumerate(args):
+                if isinstance(arg, (exp.Column, exp.Var)) and arg.name.upper() == "DEFAULT":
+                    continue   # the parameter's default: a constant
                 if i >= len(summary.params) or summary.used[i]:
-                    self.walk(arg, role, join_branch(branch, f"{fname} argument {i + 1}"), scope, ctx, out, rows, False)
+                    only_condition = bool(summary.condition_only and i < len(summary.condition_only)
+                                          and summary.condition_only[i])
+                    self.walk(arg, CONDITION if only_condition and role == VALUE else role,
+                              join_branch(branch, f"{fname} argument {i + 1}"), scope, ctx, out, rows, False)
             return
         is_arith = isinstance(e, (exp.Add, exp.Sub, exp.Mul, exp.Div, exp.Mod, exp.DPipe, exp.Neg, exp.Concat))
         for child in e.iter_expressions():

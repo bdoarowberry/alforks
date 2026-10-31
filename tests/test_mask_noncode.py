@@ -6,6 +6,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parents[1] / "src"))
 
 from table_lineage.index import mask_noncode
+from table_lineage.sources import decode_source
 
 ROOT = Path(__file__).parents[1]
 
@@ -63,7 +64,7 @@ def reference(text: str) -> str:
 
 def test_matches_reference_on_fixtures():
     for path in sorted((ROOT / "fixtures").rglob("*.sql")):
-        text = path.read_text(encoding="utf-8")
+        text = decode_source(path.read_bytes())[0]
         assert mask_noncode(text) == reference(text), path
 
 

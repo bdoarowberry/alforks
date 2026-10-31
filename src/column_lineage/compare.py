@@ -17,7 +17,8 @@ expected.json (kept local; it names real objects):
 ``sources`` are the terminal sources the known lineage gives for the column. They need not all be at
 the requested boundary: a column may draw from several branches ending in different databases or
 files. A source may omit the database (schema.table.column) to match any database; a flat-file column
-read by an SSIS package is written ``<file connection>.<column>``.
+read by an SSIS package is written ``<file connection>.<column>`` (any package) or
+``<package file>::<file connection>.<column>``.
 ``label`` and ``kind`` are free text that goes into the summary, so keep them generic.
 
 For each expected source the comparison reports one of:
@@ -53,10 +54,16 @@ def _norm(value: str) -> str:
 
 
 def _matches(node_id: str, expected: str) -> bool:
+    """Exact id; a database column given without its database (schema.table.column, three parts);
+    or a package file column given as <connection>.<column> or <package>::<connection>.<column>."""
     node = _norm(node_id)
     want = _norm(expected)
-    # Package file columns are flat_file:<package>::<connection>.<column>: match on the part after "::".
-    return node == want or node.endswith("." + want) or node.endswith("::" + want)
+    if node == want:
+        return True
+    if node.startswith("flat_file:"):
+        package, _, column = node[len("flat_file:"):].partition("::")
+        return want == column or want == f"{package}::{column}" or want.endswith("/" + f"{package.rsplit('/', 1)[-1]}::{column}")
+    return want.count(".") == 2 and "::" not in want and node.endswith("." + want) and node.count(".") == 3
 
 
 def _walk(trace: dict) -> tuple[dict[str, set[str]], set[str], set[str]]:

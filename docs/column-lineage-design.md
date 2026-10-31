@@ -158,7 +158,11 @@ scanned sources", not "this is the ultimate source-system field".
 
 `completeness.result` keeps the meanings apart:
 
-- `reached_requested_boundary`: complete, and no value path ends at an object without a writer;
+- `reached_requested_boundary`: complete, and every value path ends at the requested boundary or a constant;
+- `complete_to_requested_depth`: complete, but some paths were cut by `--max-depth`;
+- `complete_to_declared_boundary`: complete, and every other end (no writer in the selected sources,
+  external file) is a terminal declared with `--declared-terminals`; parameters and depth cuts are never
+  declared away;
 - `complete_within_selected_scope`: complete, but some paths end at objects with no writer in
   the selected sources (other sources, such as packages or feeds, may write them);
 - `incomplete`: open value-path or context gaps (for example an unsupported package step).

@@ -387,16 +387,18 @@ class TraceResult:
         for gap in open_gaps:
             if gap.kind in ("unsupported_package_step", "package_runtime_value") and effects[gap.id] != "row_selection":
                 ends[gap.kind] = ends.get(gap.kind, 0) + 1
-        # A boundary stop is already the strongest end; a declaration only matters for the other ends.
-        declared = sum(1 for s in self.stops if s.declared_terminal is not None and s.reason not in ("boundary", "constant"))
-        undeclared = [s for s in self.stops if s.declared_terminal is None and s.reason not in ("boundary", "constant")]
+        # A boundary stop is already the strongest end; a declaration only matters for sources (no writer
+        # in the selected sources, external files). Depth cuts and parameters are never declared away.
+        ends_needing_proof = [s for s in self.stops if s.reason not in ("boundary", "constant")]
+        declared = sum(1 for s in ends_needing_proof if s.declared_terminal is not None)
+        undeclared = [s for s in ends_needing_proof if s.declared_terminal is None]
         if not complete:
             result = "incomplete"
+        elif any(s.reason == "max_depth" for s in self.stops):
+            result = "complete_to_requested_depth"
         elif declared and not undeclared:
             result = "complete_to_declared_boundary"
-        elif ends.get("no_writer_in_selected_scope"):
-            result = "complete_within_selected_scope"
-        elif ends.get("reached_requested_boundary"):
+        elif any(s.reason == "boundary" for s in self.stops) and not ends_needing_proof:
             result = "reached_requested_boundary"
         else:
             result = "complete_within_selected_scope"

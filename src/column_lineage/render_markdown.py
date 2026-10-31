@@ -294,8 +294,11 @@ def _result_text(t: _Trace) -> tuple[str, int]:
         label = {"reached_requested_boundary": "Complete — reached the requested boundary",
                  "complete_to_declared_boundary": "Complete to the declared boundary — every other path ends at a "
                                                   "terminal declared for this run (upstream population not proved)",
-                 "complete_within_selected_scope": "Complete within the selected sources — some paths end at "
-                                                   "objects with no writer in them"}.get(comp.get("result"), "Complete")
+                 "complete_to_requested_depth": "Complete to the requested depth — some paths were cut by "
+                                                "--max-depth and are not traced further",
+                 "complete_within_selected_scope": "Complete within the selected sources — paths end at objects with "
+                                                   "no writer in them, files, constants or parameters, not at a "
+                                                   "proven origin"}.get(comp.get("result"), "Complete")
         return label + (f" ({'; '.join(qualifiers)})" if qualifiers else ""), n_gaps
     if n_gaps:
         n_context = sum((comp.get("context_gaps_by_kind") or {}).values())

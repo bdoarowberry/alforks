@@ -5,6 +5,7 @@ import os
 import fnmatch
 from dataclasses import dataclass
 from pathlib import Path
+import re
 from typing import Callable, Iterable
 
 from .path_filters import is_dated_snapshot
@@ -14,23 +15,30 @@ DEFAULT_EXCLUDES = (".git", ".venv", ".pytest_cache", ".pytest-run-*", "node_mod
 
 
 def decode_source(data: bytes) -> tuple[str, str]:
-    """Decode a SQL file: UTF-16 (BOM or NUL-interleaved, as SSMS saves "Unicode"), UTF-8, else
-    Windows-1252. Reading UTF-16 as UTF-8 would silently hide every statement in the file."""
+    """Decode a SQL file: UTF-16 (BOM or NUL bytes, as SSMS saves "Unicode"), UTF-8, else Windows-1252.
+
+    Reading UTF-16 as UTF-8 would silently hide every statement in the file, so any NUL bytes mean
+    UTF-16 (SQL text never contains NUL). A UTF-8 file with a few stray bytes stays UTF-8 (the stray
+    bytes become U+FFFD) rather than turning every non-ASCII identifier into mojibake."""
     if data.startswith(b"\xef\xbb\xbf"):
         return data[3:].decode("utf-8", errors="replace"), "utf-8-bom"
     if data.startswith((b"\xff\xfe", b"\xfe\xff")):
         return data.decode("utf-16", errors="replace"), "utf-16-bom"
-    sample = data[:4000]
-    if len(sample) >= 4:
+    sample = data[:8000]
+    if b"\x00" in sample:
         odd, even = sample[1::2].count(0), sample[0::2].count(0)
-        if odd > len(sample) // 4 and even < odd // 8:
-            return data.decode("utf-16-le", errors="replace"), "utf-16-le"
-        if even > len(sample) // 4 and odd < even // 8:
-            return data.decode("utf-16-be", errors="replace"), "utf-16-be"
+        return data.decode("utf-16-le" if odd >= even else "utf-16-be", errors="replace"), \
+            "utf-16-le" if odd >= even else "utf-16-be"
     try:
         return data.decode("utf-8"), "utf-8"
     except UnicodeDecodeError:
-        return data.decode("cp1252", errors="replace"), "cp1252"
+        pass
+    # Mostly valid UTF-8 (multi-byte sequences present) with a few bad bytes: keep UTF-8.
+    multibyte = len(re.findall(rb"[\xc2-\xf4][\x80-\xbf]+", data))
+    invalid = data.decode("utf-8", errors="replace").count("\ufffd")
+    if multibyte and multibyte >= invalid:
+        return data.decode("utf-8", errors="replace"), "utf-8-with-errors"
+    return data.decode("cp1252", errors="replace"), "cp1252"
 
 
 @dataclass(frozen=True)

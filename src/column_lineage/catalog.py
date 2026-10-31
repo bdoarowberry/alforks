@@ -5,6 +5,7 @@ says, plus the context needed to bind names later: database, scope, control flow
 """
 from __future__ import annotations
 
+import bisect
 from collections import defaultdict
 import logging
 from dataclasses import dataclass, field, replace
@@ -51,6 +52,7 @@ ALIAS_DEF = re.compile(rf"\b(?:FROM|JOIN|UPDATE|MERGE(?:\s+INTO)?)\s+(?P<name>{I
                        r"(?P<alias>\[[^\]]+\]|[A-Za-z_][\w$#]*)", re.I)
 NON_LINEAGE = re.compile(
     r"\s*(?:RAISERROR\b|RETURN\b|PRINT\b|THROW\b|REVERT\b|(?:WITH\s+)?EXEC(?:UTE)?\s+AS\b|"
+    r"WITH\s+(?:RECOMPILE|ENCRYPTION|NATIVE_COMPILATION|SCHEMABINDING)\b[\w\s,'@=]*\bAS\s*$|"
     # Cursor verbs and DROP are read separately from the source text; WHILE here is a condition fragment.
     r"DECLARE\s+[A-Za-z_][\w$#@]*\s+(?:INSENSITIVE\s+|SCROLL\s+)*CURSOR\b|(?:OPEN|FETCH|CLOSE|DEALLOCATE|DROP|WHILE)\b|"
     r"ALTER\s+TABLE\s+\S+\s+(?:ADD\s+(?:CONSTRAINT|PRIMARY\s+KEY|UNIQUE|FOREIGN\s+KEY|CHECK|INDEX|DEFAULT)|"
@@ -74,7 +76,12 @@ ALTER_DEFAULT = re.compile(rf"\bALTER\s+TABLE\s+(?P<name>{IDENT})\s+(?:WITH\s+(?
 # Index options left over from a CREATE INDEX / constraint the indexer did not keep, glued to the next statement.
 INDEX_OPTIONS_PREFIX = re.compile(r"\s*WITH\s*\(\s*[A-Za-z_]+\s*=\s*(?:ON|OFF|\d+)\b(?:[^()]|\([^()]*\))*\)\s*"
                                   r"(?:ON\s+(?:\[[^\]]+\]|[A-Za-z_]\w*)(?:\s*\([^()]*\))?\s*)?(?=\S)", re.I)
-EXEC_AS_HEADER = re.compile(r"\s*WITH\s+EXEC(?:UTE)?\s+AS\s+(?:N?'[^']*'|[A-Za-z_]\w*)\s*(?:,\s*[A-Za-z_]\w*\s*)*AS\b", re.I)
+# Procedure options the indexer leaves in front of the first body statement: WITH <options> AS
+# [BEGIN ATOMIC WITH (...)], options in any order (EXECUTE AS, RECOMPILE, ENCRYPTION, NATIVE_COMPILATION ...).
+PROC_OPTION = r"(?:EXEC(?:UTE)?\s+AS\s+(?:N?'[^']*'|[A-Za-z_]\w*)|RECOMPILE|ENCRYPTION|NATIVE_COMPILATION|SCHEMABINDING)"
+EXEC_AS_HEADER = re.compile(rf"\s*WITH\s+{PROC_OPTION}(?:\s*,\s*{PROC_OPTION})*\s+AS\b"
+                            r"(?:\s+BEGIN\s+ATOMIC\s+WITH\s*\([^()]*\))?", re.I)
+ATOMIC_HEADER = re.compile(r"\s*(?:(?:AS\s+)?BEGIN\s+ATOMIC\s+)?WITH\s*\(\s*TRANSACTION\s+ISOLATION\b[^()]*\)", re.I)
 DROP_TEMP = re.compile(r"\bDROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?(?P<name>#[A-Za-z_][\w$#@]*)", re.I)
 
 
@@ -122,12 +129,49 @@ STATEMENT_KEYWORD = re.compile(r"(?<![\w@#$.])(?:INSERT|UPDATE|DELETE|MERGE|SELE
                                r"TRUNCATE)\b", re.I)
 
 
+def literal_ends(text: str) -> set[int]:
+    """Offsets just past each string literal's closing quote (comments and quoted names skipped)."""
+    ends, i = set(), 0
+    while i < len(text):
+        two = text[i:i + 2]
+        if two == "--":
+            j = text.find("\n", i)
+            i = len(text) if j < 0 else j
+        elif two == "/*":
+            j = text.find("*/", i + 2)
+            i = len(text) if j < 0 else j + 2
+        elif text[i] in "[\"":
+            close = "]" if text[i] == "[" else '"'
+            j = text.find(close, i + 1)
+            i = len(text) if j < 0 else j + 1
+        elif text[i] == "'":
+            j = i + 1
+            while j < len(text):
+                if text[j] == "'" and text[j + 1:j + 2] == "'":
+                    j += 2
+                elif text[j] == "'":
+                    break
+                else:
+                    j += 1
+            ends.add(min(j + 1, len(text)))
+            i = j + 1
+        else:
+            i += 1
+    return ends
+
+
 def expression_end(masked: str, start: int, text: str | None = None) -> int:
     """End of the expression starting at ``start``: a top-level comma, clause keyword or the end.
 
-    Trailing whitespace is trimmed on ``text`` (the unmasked SQL) when given: in the masked text a
-    final string literal is blank too."""
-    text = masked if text is None else text
+    Trailing whitespace and comments are trimmed, but not a final string literal (blank in the masked
+    text too): ``text`` is the unmasked SQL that tells them apart."""
+    stops = literal_ends(text) if text is not None else set()
+
+    def trim(end: int) -> int:
+        while end > start and masked[end - 1].isspace() and end not in stops:
+            end -= 1
+        return end
+
     depth = 0
     i = start
     while i < len(masked):
@@ -140,15 +184,9 @@ def expression_end(masked: str, start: int, text: str | None = None) -> int:
             depth -= 1
         elif depth == 0 and (char in ",;" or re.match(r"(?i)(?<![\w@#$])(?:FROM|WHERE|OUTPUT|OPTION)\b", masked[i:i + 7])
                              and (i == 0 or not (masked[i - 1].isalnum() or masked[i - 1] in "_@#$"))):
-            end = i
-            while end > start and text[end - 1].isspace():
-                end -= 1
-            return end
+            return trim(i)
         i += 1
-    end = len(masked)
-    while end > start and text[end - 1].isspace():
-        end -= 1
-    return end
+    return trim(len(masked))
 
 
 def unmatched_close(masked: str) -> int | None:
@@ -671,8 +709,9 @@ class Catalog:
            semicolon before TRUNCATE, WHILE, SET NOCOUNT ...): split at line-start statement
            keywords and parse each piece on its own.
         """
-        for prefix in (EXEC_AS_HEADER, INDEX_OPTIONS_PREFIX):
-            header = prefix.match(mask_noncode(statement.text))
+        for prefix in (EXEC_AS_HEADER, ATOMIC_HEADER, INDEX_OPTIONS_PREFIX):
+            # Option values such as EXECUTE AS 'user' are literals, blank in the masked text.
+            header = prefix.match(statement.text if prefix is not INDEX_OPTIONS_PREFIX else mask_noncode(statement.text))
             if not header:
                 continue
             offset = header.end()
@@ -878,11 +917,14 @@ class Catalog:
         if name.startswith("#") and not name.startswith("##"):
             scope = statement.scope if statement else None
             return ObjectRef(norm(name), kind="temp_table", scope=scope)
+        via_server = bool(server)
         if server and norm(server) in self.local_servers:
             server = None  # a linked server that points at the databases being scanned
         db_source = "explicit" if database else None
-        if not database:
+        if not database and not via_server:
             database, db_source = unit.database_at(statement.start if statement else 0, self.default_database)
+        # server..schema.name: the remote login's default database, unknown here (unified later if the
+        # name exists in exactly one scanned database).
         schema_norm = norm(schema) if schema else self.default_schema
         return ObjectRef(norm(name), schema_norm, norm(database), norm(server), kind, None, db_source)
 
@@ -1605,6 +1647,24 @@ def _differs(ref: ObjectRef, other: ObjectRef) -> str:
     return ", ".join(parts) or "a different identity"
 
 
+def _statement_at(unit: Unit, at: int):
+    """The indexed statement covering offset ``at`` (binary search over the file's statements)."""
+    starts = getattr(unit, "_starts", None)
+    if starts is None:
+        ordered = sorted(unit.index.statements, key=lambda s: s.start)
+        unit._ordered, unit._starts = ordered, [s.start for s in ordered]
+        starts = unit._starts
+    i = bisect.bisect_right(starts, at) - 1
+    while i >= 0:
+        s = unit._ordered[i]
+        if at < max(s.end, s.start + len(s.text)):
+            return s
+        if s.start < at - 200000:
+            break
+        i -= 1
+    return None
+
+
 def writer_search(catalog: "Catalog", ref: ObjectRef, column: str, writers: list) -> list[dict]:
     """Statements that look like they write ``ref`` but gave no step for ``column``, with the reason.
 
@@ -1629,7 +1689,7 @@ def writer_search(catalog: "Catalog", ref: ObjectRef, column: str, writers: list
             findings.append({"category": "comment_or_string", "location": location,
                              "detail": WRITER_SEARCH_LABELS["comment_or_string"]})
             continue
-        statement = next((s for s in unit.index.statements if s.start <= at < max(s.end, s.start + len(s.text))), None)
+        statement = _statement_at(unit, at)
         if statement is None:
             findings.append({"category": "not_indexed", "location": location, "detail": WRITER_SEARCH_LABELS["not_indexed"]})
             continue
@@ -1680,6 +1740,9 @@ class FunctionSummary:
     pure: bool                         # reads no tables and calls only pure user functions
     reason: str | None = None          # why it is not pure
     time_dependent: bool = False
+    database: str | None = None
+    body_hash: str = ""
+    condition_only: list[bool] | None = None   # per parameter: used only in IF/WHILE conditions
 
 
 def _function_definitions(catalog: "Catalog") -> dict[tuple[str, str], list[FunctionSummary]]:
@@ -1707,27 +1770,44 @@ def _function_definitions(catalog: "Catalog") -> dict[tuple[str, str], list[Func
                     end = min(end, boundary.start())
             body = masked[header_end.end():end]
             used = [re.search(rf"(?<![\w@#$]){re.escape(p)}(?![\w$#@])", body, re.I) is not None for p in params]
+            # Text of IF/WHILE conditions (up to the line end or the statement they guard).
+            conditions = " ".join(m.group(1) for m in re.finditer(
+                r"\b(?:IF|WHILE)\b(.*?)(?=\bBEGIN\b|\bRETURN\b|\bSET\b|\bSELECT\b|\n|$)", body, re.I))
+            outside = re.sub(r"\b(?:IF|WHILE)\b.*?(?=\bBEGIN\b|\bRETURN\b|\bSET\b|\bSELECT\b|\n|$)", " ", body,
+                             flags=re.I)
+            condition_only = [u and re.search(rf"(?<![\w@#$]){re.escape(p)}(?![\w$#@])", conditions, re.I) is not None
+                              and re.search(rf"(?<![\w@#$]){re.escape(p)}(?![\w$#@])", outside, re.I) is None
+                              for p, u in zip(params, used)]
             reads = READS_DATA.search(body)
+            external = re.search(r"\bEXTERNAL\s+NAME\b", body, re.I)
+            returns = re.search(r"\bRETURN\b", body, re.I)
+            reason = (f"its body uses {reads.group().upper()}" if reads else
+                      "it is an external (CLR) function" if external else
+                      "its body has no RETURN" if returns is None else None)
             summary = FunctionSummary(key, [p.lower() for p in params], used, unit, unit.line_at(match.start()),
-                                      reads is None, None if reads is None else f"its body uses {reads.group().upper()}",
-                                      NONDETERMINISTIC.search(body) is not None)
+                                      reason is None, reason, NONDETERMINISTIC.search(body) is not None,
+                                      unit.database_at(match.start(), catalog.default_database)[0],
+                                      hashlib.sha1(re.sub(r"\s+", " ", body).strip().lower().encode()).hexdigest(),
+                                      condition_only)
             summary._calls = [m.group("name") for m in USER_CALL.finditer(body)]
             found[key].append(summary)
     return found
 
 
-def function_summary(catalog: "Catalog", schema: str | None, name: str, _seen: set | None = None) -> FunctionSummary | str:
-    """The summary of scalar function schema.name, or a string saying why there is none."""
+def function_summary(catalog: "Catalog", schema: str | None, name: str, _seen: set | None = None,
+                     database: str | None = None) -> FunctionSummary | str:
+    """The summary of scalar function [database.]schema.name, or a string saying why there is none."""
     if catalog._functions is None:
         catalog._functions = _function_definitions(catalog)
     key = (norm(schema) or catalog.default_schema, norm(name))
     candidates = catalog._functions.get(key, [])
+    if database:
+        candidates = [c for c in candidates if c.database is None or c.database == norm(database)]
     if not candidates:
         return "its definition is not in the scanned files"
-    if len(candidates) > 1:
-        shapes = {(tuple(c.params), tuple(c.used), c.pure) for c in candidates}
-        if len(shapes) > 1:
-            return f"it has {len(candidates)} different definitions in the scanned files"
+    if len({c.body_hash for c in candidates}) > 1:
+        # A later ALTER (or a copy) may replace the body: which one is deployed is unknown.
+        return f"it has {len(candidates)} different definitions in the scanned files"
     summary = candidates[0]
     if not summary.pure:
         return summary.reason or "its body reads data"
