@@ -292,8 +292,9 @@ unreadable, data flows, destinations and Execute SQL tasks (counts only in the s
   ...), the `UserComponentTypeName` of managed components (ADO.NET source/destination;
   Script Component is unsupported), the first field of `contactInfo` (written by the
   component, not the author: `OLE DB Source;Microsoft Corporation;...`), a short table of
-  known 2008 GUID class ids, and the designer's default `description` when there is no
-  `contactInfo`. Never from the component's name. Anything else is `unsupported`.
+  known 2008 GUID class ids. Never from the component's name or its `description` (both
+  are editable by the package author). Anything else is `unsupported`
+  (`unsupported_package_step` when it is on a traced path).
 - Execute Package tasks are inventoried (project `PackageName` or file connection). Steps
   of a package that a scanned parent runs carry a note naming the parent package and task
   (matched by the child's file name; context only, lineage is not traced across).
@@ -308,22 +309,42 @@ unreadable, data flows, destinations and Execute SQL tasks (counts only in the s
 - Flat-file columns: node kind `file_column`, object kind `flat_file`, id
   `flat_file:<root>/<package path>::<connection>.<column>` (one per package copy).
 - SSIS variables and parameters: node kind `package_variable`, id
-  `package_flow:<root>/<package path>::variables.<Namespace>::<name>`.
+  `package_flow:<root>/<package path>::variables.<Namespace>::<name>` for a package-level
+  definition and `...::[variables of <container path>].<Namespace>::<name>` for one defined
+  on a task, sequence or loop. Variables are scoped per container: a reference resolves to
+  the innermost definition visible from the referring component's container (for a
+  destination table, a source query, a Derived Column expression, a parameter binding, a
+  variable expression); a definition elsewhere is never used.
+- Object names in components are read with brackets, double quotes (the ADO.NET
+  designer's `"schema"."table"`), backticks or bare parts, in any mix. A name that cannot
+  be read is counted (`scan.packages.unreadable_table_names`) and reported as a
+  `package_metadata` package issue; it never silently disappears.
+- Package files are deduplicated by resolved path: a file reachable from several
+  `--package-root` values (a directory and a file inside it, or nested directories) is one
+  package copy, labelled by the first root (`scan.packages.duplicate_paths` counts the
+  repeats).
 - Database columns written or read by a package are ordinary `column` nodes. The database
   of a connection is, first match wins:
   1. `--connection-map NAME=DB` (`database_source = configured`, verified);
   2. a three-part table name in the component;
   3. the connection's literal Initial Catalog when no property expression can change the
-     connection string, catalog or server (`connection_manager`, verified);
+     connection string, catalog or server, and the package has no configurations
+     (`connection_manager`, verified);
   4. `--default-database` when the connection names no database and has no expression
      (inferred);
   5. otherwise **unproven**: the design-time literal is not used. The object is matched
      without a database, like SQL with no database context (unified when exactly one
      database is known for `schema.name`, `ambiguous_object` when several are), every step
      through that connection gets status `ambiguous`, and a `package_database_unknown`
-     gap names the connection, the reason (expression, missing project connection, no
-     catalog), the exact expressions and the design-time value. Such a destination is a
-     candidate writer, never verified.
+     gap names the connection, the reason (expression, package configurations, missing
+     project connection, no catalog), the exact expressions or configurations and the
+     design-time value. Such a destination is a candidate writer, never verified.
+
+**Package configurations** (`<DTS:Configurations>`, package deployment model): a
+configuration can set any connection or variable property at run time, so in a package
+that has any, every package connection is unproven (rule 5, the gap names the
+configurations) and every variable is run-time set (`package_runtime_value`, see Gaps).
+Flat-file stops of such a package say that the configurations can change the path.
 
 ### Steps
 
@@ -353,10 +374,19 @@ through `path` start/end ids and synchronous outputs. On the way:
   `branch_context` names the split and output.
 - Lookup match / no-match output → `join_key` row selection (input column and reference
   column); the Lookup output column's own step carries the same keys.
-- Merge Join → `join_key` from the inputs' sort key positions; Aggregate group-by
-  columns → `group_by`.
-- Error outputs → `branch_context` `error output ... of <component>`; SSIS error columns
-  (`ErrorCode`, `ErrorColumn`) stop with `package_runtime`.
+- Merge Join → `join_key` from the inputs' sort key positions; Aggregate → `group_by` for
+  the group-by columns of the output the traced column belongs to (other outputs have
+  their own keys).
+- A Conditional Split sends a row through the first output (by `EvaluationOrder`) whose
+  condition holds, so the n-th output's row selection is `NOT (earlier conditions) AND
+  its own`, and the default output's is `NOT` of all.
+- Lookup on a cache connection (`ConnectionType` 1 or a `CACHE` connection manager):
+  `unsupported_package_step`; a saved `SqlCommand` left in such a component is never used.
+- Error outputs → `branch_context` `error output ... of <component>`. Rows on an error
+  output failed in that component, so they carry the column as it arrived: a column the
+  component replaces in place (Derived Column read/write) is mapped to the upstream
+  original, never to the replacement expression, and the step is at best `inferred`. SSIS
+  error columns (`ErrorCode`, `ErrorColumn`) are `package_runtime_value` gaps.
 - Data Conversion, Derived Column, Multicast, Row Count, Copy Column, OLE DB Command and
   Lookup pass rows through. Only actual path and lineage links are followed, so components
   hanging off a Multicast are not on another output's path.
@@ -368,8 +398,16 @@ Every package step has `procedure` = `package <path>, task <task path>, componen
 evidence `{root, path (relative to the package root), start_line (the XML element), role,
 excerpt}` and a note `From package copy <root>/<path>.`. `branch_context` begins with the
 task's precedence constraints (`IF <expression> AND <task> succeeds (precedence
-constraint)`, `AFTER <task> fails`), loop containers and `DISABLED: ...` when the task or
-a container is disabled.
+constraint)`, `AFTER <task> fails`) and loop containers.
+
+**Disabled tasks** (`DTS:Disabled="True"` on the task or on any container around it) do not
+run as saved, so they are not writers: a disabled data flow's destinations and OLE DB
+Commands and a disabled Execute SQL task's statements produce no steps and are not indexed.
+Each is a package issue (`detail.disabled`) and counted (`disabled_data_flows`,
+`disabled_tasks`). When a disabled destination maps the traced column, or a disabled task's
+SQL names the traced object as a write target, the column's `source_without_writer` stop
+detail says so ("Not counted as writers: a disabled task in <package> ... maps this
+column"); when other writers exist, the note goes on their steps.
 
 ### Stops
 
@@ -377,8 +415,10 @@ a container is disabled.
   property expression sets the path (typically `@[User::file]` mapped by a Foreach loop),
   the detail names the expression and who sets the variable, and says the design-time
   path is only the saved value.
-- `package_parameter` — `$Project::` / `$Package::` parameter.
-- `package_runtime` — `System::` variable or an SSIS-generated error column.
+
+`external_file` is the only package stop: a file column is a genuine end within the scanned
+scope (`ends_by_meaning`: `external_file_source`). Values only known at run time are gaps,
+not stops (below), so a trace that reaches one is `incomplete`.
 
 ### Gaps
 
@@ -386,7 +426,7 @@ a container is disabled.
 |---|---|
 | `unsupported_package_step` | a component, access mode or task the adapter does not analyse (identity in `detail`) |
 | `ambiguous_package_copy` | more than one in-scope package file writes the column (environment, test, historical copies); every copy's steps are kept with status `ambiguous`; `detail.copies` lists them |
-| `package_runtime_value` | SQL or a value comes from a variable that is an expression or is set at run time (result set, output parameter, loop mapping, script, Expression task); `detail` names the variable, expression and setters; the columns are not mapped |
+| `package_runtime_value` | a value on the path is only known at run time: a project/package parameter (`$Project::`, `$Package::`), a system variable (`System::StartTime`, ...), an expression variable (its step lists the variables it reads, status `partial`, never verified), a variable set at run time (result set, output parameter, Foreach mapping, Script Task or Script Component `ReadWriteVariables`, Expression task, package configuration), an SSIS error column, an unbound `?` marker, or SQL from such a variable. `detail` names the exact parameter, variable, expression, setters and design-time value. Affects value; counted in `ends_by_meaning` |
 | `package_expression` | an SSIS expression could not be parsed (step `partial`, lineage ids in it kept as inputs) |
 | `package_metadata` | a metadata link is missing or inconsistent (unconnected input, unknown lineage id, no external column) |
 | `package_column_not_mapped` | an in-scope destination loads the table but maps no input to this column (not raised for identity, computed or rowversion columns); the `source_without_writer` stop detail says the same |
@@ -395,6 +435,15 @@ a container is disabled.
 Context gaps: an Execute SQL task in the same package whose statement is not in the file
 (from a variable, a property expression or a file connection) is added to every trace
 that passes through that package's destinations.
+
+**Destinations whose table is not static** (OpenRowset from a variable that is an
+expression, is set at run time or is configured; other run-time table access modes) never
+make an edge. They are a package issue, and when the variable's design-time value names an
+object, a trace of any column of that object (with or without database) gets a
+`package_runtime_value` gap (value effect) naming the destination, the variable, its
+expression or setters and the design-time value, like dynamic SQL that names a target. A
+variable with a plain design-time value and nothing that sets it at run time is still used
+(status `inferred`, with a note).
 
 ### Package copies
 
@@ -417,8 +466,10 @@ package's root-relative path, one virtual unit per task: a `USE [db]` from the c
 precedes the statement, its first line is the line of the task's `SqlTaskData` element
 (later lines count on from there), its scope is `<root>/<package>::<task path>` and its
 `procedure` label is the package and task. OLE DB `?` markers become `@ssis_param_<n>`;
-the adapter binds each to the variable in the task's `ParameterBinding`, or for an OLE DB
-Command to the input column mapped to the n-th external (parameter) column. Precedence
+the adapter binds each by parameter name: Execute SQL `ParameterBinding` `ParameterName`
+n, OLE DB Command input columns mapped to external column `Param_n`, and OLE DB source
+`ParameterMapping` entries `"ParameterN:Input"` (or a named `@p`), never by list
+position. A marker with no binding is a `package_runtime_value` gap. Precedence
 branches of the task (and `OLE DB Command <name>: runs once per row reaching it`) are
 added to the statements' control context. When the connection's database is unproven no
 `USE` is added and the writer steps get a `package_database_unknown` gap and status
@@ -432,8 +483,9 @@ Script components and tasks, third-party components, Fuzzy Lookup/Grouping, Pivo
 Unpivot, Term Extraction, Slowly Changing Dimension, Character Map, Audit,
 sampling components, cache connections for Lookup, Excel/ODBC/XML/raw-file sources,
 flat-file and other non-database destinations, destinations whose table comes from a
-runtime variable, package configurations, `.params`/environment values (a parameter is
-a `package_parameter` stop; a connection set from one is unproven), lineage across
+runtime variable (a gap on the named object, above), values of package configurations and
+`.params`/environment values (a parameter is a `package_runtime_value` gap; a connection
+set from one is unproven), multi-statement or EXEC source queries (a gap), lineage across
 Execute Package tasks (context note only), the row-selection context of the path into an
 OLE DB Command (its SQL is indexed as a writer; the binding steps carry the path), expression
 evaluation of variables (an expression is never evaluated, only its references are

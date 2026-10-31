@@ -1,0 +1,10 @@
+<?xml version="1.0"?>
+<DTS:Executable xmlns:DTS="www.microsoft.com/SqlServer/Dts" DTS:refId="Package" DTS:CreationName="Microsoft.Package" DTS:ExecutableType="Microsoft.Package" DTS:ObjectName="p" DTS:DTSID="{00000000-0000-4000-8000-000000000001}">
+<DTS:Property DTS:Name="PackageFormatVersion">8</DTS:Property>
+<DTS:ConnectionManagers><DTS:ConnectionManager DTS:refId="Package.ConnectionManagers[rev_db]" DTS:CreationName="OLEDB" DTS:DTSID="{C0000000-0000-4000-8000-000761515342}" DTS:ObjectName="rev_db"><DTS:ObjectData><DTS:ConnectionManager DTS:ConnectionString="Data Source=srv_x;Initial Catalog=rev_db;Provider=SQLNCLI11.1;Integrated Security=SSPI;"></DTS:ConnectionManager></DTS:ObjectData></DTS:ConnectionManager></DTS:ConnectionManagers>
+<DTS:Variables></DTS:Variables>
+<DTS:Executables>
+<DTS:Executable DTS:refId="Package\Load" DTS:CreationName="Microsoft.ExecuteSQLTask" DTS:ExecutableType="Microsoft.ExecuteSQLTask" DTS:ObjectName="Load" DTS:Disabled="True" DTS:DTSID="{00000000-0000-4000-8000-0000000000E1}"><DTS:ObjectData><SQLTask:SqlTaskData xmlns:SQLTask="www.microsoft.com/sqlserver/dts/tasks/sqltask" SQLTask:Connection="Package.ConnectionManagers[rev_db]" SQLTask:SqlStatementSource="INSERT INTO rv.tgt (x) SELECT a FROM rv.src;"/></DTS:ObjectData></DTS:Executable>
+</DTS:Executables>
+<DTS:PrecedenceConstraints></DTS:PrecedenceConstraints>
+</DTS:Executable>

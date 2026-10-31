@@ -46,3 +46,10 @@ Invented T-SQL used by `tests/test_column_acceptance.py` and `tests/test_column_
   result-set variable), `union` (Union All + Aggregate), `project` (project `.conmgr` connections, one with a
   parameterised connection string; Foreach file loop; Derived Column, Conditional Split, Multicast; OLE DB
   Command and Row Count off the destination path; parent package with an Execute Package task).
+- `ssis_review/` - invented cases from the adversarial review of the SSIS adapter, for
+  `tests/test_column_ssis_review.py` (one folder per case; `ssis_review/sql/tables.sql` declares
+  `rev_db.rv.*` and `other_db.rv.tgt`): error outputs of in-place Derived Columns, container-scoped
+  variables, cache Lookups, ADO.NET quoted names, unreadable names, package configurations, Script
+  Component setters, run-time destination tables, run-time values, disabled data flows and tasks,
+  parameter binding by name, overlapping roots, split/aggregate row selection, deep expressions,
+  unsupported components, duplicated lineage ids.

@@ -192,11 +192,17 @@ What becomes a gap or stays open:
 - `package_database_unknown` — the connection's database is not proven (connection string
   from an expression or parameter, no Initial Catalog, project connection not found): the
   step is a candidate, never verified; fix with `--connection-map`;
-- `package_runtime_value` — SQL or values from a variable that is an expression or is set at
-  run time (the gap names the variable and expression);
+- `package_runtime_value` — anything on the value path only known at run time: project or
+  package parameters, system variables, expression variables, variables set at run time or by
+  package configurations, and destinations whose table comes from such a variable (the gap is
+  put on the object the design-time value names; the gap names the variable and expression);
 - `package_expression`, `package_metadata` — an unparsable expression or a broken metadata link;
 - `package_column_not_mapped` — a package loads the table but not this column (loading a
   table never explains its other columns).
+
+Disabled tasks and data flows (or tasks in a disabled container) are not writers; the traced
+column's stop says when one would have written it. Packages with configurations have no
+proven connection databases. A file reachable from several package roots counts once.
 
 Every package step cites the package file (relative to its root), the XML line, and the
 package / task / component; `scan.packages` and `gap-summary.json` report packages found, in
