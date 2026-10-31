@@ -53,8 +53,6 @@ STOP_LABEL = {
     "parameter_without_caller": "parameter with no caller in the scanned files",
     "max_depth": "maximum depth reached",
     "external_file": "external file read by an SSIS package",
-    "package_parameter": "SSIS project or package parameter",
-    "package_runtime": "value set by SSIS at run time",
 }
 
 SECTION_TITLES = (

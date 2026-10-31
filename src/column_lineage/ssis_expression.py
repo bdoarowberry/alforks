@@ -200,7 +200,10 @@ class Parser:
 
 
 def parse(text: str) -> ENode:
-    return Parser(text).parse()
+    try:
+        return Parser(text).parse()
+    except RecursionError:
+        raise ExpressionError("expression nested too deeply to analyse") from None
 
 
 def unparen(node: ENode) -> ENode:
@@ -249,13 +252,20 @@ def references(text: str, tree: ENode | None = None) -> list[Reference]:
             for child in node.children:
                 walk(child, role, branch, const_ok and arithmetic)
 
-    walk(tree, "value", None, True)
+    try:
+        walk(tree, "value", None, True)
+    except RecursionError:
+        raise ExpressionError("expression nested too deeply to analyse") from None
     return out
 
 
 def operation(tree: ENode) -> str:
     """Operation label in the vocabulary of the SQL analyzer."""
     node = unparen(tree)
+    return _operation(node)
+
+
+def _operation(node: ENode) -> str:
     if node.kind == "ref":
         return "direct"
     if node.kind == "literal":

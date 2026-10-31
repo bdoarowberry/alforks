@@ -261,7 +261,7 @@ class Stop:
     """Where a value path ends without a gap."""
     node: Node
     reason: str                    # boundary, source_without_writer, constant, parameter_without_caller, max_depth,
-                                   # external_file, package_parameter, package_runtime (SSIS)
+                                   # external_file (SSIS)
     detail: str | None = None
     writer_search: list[dict] | None = None   # source_without_writer: same-named writes not used, with why
 
@@ -382,8 +382,8 @@ class TraceResult:
         asserted = sum(1 for s in value_steps if s.status == ASSERTED)
         ends = _count(END_MEANING.get(s.reason, s.reason) for s in self.stops)
         for gap in open_gaps:
-            if gap.kind == "unsupported_package_step" and effects[gap.id] != "row_selection":
-                ends["unsupported_package_step"] = ends.get("unsupported_package_step", 0) + 1
+            if gap.kind in ("unsupported_package_step", "package_runtime_value") and effects[gap.id] != "row_selection":
+                ends[gap.kind] = ends.get(gap.kind, 0) + 1
         if not complete:
             result = "incomplete"
         elif ends.get("no_writer_in_selected_scope"):
@@ -442,8 +442,6 @@ END_MEANING = {
     "parameter_without_caller": "parameter_without_caller",
     "max_depth": "max_depth",
     "external_file": "external_file_source",
-    "package_parameter": "package_runtime_input",
-    "package_runtime": "package_runtime_input",
 }
 
 

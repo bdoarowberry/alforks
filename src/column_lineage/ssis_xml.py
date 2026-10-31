@@ -157,6 +157,7 @@ class Variable:
     expression: str | None     # when EvaluateAsExpression
     dtsid: str | None
     line: int
+    scope: str = "Package"     # path of the container that defines it (package, task, sequence, loop)
 
 
 @dataclass
@@ -227,6 +228,16 @@ class Task:
     props: dict = field(default_factory=dict)     # property expressions on the task: name -> expression
     branches: list = field(default_factory=list)
 
+    @property
+    def inactive(self) -> bool:
+        """Disabled itself or inside a disabled container: it does not run as saved."""
+        task = self
+        while task is not None:
+            if task.disabled:
+                return True
+            task = task.parent
+        return False
+
 
 @dataclass
 class Constraint:
@@ -245,9 +256,10 @@ class Flow:
     components: list
     ports: dict                # port id -> Port
     upstream: dict             # input port id -> output Port
-    lineage: dict              # lineage id -> output Col
+    lineage: dict              # lineage id -> output Col (first declaration)
     input_cols: dict           # input column id -> Col
     line: int
+    lineage_all: dict = field(default_factory=dict)   # lineage id -> every output Col declaring it
 
 
 @dataclass
@@ -277,6 +289,19 @@ class PackageFile:
     issues: list               # (kind, message, line)
     format_version: str | None = None
     child_packages: list = field(default_factory=list)   # [(Execute Package Task, child reference, line)]
+    scoped_variables: dict = field(default_factory=dict)  # (container path, name) -> Variable
+    configuration_list: list = field(default_factory=list)   # descriptions of <DTS:Configuration> entries
+
+    def variable(self, name: str | None, path: str | None) -> "Variable | None":
+        """The definition of ``name`` visible from container ``path``: the innermost one wins."""
+        if not name:
+            return None
+        parts = (path or "Package").split("\\")
+        for n in range(len(parts), 0, -1):
+            found = self.scoped_variables.get(("\\".join(parts[:n]), name))
+            if found is not None:
+                return found
+        return None
 
 
 COMPONENT_CLASSES = {
@@ -337,10 +362,7 @@ def classify(el: El, props: dict) -> tuple[str, str]:
         return CONTACT_CLASSES[contact], raw or contact
     if low in GUID_CLASSES:
         return GUID_CLASSES[low], raw
-    # The designer's default description (e.g. "OLE DB Source"), only when nothing else names the type.
-    description = (el.get("description") or "").strip().lower()
-    if not contact and description in CONTACT_CLASSES:
-        return CONTACT_CLASSES[description], raw or description
+    # The description is editable by the package author, so it never classifies a component.
     return "unsupported", raw or contact or "unknown component"
 
 
@@ -401,7 +423,10 @@ def read_package(data: bytes) -> PackageFile:
     if version in ("2",):
         fmt = "2005"
     pkg = PackageFile(fmt, dts(root, "ObjectName") or "Package", [], {}, set(), [], [], [], [], {}, False, [])
-    pkg.configurations = any(True for _ in root.iter("Configuration"))
+    for cfg in root.iter("Configuration"):
+        what = dts(cfg, "ConfigurationString") or dts(cfg, "ObjectName") or "?"
+        pkg.configuration_list.append(f"{dts(cfg, 'ObjectName') or 'configuration'} ({what})")
+    pkg.configurations = bool(pkg.configuration_list)
     pkg.format_version = version
 
     for cm in items(root, "ConnectionManagers", "ConnectionManager"):
@@ -434,13 +459,16 @@ def _connection(cm: El) -> Connection:
         file_path=text if is_file else None, expressions=_property_expressions(cm), columns=columns, line=cm.line)
 
 
-def _variables(el: El, pkg: PackageFile) -> None:
+def _variables(el: El, pkg: PackageFile, scope: str) -> None:
     for var in items(el, "Variables", "Variable"):
         name = f"{dts(var, 'Namespace') or 'User'}::{dts(var, 'ObjectName') or '?'}"
         value_el = var.find("VariableValue")
         expression = dts(var, "Expression") if truthy(dts(var, "EvaluateAsExpression")) else None
-        pkg.variables.setdefault(name, Variable(name, value_el.text if value_el is not None else None,
-                                                expression, dts(var, "DTSID"), var.line))
+        variable = Variable(name, value_el.text if value_el is not None else None, expression, dts(var, "DTSID"),
+                            var.line, scope)
+        pkg.scoped_variables.setdefault((scope, name), variable)
+        if scope == "Package" or name not in pkg.variables:
+            pkg.variables[name] = variable   # any definition, for lookups that have no container
 
 
 def _executables(el: El, parent: Task | None, pkg: PackageFile) -> None:
@@ -451,7 +479,7 @@ def _executables(el: El, parent: Task | None, pkg: PackageFile) -> None:
         parent_task = task
     else:
         parent_task = parent
-    _variables(el, pkg)
+    _variables(el, pkg, parent_task.path)
     for ex in items(el, "Executables", "Executable"):
         name = dts(ex, "ObjectName") or "?"
         path = f"{parent_task.path}\\{name}"
@@ -545,6 +573,8 @@ def _setters(root: El, pkg: PackageFile) -> None:
                 add(el.get(key), "a script with write access")
         if el.tag == "Property" and el.get("Name") == "ReadWriteVariables" and el.text.strip():
             add(el.text.strip(), "a script with write access")
+        if el.tag == "property" and el.get("name") == "ReadWriteVariables" and el.text.strip():
+            add(el.text.strip(), "a Script Component with write access")
         if el.tag == "ExpressionTask" and el.get("Expression"):
             m = re.match(r"\s*@\[([^\]]+)\]\s*=", el.get("Expression"))
             if m:
@@ -553,6 +583,9 @@ def _setters(root: El, pkg: PackageFile) -> None:
         for comp in flow.components:
             if comp.cls == "row_count" and comp.props.get("VariableName"):
                 add(comp.props["VariableName"].value, f"Row Count component {comp.name}")
+    for cfg in pkg.configuration_list:
+        for name in sorted({n for _, n in pkg.scoped_variables}):
+            add(name, f"package configuration {cfg}")
 
 
 def _columns(el: El, kind: str) -> list[Col]:
@@ -600,7 +633,8 @@ def _flow(task: Task) -> Flow:
                 for col in port.columns:
                     col.port = port
                     if kind == "output" and col.lineage:
-                        flow.lineage[col.lineage] = col
+                        flow.lineage.setdefault(col.lineage, col)
+                        flow.lineage_all.setdefault(col.lineage, []).append(col)
                     if kind == "input":
                         flow.input_cols[col.id] = col
                 (comp.inputs if kind == "input" else comp.outputs).append(port)
