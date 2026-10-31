@@ -60,7 +60,7 @@ GAP_KINDS = (
     "unresolved_variable", "runtime_branch", "cycle", "depth_limit", "column_not_written", "unexplained_end",
     # SSIS packages (ssis.py)
     "unsupported_package_step", "ambiguous_package_copy", "package_runtime_value", "package_expression",
-    "package_metadata", "package_column_not_mapped",
+    "package_metadata", "package_column_not_mapped", "package_database_unknown",
 )
 
 

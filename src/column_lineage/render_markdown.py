@@ -879,6 +879,8 @@ NEXT_EVIDENCE = {
                         "incomplete",
     "package_column_not_mapped": "whether something else sets this column after the load (defaults, triggers, "
                                  "later UPDATEs); the package leaves it at its default or NULL",
+    "package_database_unknown": "the database the cited connection points to when the package runs (environment "
+                                "or parameter values); give it with --connection-map NAME=DB",
 }
 
 

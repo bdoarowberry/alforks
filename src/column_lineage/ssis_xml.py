@@ -147,6 +147,7 @@ class Connection:
     expressions: dict          # property -> expression (set at run time)
     columns: list              # flat-file column names, in order
     line: int
+    origin: str | None = None  # root-relative path of the .conmgr file for a project connection
 
 
 @dataclass
@@ -274,6 +275,8 @@ class PackageFile:
     runtime_setters: dict      # variable -> [description]
     configurations: bool
     issues: list               # (kind, message, line)
+    format_version: str | None = None
+    child_packages: list = field(default_factory=list)   # [(Execute Package Task, child reference, line)]
 
 
 COMPONENT_CLASSES = {
@@ -295,6 +298,12 @@ COMPONENT_CLASSES = {
     "microsoft.copymap": "copy_column",
     "microsoft.copycolumn": "copy_column",
     "microsoft.aggregate": "aggregate",
+    "microsoft.oledbcommand": "oledb_command",
+}
+# GUID class ids of SSIS 2008 components, used only when contactInfo does not name the type.
+GUID_CLASSES = {
+    "{bcefe59b-6819-47f7-a125-63753b33abb7}": "oledb_source",
+    "{5a0b62e8-d91d-49f5-94a5-7be58de508f0}": "oledb_destination",
 }
 # SSIS 2008 components carry a GUID class id; their contactInfo (set by the component, not
 # the package author) starts with the component type.
@@ -307,6 +316,7 @@ CONTACT_CLASSES = {
     "sort": "sort", "row count": "row_count", "copy column": "copy_column", "aggregate": "aggregate",
     "ado net source": "adonet_source", "ado.net source": "adonet_source", "datareader source": "adonet_source",
     "ado net destination": "adonet_destination", "ado.net destination": "adonet_destination",
+    "ole db command": "oledb_command",
 }
 MANAGED_CLASSES = {"datareadersourceadapter": "adonet_source", "adonetdestination": "adonet_destination"}
 
@@ -325,6 +335,12 @@ def classify(el: El, props: dict) -> tuple[str, str]:
     contact = (el.get("contactInfo") or "").split(";", 1)[0].strip().lower()
     if contact in CONTACT_CLASSES:
         return CONTACT_CLASSES[contact], raw or contact
+    if low in GUID_CLASSES:
+        return GUID_CLASSES[low], raw
+    # The designer's default description (e.g. "OLE DB Source"), only when nothing else names the type.
+    description = (el.get("description") or "").strip().lower()
+    if not contact and description in CONTACT_CLASSES:
+        return CONTACT_CLASSES[description], raw or description
     return "unsupported", raw or contact or "unknown component"
 
 
@@ -365,6 +381,8 @@ def _task_kind(el: El, etype: str, parent: Task | None) -> str:
         return "data_flow"
     if "executesqltask" in low or (data is not None and data.find("SqlTaskData") is not None):
         return "execute_sql"
+    if "executepackagetask" in low or (data is not None and data.find("ExecutePackageTask") is not None):
+        return "execute_package"
     if "forloop" in low:
         return "for_loop"
     if "foreachloop" in low:
@@ -379,8 +397,12 @@ def read_package(data: bytes) -> PackageFile:
     if root.tag != "Executable":
         raise PackageError("not an SSIS package (root element is not DTS:Executable)")
     fmt = "2012+" if root.get("refId") is not None else "2008"
+    version = dts(root, "PackageFormatVersion")
+    if version in ("2",):
+        fmt = "2005"
     pkg = PackageFile(fmt, dts(root, "ObjectName") or "Package", [], {}, set(), [], [], [], [], {}, False, [])
     pkg.configurations = any(True for _ in root.iter("Configuration"))
+    pkg.format_version = version
 
     for cm in items(root, "ConnectionManagers", "ConnectionManager"):
         pkg.connections.append(_connection(cm))
@@ -446,6 +468,8 @@ def _executables(el: El, parent: Task | None, pkg: PackageFile) -> None:
             sql = _sql_task(task)
             if sql is not None:
                 pkg.sql_tasks.append(sql)
+        elif task.kind == "execute_package":
+            pkg.child_packages.append((task, _child_reference(task, pkg), ex.line))
         _executables(ex, task, pkg)
     for pc in items(el, "PrecedenceConstraints", "PrecedenceConstraint"):
         source, target = pc.get("From"), pc.get("To")
@@ -459,6 +483,30 @@ def _executables(el: El, parent: Task | None, pkg: PackageFile) -> None:
             pkg.constraints.append(Constraint(source, target, dts(pc, "Value") or "0", dts(pc, "EvalOp"),
                                               dts(pc, "Expression"), dts(pc, "LogicalAnd") is None
                                               or truthy(dts(pc, "LogicalAnd")), pc.line))
+
+
+def _child_reference(task: Task, pkg: PackageFile) -> str | None:
+    """The package an Execute Package task runs: a project package name or a file connection's path."""
+    data = next(iter(task.el.path("ObjectData", "ExecutePackageTask")), None)
+    if data is None:
+        return None
+    name = data.find("PackageName")
+    if name is not None and name.text.strip():
+        return name.text.strip()
+    conn = data.find("Connection")
+    ref = conn.text.strip() if conn is not None else (data.get("Connection") or dts(data, "Connection"))
+    for cm in pkg.connections:
+        if ref and ref in (cm.dtsid, cm.ref_id, cm.name):
+            return cm.connection_string or cm.name
+    return ref
+
+
+def read_connection_manager(data: bytes) -> Connection:
+    """A project-level connection manager (.conmgr)."""
+    root = parse_xml(data)
+    if root.tag != "ConnectionManager":
+        raise PackageError("not a connection manager file")
+    return _connection(root)
 
 
 def _sql_task(task: Task) -> SqlTask | None:

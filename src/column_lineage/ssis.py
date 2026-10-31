@@ -34,10 +34,13 @@ from .model import (
     PACKAGE_VARIABLE, PARTIAL, UNKNOWN, UNRESOLVED, VALUE, VARIABLE, VERIFIED, Evidence, Gap, Input, Node,
     ObjectRef, RowSelection, Step, Stop, stable_id, worst,
 )
-from .ssis_xml import Col, Component, Flow, PackageError, PackageFile, Port, bracket_name, normalize_ref, read_package
+from .ssis_xml import (
+    Col, Component, Flow, PackageError, PackageFile, Port, bracket_name, normalize_ref, read_connection_manager,
+    read_package,
+)
 
 PACKAGE_GAP_KINDS = ("unsupported_package_step", "ambiguous_package_copy", "package_runtime_value",
-                     "package_expression", "package_metadata", "package_column_not_mapped")
+                     "package_expression", "package_metadata", "package_column_not_mapped", "package_database_unknown")
 PACKAGE_STOP_REASONS = ("external_file", "package_parameter", "package_runtime")
 PACKAGE_NODE_KINDS = (PACKAGE_COLUMN, FILE_COLUMN, PACKAGE_VARIABLE)
 
@@ -45,7 +48,7 @@ SOURCES = ("flat_file_source", "oledb_source", "adonet_source")
 DESTINATIONS = ("oledb_destination", "adonet_destination", "sqlserver_destination")
 # Synchronous components whose effect on rows passing through is understood.
 PASS_THROUGH = ("data_conversion", "derived_column", "conditional_split", "lookup", "multicast", "row_count",
-                "copy_column")
+                "copy_column", "oledb_command")
 AGGREGATIONS = {"0": "GROUP BY", "1": "COUNT", "2": "COUNT(*)", "3": "COUNT DISTINCT", "4": "SUM", "5": "AVG",
                 "6": "MIN", "7": "MAX"}
 PLACEHOLDER = "@ssis_param_"
@@ -76,6 +79,7 @@ class Destination:
     notes: list
     table_text: str
     mapping: dict          # destination column (lower) -> input Col
+    unknown_db: dict | None = None   # detail of a package_database_unknown gap
 
 
 @dataclass
@@ -102,7 +106,12 @@ class PackageCatalog:
         self.defs: dict[str, tuple] = {}          # package node id -> definition
         self.placeholders: dict[tuple[str, str], tuple] = {}   # (scope, @name) -> (package, variable name)
         self.counts = {"scanned": 0, "in_scope": 0, "excluded": 0, "unreadable": 0, "data_flows": 0,
-                       "destinations": 0, "execute_sql_tasks": 0, "execute_sql_indexed": 0}
+                       "destinations": 0, "execute_sql_tasks": 0, "execute_sql_indexed": 0, "oledb_commands": 0,
+                       "execute_package_tasks": 0, "project_connections": 0}
+        self._conmgr: dict[Path, list] = {}
+        self.scope_db_gaps: dict[str, tuple] = {}   # SQL scope -> (package, line, unknown-database detail, label)
+        self._embedded: list[str] = []
+        self._parents: dict | None = None
         self.file_errors: list[tuple[str, str, str]] = []
         self.component_classes: dict[str, int] = {}
 
@@ -137,6 +146,11 @@ class PackageCatalog:
                 self.component_classes[comp.cls] = self.component_classes.get(comp.cls, 0) + 1
                 if comp.cls in DESTINATIONS:
                     self._destination(pkg, flow, comp)
+                elif comp.cls == "oledb_command":
+                    self.counts["oledb_commands"] += 1
+                    self._oledb_command(pkg, flow, comp)
+        self.counts["execute_package_tasks"] += len(data.child_packages)
+        self._parents = None
         self._sql_tasks(pkg)
 
     def attach(self, analyzer) -> None:
@@ -156,39 +170,54 @@ class PackageCatalog:
         return text + (f", component {comp.name}" if comp is not None else "")
 
     def connection(self, pkg: Package, ref: str | None):
+        """The package's connection manager for a reference (refId, DTSID or name), else a project-level
+        connection manager (.conmgr) of the nearest project folder."""
         if not ref:
             return None
-        ref_key = ref.split(":external")[0]
+        ref_key = ref.split(":external")[0].strip()
+        name = bracket_name(ref_key)
         for cm in pkg.data.connections:
             if ref_key in (cm.ref_id, cm.dtsid, cm.name):
                 return cm
+        project = self.project_connections(pkg)
+        for cm in project:
+            if cm.dtsid and ref_key.lower() == cm.dtsid.lower():
+                return cm
+        for cm in project:
+            if name and cm.name.lower() == name.lower():
+                return cm
         return None
 
-    def database_for(self, pkg: Package, ref: str | None) -> tuple[str | None, str | None, list[str], str]:
-        """(database, database_source, notes, status) for a connection reference."""
+    def database_for(self, pkg: Package, ref: str | None):
+        """(database, database_source, notes, status, unknown) for a connection reference. ``unknown`` is the
+        detail of a ``package_database_unknown`` gap when the package does not prove the database."""
         cm = self.connection(pkg, ref)
-        name = cm.name if cm is not None else bracket_name(ref)
+        name = cm.name if cm is not None else (bracket_name(ref) or ref)
         notes = []
+        where = f"project connection {cm.name} ({cm.origin})" if cm is not None and cm.origin else f"connection {name}"
         if name and name.lower() in self.connection_map:
-            return self.connection_map[name.lower()], "configured", [
-                f"Database {self.connection_map[name.lower()]} for connection {name} is from --connection-map."], VERIFIED
+            db = self.connection_map[name.lower()]
+            return db, "configured", [f"Database {db} for connection {name} is from --connection-map."], VERIFIED, None
+        runtime = {k: v for k, v in (cm.expressions if cm is not None else {}).items()
+                   if k.lower() in ("connectionstring", "initialcatalog", "servername")}
         if cm is None:
-            notes.append(f"Connection {name or ref} is not defined in this package (a project connection?); "
-                         "give its database with --connection-map.")
+            unknown = {"connection": name, "reason": "the connection manager is not defined in the package or in "
+                       "a project .conmgr file"}
+        elif runtime:
+            unknown = {"connection": cm.name, "reason": "set at run time by a property expression",
+                       "expressions": dict(sorted(runtime.items())), "design_time_database": cm.database}
         elif cm.database:
-            status = VERIFIED
-            runtime = {k: v for k, v in cm.expressions.items()
-                       if k.lower() in ("connectionstring", "initialcatalog", "servername")}
-            if runtime:
-                status = INFERRED
-                notes.append(f"Connection {cm.name} has property expressions ({'; '.join(f'{k} = {v}' for k, v in sorted(runtime.items()))}) "
-                             f"that can change its database at run time; its design-time database {cm.database} is used.")
-            return norm(cm.database), "connection_manager", notes, status
+            if cm.origin:
+                notes.append(f"Database {cm.database} is from {where}.")
+            return norm(cm.database), "connection_manager", notes, VERIFIED, None
+        elif self.catalog.default_database:
+            notes.append(f"Connection {cm.name} names no database (Initial Catalog); --default-database is used.")
+            return self.catalog.default_database, "default", notes, INFERRED, None
         else:
-            notes.append(f"Connection {cm.name} names no database (Initial Catalog); give one with --connection-map.")
-        if self.catalog.default_database:
-            return self.catalog.default_database, "default", notes, INFERRED
-        return None, None, notes, VERIFIED
+            unknown = {"connection": cm.name, "reason": "the connection string names no database (Initial Catalog)"}
+        if cm is not None and cm.origin:
+            unknown["project_connection"] = cm.origin
+        return None, None, notes, INFERRED, unknown
 
     def table_ref(self, text: str, database: str | None, source: str | None) -> ObjectRef | None:
         parts = [p for p in split_name(text.strip().strip('"')) if p]
@@ -297,10 +326,12 @@ class PackageCatalog:
             table, note = table
         else:
             note = None
-        db, source, notes, status = self.database_for(pkg, comp.connections[0][1] if comp.connections else None)
+        db, source, notes, status, unknown = self.database_for(pkg, comp.connections[0][1] if comp.connections else None)
         ref = self.table_ref(table, db, source)
         if ref is None:
             return
+        if ref.database_source == "explicit":
+            unknown = None   # a three-part table name states the database
         if note:
             notes = notes + [note]
             status = worst(status, INFERRED)
@@ -317,8 +348,8 @@ class PackageCatalog:
                 mapping.setdefault(norm(name), ic)
         self.counts["destinations"] += 1
         self.destinations.setdefault(ref.key, []).append(
-            Destination(pkg, flow, comp, port, ref, status, notes, table, mapping))
-        if ref.database and ref.schema:
+            Destination(pkg, flow, comp, port, ref, status, notes, table, mapping, unknown))
+        if ref.database and ref.schema and unknown is None:
             self.catalog._register(ref)
 
     def _static_variable(self, pkg: Package, name: str | None, comp: Component, what: str):
@@ -334,9 +365,8 @@ class PackageCatalog:
 
     # =========================================================== Execute SQL
     def _sql_tasks(self, pkg: Package) -> None:
-        for n, task in enumerate(pkg.data.sql_tasks):
+        for task in pkg.data.sql_tasks:
             self.counts["execute_sql_tasks"] += 1
-            where = self.identity(pkg, task.task)
             evidence = [self.evidence(pkg, task.line, f"Execute SQL task {task.task.name}", "execute_sql")]
             detail = {"package": pkg.label, "task": task.task.path}
             runtime = task.task.props.get("SqlStatementSource")
@@ -353,31 +383,14 @@ class PackageCatalog:
                 continue
             if not task.sql.strip():
                 continue
-            db, _, _, _ = self.database_for(pkg, task.connection)
-            scope = self.scope(pkg, task.task)
-            sql = self._placeholders(task.sql, scope, pkg, {p[0]: p[1] for p in task.parameters})
-            line = max(task.line, 2)
-            text = "\n" * (line - 2) + (f"USE [{db}];" if db else "") + "\n" + sql + "\n"
-            source = SourceFile(pkg.path.parent / f"{pkg.path.name}#sql{n}", text)
-            label = f"{where}" + (" (disabled)" if task.task.disabled else "")
-
-            def adjust(statement, scope=scope, label=label):
-                return replace(statement, scope=scope, procedure=label)
-
-            try:
-                unit = self.catalog.add_embedded(source, pkg.root, pkg.root_label, pkg.rel, adjust)
+            label = self.identity(pkg, task.task) + (" (disabled)" if task.task.disabled else "")
+            if self._index_sql(pkg, task.task, task.sql, task.line, task.connection, self.scope(pkg, task.task), label,
+                               list(task.task.branches), {p[0]: p[1] for p in task.parameters}, evidence, detail):
                 self.counts["execute_sql_indexed"] += 1
-                # Precedence constraints and loop containers around the task become branch context.
-                for statement in unit.index.statements:
-                    unit.controls[statement.start] = tuple(task.task.branches) + tuple(
-                        unit.controls.get(statement.start, ()))
-            except Exception as exc:  # noqa: BLE001 - one task must not stop the scan
-                pkg.issues.append(Gap("unsupported_package_step", f"Execute SQL task {task.task.path} could not be "
-                                      f"indexed ({type(exc).__name__}).", None, evidence, detail))
 
     def _placeholders(self, sql: str, scope: str, pkg: Package, bindings: dict) -> str:
         """Replace OLE DB ``?`` markers by ``@ssis_param_<n>`` so the SQL parses and each marker is a
-        variable the adapter can bind to the package variable mapped to it."""
+        variable the adapter binds to what the package maps to it (a variable or an input column)."""
         masked = mask_noncode(sql)
         out, last, n = [], 0, 0
         for m in re.finditer(r"\?", masked):
@@ -392,7 +405,6 @@ class PackageCatalog:
                 self.placeholders.setdefault((scope, key.lower()), (pkg, var, f"parameter {key}"))
         return "".join(out)
 
-    # ============================================================== tracing
     def handles(self, node: Node) -> bool:
         if node.kind in PACKAGE_NODE_KINDS:
             return True
@@ -455,8 +467,18 @@ class PackageCatalog:
         files = self._package_files()
         package_sql = [s for s in steps if s.target.id == node.id and s.evidence
                        and (s.evidence[0].root, s.evidence[0].path) in files]
+        sql_db_gaps = []
+        for step in package_sql:
+            entry = self.scope_db_gaps.get(getattr(step, "_scope", None))
+            if entry is not None:
+                pkg, line, unknown, label = entry
+                gap = self.database_gap(unknown, node, pkg, line, f"the SQL of {label}")
+                step.status = worst(step.status, AMBIGUOUS)
+                step.gaps = sorted(set(step.gaps) | {gap.id})
+                sql_db_gaps.append(gap)
+        gaps = gaps + sql_db_gaps
         if not dests and len({files[(s.evidence[0].root, s.evidence[0].path)] for s in package_sql}) < 2:
-            return found
+            return steps, gaps, stops, cycles
         writing, loading = [], []
         for d, status, gap_id in dests:
             ic = d.mapping.get(node.name)
@@ -465,6 +487,13 @@ class PackageCatalog:
         new_gaps: list[Gap] = list(extra_gaps)
         for d, ic, status, gap_id in writing:
             s, g = self._destination_steps(node, d, ic)
+            if d.unknown_db is not None:
+                db_gap = self.database_gap(d.unknown_db, node, d.package, d.component.line,
+                                           f"destination {d.component.name} ({d.table_text})")
+                g = g + [db_gap]
+                status = worst(status, AMBIGUOUS)
+                for step in s:
+                    step.gaps = sorted(set(step.gaps) | {db_gap.id})
             for step in s:
                 step.status = worst(step.status, status)
                 if status == INFERRED and d.ref.database is None:
@@ -541,6 +570,105 @@ class PackageCatalog:
         """(root label, root-relative path) -> package label, to recognise steps from Execute SQL tasks."""
         return {(p.root_label, p.rel): p.label for p in self.packages}
 
+    def project_connections(self, pkg: Package) -> list:
+        """Connection managers in .conmgr files of the package's folder, or the nearest parent folder
+        (up to the package root) that has any."""
+        folder = pkg.path.parent
+        stop = pkg.root if pkg.root.is_dir() else folder
+        while True:
+            found = self._conmgr_folder(folder, pkg)
+            if found or folder == stop or stop not in folder.parents:
+                return found
+            folder = folder.parent
+
+    def _conmgr_folder(self, folder: Path, pkg: Package) -> list:
+        if folder not in self._conmgr:
+            found = []
+            for path in sorted(folder.glob("*.conmgr")):
+                rel = path.relative_to(pkg.root).as_posix() if pkg.root.is_dir() else path.name
+                try:
+                    cm = read_connection_manager(path.read_bytes())
+                except (OSError, PackageError) as exc:
+                    self.file_errors.append((pkg.root_label, rel, f"{type(exc).__name__}: {str(exc)[:200]}"))
+                    continue
+                cm.origin = rel
+                if not cm.name or cm.name == "?":
+                    cm.name = path.stem
+                found.append(cm)
+                self.counts["project_connections"] += 1
+            self._conmgr[folder] = found
+        return self._conmgr[folder]
+
+    def database_gap(self, unknown: dict, node: Node | None, pkg: Package, line: int, what: str) -> Gap:
+        expressions = unknown.get("expressions") or {}
+        how = f": {'; '.join(f'{k} = {v}' for k, v in expressions.items())}" if expressions else ""
+        design = (f" The design-time value {unknown['design_time_database']} saved in the file is not proof."
+                  if unknown.get("design_time_database") else "")
+        return self._gap("package_database_unknown",
+                         f"The database of {what} is not known from the package: connection {unknown['connection']} - "
+                         f"{unknown['reason']}{how}.{design} The object is matched without a database (a candidate, "
+                         "not a proven identity); give the database with --connection-map "
+                         f"{unknown['connection']}=<db>.", node, pkg, line, f"connection {unknown['connection']}",
+                         {"package": pkg.label, **unknown})
+
+    def _index_sql(self, pkg, task, sql, line, connection, scope, label, branches, bindings, evidence, detail) -> bool:
+        """Index SQL run by a package (Execute SQL task, OLE DB Command) in the SQL catalog, cited at ``line``
+        of the package file."""
+        db, _, _, _, unknown = self.database_for(pkg, connection)
+        if unknown is not None:
+            self.scope_db_gaps[scope] = (pkg, line, unknown, label)
+        sql = self._placeholders(sql, scope, pkg, bindings)
+        line = max(line, 2)
+        text = "\n" * (line - 2) + (f"USE [{db}];" if db else "") + "\n" + sql + "\n"
+        self._embedded.append(scope)
+        source = SourceFile(pkg.path.parent / f"{pkg.path.name}#sql{len(self._embedded)}", text)
+
+        def adjust(statement):
+            return replace(statement, scope=scope, procedure=label)
+
+        try:
+            unit = self.catalog.add_embedded(source, pkg.root, pkg.root_label, pkg.rel, adjust)
+        except Exception as exc:  # noqa: BLE001 - one task must not stop the scan
+            pkg.issues.append(Gap("unsupported_package_step", f"SQL of {label} could not be indexed "
+                                  f"({type(exc).__name__}).", None, evidence, detail))
+            return False
+        # Precedence constraints, loop containers and per-row execution become branch context.
+        for statement in unit.index.statements:
+            unit.controls[statement.start] = tuple(branches) + tuple(unit.controls.get(statement.start, ()))
+        return True
+
+    def _oledb_command(self, pkg: Package, flow: Flow, comp: Component) -> None:
+        """OLE DB Command: its SQL runs once per input row; ``?`` marker n binds to the input column mapped to
+        the n-th external (parameter) column."""
+        prop = comp.props.get("SqlCommand")
+        port = comp.inputs[0] if comp.inputs else None
+        evidence = [self.evidence(pkg, comp.line, f"OLE DB Command {comp.name}", "oledb_command")]
+        detail = {"package": pkg.label, "task": flow.task.path, "component": comp.name}
+        if prop is None or not prop.value.strip() or port is None:
+            pkg.issues.append(Gap("unsupported_package_step", f"OLE DB Command {comp.name} in {pkg.rel} has no static "
+                                  "SQL command; what it writes is not analysed.", None, evidence, detail))
+            return
+        order = list(port.external)
+        bindings = {}
+        for ic in port.columns:
+            if ic.external_id in port.external:
+                bindings[str(order.index(ic.external_id))] = ("column", flow, comp, port, ic)
+        scope = f"{self.scope(pkg, flow)}::{comp.name}"
+        branches = list(flow.task.branches) + [f"OLE DB Command {comp.name}: runs once per row reaching it"]
+        self._index_sql(pkg, flow.task, prop.value, prop.line, comp.connections[0][1] if comp.connections else None,
+                        scope, self.identity(pkg, flow.task, comp), branches, bindings, evidence, detail)
+
+    def parents_of(self, pkg: Package) -> list[str]:
+        """Execute Package tasks (in scanned packages) whose child reference names this package's file."""
+        if self._parents is None:
+            self._parents = {}
+            for parent in self.packages:
+                for task, ref, _ in parent.data.child_packages:
+                    if ref:
+                        key = re.split(r"[\\/]", ref.strip())[-1].lower()
+                        self._parents.setdefault(key, []).append(f"{parent.label} ({task.path})")
+        return sorted(set(self._parents.get(pkg.path.name.lower(), [])))
+
     # ---------------------------------------------------------- step helpers
     def _step(self, pkg: Package, flow: Flow, comp: Component, target: Node, writer_kind: str, expression: str,
               operation: str, method: str, inputs: list[Input], line: int, excerpt: str, role: str,
@@ -564,6 +692,10 @@ class PackageCatalog:
         if step.gaps and step.status in (VERIFIED, INFERRED):
             step.status = PARTIAL
         step.notes.append(f"From package copy {pkg.label}.")
+        parents = self.parents_of(pkg)
+        if parents:
+            step.notes.append("This package is run by Execute Package task(s) in " + "; ".join(parents) +
+                              " (matched by package file name; context only, not traced across).")
         step.notes.extend(notes)
         if flow.task.disabled or any(b.startswith("DISABLED") for b in flow.task.branches):
             step.notes.append("The data flow task (or a container around it) is disabled in this package file.")
@@ -905,10 +1037,15 @@ class PackageCatalog:
             return [], [], [Stop(node, "external_file", f"Flat-file column {name} (connection not defined in {pkg.rel}).")]
         where = cm.file_path or "?"
         runtime = cm.expressions.get("ConnectionString")
-        detail = f"Flat-file connection {cm.name} in {pkg.rel}: {where}"
         if runtime:
-            detail += f" (path set at run time by the expression {runtime})"
-        return [], [], [Stop(node, "external_file", detail + ".")]
+            setters = sorted({w for v in re.findall(r"@\[([^\]]+)\]", runtime)
+                              for w in pkg.data.runtime_setters.get(v, [])})
+            detail = (f"Flat-file connection {cm.name} in {pkg.rel}: the file is chosen at run time by the expression "
+                      f"{runtime}" + (f" (set by {', '.join(setters)})" if setters else "") +
+                      f"; the design-time path {where} is only the value saved in the file.")
+        else:
+            detail = f"Flat-file connection {cm.name} in {pkg.rel}: {where}."
+        return [], [], [Stop(node, "external_file", detail)]
 
     def _db_source(self, node, pkg, flow, comp, col):
         name, gap = self._external(node, pkg, flow, comp, col)
@@ -916,7 +1053,7 @@ class PackageCatalog:
             return [], [gap], []
         props = {k: v.value for k, v in comp.props.items()}
         mode = props.get("AccessMode", "")
-        db, source, notes, status = self.database_for(pkg, comp.connections[0][1] if comp.connections else None)
+        db, source, notes, status, unknown = self.database_for(pkg, comp.connections[0][1] if comp.connections else None)
         identity = {"package": pkg.label, "task": flow.task.path, "component": comp.name}
         if comp.cls == "adonet_source":
             table = props.get("TableOrViewName") if mode in ("", "0") else None
@@ -951,19 +1088,20 @@ class PackageCatalog:
                 return [], [gap], []
             column = Node(COLUMN, norm(name), ref)
             status = worst(status, INFERRED if ref.database_source in ("default", "unified") else VERIFIED)
+            db_gaps = [] if unknown is None or ref.database_source == "explicit" else [
+                self.database_gap(unknown, None, pkg, comp.line, f"source table {table}")]
+            if db_gaps:
+                status = worst(status, AMBIGUOUS)
             operation = "direct" if name.lower() == col.name.lower() else "rename"
             step, more = self._step(pkg, flow, comp, node, "package_source", f"{table}.{name}", operation,
                                     "external_metadata_column", [Input(column, VALUE, f"{table}.{name}", None, status)],
                                     col.line, f"{comp.name}: {col.name} <- {table}.{name}", "source", status=status,
-                                    notes=notes)
+                                    notes=notes, gaps=db_gaps)
             return [step], more, []
         if sql:
             steps, gaps = self.query_steps(pkg, flow, comp, sql, db, node, name, comp.props.get("SqlCommand").line
                                            if comp.props.get("SqlCommand") else comp.line, "source query")
-            for step in steps:
-                if step.target.id == node.id:
-                    step.status = worst(step.status, status)
-                    step.notes.extend(notes)
+            self._query_database_gap(steps, gaps, node, unknown, pkg, comp, status, notes, "source query")
             return steps, gaps, []
         gap = self._gap("unsupported_package_step", f"Source {comp.name} uses an access mode the package adapter does not "
                         f"read (AccessMode {mode or '?'}).", node, pkg, comp.line, comp.name, identity)
@@ -1067,7 +1205,7 @@ class PackageCatalog:
     def _reference_steps(self, node, pkg, flow, comp, column):
         props = {k: v.value for k, v in comp.props.items()}
         sql = props.get("SqlCommand") or ""
-        db, source, notes, status = self.database_for(pkg, comp.connections[0][1] if comp.connections else None)
+        db, source, notes, status, unknown = self.database_for(pkg, comp.connections[0][1] if comp.connections else None)
         if not sql.strip():
             table = props.get("OpenRowset") or props.get("TableOrViewName")
             if table:
@@ -1088,9 +1226,20 @@ class PackageCatalog:
         for step in steps:
             if step.target.id == node.id:
                 step.writer_kind = "package_lookup_reference"
-                step.status = worst(step.status, status)
-                step.notes.extend(notes)
+        self._query_database_gap(steps, gaps, node, unknown, pkg, comp, status, notes, "reference query")
         return steps, gaps, []
+
+    def _query_database_gap(self, steps, gaps, node, unknown, pkg, comp, status, notes, what) -> None:
+        """Status, notes and the unknown-database gap of the step mapping a query output column."""
+        gap = self.database_gap(unknown, None, pkg, comp.line, f"the {what} of {comp.name}") if unknown else None
+        if gap is not None:
+            gaps.append(gap)
+        for step in steps:
+            if step.target.id == node.id:
+                step.status = worst(step.status, status, AMBIGUOUS if gap is not None else VERIFIED)
+                step.notes.extend(notes)
+                if gap is not None:
+                    step.gaps = sorted(set(step.gaps) | {gap.id})
 
     def _union(self, node, pkg, flow, comp, col):
         steps, gaps = [], []
@@ -1258,20 +1407,28 @@ class PackageCatalog:
         return [step], more, []
 
     def _placeholder_steps(self, node: Node):
-        pkg, variable, what = self.placeholders[(node.scope, node.name)]
-        if not variable:
-            gap = Gap("package_runtime_value", f"SQL {what} ({node.name}) in {pkg.rel} has no variable bound to it in "
-                      "the package.", node, [self.evidence(pkg, 1, node.name, "gap")], {"parameter": node.name})
+        pkg, binding, what = self.placeholders[(node.scope, node.name)]
+        if not binding:
+            gap = Gap("package_runtime_value", f"SQL {what} ({node.name}) in {pkg.rel} has no variable or column bound "
+                      "to it in the package.", node, [self.evidence(pkg, 1, node.name, "gap")], {"parameter": node.name})
             return [], [gap], [], []
-        var_node = self.variable_node(pkg, variable)
-        step, gaps = self._step(pkg, _TaskOnly(pkg), None, node, "package_parameter_binding", variable, "direct",
-                                "parameter_binding", [Input(var_node, VALUE, variable)],
-                                (pkg.data.variables.get(variable).line if pkg.data.variables.get(variable) else 1),
-                                f"{what} <- {variable}", "parameter")
-        step.notes.append(f"The package binds {variable} to {what} of this SQL ({node.name} stands for the ? marker).")
+        if isinstance(binding, tuple):
+            _, flow, comp, port, ic = binding
+            r = self.resolve(pkg, flow, comp, port, ic.lineage)
+            item, _ = self._input(r, ic.name)
+            step, gaps = self._step(pkg, flow, comp, node, "package_parameter_binding", ic.name, "direct",
+                                    "parameter_binding", [item], ic.line, f"{what} <- input column {ic.name}",
+                                    "parameter", [r])
+            step.notes.append(f"{comp.name} binds input column {ic.name} to {what} of its SQL ({node.name} stands for "
+                              "the ? marker; parameters are matched to the component's external columns in order).")
+            return [step], gaps, [], []
+        var = pkg.data.variables.get(binding)
+        step, gaps = self._step(pkg, _TaskOnly(pkg), None, node, "package_parameter_binding", binding, "direct",
+                                "parameter_binding", [Input(self.variable_node(pkg, binding), VALUE, binding)],
+                                var.line if var is not None else 1, f"{what} <- {binding}", "parameter")
+        step.notes.append(f"The package binds {binding} to {what} of this SQL ({node.name} stands for the ? marker).")
         return [step], gaps, [], []
 
-    # =============================================================== reports
     def scan_info(self, include=(), exclude=()) -> dict:
         return {**self.counts, "issues": sum(len(p.issues) for p in self.packages),
                 "file_errors": len(self.file_errors), "include": list(include), "exclude": list(exclude),

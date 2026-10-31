@@ -217,13 +217,20 @@ def test_sql_command_source_is_mapped_by_the_sql_analyzer(tmp_path):
     assert t.complete
 
 
-def test_sql_command_source_without_database_follows_unknown_database_rules(tmp_path):
+def test_connection_without_database_makes_candidates_not_proof(tmp_path):
     t = ssis_trace("query", "demo.query_target.doubled_amount", tmp_path)
+    assert t.target_id == "demo_db.demo.query_target.doubled_amount"   # unified like SQL with no database
     dest = t.only_step_for(t.target_id)
-    assert dest["status"] == "inferred"            # matched through the only known database for the name
+    assert dest["status"] == "ambiguous"
     query = t.only_step_for(inputs(dest, "value")[0])
-    assert query["status"] == "inferred"
-    assert any("--connection-map" in n for n in query["notes"])
+    assert query["status"] == "ambiguous"
+    gaps = t.gaps("package_database_unknown")
+    assert {g["detail"]["connection"] for g in gaps} == {"source_conn"}
+    assert all(g["id"] in dest["gaps"] or g["id"] in query["gaps"] for g in gaps)
+    assert all("--connection-map source_conn=" in g["message"] for g in gaps)
+    assert not t.complete
+    assert not [s for s in t.steps if s["writer_kind"].startswith(PACKAGE_STEP) and s["status"] == "verified"
+                and s["target"] == t.target_id]
 
 
 def test_sql_command_from_expression_variable_is_a_named_gap(tmp_path):

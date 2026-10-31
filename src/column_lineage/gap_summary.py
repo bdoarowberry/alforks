@@ -175,7 +175,8 @@ def build(catalog, traces: list[dict], samples: int = 25, packages=None) -> dict
 
 
 PACKAGE_GAP_KINDS = ("unsupported_package_step", "ambiguous_package_copy", "package_runtime_value",
-                     "package_expression", "package_metadata", "package_column_not_mapped")
+                     "package_expression", "package_metadata", "package_column_not_mapped",
+                     "package_database_unknown")
 
 
 def _package_counts(data: dict) -> dict:
