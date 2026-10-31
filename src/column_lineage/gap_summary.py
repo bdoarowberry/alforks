@@ -146,6 +146,8 @@ def build(catalog, traces: list[dict], samples: int = 25) -> dict:
             "steps_by_status": completeness["steps_by_status"],
             "gaps_by_kind": completeness["gaps_by_kind"],
             "stops_by_reason": completeness["stops_by_reason"],
+            "result": completeness.get("result"),
+            "ends_by_meaning": completeness.get("ends_by_meaning", {}),
             "asserted_steps": completeness.get("asserted_steps", 0),
             "gaps_resolved_by_assertions": completeness.get("gaps_resolved_by_assertions", 0),
             "gap_statements_by_kind": _gap_statements(data),
@@ -176,6 +178,22 @@ def _totals(traces: list[dict]) -> dict:
     statements: dict[str, set] = {}
     traces_per_statement: Counter = Counter()
     outcome: Counter = Counter()
+    results: Counter = Counter()
+    ends: Counter = Counter()
+    no_writer = {"stops": 0, "distinct_objects": set(), "with_unused_writer_candidates": 0}
+    near: Counter = Counter()
+    for data in traces:
+        results[data["completeness"].get("result", "?")] += 1
+        ends.update(data["completeness"].get("ends_by_meaning", {}))
+        for stop in data.get("stops", []):
+            if stop["reason"] != "source_without_writer":
+                continue
+            no_writer["stops"] += 1
+            no_writer["distinct_objects"].add(stop["node"].rsplit(".", 1)[0])
+            found = stop.get("writer_search") or []
+            if found:
+                no_writer["with_unused_writer_candidates"] += 1
+            near.update(f["category"] for f in found)
     for data in traces:
         completeness = data["completeness"]
         blocking = {**completeness.get("value_gaps_by_kind", {}), **completeness.get("context_gaps_by_kind", {})}
@@ -201,6 +219,11 @@ def _totals(traces: list[dict]) -> dict:
     return {
         "traces": len(traces),
         "outcomes": dict(sorted(outcome.items())),
+        "results": dict(sorted(results.items())),
+        "value_path_ends_by_meaning": dict(sorted(ends.items())),
+        "no_writer_stops": {"stops": no_writer["stops"], "distinct_objects": len(no_writer["distinct_objects"]),
+                            "with_unused_writer_candidates": no_writer["with_unused_writer_candidates"],
+                            "unused_writer_candidates_by_category": dict(sorted(near.items()))},
         "traces_blocked_by_gap_kind": dict(sorted(blocked.items())),
         "gaps_by_kind": dict(sorted(gaps.items())),
         "distinct_gap_statements_by_kind": {k: len(v) for k, v in sorted(statements.items())},

@@ -507,6 +507,9 @@ class Catalog:
         self.top_limited: set[tuple[str, int]] = set()                        # statements whose TOP (n) was blanked
         self._dynamic_args: dict[str, list] | None = None
         self._evaluations: dict[int, object] | None = None   # id(issue) -> dynamic_eval.Evaluation
+        self.skipped_files: list[tuple[str, str]] = []   # (label, path) of files the filters skipped
+        self._write_mentions: dict | None = None
+        self._writers_by_statement: dict | None = None
 
     # ---------------------------------------------------------------- loading
     def _mapped_database(self, root: Path, rel: str, absolute: str) -> str | None:
@@ -1530,3 +1533,104 @@ def column_info(definition: exp.ColumnDef, ordinal: int) -> ColumnInfo | None:
         computed = None
     rowversion = type_name.startswith(("ROWVERSION", "TIMESTAMP"))
     return ColumnInfo(name.lower(), ordinal, identity, computed, rowversion, default)
+
+
+# ----------------------------------------------------------------- writer search
+WRITER_SEARCH_LABELS = {
+    "other_object": "writes a same-named object that resolves to a different identity",
+    "same_object_column_not_mapped": "writes this object and names the column, but no value was mapped to it",
+    "unparsed": "statement could not be parsed",
+    "ignored_non_lineage": "statement was classed as non-lineage and ignored",
+    "parsed_no_writer": "statement parsed, but no writer was recorded from it",
+    "not_indexed": "text is outside every indexed statement",
+    "comment_or_string": "write text inside a comment or string literal",
+    "skipped_file": "in a file skipped by the file filters (dated snapshot)",
+}
+
+
+def _search_catalog(catalog: "Catalog") -> dict[str, list[tuple]]:
+    """Object name -> (unit or path label, offset, in_code) for every write-shaped mention."""
+    found: dict[str, list[tuple]] = defaultdict(list)
+    for unit in catalog.units:
+        for match in WRITE_TARGET.finditer(unit.text):
+            name = norm(split_name(match.group("target"))[-1])
+            at = match.start("target")
+            found[name].append((unit, at, unit.masked[at] == unit.text[at]))
+    for label, path in catalog.skipped_files:
+        try:
+            text = Path(path).read_text(encoding="utf-8-sig", errors="replace")
+        except OSError:
+            continue
+        for match in WRITE_TARGET.finditer(mask_noncode(text)):
+            name = norm(split_name(match.group("target"))[-1])
+            found[name].append((f"{label}:{text.count(chr(10), 0, match.start()) + 1}", match.start(), True))
+    return found
+
+
+def _differs(ref: ObjectRef, other: ObjectRef) -> str:
+    parts = []
+    for field_name in ("server", "database", "schema", "kind"):
+        a, b = getattr(ref, field_name), getattr(other, field_name)
+        if a != b:
+            source = {"explicit": "named in the statement", "use_statement": "from a USE statement",
+                      "configured": "from --database-map", "default": "from --default-database",
+                      "unified": "the only database declaring it"}.get(other.database_source or "")
+            how = f" ({source})" if field_name == "database" and source else ""
+            parts.append(f"{field_name} {b or '?'}{how} instead of {a or '?'}")
+    if not parts and ref.scope != other.scope:
+        parts.append("a different procedure scope")
+    return ", ".join(parts) or "a different identity"
+
+
+def writer_search(catalog: "Catalog", ref: ObjectRef, column: str, writers: list) -> list[dict]:
+    """Statements that look like they write ``ref`` but gave no step for ``column``, with the reason.
+
+    Used to explain a `source_without_writer` stop: a near miss is usually a database-context
+    difference, a statement the parser could not read, or a file the filters skipped."""
+    if catalog._write_mentions is None:
+        catalog._write_mentions = _search_catalog(catalog)
+        catalog._writers_by_statement = defaultdict(list)
+        for items in catalog.writers.values():
+            for writer in items:
+                catalog._writers_by_statement[id(writer.statement)].append(writer)
+    findings: list[dict] = []
+    seen: set = set()
+    own = {id(w.statement) for w in writers}
+    column_word = re.compile(rf"(?<![\w@#$]){re.escape(column)}(?![\w$#])", re.I) if column else None
+    for unit, at, in_code in catalog._write_mentions.get(norm(ref.name), []):
+        if isinstance(unit, str):
+            findings.append({"category": "skipped_file", "location": unit, "detail": WRITER_SEARCH_LABELS["skipped_file"]})
+            continue
+        location = f"{unit.root_label}/{unit.rel_path}:{unit.line_at(at)}"
+        if not in_code:
+            findings.append({"category": "comment_or_string", "location": location,
+                             "detail": WRITER_SEARCH_LABELS["comment_or_string"]})
+            continue
+        statement = next((s for s in unit.index.statements if s.start <= at < max(s.end, s.start + len(s.text))), None)
+        if statement is None:
+            findings.append({"category": "not_indexed", "location": location, "detail": WRITER_SEARCH_LABELS["not_indexed"]})
+            continue
+        if id(statement) in seen:
+            continue
+        seen.add(id(statement))
+        if id(statement) in own:
+            if column_word and column_word.search(mask_noncode(statement.text)):
+                findings.append({"category": "same_object_column_not_mapped", "location": location,
+                                 "detail": WRITER_SEARCH_LABELS["same_object_column_not_mapped"]})
+            continue
+        if statement.parse_status != "parsed":
+            category = "ignored_non_lineage" if non_lineage(statement.text) else "unparsed"
+            findings.append({"category": category, "location": location, "detail": WRITER_SEARCH_LABELS[category]})
+            continue
+        recorded = [w for w in catalog._writers_by_statement.get(id(statement), []) if w.ref.name == norm(ref.name)]
+        if recorded:
+            for writer in recorded[:1]:
+                findings.append({"category": "other_object", "location": location,
+                                 "detail": f"{WRITER_SEARCH_LABELS['other_object']}: {writer.ref.display} "
+                                           f"({_differs(ref, writer.ref)})"})
+            continue
+        if not catalog._writers_by_statement.get(id(statement)):
+            findings.append({"category": "parsed_no_writer", "location": location,
+                             "detail": f"{WRITER_SEARCH_LABELS['parsed_no_writer']} (parsed as "
+                                       f"{type(statement.tree).__name__})"})
+    return findings

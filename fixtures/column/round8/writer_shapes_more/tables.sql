@@ -1,0 +1,9 @@
+CREATE TABLE stage.src (source_ref varchar(20), a int);
+CREATE TABLE dbo.dest1 (ref_no varchar(20), a int);
+CREATE TABLE dbo.dest2 (ref_no varchar(20), a int);
+CREATE TABLE dbo.dest3 (ref_no varchar(20), a int);
+CREATE TABLE dbo.dest4 (ref_no varchar(20), a int);
+CREATE TABLE dbo.dest5 (ref_no varchar(20), a int);
+CREATE TABLE dbo.dest6 (ref_no varchar(20), a int);
+CREATE TABLE dbo.dest7 (ref_no varchar(20), a int);
+CREATE TABLE dbo.dest8 (ref_no varchar(20), a int);

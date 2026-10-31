@@ -175,7 +175,7 @@ def test_complete_and_no_boundary():
     trace = chain_trace(shared=True)
     md = render_markdown(trace.to_dict())
     ident = section(md, "Identity and result")
-    assert "**Result: Complete**" in ident
+    assert "**Result: Complete within the selected sources" in ident
     assert "| Requested boundary | none |" in ident
     assert "Uncertainty:** none recorded" in section(md, "Short answer")
 
@@ -367,7 +367,7 @@ def test_empty_trace_source_target():
     trace = TraceResult(target=target, requested="db.s.t.raw", boundary=Boundary(), scan={"roots": ["r"]})
     trace.stops.append(Stop(target, "source_without_writer"))
     md = render_markdown(trace.to_dict())
-    assert "**Result: Complete**" in md
+    assert "**Result: Complete within the selected sources" in md
     assert "No mapping step leads into `db.s.t.raw`" in section(md, "Short answer")
     assert "No mapping steps" in section(md, "Detailed steps")
     assert "No row-selection dependencies" in section(md, "Row-selection context")

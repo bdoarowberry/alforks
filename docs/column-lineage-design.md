@@ -152,8 +152,29 @@ A path ends at a `Stop` (`boundary`, `source_without_writer`, `constant`,
 dependency.
 
 `completeness.status` is `complete` only if every value path ends at a stop and there
-are no gaps. A `source_without_writer` stop means "no writer exists in the scanned
-files", not "this is the ultimate source-system field".
+are no gaps. A `source_without_writer` stop means "no writer exists in the selected
+scanned sources", not "this is the ultimate source-system field".
+
+`completeness.result` keeps the meanings apart:
+
+- `reached_requested_boundary`: complete, and no value path ends at an object without a writer;
+- `complete_within_selected_scope`: complete, but some paths end at objects with no writer in
+  the selected sources (other sources, such as packages or feeds, may write them);
+- `incomplete`: open value-path or context gaps (for example an unsupported package step).
+
+`completeness.ends_by_meaning` counts value-path ends by meaning (`reached_requested_boundary`,
+`no_writer_in_selected_scope`, `constant`, `parameter_without_caller`, `max_depth`,
+`unsupported_package_step`). Asserted steps stay `asserted` and `relies_on_assertions` is
+reported separately.
+
+Every `source_without_writer` stop on a table or view carries `writer_search`: statements in
+the scanned files that look like writers of an object with the same name but gave no step,
+each with a category and location — `other_object` (resolves to another database, schema or
+server; the detail says where the database context came from), `same_object_column_not_mapped`,
+`unparsed`, `ignored_non_lineage`, `parsed_no_writer`, `not_indexed`, `comment_or_string`,
+`skipped_file`. The stop's `detail` summarises them. An empty list means the search found no
+write of that name in the selected sources. `gap-summary.json` counts the categories
+(`totals.no_writer_stops`).
 
 ### Dynamic SQL evaluation (`dynamic_eval.py`)
 

@@ -108,6 +108,20 @@
   malformed `writer`/`resolves` are usage errors.
 - `compare`: sources reached only through ambiguous bindings are `found_as_ambiguous_candidate`.
 
+## Fixed after feedback round 8
+
+- A no-writer stop now says what the writer search found (`writer_search` on the stop, counted
+  in `gap-summary.json` under `totals.no_writer_stops`). In synthetic tests every shape of
+  `INSERT ... SELECT` inside a procedure body traces correctly; the reproduced cause of the
+  symptom is a writer whose database context (USE, `--database-map`, `--default-database`)
+  resolves its target to another database than the reader's. Tests: `tests/test_column_round8.py`.
+- `completeness.result` and `ends_by_meaning` distinguish reaching the requested boundary from
+  being complete only within the selected sources.
+- Parse repairs: `@x + = y`, qualified column names in an INSERT into a table variable, index
+  options glued to the next statement, a lone `WITH EXECUTE AS` header (left an empty statement),
+  `db..name` in text-matched targets (it was read as the database name).
+- Parse-error classes keep SQLGlot's own rule names (`Required keyword: high missing for Between`).
+
 ## Known open issues
 
 - Corpus chain 08 ends in `missing_definition` (recall 0.6). Not investigated.

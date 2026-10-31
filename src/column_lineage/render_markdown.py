@@ -48,7 +48,7 @@ ROW_ROLE_LABEL = {
 }
 STOP_LABEL = {
     "boundary": "requested boundary",
-    "source_without_writer": "source with no writer in the scanned files",
+    "source_without_writer": "source with no writer in the selected scanned sources",
     "constant": "constant value",
     "parameter_without_caller": "parameter with no caller in the scanned files",
     "max_depth": "maximum depth reached",
@@ -290,7 +290,10 @@ def _result_text(t: _Trace) -> tuple[str, int]:
             qualifiers.append(f"relies on {_plural(comp['asserted_steps'], 'asserted step')}")
         if n_rows:
             qualifiers.append(f"value lineage{row_note}")
-        return "Complete" + (f" ({'; '.join(qualifiers)})" if qualifiers else ""), n_gaps
+        label = {"reached_requested_boundary": "Complete — reached the requested boundary",
+                 "complete_within_selected_scope": "Complete within the selected sources — some paths end at "
+                                                   "objects with no writer in them"}.get(comp.get("result"), "Complete")
+        return label + (f" ({'; '.join(qualifiers)})" if qualifiers else ""), n_gaps
     if n_gaps:
         n_context = sum((comp.get("context_gaps_by_kind") or {}).values())
         n_value = n_gaps - n_rows - n_context

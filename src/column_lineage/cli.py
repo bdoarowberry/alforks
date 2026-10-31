@@ -160,6 +160,9 @@ def main(argv: list[str] | None = None) -> int:
                 files.extend((root, source) for source in provider.files())
             except (OSError, ValueError) as exc:
                 parser.error(str(exc))
+            catalog.skipped_files.extend(
+                (f"{labels[root]}/{Path(p).relative_to(root).as_posix() if root.is_dir() else Path(p).name}", str(p))
+                for p in provider.ignored_dated_snapshots)
         if not files:
             parser.error("No SQL source files matched the selected roots and filters.")
         progress.start_phase("parsing", completed=0, total=len(files))
@@ -192,6 +195,7 @@ def main(argv: list[str] | None = None) -> int:
             "fallback": catalog.stats["fallback"],
             "ignored_non_lineage": catalog.stats["ignored"],
             "repaired": catalog.stats["repaired"],
+            "skipped_dated_snapshots": len(catalog.skipped_files),
             "statement_issues": len(catalog.issues),
             "file_errors": len(catalog.file_errors),
             "source_revision": source_revision(roots),

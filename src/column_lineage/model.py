@@ -251,9 +251,13 @@ class Stop:
     node: Node
     reason: str                    # boundary, source_without_writer, constant, parameter_without_caller, max_depth
     detail: str | None = None
+    writer_search: list[dict] | None = None   # source_without_writer: same-named writes not used, with why
 
     def to_dict(self) -> dict:
-        return {"node": self.node.id, "reason": self.reason, "detail": self.detail}
+        out = {"node": self.node.id, "reason": self.reason, "detail": self.detail}
+        if self.writer_search is not None:
+            out["writer_search"] = self.writer_search
+        return out
 
 
 @dataclass
@@ -364,7 +368,20 @@ class TraceResult:
             overall = PARTIAL
         complete = overall in (VERIFIED, INFERRED, ASSERTED) and not blocking
         asserted = sum(1 for s in value_steps if s.status == ASSERTED)
-        return {"status": "complete" if complete else "incomplete", "overall_step_status": overall,
+        ends = _count(END_MEANING.get(s.reason, s.reason) for s in self.stops)
+        for gap in open_gaps:
+            if gap.kind == "unsupported_package_step" and effects[gap.id] != "row_selection":
+                ends["unsupported_package_step"] = ends.get("unsupported_package_step", 0) + 1
+        if not complete:
+            result = "incomplete"
+        elif ends.get("no_writer_in_selected_scope"):
+            result = "complete_within_selected_scope"
+        elif ends.get("reached_requested_boundary"):
+            result = "reached_requested_boundary"
+        else:
+            result = "complete_within_selected_scope"
+        return {"status": "complete" if complete else "incomplete", "result": result,
+                "ends_by_meaning": dict(sorted(ends.items())), "overall_step_status": overall,
                 "steps_by_status": dict(sorted(statuses.items())), "gaps_by_kind": dict(sorted(counts.items())),
                 "value_gaps_by_kind": dict(sorted(by_effect["value"].items())),
                 "context_gaps_by_kind": dict(sorted(by_effect["context"].items())),
@@ -374,7 +391,10 @@ class TraceResult:
                 "gaps_resolved_by_assertions": len(self.resolved_gaps),
                 "stops_by_reason": dict(sorted(_count(s.reason for s in self.stops).items())),
                 "note": "Complete means every value path ends at the requested boundary or at a source "
-                        "object with no writer in the scanned files, with no value-path or context gaps. "
+                        "object with no writer in the selected scanned sources, with no value-path or context gaps. "
+                        "result says which: reached_requested_boundary, or complete_within_selected_scope when "
+                        "some paths end at objects with no writer in the selected sources (not proof that they "
+                        "are ultimate sources). "
                         "Row-selection gaps (filters and joins that could not be fully resolved) are "
                         "reported separately and do not make the value lineage incomplete. A complete "
                         "trace does not claim its stops are ultimate source-system fields."}
@@ -400,6 +420,16 @@ class TraceResult:
             "resolved_gaps": sorted(self.resolved_gaps, key=lambda g: (g["kind"], g["id"])),
             "assertions_used": sorted(set(self.assertions_used)),
         }
+
+
+# What a value-path end means for the reader (stop reason -> meaning).
+END_MEANING = {
+    "boundary": "reached_requested_boundary",
+    "source_without_writer": "no_writer_in_selected_scope",
+    "constant": "constant",
+    "parameter_without_caller": "parameter_without_caller",
+    "max_depth": "max_depth",
+}
 
 
 def _count(values) -> dict[str, int]:

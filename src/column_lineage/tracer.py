@@ -8,7 +8,7 @@ import re
 from .analyzer import Analyzer
 from table_lineage.index import mask_noncode
 
-from .catalog import Catalog, norm, split_name
+from .catalog import Catalog, norm, split_name, writer_search
 from .model import (
     AMBIGUOUS, ASSERTED, COLUMN, CONSTANT, FILTER, INFERRED, LOCAL_COLUMN, PARAMETER, TEMP_COLUMN, UNKNOWN, UNRESOLVED,
     VALUE, VARIABLE, VERIFIED, WINDOW, CONDITION, Boundary, Evidence, Gap, Input, Node, ObjectRef, RowSelection, Step,
@@ -438,7 +438,24 @@ class Tracer:
                                     "parse_error", "insert_exec", "dynamic_sql") for g in gaps):
                 stops.append(Stop(node, "source_without_writer",
                                   f"{len(writers)} statement(s) write this object but none sets this column."))
+        for stop in stops:
+            if stop.reason == "source_without_writer" and ref.kind in ("table", "view"):
+                self._explain_no_writer(stop, ref, column, writers)
         return steps, gaps, stops, cycles
+
+    def _explain_no_writer(self, stop: Stop, ref, column: str, writers) -> None:
+        """Say where the search for a writer looked, and list near misses, so a no-writer stop is
+        never mistaken for proof that the object is an ultimate source."""
+        found = writer_search(self.catalog, ref, column, writers)
+        stop.writer_search = found
+        scope = "the selected scanned SQL sources"
+        if not found:
+            stop.detail = f"{stop.detail} Searched {scope}; no statement there writes an object of this name."
+            return
+        shown = "; ".join(f"{f['location']}: {f['detail']}" for f in found[:5])
+        more = f"; and {len(found) - 5} more" if len(found) > 5 else ""
+        stop.detail = (f"{stop.detail} Searched {scope}; {len(found)} statement(s) that look like writers were not "
+                       f"used: {shown}{more}.")
 
     def _temp_writer_reaches(self, writer, ref, before) -> bool:
         path, offset, scope = before
