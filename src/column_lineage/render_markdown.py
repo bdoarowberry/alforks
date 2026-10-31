@@ -334,7 +334,8 @@ def assertion_provenance_text(data: dict) -> str:
             row.get("review"), "review not recorded")
         review[rkey] = review.get(rkey, 0) + 1
     fmt = lambda counts: ", ".join(f"{n} {k}" for k, n in sorted(counts.items(), key=lambda kv: -kv[1]))
-    return f"{fmt(made)}; {fmt(review)}"
+    records = len(rows)
+    return f"{records} assertion record{'' if records == 1 else 's'}: {fmt(made)}; {fmt(review)}"
 
 
 def _section_identity(t: _Trace, json_name: str | None) -> list[str]:

@@ -8,13 +8,15 @@
 ## Plain answer
 
 - **Not fully traced (1 open point on the value routes, so sources may be missing).** Also: 1 route stops at an open point.
-- **Sources:** `staging.demo` (CASE branch, CASE default; [F1](sample-trace.md#fam-7ff0de8a8f), [F2](sample-trace.md#fam-c93c713b4c)); variables (UPDATE of unproved run order; [F3](sample-trace.md#fam-fcaa68cfb4)).
+- **Sources:**
+    - `staging.demo` (CASE branch, CASE default; [F1](sample-trace.md#fam-7ff0de8a8f), [F2](sample-trace.md#fam-c93c713b4c))
+    - variables (UPDATE of unproved run order; [F3](sample-trace.md#fam-fcaa68cfb4))
 - **Value rules:** a CASE/IIF choice picks between the alternatives; an UPDATE may overwrite the value (run order not proved) — details under What changes the value.
 
 ## Coverage
 
 - **Status:** **Incomplete** — 1 open point on the value routes ([gaps](sample-trace.md#gaps)); proof stops before an origin on the routes they touch. 2 ends do reach the requested boundary, but the trace as a whole is not complete.
-- **Coverage:** 4 value routes in 4 route families · 2 at the requested boundary · 0 declared terminals · 1 unresolved origin (1 open point) · steps: 2 verified, 0 inferred, 0 asserted, 1 partial.
+- **Coverage:** 4 routes (3 carry the value, 1 decides between values) in 4 route families · distinct end points (columns where routes stop): 2 at the requested boundary · 0 declared terminals · 1 unresolved origin (1 open point) · steps: 2 verified, 0 inferred, 0 asserted, 1 partial.
 - A requested boundary or declared terminal is where this run stopped; it is not an originating system. An end with no writer in the selected sources is an unresolved origin even when the step reaching it is verified.
 
 ## Main evidence needed

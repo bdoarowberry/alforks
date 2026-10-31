@@ -65,9 +65,9 @@ MAX_ROUTE_OBJECTS = 7        # objects shown per route before the middle is elid
 MAX_ROUTE_ENDS = 4           # ends named per route
 MAX_LABELS = 3               # branch labels shown per route or end
 MAX_WRITERS = 3              # writers named per route
-MAX_ENDPOINTS = 10           # rows of the sources table
+MAX_ENDPOINTS = 8            # rows of the sources table (all are on the detailed page)
 MAX_ROW_OBJECTS = 4          # objects in "Which rows?"
-MAX_ROW_PREDICATES = 3       # conditions shown per object
+MAX_ROW_PREDICATES = 2       # conditions shown per object (the detailed page has all)
 MAX_OPEN = 3                 # open-point kinds shown
 MAX_PLACES = 3               # places named per open-point kind
 MAX_EVIDENCE = 3             # "Main evidence needed" bullets
@@ -1005,7 +1005,7 @@ def _headline_rank(text: str) -> tuple[int, int]:
 
 
 def _fam_ends_text(a: Analysis, fam: dict, limit: int = 2) -> str:
-    names = [_node_short(a, n, 60) for n in fam["ends"]]
+    names = [_node_short(a, n) for n in fam["ends"]]
     return _and_list(names, limit)
 
 
@@ -1090,9 +1090,11 @@ def _answer_headline(a: Analysis, unproven: int, total: int) -> str:
         return f"**{_result_head(a)}.**"
     if comp.get("result") == "complete_within_selected_scope" and unproven:
         where = ("no route reaches the requested boundary" if not boundary else
-                 f"{_plural(boundary, 'route')} {'reaches' if boundary == 1 else 'reach'} the requested boundary")
-        return (f"**Trace stopped at unresolved sources:** {unproven} of {_plural(total, 'route')} end where no "
-                f"writer, file producer or caller was found, so the origin is not proved there; {where}. "
+                 f"{_plural(boundary, 'of these routes', 'of these routes')} "
+                 f"{'reaches' if boundary == 1 else 'reach'} the requested boundary")
+        return (f"**Trace stopped at unresolved sources:** {unproven} of {_plural(total, 'route')} carrying the "
+                f"value end where no writer, file producer or caller was found, so the origin is not proved there; "
+                f"{where}. "
                 "(Technically complete within the selected sources: no open point inside them.)")
     return f"**{_result_head(a)}.**"
 
@@ -1124,8 +1126,8 @@ def _section_answer(a: Analysis, detailed: str = "") -> list[str]:
         links = ", ".join(_fam_link(f, detailed) for f in group["fams"][:4]) + (", …" if len(group["fams"]) > 4 else "")
         names.append(f"{text} ({', '.join(rules)}; {links})")
     more = len(ordered) - MAX_ANSWER_SOURCES
-    sources = "; ".join(names) + (f"; and {_plural(more, 'more source family', 'more source families')} "
-                                  "(see Route families)" if more > 0 else "")
+    if more > 0:
+        names.append(f"and {_plural(more, 'more source family', 'more source families')} (see Route families)")
     total = sum(f["route_count"] for f in value_fams)
     unproven = sum(f["route_count"] for f in value_fams
                    if f["stop"] in ("source_without_writer", "external_file", "parameter_without_caller"))
@@ -1144,7 +1146,7 @@ def _section_answer(a: Analysis, detailed: str = "") -> list[str]:
         stops.insert(0, f"{_plural(unproven, 'route')} {'ends' if unproven == 1 else 'end'} where no writer, file "
                         "producer or caller was found, so the origin is not proved there")
     out = [f"- {_answer_headline(a, unproven, total)}" + (f" Also: {_and_list(stops, 5)}." if stops else ""),
-           f"- **Sources:** {sources or 'no value source (conditions only)'}."]
+           "- **Sources:**" + ("".join(f"\n    - {n}" for n in names) if names else " no value source (conditions only)")]
     rules = _answer_rules(a)
     if rules:
         out.append(f"- **Value rules:** {'; '.join(rules)} — details under What changes the value.")
@@ -1268,10 +1270,14 @@ def _section_coverage(a: Analysis, detailed: str) -> list[str]:
              if s not in ("verified", "inferred", "asserted")]
     if other:
         step_text += ", " + ", ".join(other)
-    line = (f"{'at least ' if lower else ''}{_plural(routes, 'value route')} in "
-            f"{_plural(len(a.families), 'route family', 'route families')} · "
-            f"{counts.get('boundary', 0)} at the requested boundary · {counts.get('declared', 0)} declared terminal"
-            f"{'' if counts.get('declared', 0) == 1 else 's'} · "
+    carrying = sum(f["route_count"] for f in a.families if f["role"] == "value")
+    deciding = routes - carrying
+    line = (f"{'at least ' if lower else ''}{_plural(routes, 'route')} ({carrying} "
+            f"{'carries' if carrying == 1 else 'carry'} the value"
+            + (f", {deciding} {'decides' if deciding == 1 else 'decide'} between values" if deciding else "") + ") in "
+            f"{_plural(len(a.families), 'route family', 'route families')} · distinct end points (columns where "
+            f"routes stop): {counts.get('boundary', 0)} at the requested boundary · {counts.get('declared', 0)} "
+            f"declared terminal{'' if counts.get('declared', 0) == 1 else 's'} · "
             f"{_plural(unresolved, 'unresolved origin')}"
             + (f" ({', '.join(unresolved_parts)})" if unresolved_parts else "")
             + (f" · {_plural(counts['constant'], 'constant')}" if counts.get("constant") else "")
@@ -1430,7 +1436,7 @@ def _section_families(a: Analysis, detailed: str) -> list[str]:
         source = fam["source"]
         kind = {"database": "DB", "file": "file", "constant": "constant"}.get(source["kind"], _text(source["kind"]))
         what = _fam_ends_text(a, fam, 2) if len(fam["ends"]) <= 2 else \
-            f"{_code(_truncate(source['label'], 60))} ({len(fam['ends'])} {'values' if source['kind'] == 'constant' else 'columns'})"
+            f"{_code(_truncate(source['label'], NAME_LIMIT))} ({len(fam['ends'])} {'values' if source['kind'] == 'constant' else 'columns'})"
         routes = f"{'≥' if fam['route_count_is_lower_bound'] else ''}{fam['route_count']}"
         out.append("| " + " | ".join(_cell(c) for c in (
             _fam_link(fam, detailed), f"{kind}: {what}", _text(fam["value_rule_text"]), _text(fam["stop_text"]),

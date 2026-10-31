@@ -206,7 +206,7 @@ def test_overview_is_short_on_a_large_trace():
     assert "and 36 more objects" in section(md, "Which rows?")
     assert "dynamic SQL" in section(md, "Open points") and "and 5 more" in section(md, "Open points")
     # 968 value routes collapse into a handful of families; the diagram stays small.
-    assert "968 value routes in 5 route families" in section(md, "Coverage")
+    assert "968 routes (488 carry the value, 480 decide between values) in 5 route families" in section(md, "Coverage")
     diagram = mermaid_block(md)
     check_mermaid(diagram)
     assert len([line for line in diagram if line.startswith("  F")]) == 5
@@ -477,8 +477,8 @@ def test_overview_short_with_thousands_of_writers(tmp_path):
     run(sql, "demo.demo.target.val", tmp_path / "out", "--default-database", "demo", "--jobs", "1")
     page = overview(tmp_path / "out", "demo.demo.target.val")
     assert len(page.splitlines()) < MAX_LINES and f"{n} constants such as `'v0'` and `'v1'` (direct; [F1]" in section(page, "Plain answer")
-    assert f"{n} value routes in 1 route family" in section(page, "Coverage")
-    assert "And 1490 more end points (constant: 1490)" in page
+    assert f"{n} routes ({n} carry the value) in 1 route family" in section(page, "Coverage")
+    assert "And 1492 more end points (constant: 1492)" in page
 
 
 if __name__ == "__main__" and "--write-sample" in sys.argv:
@@ -512,11 +512,13 @@ def test_first_screen_answers_what_feeds_where_proof_stops_and_what_is_assumed(t
     assert "**Definition not approved.**" in field
     # What feeds it: every source family, with the rules that change the value.
     answer = section(md, "Plain answer")
-    lines = [l for l in answer.strip().splitlines() if l.strip()]
-    assert len(lines) <= 3 and all(l.startswith("- **") for l in lines)   # two or three short bullets
-    assert lines[0].startswith("- **Trace stopped at unresolved sources:** 5 of 6 routes end where no writer")
+    lines = [l for l in answer.strip().splitlines() if l.strip() and not l.startswith("    ")]
+    assert len(lines) <= 3 and all(l.startswith("- **") for l in lines)   # three short bullets
+    assert lines[0].startswith("- **Trace stopped at unresolved sources:** 5 of 6 routes carrying the value end "
+                               "where no writer")
     assert "no route reaches the requested boundary" in lines[0]
-    assert lines[1].startswith("- **Sources:** `core_db.crm` (primary, fallback, later UPDATE override; [F")
+    assert lines[1] == "- **Sources:**"
+    assert "\n    - `core_db.crm` (primary, fallback, later UPDATE override; [F" in answer   # one line per group
     for family in ("the constant `0` (CASE branch; [F", "file connection `limit_feed` read by package "
                    "`load_file_limit.dtsx` (package mapping; [F", "`partner_db.stage` (direct; [F"):
         assert family in answer
@@ -524,7 +526,8 @@ def test_first_screen_answers_what_feeds_where_proof_stops_and_what_is_assumed(t
     assert "it can set `0`" in lines[2]
     assert "core_db.crm.account" not in lines[2]                        # columns are named once, under Sources
     coverage = section(md, "Coverage")
-    assert ("7 value routes in 7 route families · 0 at the requested boundary · 0 declared terminals · 6 unresolved "
+    assert ("7 routes (6 carry the value, 1 decides between values) in 7 route families · distinct end points "
+            "(columns where routes stop): 0 at the requested boundary · 0 declared terminals · 6 unresolved "
             "origins (5 with no writer in the selected sources, 1 external file) · 1 constant · steps: 7 verified, "
             "0 inferred, 0 asserted") in coverage
     assert "**Trace stopped at unresolved sources**" in coverage
