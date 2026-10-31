@@ -245,7 +245,7 @@ def test_no_writer_end_never_reads_as_confirmed_source(tmp_path):
     md = overview(tmp_path, "demo.output.result_value")
     answer, coverage = section(md, "Plain answer"), section(md, "Coverage")
     assert answer.strip().startswith("- **Trace stopped at unresolved sources:**")
-    assert "where no writer, file producer or caller was found, so the origin is not proved there" in answer
+    assert "where no writer, file producer or caller was found (origin not proved there)" in answer
     assert "it is not an originating system" in coverage
     assert "unresolved origin even when the step reaching it is verified" in coverage
     for row in end_rows(md).values():
@@ -514,9 +514,9 @@ def test_first_screen_answers_what_feeds_where_proof_stops_and_what_is_assumed(t
     answer = section(md, "Plain answer")
     lines = [l for l in answer.strip().splitlines() if l.strip() and not l.startswith("    ")]
     assert len(lines) <= 3 and all(l.startswith("- **") for l in lines)   # three short bullets
-    assert lines[0].startswith("- **Trace stopped at unresolved sources:** 5 of 6 routes carrying the value end "
+    assert lines[0].startswith("- **Trace stopped at unresolved sources:** of 6 routes carrying the value, 5 end "
                                "where no writer")
-    assert "no route reaches the requested boundary" in lines[0]
+    assert "and none reaches the requested boundary" in lines[0]
     assert lines[1] == "- **Sources:**"
     assert "\n    - `core_db.crm` (primary, fallback, later UPDATE override; [F" in answer   # one line per group
     for family in ("the constant `0` (CASE branch; [F", "file connection `limit_feed` read by package "
@@ -815,3 +815,14 @@ def test_mermaid_escapes_awkward_names():
     # Readable, entity-free: a quote becomes an apostrophe, < > become ‹ ›, ; becomes a comma; the rest stays.
     assert "odd'name" in nodes["T"]["label"] and "c|1" in nodes["T"]["label"]
     assert "s[x]" in nodes["F1"]["label"] and "a‹b›#,`c" in nodes["F1"]["label"]
+
+
+def test_headline_counts_boundary_and_unresolved_routes_separately():
+    """Reviewer: 'N of M end unresolved; N of these reach the boundary' read as a subset. Separate counts."""
+    from column_lineage.render_overview import Analysis, _answer_headline
+    trace = sample_trace()
+    a = Analysis(trace.to_dict())
+    a.comp = {**a.comp, "status": "complete", "result": "complete_within_selected_scope"}
+    text = _answer_headline(a, unproven=9, total=25)
+    assert "of 25 routes carrying the value, 9 end where no writer" in text
+    assert "of these" not in text and ("a separate" in text or "none reaches" in text)

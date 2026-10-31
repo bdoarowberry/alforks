@@ -1089,12 +1089,12 @@ def _answer_headline(a: Analysis, unproven: int, total: int) -> str:
     if comp.get("status") != "complete":
         return f"**{_result_head(a)}.**"
     if comp.get("result") == "complete_within_selected_scope" and unproven:
-        where = ("no route reaches the requested boundary" if not boundary else
-                 f"{_plural(boundary, 'of these routes', 'of these routes')} "
-                 f"{'reaches' if boundary == 1 else 'reach'} the requested boundary")
-        return (f"**Trace stopped at unresolved sources:** {unproven} of {_plural(total, 'route')} carrying the "
-                f"value end where no writer, file producer or caller was found, so the origin is not proved there; "
-                f"{where}. "
+        # Separate counts of the same routes, never one as a subset of the other.
+        where = ("none reaches the requested boundary" if not boundary else
+                 f"a separate {boundary} {'reaches' if boundary == 1 else 'reach'} the requested boundary")
+        return (f"**Trace stopped at unresolved sources:** of {_plural(total, 'route')} carrying the value, "
+                f"{unproven} {'ends' if unproven == 1 else 'end'} where no writer, file producer or caller was "
+                f"found (origin not proved there) and {where}. "
                 "(Technically complete within the selected sources: no open point inside them.)")
     return f"**{_result_head(a)}.**"
 
