@@ -137,6 +137,16 @@
   `test_compound_assignment_ending_in_a_literal`.
 - Parse-error classes now really keep SQLGlot's rule names (the stored message has a prefix).
 
+## Added: optional SSIS adapter
+
+- `--package-root`, `--package-include/--package-exclude`, `--connection-map`; modules `ssis.py`,
+  `ssis_xml.py`, `ssis_expression.py`; contract in the design doc ("SSIS packages").
+- An adversarial review found 3 realistic false edges (error outputs, variable scoping, cache
+  Lookup), 2 binding-order false edges and several hidden runtime unknowns; all fixed with
+  regression fixtures in `fixtures/column/ssis_review/` (`tests/test_column_ssis_review.py`).
+  Runtime values (parameters, system/expression variables, configurations) are gaps, not stops.
+- Not yet run on real packages.
+
 ## Known open issues
 
 - Corpus chain 08 ends in `missing_definition` (recall 0.6). Not investigated.
