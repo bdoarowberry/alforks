@@ -40,6 +40,7 @@ The useful options:
 | `--default-schema S` | Schema for one-part names (default `dbo`). |
 | `--stop-at-database DB ...` | Stop when the trace reaches a column in one of these databases. |
 | `--stop-at-object GLOB ...` | Stop at matching objects (`db.schema.name`, case-insensitive). |
+| `--entry-point PROCEDURE ...` | The procedure(s) the run starts from. When writers in several procedures conflict, the call sequence from here orders them (each writer reached by one call path, unconditionally, or in the two arms of one IF/ELSE); the order is noted on the steps instead of an `ambiguous_writer_order` gap. Writers not called from it keep the gap. |
 | `--declared-terminals FILE` | Objects or columns the reviewer accepts as terminal sources for this run (one glob per line, `# reason` optional). Stops there keep their reason and are labelled; the result can be `complete_to_declared_boundary`. Upstream population is not proved. |
 | `--max-depth N` | Stop after N mapping steps. |
 | `--trace-row-selection` | Also trace filter and join columns upstream (larger output). |

@@ -166,6 +166,10 @@
   `tests/test_column_function_summary.py`. Two synthetic corpus chains became complete.
 - `--declared-terminals FILE` and the result `complete_to_declared_boundary` (stops keep their reasons).
 - Positional INSERT steps cite the column order they used (`target_schema` evidence).
+- `--entry-point PROCEDURE`: orders writers in several procedures by the call sequence from the run's
+  entry procedure (single call path, unconditional or opposite IF/ELSE arms); otherwise the
+  `ambiguous_writer_order` gap stays and says why. All writers' sources remain on the trace (an
+  overwrite replaces only the rows it matches). Test: `tests/test_column_entry_point.py`.
 
 ## Known open issues
 

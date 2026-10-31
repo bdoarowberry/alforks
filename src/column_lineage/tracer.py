@@ -8,7 +8,7 @@ import re
 from .analyzer import Analyzer
 from table_lineage.index import mask_noncode
 
-from .catalog import Catalog, norm, split_name, writer_search
+from .catalog import Catalog, controls_of, norm, split_name, writer_search
 from .model import (
     AMBIGUOUS, ASSERTED, COLUMN, CONSTANT, FILTER, INFERRED, LOCAL_COLUMN, PARAMETER, TEMP_COLUMN, UNKNOWN, UNRESOLVED,
     VALUE, VARIABLE, VERIFIED, WINDOW, CONDITION, Boundary, Evidence, Gap, Input, Node, ObjectRef, RowSelection, Step,
@@ -25,6 +25,8 @@ class Tracer:
         self.catalog = catalog
         self.packages = packages   # optional ssis.PackageCatalog: package destinations as writers
         self.terminals: list[tuple[str, str]] = []   # (glob, reason) from --declared-terminals
+        self.entry_points: list[str] = []            # procedure scopes the run starts from (--entry-point)
+        self._keys: dict = {}
         self.analyzer = analyzer or Analyzer(catalog)
         self.trace_row_selection = trace_row_selection
         self.analyzer.expand_row_selection = trace_row_selection
@@ -416,13 +418,19 @@ class Tracer:
                     step._scope = writer.statement.scope
                     step._position = (writer.unit.path, writer.statement.start, writer.statement.scope)
             steps.extend(found)
-        # Overwrite order across procedures cannot be established statically.
+        # Overwrite order across procedures is unknown, unless the call sequence from a declared entry
+        # point (--entry-point) fixes it.
         scopes = {w.statement.scope for w, _ in writing}
-        if len(scopes) > 1 and any(w.kind in OVERWRITING for w, _ in writing):
+        ordered, why = (self._call_order(writing) if len(scopes) > 1 and self.entry_points
+                        else (False, None))
+        if len(scopes) > 1 and any(w.kind in OVERWRITING for w, _ in writing) and ordered:
+            self._note_call_order(writing)
+        elif len(scopes) > 1 and any(w.kind in OVERWRITING for w, _ in writing):
             names = sorted({(w.statement.procedure or w.unit.rel_path) for w, _ in writing})
             gaps.append(Gap("ambiguous_writer_order",
                             f"{node.display} is written by {len(names)} procedures/scripts ({', '.join(names)}), at least "
-                            "one of which overwrites existing rows; which value survives depends on run order.",
+                            "one of which overwrites existing rows; which value survives depends on run order."
+                            + (f" The call sequence from the entry point does not settle it: {why}." if why else ""),
                             node, [self.catalog.evidence(w.unit, w.statement, role="writer") for w, _ in writing][:10]))
         elif len({id(w.statement) for w, _ in writing}) > 1:
             first = min(w.statement.start for w, _ in writing)
@@ -454,6 +462,84 @@ class Tracer:
             if stop.reason == "source_without_writer" and ref.kind in ("table", "view"):
                 self._explain_no_writer(stop, ref, column, writers)
         return steps, gaps, stops, cycles
+
+    # ------------------------------------------------------- call order
+    def _call_paths(self, scope: str, limit: int = 3) -> list[tuple[str, list]]:
+        """(entry scope, calls) for each call path from an entry point to ``scope`` (at most ``limit``)."""
+        found: list[tuple[str, list]] = []
+        for entry in self.entry_points:
+            stack = [(entry, [])]
+            while stack and len(found) < limit:
+                current, path = stack.pop()
+                if current == scope:
+                    found.append((entry, path))
+                    continue
+                if len(path) >= 12:
+                    continue
+                for call in self.catalog.calls_by_caller.get(current, []):
+                    for proc in self.catalog.procs_for(call.callee):
+                        if proc.scope not in {c.caller_scope for c in path} | {current}:
+                            stack.append((proc.scope, path + [call]))
+        return found
+
+    def _call_key(self, writer) -> tuple[list, str | None]:
+        """[(offset, controls)] from the entry point down to the writer, or (None, reason)."""
+        paths = self._call_paths(writer.statement.scope)
+        label = writer.statement.procedure or writer.unit.rel_path
+        if not paths:
+            return None, f"{label} is not called from the entry point"
+        if len(paths) > 1:
+            return None, f"{label} is reached by several call paths from the entry point"
+        entry, calls = paths[0]
+        key = [(c.statement.start, tuple(controls_of(c.unit, c.statement))) for c in calls]
+        return key + [(writer.statement.start, tuple(writer.controls))], None
+
+    def _call_order(self, writing) -> tuple[bool, str | None]:
+        """Whether the call sequence from the entry point orders every pair of writers."""
+        keys = []
+        for writer, _ in writing:
+            key, why = self._call_key(writer)
+            if key is None:
+                return False, why
+            keys.append(key)
+        conditional = lambda c: any(not x.startswith("TRY") for x in c)
+        for i in range(len(keys)):
+            for j in range(i + 1, len(keys)):
+                a, b = keys[i], keys[j]
+                d = next((k for k in range(min(len(a), len(b))) if a[k][0] != b[k][0]), None)
+                if d is None:
+                    continue   # the same statement (two steps of one writer)
+                # a[d] and b[d] are statements of the same procedure; their controls share the blocks
+                # that enclose both. What lies beyond that, and everything inside the callees below,
+                # must run unconditionally for the order to be certain.
+                ca, cb = a[d][1], b[d][1]
+                common = 0
+                while common < min(len(ca), len(cb)) and ca[common] == cb[common]:
+                    common += 1
+                extra_a, extra_b = ca[common:], cb[common:]
+                if extra_a and extra_b and (extra_b[0] == f"ELSE (of {extra_a[0]})"
+                                            or extra_a[0] == f"ELSE (of {extra_b[0]})"):
+                    continue   # the two arms of one IF never both run
+                deeper = [c for _, c in a[d + 1:]] + [c for _, c in b[d + 1:]]
+                if conditional(extra_a) or conditional(extra_b) or any(conditional(c) for c in deeper):
+                    return False, "a call or write on the way is conditional (IF/ELSE/WHILE/CATCH)"
+        self._keys = {id(w): k for (w, _), k in zip(writing, keys)}
+        return True, None
+
+    def _note_call_order(self, writing) -> None:
+        order = sorted(writing, key=lambda ws: [o for o, _ in self._keys[id(ws[0])]])
+        names = [w.statement.procedure or w.unit.rel_path for w, _ in order]
+        for rank, (writer, step) in enumerate(order):
+            earlier = sorted(set(names[:rank]) - {names[rank]})
+            later = sorted(set(names[rank + 1:]) - {names[rank]})
+            text = "From the entry point's call sequence, this write runs"
+            if earlier:
+                text += f" after {', '.join(earlier)}"
+            if later:
+                text += f"{' and' if earlier else ''} before {', '.join(later)}"
+            if writer.kind in OVERWRITING and earlier:
+                text += "; it overwrites the rows it matches"
+            step.notes.append(text + ".")
 
     def _explain_no_writer(self, stop: Stop, ref, column: str, writers) -> None:
         """Say where the search for a writer looked, and list near misses, so a no-writer stop is

@@ -16,8 +16,8 @@ from table_lineage.progress import ProgressReporter
 from table_lineage.sources import DEFAULT_EXCLUDES, FilesystemSourceProvider
 
 from . import assertions, gap_summary
-from .catalog import Catalog, prepare_in_worker
-from .model import UNKNOWN, UNRESOLVED, Boundary, Gap, Node, TraceResult
+from .catalog import Catalog, prepare_in_worker, split_name
+from .model import UNKNOWN, UNRESOLVED, Boundary, Gap, Node, ObjectRef, TraceResult
 from .tracer import Tracer
 
 
@@ -58,6 +58,9 @@ def build_parser() -> argparse.ArgumentParser:
                         help="Objects or columns accepted as terminal sources for this run: one glob per line "
                              "(db.schema.table or db.schema.table.column), optionally followed by '# reason'. "
                              "Stops there keep their reason and are labelled declared_terminal.")
+    parser.add_argument("--entry-point", nargs="+", action="extend", default=[], metavar="PROCEDURE",
+                        help="Procedure(s) the run starts from. When writers in several procedures conflict and the "
+                             "call sequence from here fixes their order, the order is noted instead of a gap.")
     parser.add_argument("--gap-summary", action="store_true", help="Write sanitized gap-summary.json")
     parser.add_argument("--fail-on-incomplete", action="store_true")
     parser.add_argument("--no-progress", action="store_true")
@@ -253,6 +256,16 @@ def main(argv: list[str] | None = None) -> int:
         tracer = Tracer(catalog, trace_row_selection=args.trace_row_selection, assertions=asserted, packages=packages)
         scan["assertions"] = len(asserted)
         tracer.terminals = terminals
+        for name in args.entry_point:
+            parts = [p.lower() for p in split_name(name)]
+            parts = [None] * (3 - len(parts[-3:])) + parts[-3:]
+            procs = catalog.procs_for(ObjectRef(parts[2], parts[1] or catalog.default_schema, parts[0], None, "procedure"))
+            if not procs:
+                parser.error(f"--entry-point: procedure {name} is not defined in the scanned files")
+            if len(procs) > 1:
+                parser.error(f"--entry-point: {name} has {len(procs)} definitions; exclude the copies that do not run")
+            tracer.entry_points.append(procs[0].scope)
+        scan["entry_points"] = len(tracer.entry_points)
         scan["declared_terminals"] = len(terminals)
         output = Path(args.output)
         output.mkdir(parents=True, exist_ok=True)
