@@ -30,6 +30,8 @@ python -m column_lineage --column <object>.<column> [--column ...]
                          [--include <glob> ...] [--exclude <glob> ...]
                          [--gap-summary]                   also write gap-summary.json (sanitized, no names)
                          [--fail-on-incomplete]            exit 3 when any requested trace is incomplete
+                         [--business-glossary <file>]      business definitions for the overview pages
+                         [--no-overview]                   do not write <stem>.overview.md
                          [--no-progress] [--verbose]
 ```
 
@@ -39,15 +41,17 @@ be a table, view or `#temp` table (use `--column "#t.col"` only with a single fi
 
 Outputs per requested column, in `--output`:
 
-- `<stem>.lineage.json` — the versioned trace (schema `column-lineage/1.0`).
-- `<stem>.lineage.md` — the review page, regenerated from the JSON model.
+- `<stem>.lineage.json` — the versioned trace (schema `column-lineage/1.0`), the source of truth.
+- `<stem>.lineage.md` — the detailed review page, regenerated from the JSON model.
+- `<stem>.overview.md` — the short reader page (see "Renderers"); not written with `--no-overview`.
 
 `<stem>` is the requested spec lower-cased with brackets removed and characters
 outside `[a-z0-9._-]` replaced by `_`. For example `--column Demo.Output.Result_Value`
 writes `demo.output.result_value.lineage.json`.
 
 Also written once per run: `scan-diagnostics.json` (files, statement parse statistics,
-all scan-level gaps with names) and, with `--gap-summary`, `gap-summary.json`.
+all scan-level gaps with names), `routes-index.md` / `routes-index.json` (see "Renderers") and,
+with `--gap-summary`, `gap-summary.json`.
 
 Exit codes: `0` traces written (whether complete or not), `2` usage error,
 `3` with `--fail-on-incomplete` when any trace is incomplete. A zero exit never
@@ -253,6 +257,80 @@ For handing results back without sharing source: counts of gaps by kind, parse
 fallbacks by statement keyword and error class, and up to N anonymized samples of
 unsupported statements in which identifiers become `ID1, ID2, ...`, string literals
 become `'?'` and numbers become `0`. It contains no object, column, path or file names.
+`route_index` adds counts only: columns, terminal-source, writer and route signatures, and the
+sizes of the largest groups.
+
+## Renderers
+
+Every page is rendered from trace JSON only (`TraceResult.to_dict()`); nothing in a page is
+computed from the sources. Re-render with `python -m column_lineage.render_markdown <json>`
+(detailed page) and `python -m column_lineage.render_overview <json>... [--out-dir DIR]
+[--index-out DIR] [--business-glossary FILE]` (overview pages and route index).
+
+### Detailed page (`render_markdown.py`)
+
+Identity and result, short answer, value lineage tree, row-selection context, every step once
+with its evidence, gaps and next evidence. Its size is linear in the trace: cross-references
+between steps (other writers of the same column, upstream steps of an input, steps a gap
+affects) list a sample of links and a count, never every pair. The tree and the Mermaid diagram
+are capped.
+
+### Overview page (`render_overview.py`)
+
+For a reader who does not read SQL; lists are capped ("and N more — see detailed page"), so a
+page stays well under 150 lines however large the trace. Sections:
+
+1. **Field and result** — the target; a plain sentence from `completeness.result` and the value
+   ends (for example "Traced within the selected sources; 3 end points are objects with no
+   writer in those sources — their origin is not proved"); whether it relies on assertions;
+   confidence from `steps_by_status`, defining every weaker status it uses (inferred = bound by a
+   stated rule, not by explicit code; asserted = stated by a person, not proved from code).
+2. **Business definition** — from `--business-glossary` (approved, or "Proposed (not
+   approved)"), otherwise "Not confirmed — question for the source owner". Never from names.
+3. **Routes** — a *route* is a path from the target through value, condition and window inputs
+   to an end, summarised as the sequence of distinct objects it passes (tables, views, temp
+   tables, package data flows collapsed per task, file connections; CTEs and derived tables are
+   not listed; consecutive repeats collapse). Paths with the same object sequence form one
+   route. Per route: its branch labels (step `branch_context`, input branches such as CASE
+   `WHEN … THEN`/`ELSE`, `COALESCE argument n`, and the writer when alternative writers are in
+   different procedures; labels shared by all its ends are listed once, the others on each end:
+   alternatives are listed, never combined), transformations other than direct/rename in plain
+   words, its ends with how each takes part (value, or decides between values), the proof status
+   of its steps, its writers and the open points on its steps. The top 6 routes by number of
+   ends are shown. Enumeration keeps at most 400 object sequences per node (the rest are merged
+   and marked).
+4. **Rows included** — row-selection conditions of the value-route steps, grouped by the object
+   of the column they read, stated as conditions and kept apart from values.
+5. **End points** — one row per end (database | schema | table | column, or file connection,
+   constant, procedure or package parameter, variable, temp table) with why it stops (boundary
+   reached; declared terminal and its reason; no writer in the selected sources — origin not
+   proved; external file — not a confirmed source system; constant; parameter without caller;
+   depth limit; open point) and the status of the step that reaches it, linked to that step.
+6. **Open points** — value and context gaps by kind in plain words with the detailed page's
+   next-evidence text, then a count of row-selection gaps.
+7. **Links** — detailed page sections, the JSON and the route index.
+
+An *end* is a node on a value route with no step into it: a stop or a node with a gap. No end is
+ever described as a confirmed or ultimate source.
+
+### Route index (`routes-index.md`, `routes-index.json`, schema `column-lineage-routes/1.0`)
+
+Written once per run (and by `render_overview --index-out`). Columns are grouped by:
+
+- **terminal sources** (`src-<hash>`): the set of objects of the column's value-route ends —
+  table or view keys, a flat-file connection per package copy, parameters and variables by id;
+  constants are left out;
+- **writers** (`wr-<hash>`): the set of code units that write the value-route steps — a
+  procedure (normalised name and file), a package file, a script file, or an assertions file;
+  views, CTEs and derived tables are objects on the route, not writers.
+
+Ids are the first 10 hex digits of the SHA-256 of the sorted keys, so they are stable across
+runs. Each group lists its members, the shared objects or writers and the count of
+`completeness.result` values. `routes-index.json` also lists `route_signatures` (route id = hash
+of the object keys upstream of the target's own object, with the columns that have it) and, per
+column, `source_signature`, `writer_signature` and `route_signatures`. A shared signature does
+not mean identical expressions, branch selection or business meaning, and a group never stands
+in for a column's own trace.
 
 ## SSIS packages (optional adapter)
 

@@ -45,6 +45,8 @@ The useful options:
 | `--max-depth N` | Stop after N mapping steps. |
 | `--trace-row-selection` | Also trace filter and join columns upstream (larger output). |
 | `--gap-summary` | Also write `gap-summary.json`, a summary with no names in it, safe to share. |
+| `--business-glossary FILE` | Business definitions shown on the overview pages (see below). |
+| `--no-overview` | Do not write the `<column>.overview.md` pages. |
 | `--local-server NAME ...` | Linked-server names whose four-part references mean the databases being scanned. Add that database's SQL as another `--source-root`, so its objects are traced instead of reported as external. |
 | `--assertions FILE ...` | Human-asserted mappings for steps SQL cannot prove (see below). |
 | `--jobs N` | Parser worker processes (default: CPUs, at most 8; `1` = none). |
@@ -60,13 +62,51 @@ unknown (shown as `?` in ids).
 
 For each `--column`, in `--output`:
 
-- `<column>.lineage.md` — the review page: identity and result, short answer, value
-  lineage tree, row-selection context, detailed steps with evidence, gaps.
-- `<column>.lineage.json` — the full trace (`column-lineage/1.0`). The page is generated
-  from it and can be regenerated with `python -m column_lineage.render_markdown <json>`.
+- `<column>.lineage.json` — the full trace (`column-lineage/1.0`), the source of truth. Every
+  page below is generated from it.
+- `<column>.lineage.md` — the detailed review page: identity and result, short answer, value
+  lineage tree, row-selection context, detailed steps with evidence, gaps. Regenerate it with
+  `python -m column_lineage.render_markdown <json>`.
+- `<column>.overview.md` — a short page for a business reader (no SQL needed; list lengths are
+  capped, with links to the detailed page): field and result in plain words, business definition,
+  routes (how the value arrives, branch by branch), rows included (row selection, kept apart from
+  the value), end points with why each stops, open points with the next evidence, links. See
+  `docs/examples/sample-overview.md`. Skip it with `--no-overview`.
 
 Once per run: `scan-diagnostics.json` (parse statistics, files that failed, every
-statement-level issue with its location) and, with `--gap-summary`, `gap-summary.json`.
+statement-level issue with its location), `routes-index.md` and `routes-index.json` (below) and,
+with `--gap-summary`, `gap-summary.json`.
+
+**Route index.** Many columns share long routes. `routes-index.md` groups the run's columns by
+the set of terminal source objects their routes end at (files grouped by connection, constants
+left out) and by the set of writer procedures, packages and scripts on their value routes. Each
+group has a stable id (`src-…`, `wr-…`), its members (linked to their overview pages), the shared
+objects or writers and the count of results. `routes-index.json` holds the same groups and, per
+column, its signatures and route ids, for tools and LLMs. A shared signature does **not** mean
+identical expressions, branch selection or business meaning; every column's own pages and JSON
+stay complete.
+
+Re-render overview pages and the index from JSON only:
+
+```bash
+python -m column_lineage.render_overview out/*.lineage.json --index-out out [--business-glossary FILE]
+```
+
+**Business glossary** (`--business-glossary FILE`, also accepted by `render_overview`): the tool
+never derives business meaning from names. Definitions come from a JSON file:
+
+```json
+{"columns": [{"column": "sales_db.mart.order_fact.net_amount", "definition": "Order amount after discounts",
+              "status": "approved", "source": "Finance data owner, 2026-03 review"},
+             {"column": "*.mart.order_fact.*_code", "definition": "Code from the order system",
+              "status": "proposed", "source": "Analyst draft"}]}
+```
+
+`column` is `db.schema.table.column` or a shorter suffix; globs are allowed (a column whose
+database is unknown is matched only by `*` in that position). An exact name wins over a glob,
+then approved over proposed. Approved entries are shown as the definition with their source;
+proposed ones as "Proposed (not approved): …"; a column without an entry reads "Not confirmed —
+question for the source owner."
 
 **A zero exit code does not mean the lineage is complete.** Read the result line at the
 top of the page, or `completeness.status` in the JSON.

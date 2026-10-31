@@ -61,6 +61,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--entry-point", nargs="+", action="extend", default=[], metavar="PROCEDURE",
                         help="Procedure(s) the run starts from. When writers in several procedures conflict and the "
                              "call sequence from here fixes their order, the order is noted instead of a gap.")
+    parser.add_argument("--no-overview", action="store_true",
+                        help="Do not write the <column>.overview.md pages (routes-index.md/.json are still written)")
+    parser.add_argument("--business-glossary", metavar="FILE", default=None,
+                        help='Business definitions for the overview pages: JSON {"columns": [{"column": '
+                             '"db.schema.table.col" (glob ok), "definition": ..., "status": "approved"|"proposed", '
+                             '"source": ...}]}. Never derived from names.')
     parser.add_argument("--gap-summary", action="store_true", help="Write sanitized gap-summary.json")
     parser.add_argument("--fail-on-incomplete", action="store_true")
     parser.add_argument("--no-progress", action="store_true")
@@ -156,6 +162,13 @@ def main(argv: list[str] | None = None) -> int:
             terminals = load_terminals(Path(args.declared_terminals))
         except (OSError, ValueError) as exc:
             parser.error(f"--declared-terminals: {exc}")
+    glossary = None
+    if args.business_glossary:
+        from .render_overview import load_glossary
+        try:
+            glossary = load_glossary(args.business_glossary)
+        except (OSError, ValueError) as exc:
+            parser.error(f"--business-glossary: {exc}")
     # Cite assertion files relative to the output folder, where the pages are written.
     out_dir = Path(args.output).resolve()
     for assertion in asserted:
@@ -270,6 +283,7 @@ def main(argv: list[str] | None = None) -> int:
         output = Path(args.output)
         output.mkdir(parents=True, exist_ok=True)
         traces = []
+        trace_files = []
         incomplete = False
         written = []
         try:
@@ -292,6 +306,7 @@ def main(argv: list[str] | None = None) -> int:
             json_path = output / f"{name}.lineage.json"
             json_path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
             written.append(json_path)
+            trace_files.append((data, json_path))
             if render_markdown is not None:
                 md_path = output / f"{name}.lineage.md"
                 md_path.write_text(render_markdown(data, json_path.name), encoding="utf-8")
@@ -312,8 +327,14 @@ def main(argv: list[str] | None = None) -> int:
             diagnostics["package_issues"] = packages.issue_entries()
         (output / "scan-diagnostics.json").write_text(json.dumps(diagnostics, indent=2, ensure_ascii=False) + "\n",
                                                       encoding="utf-8")
+        # Reader-facing outputs, rendered from the trace JSON only: overview pages and the run's route index.
+        from .render_overview import index_counts, write_outputs
+        pages, route_index = write_outputs(trace_files, index_dir=output, glossary=glossary,
+                                           overviews=not args.no_overview)
+        written += pages
         if args.gap_summary:
             summary = gap_summary.build(catalog, traces, packages=packages)
+            summary["route_index"] = index_counts(route_index)  # counts only
             (output / "gap-summary.json").write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
     if args.verbose:
         print(json.dumps({"files": len(files), "statements": catalog.stats["statements"],
