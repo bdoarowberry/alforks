@@ -136,6 +136,10 @@
   failed to parse; dynamic SQL built that way could not be evaluated. Test:
   `test_compound_assignment_ending_in_a_literal`.
 - Parse-error classes now really keep SQLGlot's rule names (the stored message has a prefix).
+- Variables named like keywords (`@End`, `@Update`, `@Set`, `@Declare` …) started a new statement at
+  the keyword, cutting the statement after `@` (shared indexer, `table_lineage/index.py`). This was
+  behind most remaining "Required keyword: this missing for Parameter" and "DECLARE <name>" fallbacks;
+  writers among them became parse errors. Test: `test_keyword_named_variables_do_not_split_statements`.
 
 ## Added: optional SSIS adapter
 

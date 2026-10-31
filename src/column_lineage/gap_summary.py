@@ -85,6 +85,9 @@ def _error_class(error: str | None) -> str:
     required = re.search(r"Required keyword: '(\w+)' missing for <class 'sqlglot\.expressions\.(?:\w+\.)*(\w+)'", error)
     if required:
         return f"ParseError: Required keyword: {required.group(1)} missing for {required.group(2)}"
+    token = re.search(r"(Expected [\w ]+ but got) <Token token_type: TokenType\.(\w+)", error)
+    if token:
+        return f"ParseError: {token.group(1)} {token.group(2)}"
     first = error.split(".")[0]
     first = re.sub(r"'[^']*'", "'?'", first)
     first = re.sub(r"Line \d+, Col: \d+", "", first)

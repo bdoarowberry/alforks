@@ -13,11 +13,12 @@ from .sources import SourceFile
 
 IDENT = r'(?:\[(?:[^\]]|\]\])*\]|"(?:[^"]|"")*"|[A-Za-z_#][\w$#-]*)(?:\s*\.(?:\s*\.)?\s*(?:\[(?:[^\]]|\]\])*\]|"(?:[^"]|"")*"|[A-Za-z_#][\w$#-]*)){0,3}'
 DEFINITION = re.compile(rf'\b(?:CREATE\s+(?:OR\s+ALTER\s+)?|ALTER\s+)(?P<kind>PROC(?:EDURE)?|TABLE|VIEW|FUNCTION|SYNONYM)\s+(?P<name>{IDENT})', re.I)
-STATEMENT = re.compile(r'\b(?:CREATE\s+(?:OR\s+ALTER\s+)?VIEW|WITH|SELECT|INSERT|UPDATE|DELETE|MERGE|EXEC(?:UTE)?|SET|DECLARE|RAISERROR|RETURN)\b', re.I)
-DEFINITION_STATEMENT = re.compile(r'\b(?:CREATE\s+TABLE|ALTER\s+TABLE|CREATE\s+(?:OR\s+ALTER\s+)?VIEW|WITH|SELECT|INSERT|UPDATE|DELETE|MERGE|EXEC(?:UTE)?|SET|DECLARE|RAISERROR|RETURN)\b', re.I)
+# A keyword inside a variable, temp or qualified name (@End, #Set, x.Update) never starts a statement.
+STATEMENT = re.compile(r'(?<![@#$.])\b(?:CREATE\s+(?:OR\s+ALTER\s+)?VIEW|WITH|SELECT|INSERT|UPDATE|DELETE|MERGE|EXEC(?:UTE)?|SET|DECLARE|RAISERROR|RETURN)\b', re.I)
+DEFINITION_STATEMENT = re.compile(r'(?<![@#$.])\b(?:CREATE\s+TABLE|ALTER\s+TABLE|CREATE\s+(?:OR\s+ALTER\s+)?VIEW|WITH|SELECT|INSERT|UPDATE|DELETE|MERGE|EXEC(?:UTE)?|SET|DECLARE|RAISERROR|RETURN)\b', re.I)
 GO = re.compile(r'^[ \t]*GO(?:[ \t]+\d+)?[ \t]*\r?$', re.I | re.M)
-NEXT_STATEMENT = re.compile(r'\b(?:SELECT|INSERT|UPDATE|DELETE|MERGE|EXEC(?:UTE)?|SET|DECLARE|RAISERROR|RETURN|IF|ELSE|BEGIN|END|CASE)\b', re.I)
-NEXT_DEFINITION_STATEMENT = re.compile(r'\b(?:CREATE|ALTER|DROP|SELECT|INSERT|UPDATE|DELETE|MERGE|EXEC(?:UTE)?|SET|DECLARE|RAISERROR|RETURN|IF|ELSE|BEGIN|END|CASE)\b', re.I)
+NEXT_STATEMENT = re.compile(r'(?<![@#$.])\b(?:SELECT|INSERT|UPDATE|DELETE|MERGE|EXEC(?:UTE)?|SET|DECLARE|RAISERROR|RETURN|IF|ELSE|BEGIN|END|CASE)\b', re.I)
+NEXT_DEFINITION_STATEMENT = re.compile(r'(?<![@#$.])\b(?:CREATE|ALTER|DROP|SELECT|INSERT|UPDATE|DELETE|MERGE|EXEC(?:UTE)?|SET|DECLARE|RAISERROR|RETURN|IF|ELSE|BEGIN|END|CASE)\b', re.I)
 WORD = re.compile(r'[\w$#]+')
 VARIABLE_ASSIGNMENT = re.compile(r'\s+@')
 IDENTITY_INSERT = re.compile(r'\s+IDENTITY_INSERT\b', re.I)

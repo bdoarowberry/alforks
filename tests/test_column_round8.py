@@ -88,3 +88,11 @@ def test_writer_in_non_utf8_file_is_read(encoding, bom, tmp_path):
     assert "demo.stage.value_01" not in reached(t)
     assert "demo.dbo.stage.value_01" in reached(t)
     assert t.data["scan"]["files_without_statements"] == 0
+
+
+def test_keyword_named_variables_do_not_split_statements(tmp_path):
+    """`@End`, `@Update`, `@Set` used to start a new statement at the keyword, cutting the statement
+    after '@' (a writer among them was lost to a parse failure)."""
+    t = trace(ROOT / "keyword_variables", "demo.dbo.t.d", tmp_path, *DB)
+    assert "demo.dbo.s.d" in reached(t)
+    assert t.data["scan"]["fallback"] == 0
