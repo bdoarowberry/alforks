@@ -82,7 +82,7 @@ def _error_class(error: str | None) -> str:
         return "unsupported command"
     error = re.sub(r"\x1b\[[0-9;]*m", "", error)
     # SQLGlot's own argument and class names are not identifying and say what the parser wanted.
-    required = re.match(r"Required keyword: '(\w+)' missing for <class 'sqlglot\.expressions\.(?:\w+\.)*(\w+)'>", error)
+    required = re.search(r"Required keyword: '(\w+)' missing for <class 'sqlglot\.expressions\.(?:\w+\.)*(\w+)'", error)
     if required:
         return f"ParseError: Required keyword: {required.group(1)} missing for {required.group(2)}"
     first = error.split(".")[0]

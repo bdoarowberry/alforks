@@ -120,8 +120,12 @@ STATEMENT_KEYWORD = re.compile(r"(?<![\w@#$.])(?:INSERT|UPDATE|DELETE|MERGE|SELE
                                r"TRUNCATE)\b", re.I)
 
 
-def expression_end(masked: str, start: int) -> int:
-    """End of the expression starting at ``start``: a top-level comma, clause keyword or the end."""
+def expression_end(masked: str, start: int, text: str | None = None) -> int:
+    """End of the expression starting at ``start``: a top-level comma, clause keyword or the end.
+
+    Trailing whitespace is trimmed on ``text`` (the unmasked SQL) when given: in the masked text a
+    final string literal is blank too."""
+    text = masked if text is None else text
     depth = 0
     i = start
     while i < len(masked):
@@ -135,12 +139,12 @@ def expression_end(masked: str, start: int) -> int:
         elif depth == 0 and (char in ",;" or re.match(r"(?i)(?<![\w@#$])(?:FROM|WHERE|OUTPUT|OPTION)\b", masked[i:i + 7])
                              and (i == 0 or not (masked[i - 1].isalnum() or masked[i - 1] in "_@#$"))):
             end = i
-            while end > start and masked[end - 1].isspace():
+            while end > start and text[end - 1].isspace():
                 end -= 1
             return end
         i += 1
     end = len(masked)
-    while end > start and masked[end - 1].isspace():
+    while end > start and text[end - 1].isspace():
         end -= 1
     return end
 
@@ -718,7 +722,7 @@ class Catalog:
         compound = list(COMPOUND.finditer(masked))
         for match in reversed(compound):
             lhs = text[match.start("lhs"):match.end("lhs")]
-            end = expression_end(mask_noncode(text), match.end())
+            end = expression_end(mask_noncode(text), match.end(), text)
             text = (text[:match.start()] + f"{lhs} = {lhs} {match.group('op')} (" + text[match.end():end] + ")"
                     + text[end:])
         # SQLGlot splits @2_name into '@', '2' and '_name'; give such variables a parseable

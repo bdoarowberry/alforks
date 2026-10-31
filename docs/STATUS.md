@@ -129,6 +129,14 @@
   `db..name` in text-matched targets (it was read as the database name).
 - Parse-error classes keep SQLGlot's own rule names (`Required keyword: high missing for Between`).
 
+## Fixed after the 178-column SQL batch
+
+- Compound assignment ending in a string literal (`SET @sql += N'...'`, `SELECT @c += ',' + name + ']'`)
+  was rewritten with the final literal cut off (the masked text is blank there), so the statement
+  failed to parse; dynamic SQL built that way could not be evaluated. Test:
+  `test_compound_assignment_ending_in_a_literal`.
+- Parse-error classes now really keep SQLGlot's rule names (the stored message has a prefix).
+
 ## Known open issues
 
 - Corpus chain 08 ends in `missing_definition` (recall 0.6). Not investigated.

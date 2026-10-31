@@ -217,3 +217,13 @@ def test_markdown_shows_the_evaluated_note(tmp_path):
     md = t.markdown
     assert "Evaluated from dynamic SQL" in md
     assert "ELSE (of IF @mode = 1)" in md
+
+
+def test_compound_assignment_ending_in_a_literal(tmp_path):
+    """`SET @sql += N'...'`: the rewrite to `@sql = @sql + (...)` used to drop a final string literal,
+    so the statement failed to parse and the dynamic SQL could not be evaluated."""
+    t = trace(dyn("compound"), "demo.output.result_value", tmp_path)
+    step = t.only_step_for(t.target_id)
+    assert inputs(step, "value") == [SOURCE_A]
+    assert_evaluated_step(step)
+    assert t.complete
