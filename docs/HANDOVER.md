@@ -35,13 +35,18 @@ Compare with known lineage: `python -m column_lineage.compare --expected expecte
 
 ## 2. Outputs per column
 
-- `<column>.overview.md`: short page for business readers (result, sources, what changes the value,
-  which rows, what is assumed, what evidence is missing).
+- `<column>.overview.md`: short page for business readers (about 60–150 lines). First screen: field and
+  definition (approved / not approved / proposed interpretation), plain answer, coverage and proof line,
+  up to three evidence requests, a Mermaid diagram of route families (alternatives side by side, each
+  box saying where proof stops), and a sources table with database, schema, table and column. Then
+  what changes the value, which rows are included, and evidence and uncertainty, each linked to the
+  exact steps. Layout brief: `presentation-brief.md`.
 - `<column>.lineage.md`: complete technical page (every step, branch, condition, evidence line, gap).
 - `<column>.lineage.json`: the machine-readable source of truth.
 
-Per run: `routes-index.md/.json` (columns grouped by shared sources and writers, plus what needs
-attention), `scan-diagnostics.json` (scan, statement issues, assertion use), `gap-summary.json`
+Per run: `routes-index.md/.json` (columns grouped by shared sources, writers and route families, plus a
+"needs attention" view: unresolved origins, writer-order gaps, assertions awaiting review, definitions
+awaiting approval), `scan-diagnostics.json` (scan, statement issues, assertion use), `gap-summary.json`
 (counts and anonymized shapes only; safe to share).
 
 ## 3. Reading a result
