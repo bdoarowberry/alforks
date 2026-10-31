@@ -12,16 +12,18 @@ from .catalog import Catalog, norm, split_name
 from .model import (
     AMBIGUOUS, ASSERTED, COLUMN, CONSTANT, FILTER, INFERRED, LOCAL_COLUMN, PARAMETER, TEMP_COLUMN, UNKNOWN, UNRESOLVED,
     VALUE, VARIABLE, VERIFIED, WINDOW, CONDITION, Boundary, Evidence, Gap, Input, Node, ObjectRef, RowSelection, Step,
-    Stop, TraceResult, worst,
+    Stop, TraceResult, worst, FILE_COLUMN, PACKAGE_COLUMN, PACKAGE_VARIABLE,
 )
 
 OVERWRITING = ("update", "merge")
+TRACED_KINDS = (COLUMN, TEMP_COLUMN, VARIABLE, PARAMETER, PACKAGE_COLUMN, FILE_COLUMN, PACKAGE_VARIABLE)
 
 
 class Tracer:
     def __init__(self, catalog: Catalog, analyzer: Analyzer | None = None, trace_row_selection: bool = False,
-                 assertions: list | None = None):
+                 assertions: list | None = None, packages=None):
         self.catalog = catalog
+        self.packages = packages   # optional ssis.PackageCatalog: package destinations as writers
         self.analyzer = analyzer or Analyzer(catalog)
         self.trace_row_selection = trace_row_selection
         self.analyzer.expand_row_selection = trace_row_selection
@@ -31,6 +33,8 @@ class Tracer:
         self.assertions_seen: set[str] = set()
         self.assertion_effects: dict[str, list[dict]] = {}   # assertion id -> gaps it resolved
         self._memo: dict[tuple, tuple] = {}   # shared between traces in one run
+        if packages is not None:
+            packages.attach(self.analyzer)
         catalog.evaluate_dynamic()
 
     # ------------------------------------------------------------- targets
@@ -70,7 +74,8 @@ class Tracer:
             canonical = ObjectRef(canonical.name, canonical.schema, canonical.database, canonical.server, "view",
                                   None, canonical.database_source)
         node = Node(COLUMN, column, canonical)
-        if not self.catalog.is_known(canonical) and not self.catalog.writers_for(canonical):
+        if not self.catalog.is_known(canonical) and not self.catalog.writers_for(canonical) \
+                and not (self.packages is not None and self.packages.writes_object(canonical)):
             gaps.append(Gap("missing_definition", f"No definition or writer of {canonical.display} was found in the "
                             "scanned files.", node))
             return node, UNRESOLVED, gaps
@@ -149,11 +154,11 @@ class Tracer:
                     edges.setdefault(step.target.id, set()).add(item.node.id)
                     if item.node.kind == CONSTANT and item.role == VALUE:
                         result.stops.append(Stop(item.node, "constant"))
-                    if item.node.kind in (COLUMN, TEMP_COLUMN, VARIABLE, PARAMETER):
+                    if item.node.kind in TRACED_KINDS:
                         queue.append((item.node, self.read_point(item.node, position), depth + 1))
                 for row in step.row_selection:
                     result.add_node(row.node)
-                    if self.trace_row_selection and row.node.kind in (COLUMN, TEMP_COLUMN, VARIABLE, PARAMETER):
+                    if self.trace_row_selection and row.node.kind in TRACED_KINDS:
                         queue.append((row.node, self.read_point(row.node, position), depth + 1))
         # Dynamic SQL with a computed target in any procedure this trace passed through.
         used = [a for a in self.assertions if a.id in result.assertions_used and a.writer_path]
@@ -307,8 +312,12 @@ class Tracer:
     def expand(self, node: Node, before):
         memo_key = (node.id, before)
         if memo_key not in self._memo:
-            if node.kind in (COLUMN, TEMP_COLUMN):
+            if self.packages is not None and self.packages.handles(node):
+                found = self.packages.expand(node)
+            elif node.kind in (COLUMN, TEMP_COLUMN):
                 found = self._expand_column(node, before)
+                if self.packages is not None and node.kind == COLUMN:
+                    found = self.packages.merge(node, found)
             elif node.kind == VARIABLE:
                 found = self._expand_variable(node, before)
             elif node.kind == PARAMETER:

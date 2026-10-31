@@ -46,6 +46,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--include-dated-snapshots", action="store_true")
     parser.add_argument("--assertions", nargs="+", action="extend", default=[], metavar="FILE",
                         help="JSON file(s) of human-asserted mappings for steps SQL cannot prove (see README)")
+    parser.add_argument("--package-root", nargs="+", action="extend", default=[], metavar="DIR|FILE",
+                        help="SSIS package files (.dtsx) or folders to scan; their data flows become writers")
+    parser.add_argument("--package-include", nargs="+", action="extend", default=[], metavar="GLOB",
+                        help="Only packages whose path relative to a package root matches")
+    parser.add_argument("--package-exclude", nargs="+", action="extend", default=[], metavar="GLOB",
+                        help="Leave out packages whose path relative to a package root matches")
+    parser.add_argument("--connection-map", nargs="+", action="extend", default=[], metavar="NAME=DB",
+                        help="Database of an SSIS connection manager (overrides its Initial Catalog)")
     parser.add_argument("--gap-summary", action="store_true", help="Write sanitized gap-summary.json")
     parser.add_argument("--fail-on-incomplete", action="store_true")
     parser.add_argument("--no-progress", action="store_true")
@@ -146,7 +154,18 @@ def main(argv: list[str] | None = None) -> int:
     for root in roots:
         if not root.exists():
             parser.error(f"Source root does not exist: {root}")
-    labels = root_labels(roots)
+    package_roots = list(dict.fromkeys(Path(r).resolve() for r in args.package_root))
+    for root in package_roots:
+        if not root.exists():
+            parser.error(f"Package root does not exist: {root}")
+    connection_map = {}
+    if package_roots or args.connection_map:
+        from .ssis import parse_connection_map
+        try:
+            connection_map = parse_connection_map(args.connection_map)
+        except ValueError as exc:
+            parser.error(str(exc))
+    labels = root_labels(roots + [r for r in package_roots if r not in roots])
     started = time.monotonic()
     catalog = Catalog(args.default_database, args.default_schema, mapping, tuple(args.local_server))
     with ProgressReporter(enabled=not args.no_progress, interval=args.progress_interval) as progress:
@@ -182,6 +201,13 @@ def main(argv: list[str] | None = None) -> int:
             progress.complete_item(done)
         if prepared_stream is not None:
             pool.shutdown()
+        packages = None
+        if package_roots:
+            from .ssis import PackageCatalog
+            progress.start_phase("packages", completed=0, total=len(package_roots))
+            packages = PackageCatalog(catalog, connection_map)
+            for root in package_roots:
+                packages.scan_root(root, labels[root], tuple(args.package_include), tuple(args.package_exclude))
         progress.start_phase("analyzing", completed=len(files), total=len(files))
         parse_seconds = time.monotonic() - started
         scan = {
@@ -200,8 +226,11 @@ def main(argv: list[str] | None = None) -> int:
                         "database_map": [f"{p}={d}" for p, d in mapping],
                         "trace_row_selection": args.trace_row_selection},
         }
+        if packages is not None:
+            scan["packages"] = {"roots": [labels[r] for r in package_roots],
+                                **packages.scan_info(args.package_include, args.package_exclude)}
         boundary = Boundary(tuple(d.lower() for d in args.stop_at_database), tuple(args.stop_at_object), args.max_depth)
-        tracer = Tracer(catalog, trace_row_selection=args.trace_row_selection, assertions=asserted)
+        tracer = Tracer(catalog, trace_row_selection=args.trace_row_selection, assertions=asserted, packages=packages)
         scan["assertions"] = len(asserted)
         output = Path(args.output)
         output.mkdir(parents=True, exist_ok=True)
@@ -244,10 +273,12 @@ def main(argv: list[str] | None = None) -> int:
             "statement_issues": [issue_entry(catalog, i) for i in
                                  sorted(catalog.issues, key=lambda i: (i.unit.root_label, i.unit.rel_path, i.statement.start))],
         }
+        if packages is not None:
+            diagnostics["package_issues"] = packages.issue_entries()
         (output / "scan-diagnostics.json").write_text(json.dumps(diagnostics, indent=2, ensure_ascii=False) + "\n",
                                                       encoding="utf-8")
         if args.gap_summary:
-            summary = gap_summary.build(catalog, traces)
+            summary = gap_summary.build(catalog, traces, packages=packages)
             (output / "gap-summary.json").write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
     if args.verbose:
         print(json.dumps({"files": len(files), "statements": catalog.stats["statements"],

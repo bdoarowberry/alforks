@@ -111,7 +111,7 @@ def _error_window(sql: str, error: str | None, before: int = 160, after: int = 1
     return ("… " if start else "") + left + " <<HERE>> " + right + (" …" if end < len(sql) else "")
 
 
-def build(catalog, traces: list[dict], samples: int = 25) -> dict:
+def build(catalog, traces: list[dict], samples: int = 25, packages=None) -> dict:
     statements = Counter()
     errors = Counter()
     sample_list = []
@@ -155,7 +155,9 @@ def build(catalog, traces: list[dict], samples: int = 25) -> dict:
             "writer_kinds": dict(sorted(Counter(s["writer_kind"] for s in data["steps"]).items())),
             "max_depth_reached": _depth(data),
         })
-    return {
+        if packages is not None:
+            trace_summary[-1].update(_package_counts(data))
+    result = {
         "schema_version": "column-lineage-gap-summary/1.0",
         "note": "Contains no object, column, path or file names. Anonymized SQL replaces identifiers with IDn.",
         "scan": {k: v for k, v in catalog.stats.items()},
@@ -167,6 +169,23 @@ def build(catalog, traces: list[dict], samples: int = 25) -> dict:
         "totals": _totals(traces),
         "traces": trace_summary,
     }
+    if packages is not None:
+        result["packages"] = packages.summary()   # counts only (see ssis.PackageCatalog.summary)
+    return result
+
+
+PACKAGE_GAP_KINDS = ("unsupported_package_step", "ambiguous_package_copy", "package_runtime_value",
+                     "package_expression", "package_metadata", "package_column_not_mapped")
+
+
+def _package_counts(data: dict) -> dict:
+    """Package steps by writer kind and package gaps by kind for one trace (counts only)."""
+    steps = Counter(s["writer_kind"] for s in data["steps"] if str(s.get("writer_kind", "")).startswith("package_"))
+    gaps = Counter(g["kind"] for g in data.get("gaps", []) if g["kind"] in PACKAGE_GAP_KINDS)
+    copies = {ev.get("path") for s in data["steps"] if str(s.get("writer_kind", "")).startswith("package_")
+              for ev in s.get("evidence", [])[:1]}
+    return {"package_steps": sum(steps.values()), "package_steps_by_writer_kind": dict(sorted(steps.items())),
+            "package_gaps_by_kind": dict(sorted(gaps.items())), "package_files_on_path": len(copies)}
 
 
 def _totals(traces: list[dict]) -> dict:

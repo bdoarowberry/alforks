@@ -29,6 +29,10 @@ VARIABLE = "variable"          # @variable, scoped to a procedure or batch
 PARAMETER = "parameter"        # procedure parameter
 CONSTANT = "constant"          # literal value
 UNKNOWN = "unknown"            # an input that could not be identified
+PACKAGE_COLUMN = "package_column"      # column inside an SSIS data flow (component output), scoped to package and task
+FILE_COLUMN = "file_column"            # column of a flat file read by an SSIS package
+PACKAGE_VARIABLE = "package_variable"  # SSIS variable or parameter, scoped to a package
+PACKAGE_OBJECT_KINDS = ("package_flow", "flat_file")  # ObjectRef kinds of package-internal objects
 
 # Input roles. VALUE inputs compute the target value; CONDITION inputs choose
 # between value alternatives (CASE/IIF predicates, simple CASE operands).
@@ -54,6 +58,9 @@ GAP_KINDS = (
     "ambiguous_writer_order", "positional_without_schema", "wildcard_without_schema",
     "column_count_mismatch", "opaque_function", "table_valued_function", "external_object",
     "unresolved_variable", "runtime_branch", "cycle", "depth_limit", "column_not_written", "unexplained_end",
+    # SSIS packages (ssis.py)
+    "unsupported_package_step", "ambiguous_package_copy", "package_runtime_value", "package_expression",
+    "package_metadata", "package_column_not_mapped",
 )
 
 
@@ -85,7 +92,7 @@ class ObjectRef:
 
     @property
     def key(self) -> str:
-        if self.kind in ("temp_table", "table_variable", "cte", "derived"):
+        if self.kind in ("temp_table", "table_variable", "cte", "derived") + PACKAGE_OBJECT_KINDS:
             return f"{self.kind}:{self.scope}::{quote_part(self.name)}"
         parts = [p for p in (self.server, self.database or "?", self.schema or "?", self.name)]
         return ".".join(quote_part(p) for p in parts if p is not None)
@@ -96,6 +103,8 @@ class ObjectRef:
             return f"{self.name} (in {self.scope_label})"
         if self.kind in ("cte", "derived"):
             return f"{self.kind} {self.name}"
+        if self.kind in PACKAGE_OBJECT_KINDS:
+            return f"{self.name} (in {self.scope})"
         return ".".join(p for p in (self.server, self.database or "?", self.schema or "?", self.name) if p)
 
     @property
@@ -124,6 +133,8 @@ class Node:
 
     @property
     def display(self) -> str:
+        if self.object is not None and self.object.kind in PACKAGE_OBJECT_KINDS:
+            return f"{self.object.name}.{self.name} (in {self.object.scope})"
         if self.object is not None:
             return f"{self.object.display}.{self.name}" if self.object.kind not in ("temp_table", "table_variable") \
                 else f"{self.object.name}.{self.name} (in {self.object.scope_label})"
@@ -249,7 +260,8 @@ class Gap:
 class Stop:
     """Where a value path ends without a gap."""
     node: Node
-    reason: str                    # boundary, source_without_writer, constant, parameter_without_caller, max_depth
+    reason: str                    # boundary, source_without_writer, constant, parameter_without_caller, max_depth,
+                                   # external_file, package_parameter, package_runtime (SSIS)
     detail: str | None = None
 
     def to_dict(self) -> dict:
