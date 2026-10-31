@@ -253,7 +253,8 @@ class PackageCatalog:
                 source = by_id.get(pc.source)
                 before = source.name if source is not None else pc.source
                 outcome = {"1": "fails", "2": "completes"}.get(pc.value, "succeeds")
-                expression = pc.expression if pc.expression and pc.eval_op not in ("2",) else None
+                # EvalOp: 1 expression, 2 constraint (the default when absent), 3 both, 4 either.
+                expression = pc.expression if pc.expression and pc.eval_op in ("1", "3", "4") else None
                 any_of = "" if pc.logical_and else " (one of several alternative constraints)"
                 if expression and pc.eval_op == "3":
                     out.append(f"IF {expression} AND {before} {outcome} (precedence constraint){any_of}")
@@ -364,8 +365,12 @@ class PackageCatalog:
                 return replace(statement, scope=scope, procedure=label)
 
             try:
-                self.catalog.add_embedded(source, pkg.root, pkg.root_label, pkg.rel, adjust)
+                unit = self.catalog.add_embedded(source, pkg.root, pkg.root_label, pkg.rel, adjust)
                 self.counts["execute_sql_indexed"] += 1
+                # Precedence constraints and loop containers around the task become branch context.
+                for statement in unit.index.statements:
+                    unit.controls[statement.start] = tuple(task.task.branches) + tuple(
+                        unit.controls.get(statement.start, ()))
             except Exception as exc:  # noqa: BLE001 - one task must not stop the scan
                 pkg.issues.append(Gap("unsupported_package_step", f"Execute SQL task {task.task.path} could not be "
                                       f"indexed ({type(exc).__name__}).", None, evidence, detail))

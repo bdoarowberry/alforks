@@ -351,6 +351,7 @@ def test_execute_sql_task_statements_feed_the_sql_catalog(tmp_path):
     assert insert["writer_kind"] == "insert_values"
     assert insert["evidence"][0]["path"] == "write_audit.dtsx"
     assert "Write audit" in insert["procedure"]
+    assert insert["branch_context"] == ["IF @[User::loaded_rows] > 0 AND Count rows succeeds (precedence constraint)"]
     [param] = inputs(insert, "value")
     binding = t.only_step_for(param)
     assert binding["writer_kind"] == "package_parameter_binding"
@@ -402,6 +403,19 @@ def test_scan_diagnostics_list_package_issues(tmp_path):
     diagnostics = json.loads((tmp_path / "out" / "scan-diagnostics.json").read_text())
     assert any(e["kind"] == "unreadable_package" and e["path"] == "broken.dtsx" for e in diagnostics["package_issues"])
     assert t.complete
+
+
+def test_package_root_may_be_a_file(tmp_path):
+    t = ssis_trace(SSIS / "basic" / "load_stage.dtsx", "demo.stage.amount", tmp_path)
+    assert t.complete and t.data["scan"]["packages"]["in_scope"] == 1
+    assert {ev["path"] for s in t.steps for ev in s["evidence"]} == {"load_stage.dtsx"}
+
+
+def test_connection_map_overrides_initial_catalog(tmp_path):
+    t = ssis_trace("basic", "other_db.demo.stage.amount", tmp_path, "--connection-map", "demo_db=other_db")
+    dest = t.only_step_for(t.target_id)
+    assert dest["writer_kind"] == "package_destination"
+    assert any("--connection-map" in n for n in dest["notes"])
 
 
 def test_connection_map_rejects_bad_value(tmp_path):

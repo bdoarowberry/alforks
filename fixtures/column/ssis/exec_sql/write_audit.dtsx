@@ -75,6 +75,8 @@
       DTS:refId="Package.PrecedenceConstraints[Constraint]"
       DTS:CreationName=""
       DTS:DTSID="{6A1F0E00-0000-4000-800B-0000000000B1}"
+      DTS:EvalOp="3"
+      DTS:Expression="@[User::loaded_rows] &gt; 0"
       DTS:From="Package\Count rows"
       DTS:LogicalAnd="True"
       DTS:ObjectName="Constraint"
