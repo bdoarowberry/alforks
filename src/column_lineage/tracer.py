@@ -457,7 +457,7 @@ class Tracer:
         never mistaken for proof that the object is an ultimate source."""
         found = writer_search(self.catalog, ref, column, writers)
         stop.writer_search = found
-        scope = "the selected scanned SQL sources"
+        scope = "the selected scanned SQL sources" + (" and packages" if getattr(self, "packages", None) else "")
         if not found:
             stop.detail = f"{stop.detail} Searched {scope}; no statement there writes an object of this name."
             return

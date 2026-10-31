@@ -441,6 +441,9 @@ END_MEANING = {
     "constant": "constant",
     "parameter_without_caller": "parameter_without_caller",
     "max_depth": "max_depth",
+    "external_file": "external_file_source",
+    "package_parameter": "package_runtime_input",
+    "package_runtime": "package_runtime_input",
 }
 
 
