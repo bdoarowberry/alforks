@@ -178,7 +178,7 @@ def non_lineage(text: str) -> bool:
     masked = mask_noncode(text)
     if write_targets(masked):
         return False
-    if NON_LINEAGE.match(text):
+    if NON_LINEAGE.match(text) or NON_LINEAGE.match(re.sub(r"--[^\n]*|/\*.*?\*/", " ", text, flags=re.S)):
         return True
     return masked.count(")") > masked.count("(")
 

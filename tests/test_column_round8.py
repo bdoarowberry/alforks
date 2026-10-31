@@ -96,3 +96,10 @@ def test_keyword_named_variables_do_not_split_statements(tmp_path):
     t = trace(ROOT / "keyword_variables", "demo.dbo.t.d", tmp_path, *DB)
     assert "demo.dbo.s.d" in reached(t)
     assert t.data["scan"]["fallback"] == 0
+
+
+def test_filegroup_clause_on_its_own_is_non_lineage():
+    from column_lineage.catalog import non_lineage
+    assert non_lineage("ON [PRIMARY]\n-- ==========\n")
+    assert non_lineage("ON [PRIMARY] TEXTIMAGE_ON [PRIMARY]")
+    assert not non_lineage("ON x.a = y.a")
