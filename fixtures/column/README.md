@@ -35,3 +35,14 @@ Invented T-SQL used by `tests/test_column_acceptance.py` and `tests/test_column_
   `loop` (built in a WHILE), `too_many` (32 alternatives), `multi_statement` (SELECT INTO #temp then INSERT
   in one string), `nested` (EXEC inside the string), `batch_variable` (a variable read inside the string;
   declared-length truncation).
+- `ssis/` - invented SSIS packages for `tests/test_column_ssis.py`; `ssis/sql/tables.sql` (`USE demo_db`) declares
+  their tables and each other folder is one `--package-root`: `basic` (acceptance: flat file `file_a.csv` ->
+  Data Conversion -> OLE DB destination `demo.stage.amount`; `unmapped_column` not mapped; precedence expression),
+  `split` (Conditional Split filter), `derived` (conditional Derived Column, in-place replacement), `lookup`
+  (Lookup with a reference query), `query` (SqlCommand source; connection without Initial Catalog), `variable`
+  (SqlCommandFromVariable with an expression), `copies/dev` + `copies/prod` (two copies of one package),
+  `unsupported` (Script Component on the path), `name_only` (names match, metadata maps elsewhere), `legacy`
+  (SSIS 2008 format, integer ids, DTSID precedence), `exec_sql` (Execute SQL INSERT with a `?` bound to a
+  result-set variable), `union` (Union All + Aggregate), `project` (project `.conmgr` connections, one with a
+  parameterised connection string; Foreach file loop; Derived Column, Conditional Split, Multicast; OLE DB
+  Command and Row Count off the destination path; parent package with an Execute Package task).

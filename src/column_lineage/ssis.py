@@ -112,6 +112,8 @@ class PackageCatalog:
         self.scope_db_gaps: dict[str, tuple] = {}   # SQL scope -> (package, line, unknown-database detail, label)
         self._embedded: list[str] = []
         self._parents: dict | None = None
+        self._files: dict | None = None
+        self._names: dict[int, dict] = {}
         self.file_errors: list[tuple[str, str, str]] = []
         self.component_classes: dict[str, int] = {}
 
@@ -568,7 +570,9 @@ class PackageCatalog:
 
     def _package_files(self) -> dict:
         """(root label, root-relative path) -> package label, to recognise steps from Execute SQL tasks."""
-        return {(p.root_label, p.rel): p.label for p in self.packages}
+        if self._files is None or len(self._files) != len(self.packages):
+            self._files = {(p.root_label, p.rel): p.label for p in self.packages}
+        return self._files
 
     def project_connections(self, pkg: Package) -> list:
         """Connection managers in .conmgr files of the package's folder, or the nearest parent folder
@@ -817,12 +821,18 @@ class PackageCatalog:
         return branches, rows, gaps
 
     def _display(self, flow: Flow, text: str) -> str:
-        names = {k: c.name for k, c in flow.lineage.items()}
-        names.update({k: c.name for k, c in flow.input_cols.items()})
-        for c in flow.input_cols.values():
-            if c.lineage:
-                names.setdefault(c.lineage, c.name)
-        return sx.friendly(text or "", names)
+        """An expression with lineage-id references replaced by column names."""
+        if "#" not in (text or ""):
+            return text or ""
+        names = self._names.get(id(flow))
+        if names is None:
+            names = {k: c.name for k, c in flow.lineage.items()}
+            names.update({k: c.name for k, c in flow.input_cols.items()})
+            for c in flow.input_cols.values():
+                if c.lineage:
+                    names.setdefault(c.lineage, c.name)
+            self._names[id(flow)] = names
+        return sx.friendly(text, names)
 
     def lookup_keys(self, pkg: Package, flow: Flow, comp: Component, depth: int, kind: str = "match output"):
         rows, gaps = [], []
