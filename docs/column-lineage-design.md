@@ -171,6 +171,13 @@ scanned sources", not "this is the ultimate source-system field".
   the selected sources (other sources, such as packages or feeds, may write them);
 - `incomplete`: open value-path or context gaps (for example an unsupported package step).
 
+For readers (overview pages, route index) the ends are named by what they prove: an end at the
+requested **boundary** or at a **declared terminal** is where the run was asked to stop, never an
+originating system; an end with no writer in the selected sources, an external file, a parameter
+without caller, a depth cut, a loop or a gap is an **unresolved origin** — even when the step that
+reaches it is verified. An incomplete trace is reported as incomplete even when some of its
+branches reach the boundary.
+
 `completeness.ends_by_meaning` counts value-path ends by meaning (`reached_requested_boundary`,
 `no_writer_in_selected_scope`, `constant`, `parameter_without_caller`, `max_depth`,
 `unsupported_package_step`). Asserted steps stay `asserted` and `relies_on_assertions` is
@@ -239,9 +246,18 @@ After loading, every `dynamic_sql` statement issue (other than dead dynamic SQL)
              "evidence": [Evidence...], "gaps": [gap-id], "notes": [], "order"}],
   "stops": [{"node", "reason", "detail"}],
   "gaps": [{"id", "kind", "message", "node", "evidence": [...], "detail": {}}],
-  "cycles": [[node-id...]]
+  "cycles": [[node-id...]],
+  "route_families": {"schema_version": "column-lineage-route-families/1.0", "note": ...,
+                     "families": [{"id": "fam-<hash>", "label": "F1", "source": {"kind", "key", "label"},
+                                   "role": "value|condition", "value_rule": [tag...], "value_rule_text",
+                                   "headline", "stop", "stop_text", "status", "route_count",
+                                   "route_count_is_lower_bound", "ends": [node-id], "diagram_kind",
+                                   "members": [{"end", "object_sequences", "steps", "gaps", "branches"}]}]}
 }
 ```
+
+`route_families` is additive (written by the CLI next to the fields above, derived from them; the
+renderers recompute it from the steps, stops and gaps and never read it back).
 
 `Node`: `{id, kind, name, display, object: ObjectRef|null, scope}`.
 `Input`: `{node, role, expression, branch, status, gap, note}`.
@@ -257,8 +273,8 @@ For handing results back without sharing source: counts of gaps by kind, parse
 fallbacks by statement keyword and error class, and up to N anonymized samples of
 unsupported statements in which identifiers become `ID1, ID2, ...`, string literals
 become `'?'` and numbers become `0`. It contains no object, column, path or file names.
-`route_index` adds counts only: columns, terminal-source, writer and route signatures, and the
-sizes of the largest groups.
+`route_index` adds counts only: columns, terminal-source, writer and route signatures, route
+families, the sizes of the largest groups and the number of entries in each "needs attention" list.
 
 ## Renderers
 
@@ -278,37 +294,72 @@ are capped.
 ### Overview page (`render_overview.py`)
 
 For a reader who does not read SQL; lists are capped ("and N more — see detailed page"), so a
-page stays well under 150 lines however large the trace. Sections:
+page stays under 150 lines however large the trace. The first screen answers "what feeds this
+field, where does proof stop, and what is assumed" (`docs/presentation-brief.md` is the brief):
 
-1. **Field and result** — the target; a plain sentence from `completeness.result` and the value
-   ends (for example "Traced within the selected sources; 3 end points are objects with no
-   writer in those sources — their origin is not proved"); whether it relies on assertions;
-   confidence from `steps_by_status`, defining every weaker status it uses (inferred = bound by a
-   stated rule, not by explicit code; asserted = stated by a person, not proved from code).
-2. **Business definition** — from `--business-glossary` (approved, or "Proposed (not
-   approved)"), otherwise "Not confirmed — question for the source owner". Never from names.
-3. **Routes** — a *route* is a path from the target through value, condition and window inputs
-   to an end, summarised as the sequence of distinct objects it passes (tables, views, temp
-   tables, package data flows collapsed per task, file connections; CTEs and derived tables are
-   not listed; consecutive repeats collapse). Paths with the same object sequence form one
-   route. Per route: its branch labels (step `branch_context`, input branches such as CASE
-   `WHEN … THEN`/`ELSE`, `COALESCE argument n`, and the writer when alternative writers are in
-   different procedures; labels shared by all its ends are listed once, the others on each end:
-   alternatives are listed, never combined), transformations other than direct/rename in plain
-   words, its ends with how each takes part (value, or decides between values), the proof status
-   of its steps, its writers and the open points on its steps. The top 6 routes by number of
-   ends are shown. Enumeration keeps at most 400 object sequences per node (the rest are merged
-   and marked).
-4. **Rows included** — row-selection conditions of the value-route steps, grouped by the object
-   of the column they read, stated as conditions and kept apart from values.
-5. **End points** — one row per end (database | schema | table | column, or file connection,
-   constant, procedure or package parameter, variable, temp table) with why it stops (boundary
-   reached; declared terminal and its reason; no writer in the selected sources — origin not
-   proved; external file — not a confirmed source system; constant; parameter without caller;
-   depth limit; open point) and the status of the step that reaches it, linked to that step.
-6. **Open points** — value and context gaps by kind in plain words with the detailed page's
-   next-evidence text, then a count of row-selection gaps.
-7. **Links** — detailed page sections, the JSON and the route index.
+1. **Field and definition** — the qualified target (database, schema, table, column); from
+   `--business-glossary` either "Definition (approved)" with its source, or "Definition not
+   approved" plus, only when the glossary supplies one, a separately labelled *proposed
+   interpretation* with its source. Never derived from names.
+2. **Plain answer** — one or two generated sentences: the head from `completeness` ("Complete only
+   within the selected sources", "Not fully traced (n open points …)", "Traced to the requested
+   boundary", …), the main source families with their headline rules (primary, fallback, CASE
+   branch or default, later UPDATE override, UPDATE of unproved run order, MERGE, package mapping,
+   direct), how many routes end without a proved origin, then the value rules that change the
+   result (CASE choice and its condition columns and constants, COALESCE/ISNULL fallbacks, UPDATE
+   overrides, MERGE, package transformations, aggregation).
+3. **Coverage** — status (an incomplete trace says **Incomplete** even when some ends reach the
+   boundary), value routes and families, ends at the requested boundary, declared terminals,
+   unresolved origins by kind, constants, and verified / inferred / asserted step counts; a
+   boundary or declared terminal is stated not to be an originating system.
+4. **Main evidence needed** — at most three requests, ranked by the routes they affect: gap kinds
+   (with the next-evidence text) and unresolved origins per source family ("who writes …", "who
+   produces file connection …", callers, depth, loops), each linked to the detailed page.
+5. **Route families** — a Mermaid `flowchart LR` with one node per family (at most 10, then a
+   "N more families" node) and one edge per family straight into the target, labelled with the
+   value rule and the stopping reason (and the status when not verified). Alternatives are
+   parallel edges, never a chain. Shapes: database column `[( )]`, file column `[/ /]`, constant
+   `([ ])`, unresolved origin `{{ }}`, declared terminal `[[ ]]` ("not an origin"); condition
+   families use dotted edges. Labels are quoted and Markdown/Mermaid-active characters become entity
+   codes. A family table (linked to the detailed page's `#fam-…` anchors) follows.
+6. **Sources at a glance** — one row per end: kind (DB column, file column, constant, variable,
+   parameter, temp table, package data flow) | database | schema | table / source | column |
+   families | why it stops | proof status of the step reaching it (linked). Files and constants
+   never appear in the database column.
+7. **What changes the value** — CASE/IIF choices, COALESCE/ISNULL fallbacks, overrides (UPDATE
+   after other writers; in the same procedure after them, or with run order not proved), MERGE,
+   aggregations and window calculations, package transformations; other calculations in one line.
+8. **Which rows?** — row-selection conditions of the value-route steps, grouped by object, stated
+   as conditions and kept apart from values.
+9. **Evidence and uncertainty** — step counts by status (verified / inferred / asserted always
+   shown), links to every weaker step, assertion ids and the assertions file, unresolved origins,
+   value / context / row-selection gap counts, source files with line ranges.
+10. **Routes**, **Open points**, **Links** — the object-sequence routes (top 2), open points by
+    kind, links to the detailed page sections, the JSON and the route index.
+
+**Route families.** A *value route* is a path from the target through value, condition and window
+inputs to an end, identified by its end, its object sequence, its value rule and its status. A
+*family* groups value routes that agree on all four of:
+
+- source family — `database.schema` (server-qualified when known; `?` when the database is
+  unknown), a flat-file connection per package, constants, variables, procedure parameters, package
+  variables, a temp table or package data flow;
+- value rule — the set of tags met on the way: writer kind (later UPDATE override, UPDATE of
+  unproved run order, plain UPDATE, MERGE matched / not matched, assertion), branch context (IF,
+  ELSE, WHILE, CATCH, UNION branch, conditional split, lookup or error output), package mapping,
+  input branch (CASE branch `WHEN … THEN`, CASE default `ELSE`, COALESCE/ISNULL primary or
+  fallback *n*), role (decides between values, orders or partitions rows) and operation
+  (conversion, arithmetic, function, text, aggregation, window, subquery, other calculation);
+- stopping reason — boundary, declared terminal, no writer, external file, parameter without
+  caller, depth limit, constant, loop, or the gap kinds at the end;
+- evidence status — the worst step and input status on the route, raised to partial (ambiguous for
+  ambiguity gaps) when an open point lies on it.
+
+Family ids (`fam-` + 10 hex digits of the SHA-256 of those four) are stable across runs and
+columns. Route counts are distinct (end, object sequence) pairs, enumerated with at most 50 object
+sequences per (end, rule, stop, status) (`route_count_is_lower_bound` when cut). The detailed page
+lists every family under "Route families" (anchor `route-families`, one `fam-…` anchor each, up to
+25 member ends each), and the JSON `route_families` block keeps every member.
 
 An *end* is a node on a value route with no step into it: a stop or a node with a gap. No end is
 ever described as a confirmed or ultimate source.
@@ -328,9 +379,23 @@ Ids are the first 10 hex digits of the SHA-256 of the sorted keys, so they are s
 runs. Each group lists its members, the shared objects or writers and the count of
 `completeness.result` values. `routes-index.json` also lists `route_signatures` (route id = hash
 of the object keys upstream of the target's own object, with the columns that have it) and, per
-column, `source_signature`, `writer_signature` and `route_signatures`. A shared signature does
-not mean identical expressions, branch selection or business meaning, and a group never stands
-in for a column's own trace.
+column, `source_signature`, `writer_signature`, `route_signatures`, `route_families` (family ids),
+`value_routes` and `definition_status` (approved, proposed or missing). The top-level
+`route_families` lists each family id with its source family, rule, stop, status and columns. A
+shared signature or family does not mean identical expressions, branch selection or business
+meaning, and a group never stands in for a column's own trace.
+
+`needs_attention` (rendered first in `routes-index.md`):
+
+- `unresolved_origins` — per (source family, stopping kind): columns and routes (declared terminals
+  are listed too, since their upstream is not proved);
+- `ambiguous_writer_order` — per written object of an `ambiguous_writer_order` value gap: the writer
+  locations and the columns affected;
+- `assertions_awaiting_review` — per assertion id used: the columns relying on it;
+- `definitions_awaiting_approval` — columns without an approved glossary definition, with their
+  glossary status, and whether a glossary was supplied.
+
+Every list is sorted by the number of columns affected.
 
 ## SSIS packages (optional adapter)
 
