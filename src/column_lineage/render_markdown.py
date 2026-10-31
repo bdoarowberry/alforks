@@ -34,6 +34,8 @@ TREE_MAX_INPUTS = 12         # inputs shown per step in the overview tree
 TREE_MAX_LINES = 400         # hard cap on overview tree lines
 MERMAID_MAX_STEPS = 40       # the Mermaid diagram is only drawn up to this many steps
 SUMMARY_MAX_ITEMS = 8        # items listed per Short-answer bullet before "and N more"
+LINK_SAMPLE = 5              # step links listed per cross-reference (other writers, upstream steps) before "N more"
+AFFECTS_MAX = 50             # steps listed under one gap's "Affects"
 
 STATUS_ORDER = ("verified", "inferred", "asserted", "partial", "ambiguous", "unresolved")
 ROW_ROLE_ORDER = ("filter", "join_key", "join_predicate", "group_by", "having", "qualify", "merge_condition")
@@ -234,6 +236,11 @@ class _Trace:
 
     def step_link(self, step: dict) -> str:
         return f"[{self.label[step['id']]}](#{_anchor(step['id'])})"
+
+    def step_links(self, steps: list[dict], limit: int = LINK_SAMPLE) -> str:
+        """Links to at most ``limit`` steps, then a count, so cross-references stay linear in size."""
+        shown = ", ".join(self.step_link(s) for s in steps[:limit])
+        return shown + (f" and {len(steps) - limit} more" if len(steps) > limit else "")
 
     def gap_link(self, gap_id: str) -> str:
         return f"[{self.gap_kind(gap_id)}](#{_anchor(gap_id)})"
@@ -450,7 +457,7 @@ def _section_short_answer(t: _Trace) -> list[str]:
         route += " through " + _join_list([_code(t.display(n)) for n in intermediates])
     renames = [s for s in t.ordered if s["id"] in value_steps and s.get("operation") == "rename"]
     if renames:
-        route += f"; {_plural(len(renames), 'rename')} ({', '.join(t.step_link(s) for s in renames)})"
+        route += f"; {_plural(len(renames), 'rename')} ({t.step_links(renames, SUMMARY_MAX_ITEMS)})"
     out.append(route + ".")
 
     # Conditions and alternatives.
@@ -619,7 +626,10 @@ class _TreeBuilder:
             _, upstream = t.reach(node_id, ("value", "condition", "window"))
             self.emit(f"{child_prefix}└─ … {_plural(len(upstream), 'more step')} upstream (see Detailed steps)")
             return
-        self.expanded[node_id] = [t.label[s["id"]] for s in steps]
+        labels = [t.label[s["id"]] for s in steps[:LINK_SAMPLE]]
+        if len(steps) > LINK_SAMPLE:
+            labels.append(f"and {len(steps) - LINK_SAMPLE} more")
+        self.expanded[node_id] = labels
         stack.append(node_id)
         for index, step in enumerate(steps):
             last = index == len(steps) - 1
@@ -722,10 +732,10 @@ def _section_overview(t: _Trace) -> list[str]:
     unreachable = [s for s in t.ordered if s["id"] not in t.depth]
     if via_rows:
         out += ["", f"{_plural(len(via_rows), 'step')} reached only through row-selection columns "
-                    f"(not value inputs): {', '.join(t.step_link(s) for s in via_rows)} (see Detailed steps)."]
+                    f"(not value inputs): {t.step_links(via_rows, 20)} (see Detailed steps)."]
     if unreachable:
         out += ["", f"{_plural(len(unreachable), 'step')} in the trace are not reachable from the target: "
-                    f"{', '.join(t.step_link(s) for s in unreachable)} (see Detailed steps)."]
+                    f"{t.step_links(unreachable, 20)} (see Detailed steps)."]
     reachable = [s for s in t.ordered if s["id"] in value_steps]
     if 0 < len(reachable) <= MERMAID_MAX_STEPS:
         out += ["", "<details><summary>Diagram (Mermaid)</summary>", ""]
@@ -757,7 +767,7 @@ def _section_row_selection(t: _Trace) -> list[str]:
             column = _code(t.display(node_id))
             traced = t.steps_by_target.get(node_id or "")
             if traced:
-                column += " (traced: " + ", ".join(t.step_link(s) for s in traced) + ")"
+                column += " (traced: " + t.step_links(traced) + ")"
             status = _text(rs.get("status") or "verified")
             if rs.get("gap"):
                 status += " ⚠ " + t.gap_link(rs["gap"])
@@ -802,9 +812,17 @@ def _section_steps(t: _Trace) -> list[str]:
             ("Status", f"**{_text(step.get('status') or 'verified')}**"),
             ("Depth", "not reachable from the target" if depth is None else str(depth)),
         ]
-        if len(t.steps_by_target.get(step.get("target") or "", [])) > 1:
-            others = [t.step_link(s) for s in t.steps_by_target[step["target"]] if s["id"] != step["id"]]
-            fields.append(("Alternative writers", ", ".join(others)))
+        writers = t.steps_by_target.get(step.get("target") or "", [])
+        if len(writers) > 1:
+            # A sample and a count, not every other writer: n writers of one column would otherwise make the
+            # page grow with n squared. Every writer still has its own entry in this section.
+            others = [s for s in writers[: LINK_SAMPLE + 1] if s["id"] != step["id"]][:LINK_SAMPLE]
+            if len(writers) - 1 > len(others):
+                text = (f"{len(writers) - 1} others, e.g. " + ", ".join(t.step_link(s) for s in others)
+                        + f"; all {len(writers)} writers of this column are listed in this section")
+            else:
+                text = ", ".join(t.step_link(s) for s in others)
+            fields.append(("Alternative writers", text))
         if step.get("gaps"):
             fields.append(("Gaps", ", ".join(f"⚠ {t.gap_link(g)}" for g in sorted(step["gaps"]))))
         if step.get("row_selection"):
@@ -830,7 +848,7 @@ def _section_steps(t: _Trace) -> list[str]:
                 name = _code(t.display(node_id))
                 upstream = t.steps_by_target.get(node_id or "")
                 if upstream:
-                    name += " → " + ", ".join(t.step_link(s) for s in upstream)
+                    name += " → " + t.step_links(upstream)
                 status = _text(inp.get("status") or "verified")
                 if inp.get("gap"):
                     status += " ⚠ " + t.gap_link(inp["gap"])
@@ -1030,18 +1048,21 @@ def _section_gaps(t: _Trace, json_name: str | None) -> list[str]:
         by_kind: dict[str, list[dict]] = {}
         for gap in gaps:
             by_kind.setdefault(gap.get("kind") or "gap", []).append(gap)
+        users_by_gap: dict[str, list[dict]] = {}
+        for step in t.ordered:
+            refs = set(step.get("gaps") or []) | {i.get("gap") for i in step.get("inputs") or []} \
+                | {r.get("gap") for r in step.get("row_selection") or []}
+            for ref in sorted(refs - {None}):
+                users_by_gap.setdefault(ref, []).append(step)
         for kind in sorted(by_kind):
             out += [f"### {_text(kind)} ({len(by_kind[kind])})", ""]
             for gap in by_kind[kind]:
                 out.append(f'- <a id="{_anchor(gap["id"])}"></a>**{_text(gap.get("message") or kind)}**')
                 if gap.get("node"):
                     out.append(f"  - Node: {_code(t.display(gap['node']))} (id {_code(gap['node'])})")
-                users = [s for s in t.ordered
-                         if gap["id"] in (s.get("gaps") or [])
-                         or any(i.get("gap") == gap["id"] for i in s.get("inputs") or [])
-                         or any(r.get("gap") == gap["id"] for r in s.get("row_selection") or [])]
+                users = users_by_gap.get(gap["id"], [])
                 if users:
-                    out.append("  - Affects: " + ", ".join(t.step_link(s) for s in users))
+                    out.append("  - Affects: " + t.step_links(users, AFFECTS_MAX))
                 evidence = gap.get("evidence") or []
                 for ev in evidence:
                     out.append(f"  - Evidence: {t.evidence_md(ev)}")

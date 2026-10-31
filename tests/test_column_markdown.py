@@ -403,6 +403,28 @@ def test_cli_regenerates_page(tmp_path):
     assert proc.returncode == 0 and "## 6. Gaps and next evidence" in proc.stdout
 
 
+def test_detailed_page_is_linear_in_writers(tmp_path):
+    """Thousands of single-row INSERTs into one column: every step is shown once, and cross-references are
+    sampled, so the page grows linearly (it used to link every other writer from every step)."""
+    from column_lineage.cli import main as cli_main
+    n = 2500
+    sql = tmp_path / "sql"
+    sql.mkdir()
+    rows = "\n".join(f"INSERT INTO demo.target (id, val) VALUES ({i}, 'v{i}');" for i in range(n))
+    (sql / "load.sql").write_text("CREATE TABLE demo.target (id int, val varchar(10));\nGO\n"
+                                  f"CREATE PROCEDURE demo.load_rows AS\nBEGIN\n{rows}\nEND\nGO\n", encoding="utf-8")
+    out = tmp_path / "out"
+    assert cli_main(["--column", "demo.demo.target.val", "--source-root", str(sql), "--default-database", "demo",
+                     "--output", str(out), "--no-progress", "--jobs", "1"]) == 0
+    md = (out / "demo.demo.target.val.lineage.md").read_text(encoding="utf-8")
+    data = json.loads((out / "demo.demo.target.val.lineage.json").read_text(encoding="utf-8"))
+    assert len(data["steps"]) == n
+    assert len(re.findall(r"^### S\d+\. ", md, re.M)) == n
+    assert len(md) < 1500 * n, len(md)
+    assert max(len(line) for line in md.splitlines()) < 2000
+    assert f"{n - 1} others, e.g." in md and f"all {n} writers of this column are listed in this section" in md
+
+
 def test_sample_document_is_current():
     expected = render_markdown(sample_trace().to_dict(), SAMPLE_JSON_NAME)
     assert SAMPLE_MD.read_text(encoding="utf-8") == expected, \
