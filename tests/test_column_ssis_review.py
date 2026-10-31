@@ -295,3 +295,12 @@ def test_disabled_task_without_targets_is_not_a_gap_on_traces(tmp_path):
     assert "unsupported_package_step" not in t.gap_kinds
     assert t.complete
     assert t.data["scan"]["packages"]["disabled_tasks"] == 1
+
+
+def test_expression_shape_is_anonymized_and_tags_reference_kinds():
+    from column_lineage import ssis_expression as sx
+    text = 'LEN(TRIM(#{Package\\Load\\Src.Outputs[Out].Columns[Customer Name]})) == 0 && [Order Ref] != "ABC" && @[User::Cutoff] > 5'
+    shape = sx.shape(text)
+    assert shape == 'LEN ( TRIM ( #ID1 ) ) == 0 && [ID2] != "?" && @ID3 > 0'
+    for name in ("Customer", "Order", "ABC", "Cutoff", "Package"):
+        assert name not in shape

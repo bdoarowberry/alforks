@@ -308,8 +308,8 @@ SHAPE_KEEP = re.compile(r"(?:DT_\w+|NULL|ISNULL|REPLACENULL|LEN|TRIM|LTRIM|RTRIM
 
 
 def shape(text: str, error: str | None = None) -> str:
-    """Anonymized shape of an expression for sanitized summaries: column, variable and lineage references
-    become IDn, strings "?" and numbers 0; operators, casts and built-in function names stay. ``<<HERE>>``
+    """Anonymized shape of an expression for sanitized summaries: references become [IDn] (bracketed
+    column), #IDn (lineage reference), @IDn (variable) or IDn (bare name), strings "?" and numbers 0; operators, casts and built-in function names stay. ``<<HERE>>``
     marks the position named in ``error``. Characters the tokenizer rejects are shown only when they are
     punctuation."""
     at = re.search(r" at (\d+)", error or "")
@@ -333,7 +333,8 @@ def shape(text: str, error: str | None = None) -> str:
             out.append("0")
         elif kind in ("lineage", "var", "column") or (kind == "ident" and not SHAPE_KEEP.match(value)):
             names.setdefault(value.lower(), f"ID{len(names) + 1}")
-            out.append(("@" if kind == "var" else "") + names[value.lower()])
+            name = names[value.lower()]
+            out.append({"var": f"@{name}", "column": f"[{name}]", "lineage": f"#{name}"}.get(kind, name))
         elif kind != "ws":
             out.append(value.upper() if kind == "ident" else value)
         pos = m.end()
