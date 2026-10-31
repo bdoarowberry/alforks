@@ -434,4 +434,68 @@ def test_connection_map_rejects_bad_value(tmp_path):
 def test_all_package_roots_together(tmp_path):
     t = ssis_trace(SSIS, "demo.stage.amount", tmp_path)
     assert t.complete           # other packages in the tree do not write demo.stage
-    assert t.data["scan"]["packages"]["in_scope"] == 13
+    assert t.data["scan"]["packages"]["in_scope"] == 15
+
+
+# ----------------------------------------------------------------------------- project-shaped package
+
+def test_file_loop_project_connection_and_paths_only(tmp_path):
+    # Flat file (path from a Foreach variable) -> Data Conversion -> Derived Column -> Conditional Split -> Multicast
+    # -> OLE DB destination through a project connection (.conmgr); Row Count and OLE DB Command hang off the
+    # multicast but are not on the destination's path.
+    t = ssis_trace("project", "demo_db.demo.file_target.amount", tmp_path)
+    dest = t.only_step_for(t.target_id)
+    assert dest["status"] == "verified"
+    assert any("project connection target_db" in n for n in dest["notes"])
+    assert any("run_all.dtsx" in n and "Execute Package" in n for n in dest["notes"])
+    assert "FOREACH LOOP container For each file" in dest["branch_context"]
+    assert [r["role"] for r in dest["row_selection"]] == ["filter"]
+    [stop] = t.stops("external_file")
+    assert "@[User::current_file]" in stop["detail"] and "Foreach" in stop["detail"]
+    assert "sample.csv" in stop["detail"] and "only the value saved" in stop["detail"]
+    assert not any("Count rows" in (s["procedure"] or "") or "Update status" in (s["procedure"] or "") for s in t.steps)
+    assert t.complete
+    code = ssis_trace("project", "demo_db.demo.file_target.code", tmp_path / "code")
+    derived = code.only_step_for(inputs(code.only_step_for(code.target_id), "value")[0])
+    assert derived["operation"] == "string" and derived["expression"] == "UPPER(TRIM(a_code))"
+
+
+def test_oledb_command_sql_binds_parameters_to_input_columns(tmp_path):
+    t = ssis_trace("project", "demo_db.demo.file_status.last_amount", tmp_path)
+    update = t.only_step_for(t.target_id)
+    assert update["writer_kind"] == "update" and update["evidence"][0]["path"] == "load_files.dtsx"
+    assert "Update status" in update["procedure"]
+    assert any("runs once per row" in b for b in update["branch_context"])
+    [param] = inputs(update, "value")
+    binding = t.only_step_for(param)
+    assert binding["writer_kind"] == "package_parameter_binding"
+    assert inputs(binding, "value")[0].endswith("[convert.data conversion output].amount_num")
+    # The command's connection takes its connection string from a project parameter: a candidate, not proof.
+    [gap] = t.gaps("package_database_unknown")
+    assert gap["detail"]["connection"] == "runtime_db"
+    assert gap["detail"]["expressions"] == {"ConnectionString": "@[$Project::runtime_connection]"}
+    assert gap["detail"]["design_time_database"] == "demo_db" and "not proof" in gap["message"]
+    assert update["status"] == "ambiguous" and not t.complete
+
+
+def test_connection_map_resolves_runtime_connection(tmp_path):
+    t = ssis_trace("project", "demo_db.demo.file_status.last_amount", tmp_path, "--connection-map", "runtime_db=demo_db")
+    assert t.gaps("package_database_unknown") == []
+    assert t.only_step_for(t.target_id)["status"] != "ambiguous"
+
+
+def test_old_package_formats_are_read_or_reported(tmp_path):
+    root = tmp_path / "pkgs"
+    root.mkdir()
+    text = (SSIS / "legacy" / "load_legacy.dtsx").read_text()
+    (root / "format2.dtsx").write_text(text.replace('"PackageFormatVersion">3<', '"PackageFormatVersion">2<'))
+    # An unknown class id without a known contactInfo is never guessed from the component's name.
+    (root / "unknown_component.dtsx").write_text(text.replace('contactInfo="Derived Column;', 'contactInfo="Vendor Widget;'))
+    code = run_cli(["--column", "demo_db.demo.legacy_target.amount_text", "--source-root", str(SQL),
+                    "--package-root", str(root), "--output", str(tmp_path / "out"), "--no-progress", "--gap-summary"])
+    assert code == 0
+    t = load_trace(tmp_path / "out", "demo_db.demo.legacy_target.amount_text")
+    assert len(t.steps_for(t.target_id)) == 2
+    assert t.gaps("ambiguous_package_copy") and t.gaps("unsupported_package_step")
+    summary = json.loads((tmp_path / "out" / "gap-summary.json").read_text())
+    assert summary["packages"]["package_formats"] == {"2005": 1, "2008": 1}

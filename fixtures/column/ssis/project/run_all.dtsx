@@ -1,0 +1,26 @@
+<?xml version="1.0"?>
+<DTS:Executable xmlns:DTS="www.microsoft.com/SqlServer/Dts"
+  DTS:refId="Package"
+  DTS:CreationName="Microsoft.Package"
+  DTS:DTSID="{6A1F0E00-0000-4000-800E-000000000001}"
+  DTS:ExecutableType="Microsoft.Package"
+  DTS:ObjectName="run_all">
+  <DTS:Property
+    DTS:Name="PackageFormatVersion">8</DTS:Property>
+  <DTS:Executables>
+    <DTS:Executable
+      DTS:refId="Package\Run load files"
+      DTS:CreationName="Microsoft.ExecutePackageTask"
+      DTS:DTSID="{6A1F0E00-0000-4000-800E-0000000000E1}"
+      DTS:ExecutableType="Microsoft.ExecutePackageTask"
+      DTS:ObjectName="Run load files">
+      <DTS:Variables />
+      <DTS:ObjectData>
+        <ExecutePackageTask>
+          <UseProjectReference>True</UseProjectReference>
+          <PackageName>load_files.dtsx</PackageName>
+        </ExecutePackageTask>
+      </DTS:ObjectData>
+    </DTS:Executable>
+  </DTS:Executables>
+</DTS:Executable>

@@ -27,4 +27,6 @@ CREATE TABLE demo.legacy_target (amount_text varchar(30) NULL);
 CREATE TABLE demo.audit (row_total int NULL);
 CREATE TABLE demo.orders_archive (amount decimal(18, 2) NULL, region_code varchar(10) NULL);
 CREATE TABLE demo.union_target (region_code varchar(10) NULL, total_amount decimal(18, 2) NULL);
+CREATE TABLE demo.file_target (code varchar(10) NULL, amount decimal(18, 2) NULL);
+CREATE TABLE demo.file_status (code varchar(10) NULL, last_amount decimal(18, 2) NULL);
 GO
