@@ -70,3 +70,21 @@ def test_parse_repairs(tmp_path):
     assert "demo.dbo.src.a" in reached(t)
     assert t.data["scan"]["fallback"] == 0
     assert t.data["scan"]["ignored_non_lineage"] == 1   # the WITH EXECUTE AS header on its own
+
+
+WRITER = ("USE demo;\r\nGO\r\nALTER PROCEDURE dbo.load_destination AS\r\nBEGIN\r\n"
+          "  INSERT INTO dbo.destination (field_01)\r\n  SELECT s.value_01 FROM dbo.stage AS s; -- café\r\nEND;\r\n")
+
+
+@pytest.mark.parametrize("encoding,bom", [("utf-16-le", b"\xff\xfe"), ("utf-16-le", b""), ("utf-16-be", b"\xfe\xff"),
+                                          ("cp1252", b""), ("utf-8", b"\xef\xbb\xbf")])
+def test_writer_in_non_utf8_file_is_read(encoding, bom, tmp_path):
+    """SSMS saves "Unicode" scripts as UTF-16; read as UTF-8 their statements silently vanished."""
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "tables.sql").write_text("CREATE TABLE dbo.stage (value_01 int);\nCREATE TABLE dbo.destination (field_01 int);\n")
+    (src / "load.sql").write_bytes(bom + WRITER.encode(encoding))
+    t = trace(src, "demo.dbo.destination.field_01", tmp_path / "out", *DB)
+    assert "demo.stage.value_01" not in reached(t)
+    assert "demo.dbo.stage.value_01" in reached(t)
+    assert t.data["scan"]["files_without_statements"] == 0

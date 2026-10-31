@@ -152,6 +152,7 @@ def main(argv: list[str] | None = None) -> int:
     with ProgressReporter(enabled=not args.no_progress, interval=args.progress_interval) as progress:
         progress.start_phase("discovering", completed=0, total=None)
         files = []
+        encodings: dict[str, int] = {}
         for root in roots:
             provider = FilesystemSourceProvider([str(root)], DEFAULT_EXCLUDES + tuple(args.exclude), tuple(args.include),
                                                 include_dated_snapshots=args.include_dated_snapshots)
@@ -160,9 +161,12 @@ def main(argv: list[str] | None = None) -> int:
                 files.extend((root, source) for source in provider.files())
             except (OSError, ValueError) as exc:
                 parser.error(str(exc))
+            for name, count in provider.encodings.items():
+                encodings[name] = encodings.get(name, 0) + count
             catalog.skipped_files.extend(
                 (f"{labels[root]}/{Path(p).relative_to(root).as_posix() if root.is_dir() else Path(p).name}", str(p))
                 for p in provider.ignored_dated_snapshots)
+        catalog.file_encodings = encodings
         if not files:
             parser.error("No SQL source files matched the selected roots and filters.")
         progress.start_phase("parsing", completed=0, total=len(files))
@@ -196,6 +200,8 @@ def main(argv: list[str] | None = None) -> int:
             "ignored_non_lineage": catalog.stats["ignored"],
             "repaired": catalog.stats["repaired"],
             "skipped_dated_snapshots": len(catalog.skipped_files),
+            "file_encodings": dict(sorted(encodings.items())),
+            "files_without_statements": catalog.stats["files_without_statements"],
             "statement_issues": len(catalog.issues),
             "file_errors": len(catalog.file_errors),
             "source_revision": source_revision(roots),

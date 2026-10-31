@@ -160,7 +160,7 @@ def build(catalog, traces: list[dict], samples: int = 25) -> dict:
     return {
         "schema_version": "column-lineage-gap-summary/1.0",
         "note": "Contains no object, column, path or file names. Anonymized SQL replaces identifiers with IDn.",
-        "scan": {k: v for k, v in catalog.stats.items()},
+        "scan": {**catalog.stats, "file_encodings": getattr(catalog, "file_encodings", {})},
         "statement_issues_by_kind": dict(sorted(issue_kinds.items())),
         "dynamic_sql_evaluation": dict(sorted(evaluations.items())),
         "unparsed_statements_by_keyword": dict(sorted(statements.items())),

@@ -18,7 +18,7 @@ from sqlglot.errors import ErrorLevel, SqlglotError
 
 from table_lineage.index import DEFINITION, GO, IDENT, SourceIndex, Statement, mask_noncode
 from table_lineage.models import normalize_name
-from table_lineage.sources import SourceFile
+from table_lineage.sources import SourceFile, decode_source
 
 from .control import control_contexts, header_end
 from .model import Evidence, ObjectRef
@@ -494,7 +494,8 @@ class Catalog:
         self.dynamic_by_scope: dict[str, list[StatementIssue]] = defaultdict(list)
         self.known_databases: dict[tuple[str, str], set[str]] = defaultdict(set)  # (schema, name) -> {db}
         self.unknown_db_writers: dict[tuple[str, str], list[Writer]] = defaultdict(list)
-        self.stats = {"files": 0, "statements": 0, "parsed": 0, "fallback": 0, "ignored": 0, "repaired": 0}
+        self.stats = {"files": 0, "statements": 0, "parsed": 0, "fallback": 0, "ignored": 0, "repaired": 0,
+                      "files_without_statements": 0}
         self.fallback_samples: list[tuple[Statement, Unit]] = []
         self.file_errors: list[tuple[str, str, str]] = []
         self.rewritten: set[tuple[str, int]] = set()
@@ -591,6 +592,8 @@ class Catalog:
         self.units.append(unit)
         self.units_by_path[unit.path] = unit
         self.stats["files"] += 1
+        if not index.statements and masked.strip():
+            self.stats["files_without_statements"] += 1
         for step in (self._procedures, self._synonyms):
             try:
                 step(unit)
@@ -1542,6 +1545,8 @@ WRITER_SEARCH_LABELS = {
     "unparsed": "statement could not be parsed",
     "ignored_non_lineage": "statement was classed as non-lineage and ignored",
     "parsed_no_writer": "statement parsed, but no writer was recorded from it",
+    "parsed_other_writer": "statement parsed, but only a writer of another object was recorded from it",
+    "same_object_other_columns": "writes this object, but does not name the column",
     "not_indexed": "text is outside every indexed statement",
     "comment_or_string": "write text inside a comment or string literal",
     "skipped_file": "in a file skipped by the file filters (dated snapshot)",
@@ -1558,7 +1563,7 @@ def _search_catalog(catalog: "Catalog") -> dict[str, list[tuple]]:
             found[name].append((unit, at, unit.masked[at] == unit.text[at]))
     for label, path in catalog.skipped_files:
         try:
-            text = Path(path).read_text(encoding="utf-8-sig", errors="replace")
+            text = decode_source(Path(path).read_bytes())[0]
         except OSError:
             continue
         for match in WRITE_TARGET.finditer(mask_noncode(text)):
@@ -1614,9 +1619,9 @@ def writer_search(catalog: "Catalog", ref: ObjectRef, column: str, writers: list
             continue
         seen.add(id(statement))
         if id(statement) in own:
-            if column_word and column_word.search(mask_noncode(statement.text)):
-                findings.append({"category": "same_object_column_not_mapped", "location": location,
-                                 "detail": WRITER_SEARCH_LABELS["same_object_column_not_mapped"]})
+            named = bool(column_word and column_word.search(mask_noncode(statement.text)))
+            category = "same_object_column_not_mapped" if named else "same_object_other_columns"
+            findings.append({"category": category, "location": location, "detail": WRITER_SEARCH_LABELS[category]})
             continue
         if statement.parse_status != "parsed":
             category = "ignored_non_lineage" if non_lineage(statement.text) else "unparsed"
@@ -1629,8 +1634,9 @@ def writer_search(catalog: "Catalog", ref: ObjectRef, column: str, writers: list
                                  "detail": f"{WRITER_SEARCH_LABELS['other_object']}: {writer.ref.display} "
                                            f"({_differs(ref, writer.ref)})"})
             continue
-        if not catalog._writers_by_statement.get(id(statement)):
-            findings.append({"category": "parsed_no_writer", "location": location,
-                             "detail": f"{WRITER_SEARCH_LABELS['parsed_no_writer']} (parsed as "
-                                       f"{type(statement.tree).__name__})"})
+        others = catalog._writers_by_statement.get(id(statement))
+        category = "parsed_other_writer" if others else "parsed_no_writer"
+        findings.append({"category": category, "location": location,
+                         "detail": f"{WRITER_SEARCH_LABELS[category]} (parsed as {type(statement.tree).__name__}"
+                                   + (f", writing {others[0].ref.display})" if others else ")")})
     return findings

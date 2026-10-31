@@ -115,6 +115,12 @@
   `INSERT ... SELECT` inside a procedure body traces correctly; the reproduced cause of the
   symptom is a writer whose database context (USE, `--database-map`, `--default-database`)
   resolves its target to another database than the reader's. Tests: `tests/test_column_round8.py`.
+- **Root cause of the missed writer (C23): file encoding.** Files saved as UTF-16 (SSMS
+  "Unicode") were decoded as UTF-8, so every statement in them silently vanished and their
+  writers' targets looked like sources with no writer. Files are now decoded by BOM / NUL
+  pattern (UTF-16 LE/BE, UTF-8, else Windows-1252); the scan reports `file_encodings` and
+  `files_without_statements`. The writer search now also reports writers of the same object that
+  do not name the column, and statements that only wrote another object.
 - `completeness.result` and `ends_by_meaning` distinguish reaching the requested boundary from
   being complete only within the selected sources.
 - Parse repairs: `@x + = y`, qualified column names in an INSERT into a table variable, index

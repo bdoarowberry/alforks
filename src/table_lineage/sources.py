@@ -13,6 +13,26 @@ SUPPORTED_SUFFIXES = {".sql", ".tsql", ".ddl", ".prc", ".proc"}
 DEFAULT_EXCLUDES = (".git", ".venv", ".pytest_cache", ".pytest-run-*", "node_modules", "bin", "obj")
 
 
+def decode_source(data: bytes) -> tuple[str, str]:
+    """Decode a SQL file: UTF-16 (BOM or NUL-interleaved, as SSMS saves "Unicode"), UTF-8, else
+    Windows-1252. Reading UTF-16 as UTF-8 would silently hide every statement in the file."""
+    if data.startswith(b"\xef\xbb\xbf"):
+        return data[3:].decode("utf-8", errors="replace"), "utf-8-bom"
+    if data.startswith((b"\xff\xfe", b"\xfe\xff")):
+        return data.decode("utf-16", errors="replace"), "utf-16-bom"
+    sample = data[:4000]
+    if len(sample) >= 4:
+        odd, even = sample[1::2].count(0), sample[0::2].count(0)
+        if odd > len(sample) // 4 and even < odd // 8:
+            return data.decode("utf-16-le", errors="replace"), "utf-16-le"
+        if even > len(sample) // 4 and odd < even // 8:
+            return data.decode("utf-16-be", errors="replace"), "utf-16-be"
+    try:
+        return data.decode("utf-8"), "utf-8"
+    except UnicodeDecodeError:
+        return data.decode("cp1252", errors="replace"), "cp1252"
+
+
 @dataclass(frozen=True)
 class SourceFile:
     path: Path
@@ -44,6 +64,7 @@ class FilesystemSourceProvider(SourceProvider):
         self.progress_callback = progress_callback
         self.preserve_newlines = False
         self.ignored_dated_snapshots: list[Path] = []
+        self.encodings: dict[str, int] = {}
         self._display_paths: dict[str, str] = {}
 
     @staticmethod
@@ -86,6 +107,7 @@ class FilesystemSourceProvider(SourceProvider):
         ignored: dict[str, Path] = {}
         explicit: set[str] = set()
         self.ignored_dated_snapshots = []
+        self.encodings = {}
         self._display_paths = {}
         for root in self.roots:
             root = root.resolve()
@@ -149,11 +171,10 @@ class FilesystemSourceProvider(SourceProvider):
             self._notify(SourceProgressEvent(
                 "reading", display, completed - 1, len(paths),
                 len(self.ignored_dated_snapshots)))
-            if self.preserve_newlines:
-                with path.open(encoding="utf-8-sig", errors="replace", newline="") as stream:
-                    text = stream.read()
-            else:
-                text = path.read_text(encoding="utf-8-sig", errors="replace")
+            text, encoding = decode_source(path.read_bytes())
+            if not self.preserve_newlines:
+                text = text.replace("\r\n", "\n").replace("\r", "\n")
+            self.encodings[encoding] = self.encodings.get(encoding, 0) + 1
             self._notify(SourceProgressEvent(
                 "read_complete", display, completed, len(paths),
                 len(self.ignored_dated_snapshots)))
