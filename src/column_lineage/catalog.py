@@ -43,9 +43,9 @@ DML_TOP = re.compile(r"(?:^|(?<=[\s;]))(?:UPDATE|DELETE|INSERT)\s+(?P<top>TOP\s*
 INSERT_HINT = re.compile(rf"\bINSERT\s+(?:INTO\s+)?{IDENT}\s*(?P<hint>WITH\s*\(\s*[A-Za-z_]+(?:\s*,\s*[A-Za-z_]+)*\s*\))", re.I)
 OUTPUT_CLAUSE = re.compile(rf"(?<![.\w\[\]])OUTPUT\s+(?=INSERTED\b|DELETED\b|\$ACTION\b|@)(?:(?!\bOUTPUT\b).)*?(?:\bINTO\s+(?P<target>{IDENT})(?:\s*\([^()]*\))?)?"
                            r"(?=\s*(?:SELECT|VALUES|FROM|WHERE|DEFAULT|;|$))", re.I | re.S)
-INSERT_COLUMNS = re.compile(rf"\bINSERT\s+(?:INTO\s+)?{IDENT}\s*\((?P<cols>[^()]*)\)", re.I)
+INSERT_COLUMNS = re.compile(rf"\bINSERT\s+(?:INTO\s+)?(?:{IDENT}|@[\w$#@]+)\s*\((?P<cols>[^()]*)\)", re.I)
 KEY_CLUSTERING = re.compile(r"\b(?:PRIMARY\s+KEY|UNIQUE)\s+(?P<kind>(?:NON)?CLUSTERED)\b", re.I)
-SPACED_OPERATOR = re.compile(r"([!<>])[ \t]+([=>])")
+SPACED_OPERATOR = re.compile(r"([!<>])[ \t]+([=>])|(?<=[\w\]])(\s*[-+*/%&|^])[ \t]+(=)(?!=)")
 OPTION_HINT = re.compile(r"(?P<option>\bOPTION\s*\((?:[^()]|\((?:[^()]|\([^()]*\))*\))*\))\s*;?\s*$", re.I)
 ALIAS_DEF = re.compile(rf"\b(?:FROM|JOIN|UPDATE|MERGE(?:\s+INTO)?)\s+(?P<name>{IDENT})\s+(?:WITH\s*\([^)]*\)\s*)?(?:AS\s+)?"
                        r"(?P<alias>\[[^\]]+\]|[A-Za-z_][\w$#]*)", re.I)
@@ -69,6 +69,9 @@ SWITCH = re.compile(rf"\bALTER\s+TABLE\s+(?P<source>{IDENT})\s+SWITCH\s+(?:PARTI
 ALTER_DEFAULT = re.compile(rf"\bALTER\s+TABLE\s+(?P<name>{IDENT})\s+(?:WITH\s+(?:NO)?CHECK\s+)?ADD\s+(?:CONSTRAINT\s+\S+\s+)?"
                            r"DEFAULT\s*(?P<expr>\((?:[^()]|\((?:[^()]|\([^()]*\))*\))*\)|N?'(?:''|[^'])*'|[-\w.]+)\s+FOR\s+"
                            r"(?P<col>\[[^\]]+\]|[A-Za-z_][\w$#@]*)", re.I)
+# Index options left over from a CREATE INDEX / constraint the indexer did not keep, glued to the next statement.
+INDEX_OPTIONS_PREFIX = re.compile(r"\s*WITH\s*\(\s*[A-Za-z_]+\s*=\s*(?:ON|OFF|\d+)\b(?:[^()]|\([^()]*\))*\)\s*"
+                                  r"(?:ON\s+(?:\[[^\]]+\]|[A-Za-z_]\w*)(?:\s*\([^()]*\))?\s*)?(?=\S)", re.I)
 EXEC_AS_HEADER = re.compile(r"\s*WITH\s+EXEC(?:UTE)?\s+AS\s+(?:N?'[^']*'|[A-Za-z_]\w*)\s*(?:,\s*[A-Za-z_]\w*\s*)*AS\b", re.I)
 DROP_TEMP = re.compile(r"\bDROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?(?P<name>#[A-Za-z_][\w$#@]*)", re.I)
 
@@ -341,7 +344,8 @@ def table_parts(table: exp.Table) -> tuple[str | None, str | None, str | None, s
 
 
 def split_name(text: str) -> list[str]:
-    parts = re.findall(r'\[(?:[^\]]|\]\])*\]|"(?:[^"]|"")*"|[^.\s]+', text.strip())
+    # `db..name` (default schema) keeps an empty schema part.
+    parts = re.findall(r'\[(?:[^\]]|\]\])*\]|"(?:[^"]|"")*"|[^.\s]+|(?<=\.)(?=\.)', text.strip())
     out = []
     for part in parts:
         if part.startswith("[") and part.endswith("]"):
@@ -643,16 +647,21 @@ class Catalog:
            semicolon before TRUNCATE, WHILE, SET NOCOUNT ...): split at line-start statement
            keywords and parse each piece on its own.
         """
-        header = EXEC_AS_HEADER.match(mask_noncode(statement.text))
-        if header:
+        for prefix in (EXEC_AS_HEADER, INDEX_OPTIONS_PREFIX):
+            header = prefix.match(mask_noncode(statement.text))
+            if not header:
+                continue
             offset = header.end()
             body = statement.text[offset:]
+            if not body.strip():
+                break   # a header on its own (the body was indexed separately): non-lineage as it is
             tree = parse_or_none(body)
             statement = replace(statement, start=statement.start + offset, text=body,
                                 line=statement.line + statement.text.count("\n", 0, offset), tree=tree,
                                 parse_status="parsed" if tree is not None else statement.parse_status)
             if tree is not None:
                 return [statement]
+            break
         if non_lineage(statement.text) or INSERT_EXEC.match(mask_noncode(statement.text)):
             return [statement]
         repaired = self._reparse(root_label, rel, statement)
@@ -680,9 +689,10 @@ class Catalog:
         for start, end in sorted(spans, reverse=True):
             text = text[:start] + "".join(c if c in "\r\n" else " " for c in text[start:end]) + text[end:]
         for match in SPACED_OPERATOR.finditer(mask_noncode(text)):
-            # `a ! = b` / `a < = b` are accepted by SQL Server: close the gap, keeping the length.
-            gap = match.end() - match.start() - 2
-            text = text[:match.start()] + match.group(1) + match.group(2) + " " * gap + text[match.end():]
+            # `a ! = b`, `a < = b` and `@x + = y` are accepted by SQL Server: close the gap, keeping the length.
+            op, eq = (match.group(1), match.group(2)) if match.group(1) else (match.group(3), match.group(4))
+            gap = match.end() - match.start() - len(op) - len(eq)
+            text = text[:match.start()] + op + eq + " " * gap + text[match.end():]
         return text, outputs
 
     def _reparse(self, root_label: str, rel: str, statement: Statement) -> Statement | None:

@@ -11,7 +11,7 @@ from sqlglot.errors import ErrorLevel, SqlglotError
 from .models import normalize_name
 from .sources import SourceFile
 
-IDENT = r'(?:\[(?:[^\]]|\]\])*\]|"(?:[^"]|"")*"|[A-Za-z_#][\w$#-]*)(?:\s*\.\s*(?:\[(?:[^\]]|\]\])*\]|"(?:[^"]|"")*"|[A-Za-z_#][\w$#-]*)){0,3}'
+IDENT = r'(?:\[(?:[^\]]|\]\])*\]|"(?:[^"]|"")*"|[A-Za-z_#][\w$#-]*)(?:\s*\.(?:\s*\.)?\s*(?:\[(?:[^\]]|\]\])*\]|"(?:[^"]|"")*"|[A-Za-z_#][\w$#-]*)){0,3}'
 DEFINITION = re.compile(rf'\b(?:CREATE\s+(?:OR\s+ALTER\s+)?|ALTER\s+)(?P<kind>PROC(?:EDURE)?|TABLE|VIEW|FUNCTION|SYNONYM)\s+(?P<name>{IDENT})', re.I)
 STATEMENT = re.compile(r'\b(?:CREATE\s+(?:OR\s+ALTER\s+)?VIEW|WITH|SELECT|INSERT|UPDATE|DELETE|MERGE|EXEC(?:UTE)?|SET|DECLARE|RAISERROR|RETURN)\b', re.I)
 DEFINITION_STATEMENT = re.compile(r'\b(?:CREATE\s+TABLE|ALTER\s+TABLE|CREATE\s+(?:OR\s+ALTER\s+)?VIEW|WITH|SELECT|INSERT|UPDATE|DELETE|MERGE|EXEC(?:UTE)?|SET|DECLARE|RAISERROR|RETURN)\b', re.I)
