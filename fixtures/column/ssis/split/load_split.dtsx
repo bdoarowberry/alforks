@@ -1,0 +1,238 @@
+<?xml version="1.0"?>
+<DTS:Executable xmlns:DTS="www.microsoft.com/SqlServer/Dts"
+  DTS:refId="Package"
+  DTS:CreationName="Microsoft.Package"
+  DTS:DTSID="{6A1F0E00-0000-4000-8001-000000000001}"
+  DTS:ExecutableType="Microsoft.Package"
+  DTS:ObjectName="load_split">
+  <DTS:Property
+    DTS:Name="PackageFormatVersion">8</DTS:Property>
+  <DTS:ConnectionManagers>
+    <DTS:ConnectionManager
+      DTS:refId="Package.ConnectionManagers[demo_db]"
+      DTS:CreationName="OLEDB"
+      DTS:DTSID="{6A1F0E00-0000-4000-8001-0000000000C1}"
+      DTS:ObjectName="demo_db">
+      <DTS:ObjectData>
+        <DTS:ConnectionManager
+          DTS:ConnectionString="Data Source=server_a;Initial Catalog=demo_db;Provider=SQLNCLI11.1;Integrated Security=SSPI;" />
+      </DTS:ObjectData>
+    </DTS:ConnectionManager>
+  </DTS:ConnectionManagers>
+  <DTS:Variables />
+  <DTS:Executables>
+    <DTS:Executable
+      DTS:refId="Package\Split orders"
+      DTS:CreationName="Microsoft.Pipeline"
+      DTS:DTSID="{6A1F0E00-0000-4000-8001-0000000000E1}"
+      DTS:ExecutableType="Microsoft.Pipeline"
+      DTS:ObjectName="Split orders">
+      <DTS:Variables />
+      <DTS:ObjectData>
+        <pipeline
+          version="1">
+          <components>
+            <component
+              refId="Package\Split orders\Read orders"
+              componentClassID="Microsoft.OLEDBSource"
+              contactInfo="OLE DB Source;Microsoft Corporation; Microsoft SQL Server; (C) Microsoft Corporation; All Rights Reserved; http://www.microsoft.com/sql/support;7"
+              description="OLE DB Source"
+              name="Read orders"
+              usesDispositions="true"
+              version="7">
+              <properties>
+                <property
+                  dataType="System.String"
+                  name="OpenRowset">[demo].[orders]</property>
+                <property
+                  dataType="System.String"
+                  name="SqlCommand"></property>
+                <property
+                  dataType="System.Int32"
+                  name="AccessMode"
+                  typeConverter="AccessMode">0</property>
+              </properties>
+              <connections>
+                <connection
+                  refId="Package\Split orders\Read orders.Connections[OleDbConnection]"
+                  connectionManagerID="Package.ConnectionManagers[demo_db]"
+                  connectionManagerRefId="Package.ConnectionManagers[demo_db]"
+                  name="OleDbConnection" />
+              </connections>
+              <outputs>
+                <output
+                  refId="Package\Split orders\Read orders.Outputs[OLE DB Source Output]"
+                  name="OLE DB Source Output">
+                  <outputColumns>
+                    <outputColumn
+                      refId="Package\Split orders\Read orders.Outputs[OLE DB Source Output].Columns[order_id]"
+                      dataType="i4"
+                      externalMetadataColumnId="Package\Split orders\Read orders.Outputs[OLE DB Source Output].ExternalColumns[order_id]"
+                      lineageId="Package\Split orders\Read orders.Outputs[OLE DB Source Output].Columns[order_id]"
+                      name="order_id" />
+                    <outputColumn
+                      refId="Package\Split orders\Read orders.Outputs[OLE DB Source Output].Columns[amount]"
+                      dataType="numeric"
+                      precision="18"
+                      scale="2"
+                      externalMetadataColumnId="Package\Split orders\Read orders.Outputs[OLE DB Source Output].ExternalColumns[amount]"
+                      lineageId="Package\Split orders\Read orders.Outputs[OLE DB Source Output].Columns[amount]"
+                      name="amount" />
+                    <outputColumn
+                      refId="Package\Split orders\Read orders.Outputs[OLE DB Source Output].Columns[status_code]"
+                      dataType="str"
+                      length="1"
+                      externalMetadataColumnId="Package\Split orders\Read orders.Outputs[OLE DB Source Output].ExternalColumns[status_code]"
+                      lineageId="Package\Split orders\Read orders.Outputs[OLE DB Source Output].Columns[status_code]"
+                      name="status_code" />
+                  </outputColumns>
+                  <externalMetadataColumns
+                    isUsed="True">
+                    <externalMetadataColumn
+                      refId="Package\Split orders\Read orders.Outputs[OLE DB Source Output].ExternalColumns[order_id]"
+                      dataType="i4"
+                      name="order_id" />
+                    <externalMetadataColumn
+                      refId="Package\Split orders\Read orders.Outputs[OLE DB Source Output].ExternalColumns[amount]"
+                      dataType="numeric"
+                      name="amount" />
+                    <externalMetadataColumn
+                      refId="Package\Split orders\Read orders.Outputs[OLE DB Source Output].ExternalColumns[status_code]"
+                      dataType="str"
+                      length="1"
+                      name="status_code" />
+                  </externalMetadataColumns>
+                </output>
+              </outputs>
+            </component>
+            <component
+              refId="Package\Split orders\Split by status"
+              componentClassID="Microsoft.ConditionalSplit"
+              contactInfo="Conditional Split;Microsoft Corporation; Microsoft SQL Server; (C) Microsoft Corporation; All Rights Reserved; http://www.microsoft.com/sql/support;0"
+              description="Conditional Split"
+              name="Split by status"
+              usesDispositions="true">
+              <inputs>
+                <input
+                  refId="Package\Split orders\Split by status.Inputs[Conditional Split Input]"
+                  name="Conditional Split Input">
+                  <inputColumns>
+                    <inputColumn
+                      refId="Package\Split orders\Split by status.Inputs[Conditional Split Input].Columns[status_code]"
+                      cachedDataType="str"
+                      cachedLength="1"
+                      cachedName="status_code"
+                      lineageId="Package\Split orders\Read orders.Outputs[OLE DB Source Output].Columns[status_code]" />
+                  </inputColumns>
+                  <externalMetadataColumns />
+                </input>
+              </inputs>
+              <outputs>
+                <output
+                  refId="Package\Split orders\Split by status.Outputs[Active]"
+                  exclusionGroup="1"
+                  name="Active"
+                  synchronousInputId="Package\Split orders\Split by status.Inputs[Conditional Split Input]">
+                  <properties>
+                    <property
+                      dataType="System.Int32"
+                      name="EvaluationOrder">0</property>
+                    <property
+                      dataType="System.String"
+                      name="FriendlyExpression">status_code == "A"</property>
+                    <property
+                      containsID="true"
+                      dataType="System.String"
+                      name="Expression">#{Package\Split orders\Read orders.Outputs[OLE DB Source Output].Columns[status_code]} == "A"</property>
+                  </properties>
+                  <externalMetadataColumns />
+                </output>
+                <output
+                  refId="Package\Split orders\Split by status.Outputs[Other]"
+                  exclusionGroup="1"
+                  name="Other"
+                  synchronousInputId="Package\Split orders\Split by status.Inputs[Conditional Split Input]">
+                  <properties>
+                    <property
+                      dataType="System.Boolean"
+                      name="IsDefaultOut">true</property>
+                  </properties>
+                  <externalMetadataColumns />
+                </output>
+              </outputs>
+            </component>
+            <component
+              refId="Package\Split orders\Write active"
+              componentClassID="Microsoft.OLEDBDestination"
+              contactInfo="OLE DB Destination;Microsoft Corporation; Microsoft SQL Server; (C) Microsoft Corporation; All Rights Reserved; http://www.microsoft.com/sql/support;4"
+              description="OLE DB Destination"
+              name="Write active"
+              usesDispositions="true"
+              version="4">
+              <properties>
+                <property
+                  dataType="System.String"
+                  name="OpenRowset">[demo].[split_target]</property>
+                <property
+                  dataType="System.Int32"
+                  name="AccessMode"
+                  typeConverter="AccessMode">3</property>
+              </properties>
+              <connections>
+                <connection
+                  refId="Package\Split orders\Write active.Connections[OleDbConnection]"
+                  connectionManagerID="Package.ConnectionManagers[demo_db]"
+                  connectionManagerRefId="Package.ConnectionManagers[demo_db]"
+                  name="OleDbConnection" />
+              </connections>
+              <inputs>
+                <input
+                  refId="Package\Split orders\Write active.Inputs[OLE DB Destination Input]"
+                  hasSideEffects="true"
+                  name="OLE DB Destination Input">
+                  <inputColumns>
+                    <inputColumn
+                      refId="Package\Split orders\Write active.Inputs[OLE DB Destination Input].Columns[order_id]"
+                      cachedDataType="i4"
+                      cachedName="order_id"
+                      externalMetadataColumnId="Package\Split orders\Write active.Inputs[OLE DB Destination Input].ExternalColumns[order_id]"
+                      lineageId="Package\Split orders\Read orders.Outputs[OLE DB Source Output].Columns[order_id]" />
+                    <inputColumn
+                      refId="Package\Split orders\Write active.Inputs[OLE DB Destination Input].Columns[amount]"
+                      cachedDataType="numeric"
+                      cachedName="amount"
+                      externalMetadataColumnId="Package\Split orders\Write active.Inputs[OLE DB Destination Input].ExternalColumns[amount]"
+                      lineageId="Package\Split orders\Read orders.Outputs[OLE DB Source Output].Columns[amount]" />
+                  </inputColumns>
+                  <externalMetadataColumns
+                    isUsed="True">
+                    <externalMetadataColumn
+                      refId="Package\Split orders\Write active.Inputs[OLE DB Destination Input].ExternalColumns[order_id]"
+                      dataType="i4"
+                      name="order_id" />
+                    <externalMetadataColumn
+                      refId="Package\Split orders\Write active.Inputs[OLE DB Destination Input].ExternalColumns[amount]"
+                      dataType="numeric"
+                      name="amount" />
+                  </externalMetadataColumns>
+                </input>
+              </inputs>
+            </component>
+          </components>
+          <paths>
+            <path
+              refId="Package\Split orders.Paths[OLE DB Source Output]"
+              endId="Package\Split orders\Split by status.Inputs[Conditional Split Input]"
+              name="OLE DB Source Output"
+              startId="Package\Split orders\Read orders.Outputs[OLE DB Source Output]" />
+            <path
+              refId="Package\Split orders.Paths[Active]"
+              endId="Package\Split orders\Write active.Inputs[OLE DB Destination Input]"
+              name="Active"
+              startId="Package\Split orders\Split by status.Outputs[Active]" />
+          </paths>
+        </pipeline>
+      </DTS:ObjectData>
+    </DTS:Executable>
+  </DTS:Executables>
+</DTS:Executable>

@@ -1,0 +1,178 @@
+<?xml version="1.0"?>
+<DTS:Executable xmlns:DTS="www.microsoft.com/SqlServer/Dts"
+  DTS:refId="Package"
+  DTS:CreationName="Microsoft.Package"
+  DTS:DTSID="{6A1F0E00-0000-4000-8008-000000000001}"
+  DTS:ExecutableType="Microsoft.Package"
+  DTS:ObjectName="load_script">
+  <DTS:Property
+    DTS:Name="PackageFormatVersion">8</DTS:Property>
+  <DTS:ConnectionManagers>
+    <DTS:ConnectionManager
+      DTS:refId="Package.ConnectionManagers[demo_db]"
+      DTS:CreationName="OLEDB"
+      DTS:DTSID="{6A1F0E00-0000-4000-8008-0000000000C1}"
+      DTS:ObjectName="demo_db">
+      <DTS:ObjectData>
+        <DTS:ConnectionManager
+          DTS:ConnectionString="Data Source=server_a;Initial Catalog=demo_db;Provider=SQLNCLI11.1;Integrated Security=SSPI;" />
+      </DTS:ObjectData>
+    </DTS:ConnectionManager>
+  </DTS:ConnectionManagers>
+  <DTS:Executables>
+    <DTS:Executable
+      DTS:refId="Package\Scripted load"
+      DTS:CreationName="Microsoft.Pipeline"
+      DTS:DTSID="{6A1F0E00-0000-4000-8008-0000000000E1}"
+      DTS:ExecutableType="Microsoft.Pipeline"
+      DTS:ObjectName="Scripted load">
+      <DTS:ObjectData>
+        <pipeline
+          version="1">
+          <components>
+            <component
+              refId="Package\Scripted load\Read orders"
+              componentClassID="Microsoft.OLEDBSource"
+              contactInfo="OLE DB Source;Microsoft Corporation; Microsoft SQL Server; (C) Microsoft Corporation; All Rights Reserved; http://www.microsoft.com/sql/support;7"
+              name="Read orders"
+              version="7">
+              <properties>
+                <property
+                  dataType="System.String"
+                  name="OpenRowset">[demo].[orders]</property>
+                <property
+                  dataType="System.Int32"
+                  name="AccessMode"
+                  typeConverter="AccessMode">0</property>
+              </properties>
+              <connections>
+                <connection
+                  refId="Package\Scripted load\Read orders.Connections[OleDbConnection]"
+                  connectionManagerID="Package.ConnectionManagers[demo_db]"
+                  connectionManagerRefId="Package.ConnectionManagers[demo_db]"
+                  name="OleDbConnection" />
+              </connections>
+              <outputs>
+                <output
+                  refId="Package\Scripted load\Read orders.Outputs[OLE DB Source Output]"
+                  name="OLE DB Source Output">
+                  <outputColumns>
+                    <outputColumn
+                      refId="Package\Scripted load\Read orders.Outputs[OLE DB Source Output].Columns[amount]"
+                      dataType="numeric"
+                      externalMetadataColumnId="Package\Scripted load\Read orders.Outputs[OLE DB Source Output].ExternalColumns[amount]"
+                      lineageId="Package\Scripted load\Read orders.Outputs[OLE DB Source Output].Columns[amount]"
+                      name="amount" />
+                  </outputColumns>
+                  <externalMetadataColumns
+                    isUsed="True">
+                    <externalMetadataColumn
+                      refId="Package\Scripted load\Read orders.Outputs[OLE DB Source Output].ExternalColumns[amount]"
+                      dataType="numeric"
+                      name="amount" />
+                  </externalMetadataColumns>
+                </output>
+              </outputs>
+            </component>
+            <component
+              refId="Package\Scripted load\Adjust rows"
+              componentClassID="Microsoft.ManagedComponentHost"
+              contactInfo="Executes a custom script.;Microsoft Corporation; Microsoft SQL Server; © Microsoft Corporation; All Rights Reserved; http://www.microsoft.com/sql/support;10"
+              description="Executes a custom script."
+              name="Adjust rows"
+              version="10">
+              <properties>
+                <property
+                  dataType="System.String"
+                  name="UserComponentTypeName">Microsoft.ScriptComponentHost</property>
+                <property
+                  dataType="System.String"
+                  name="ScriptLanguage">CSharp</property>
+              </properties>
+              <inputs>
+                <input
+                  refId="Package\Scripted load\Adjust rows.Inputs[Input 0]"
+                  name="Input 0">
+                  <inputColumns>
+                    <inputColumn
+                      refId="Package\Scripted load\Adjust rows.Inputs[Input 0].Columns[amount]"
+                      cachedDataType="numeric"
+                      cachedName="amount"
+                      lineageId="Package\Scripted load\Read orders.Outputs[OLE DB Source Output].Columns[amount]" />
+                  </inputColumns>
+                  <externalMetadataColumns />
+                </input>
+              </inputs>
+              <outputs>
+                <output
+                  refId="Package\Scripted load\Adjust rows.Outputs[Output 0]"
+                  exclusionGroup="0"
+                  name="Output 0"
+                  synchronousInputId="Package\Scripted load\Adjust rows.Inputs[Input 0]">
+                  <externalMetadataColumns />
+                </output>
+              </outputs>
+            </component>
+            <component
+              refId="Package\Scripted load\Write script target"
+              componentClassID="Microsoft.OLEDBDestination"
+              contactInfo="OLE DB Destination;Microsoft Corporation; Microsoft SQL Server; (C) Microsoft Corporation; All Rights Reserved; http://www.microsoft.com/sql/support;4"
+              name="Write script target"
+              version="4">
+              <properties>
+                <property
+                  dataType="System.String"
+                  name="OpenRowset">[demo].[script_target]</property>
+                <property
+                  dataType="System.Int32"
+                  name="AccessMode"
+                  typeConverter="AccessMode">3</property>
+              </properties>
+              <connections>
+                <connection
+                  refId="Package\Scripted load\Write script target.Connections[OleDbConnection]"
+                  connectionManagerID="Package.ConnectionManagers[demo_db]"
+                  connectionManagerRefId="Package.ConnectionManagers[demo_db]"
+                  name="OleDbConnection" />
+              </connections>
+              <inputs>
+                <input
+                  refId="Package\Scripted load\Write script target.Inputs[OLE DB Destination Input]"
+                  hasSideEffects="true"
+                  name="OLE DB Destination Input">
+                  <inputColumns>
+                    <inputColumn
+                      refId="Package\Scripted load\Write script target.Inputs[OLE DB Destination Input].Columns[amount]"
+                      cachedDataType="numeric"
+                      cachedName="amount"
+                      externalMetadataColumnId="Package\Scripted load\Write script target.Inputs[OLE DB Destination Input].ExternalColumns[amount]"
+                      lineageId="Package\Scripted load\Read orders.Outputs[OLE DB Source Output].Columns[amount]" />
+                  </inputColumns>
+                  <externalMetadataColumns
+                    isUsed="True">
+                    <externalMetadataColumn
+                      refId="Package\Scripted load\Write script target.Inputs[OLE DB Destination Input].ExternalColumns[amount]"
+                      dataType="numeric"
+                      name="amount" />
+                  </externalMetadataColumns>
+                </input>
+              </inputs>
+            </component>
+          </components>
+          <paths>
+            <path
+              refId="Package\Scripted load.Paths[OLE DB Source Output]"
+              endId="Package\Scripted load\Adjust rows.Inputs[Input 0]"
+              name="OLE DB Source Output"
+              startId="Package\Scripted load\Read orders.Outputs[OLE DB Source Output]" />
+            <path
+              refId="Package\Scripted load.Paths[Output 0]"
+              endId="Package\Scripted load\Write script target.Inputs[OLE DB Destination Input]"
+              name="Output 0"
+              startId="Package\Scripted load\Adjust rows.Outputs[Output 0]" />
+          </paths>
+        </pipeline>
+      </DTS:ObjectData>
+    </DTS:Executable>
+  </DTS:Executables>
+</DTS:Executable>

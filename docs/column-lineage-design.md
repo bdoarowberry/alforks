@@ -5,7 +5,8 @@ The data model lives in `src/column_lineage/model.py`; this file explains its me
 
 ## Scope
 
-- Input: local SQL files only. Nothing is executed and no database is contacted.
+- Input: local SQL files only (and, optionally, SSIS packages: see "SSIS packages"). Nothing is
+  executed and no database is contacted.
 - One requested column per report. A run may request several columns; parsed
   sources and per-object analysis are shared between them.
 - Generic: no database, schema, object, column or folder name appears in code.
@@ -146,7 +147,7 @@ upstream unless `--trace-row-selection` is set.
 
 ## Stops and gaps
 
-A path ends at a `Stop` (`boundary`, `source_without_writer`, `constant`,
+A path ends at a `Stop` (`boundary`, `source_without_writer`, `constant`, the SSIS stops below,
 `parameter_without_caller`, `max_depth`) or at a `Gap`. Gap kinds are listed in
 `model.GAP_KINDS`. Never infer a mapping from similar names or from a table-level
 dependency.
@@ -249,11 +250,191 @@ fallbacks by statement keyword and error class, and up to N anonymized samples o
 unsupported statements in which identifiers become `ID1, ID2, ...`, string literals
 become `'?'` and numbers become `0`. It contains no object, column, path or file names.
 
-## Later: SSIS
+## SSIS packages (optional adapter)
 
-An SSIS adapter will add writers whose evidence is a package path plus component id:
-OLE DB source SQL → `derived` columns, Derived Column → `expression` steps, Lookup →
-`join_key` row selection plus value inputs, Conditional Split → `branch_context`,
-destination column mappings → `target_list` steps, Execute SQL tasks → procedure calls,
-connection managers → `database_source = configured`. Nothing in the tracer depends on
-the writer being SQL text.
+`src/column_lineage/ssis.py` (with `ssis_xml.py` and `ssis_expression.py`) reads SSIS
+packages (`.dtsx`) and makes their data flows writers of database columns. It is off
+unless `--package-root` is given; without it nothing in a trace or the scan changes.
+
+```
+                         [--package-root <dir-or-file> ...]   .dtsx files to scan (recursively)
+                         [--package-include <glob> ...]       only packages whose root-relative path matches
+                         [--package-exclude <glob> ...]       leave out packages whose root-relative path matches
+                         [--connection-map <name>=<db> ...]   database of a connection manager (overrides Initial Catalog)
+```
+
+Globs use `fnmatch` on the forward-slash path relative to the package root,
+case-insensitively (`dev/*`, `*/archive/*.dtsx`). `scan.packages` in every trace and
+`packages` in `gap-summary.json` report packages found / in scope / excluded /
+unreadable, data flows, destinations and Execute SQL tasks (counts only in the summary).
+`scan-diagnostics.json` lists `package_issues` (with names).
+
+### Reading packages
+
+- Both layouts: SSIS 2012+ (`PackageFormatVersion` 6/8: `refId` paths, properties as
+  attributes, holder elements such as `DTS:Executables`) and SSIS 2005/2008 (versions 2/3:
+  integer pipeline ids and lineage ids, `DTS:Property` child elements, executables and
+  connection managers as direct children, DTSID references in precedence constraints and
+  connections). Namespaces are ignored; DOCTYPE/entity declarations are refused. A file
+  that cannot be read is counted as `unreadable` and listed in `scan-diagnostics.json`;
+  it never stops the run.
+- Project connection managers: a reference the package does not define (2012+
+  `{DTSID}:external` / `Project.ConnectionManagers[name]`, or a DTSID in an Execute SQL
+  task) is resolved against the `.conmgr` files of the package's folder, or of the nearest
+  parent folder (up to the package root) that has any: by DTSID, then by name.
+- Inventory: connection managers (name, refId, DTSID, connection string → server,
+  database = `Initial Catalog`/`Database`, flat-file path and columns, property
+  expressions), variables (value, expression when `EvaluateAsExpression`), executables
+  (package path `Package\Container\Task`, refId or DTSID, kind, disabled), precedence
+  constraints, Execute SQL tasks and data flows (components, inputs, outputs, columns,
+  external metadata columns, paths).
+- Component types come from, in order: `componentClassID` names (`Microsoft.OLEDBSource`,
+  ...), the `UserComponentTypeName` of managed components (ADO.NET source/destination;
+  Script Component is unsupported), the first field of `contactInfo` (written by the
+  component, not the author: `OLE DB Source;Microsoft Corporation;...`), a short table of
+  known 2008 GUID class ids, and the designer's default `description` when there is no
+  `contactInfo`. Never from the component's name. Anything else is `unsupported`.
+- Execute Package tasks are inventoried (project `PackageName` or file connection). Steps
+  of a package that a scanned parent runs carry a note naming the parent package and task
+  (matched by the child's file name; context only, lineage is not traced across).
+
+### Identities
+
+- Package-internal data-flow columns: node kind `package_column`, object kind
+  `package_flow`, id `package_flow:<root>/<package path>::<task path>::<component>.<port>.<column>`.
+  A column replaced in place by a Derived Column (read/write input column) is a separate
+  node `<component>.<input>.<column>` so the value before and after the rewrite stay apart.
+  Lookup reference columns are `<lookup>.reference.<column>`.
+- Flat-file columns: node kind `file_column`, object kind `flat_file`, id
+  `flat_file:<root>/<package path>::<connection>.<column>` (one per package copy).
+- SSIS variables and parameters: node kind `package_variable`, id
+  `package_flow:<root>/<package path>::variables.<Namespace>::<name>`.
+- Database columns written or read by a package are ordinary `column` nodes. The database
+  of a connection is, first match wins:
+  1. `--connection-map NAME=DB` (`database_source = configured`, verified);
+  2. a three-part table name in the component;
+  3. the connection's literal Initial Catalog when no property expression can change the
+     connection string, catalog or server (`connection_manager`, verified);
+  4. `--default-database` when the connection names no database and has no expression
+     (inferred);
+  5. otherwise **unproven**: the design-time literal is not used. The object is matched
+     without a database, like SQL with no database context (unified when exactly one
+     database is known for `schema.name`, `ambiguous_object` when several are), every step
+     through that connection gets status `ambiguous`, and a `package_database_unknown`
+     gap names the connection, the reason (expression, missing project connection, no
+     catalog), the exact expressions and the design-time value. Such a destination is a
+     candidate writer, never verified.
+
+### Steps
+
+Edges come only from package metadata links. A package, task, component, table or
+column name never establishes a mapping.
+
+| writer_kind | how the target is matched | operation |
+|---|---|---|
+| `package_destination` | destination input column `externalMetadataColumnId` → external column name = table column; input `lineageId` → upstream column | direct / rename |
+| `package_source` | source output column `externalMetadataColumnId` → table column (table access) or flat-file column | direct / rename |
+| `package_source_query` | embedded `SqlCommand` (or a static variable's value) analysed by the SQL analyzer; the external column name is the query's output name | from SQL |
+| `package_data_conversion` | output `SourceInputColumnLineageID` | cast |
+| `package_derived_column` | `Expression` (lineage ids `#{...}` / `#n`) or `FriendlyExpression` (input names of the same component) | from the expression |
+| `package_lookup` / `package_lookup_reference` | output `CopyFromReferenceColumn` → reference query (SQL analyzer) or table | direct / rename |
+| `package_union_all`, `package_merge` | input column `OutputColumnLineageID`, one step per input (`branch_context` `Union All <name> input i of n`); an input that maps nothing gives `constant:NULL` | direct / rename / constant |
+| `package_merge_join` | output `InputColumnID` | direct / rename |
+| `package_sort`, `package_copy_column` | `SortColumnId`, `copyColumnId` | direct / rename |
+| `package_aggregate` | `AggregationColumnId` + `AggregationType` | direct (group by) / aggregate |
+| `package_variable` | variable expression or design-time value (inferred) | from the expression / constant |
+| `package_parameter_binding` | Execute SQL `ParameterBinding` (`?` marker n ↔ variable) or OLE DB Command (`?` marker n ↔ the input column mapped to its n-th external parameter column) | direct |
+
+The path between a consumer and the component that produced a lineage id is followed
+through `path` start/end ids and synchronous outputs. On the way:
+
+- Conditional Split output → `filter` row selection on the consumer's step for every
+  column its condition reads; the default output gets `NOT (c1) AND NOT (c2) ...`;
+  `branch_context` names the split and output.
+- Lookup match / no-match output → `join_key` row selection (input column and reference
+  column); the Lookup output column's own step carries the same keys.
+- Merge Join → `join_key` from the inputs' sort key positions; Aggregate group-by
+  columns → `group_by`.
+- Error outputs → `branch_context` `error output ... of <component>`; SSIS error columns
+  (`ErrorCode`, `ErrorColumn`) stop with `package_runtime`.
+- Data Conversion, Derived Column, Multicast, Row Count, Copy Column, OLE DB Command and
+  Lookup pass rows through. Only actual path and lineage links are followed, so components
+  hanging off a Multicast are not on another output's path.
+  Any other component on the path (Script Component, third-party, ...) adds an
+  `unsupported_package_step` gap to the step (value effect, status `partial`); if it
+  rewrites the column in place the path ends there.
+
+Every package step has `procedure` = `package <path>, task <task path>, component <name>`,
+evidence `{root, path (relative to the package root), start_line (the XML element), role,
+excerpt}` and a note `From package copy <root>/<path>.`. `branch_context` begins with the
+task's precedence constraints (`IF <expression> AND <task> succeeds (precedence
+constraint)`, `AFTER <task> fails`), loop containers and `DISABLED: ...` when the task or
+a container is disabled.
+
+### Stops
+
+- `external_file` — a flat-file column; detail names the connection and its path. When a
+  property expression sets the path (typically `@[User::file]` mapped by a Foreach loop),
+  the detail names the expression and who sets the variable, and says the design-time
+  path is only the saved value.
+- `package_parameter` — `$Project::` / `$Package::` parameter.
+- `package_runtime` — `System::` variable or an SSIS-generated error column.
+
+### Gaps
+
+| kind | when |
+|---|---|
+| `unsupported_package_step` | a component, access mode or task the adapter does not analyse (identity in `detail`) |
+| `ambiguous_package_copy` | more than one in-scope package file writes the column (environment, test, historical copies); every copy's steps are kept with status `ambiguous`; `detail.copies` lists them |
+| `package_runtime_value` | SQL or a value comes from a variable that is an expression or is set at run time (result set, output parameter, loop mapping, script, Expression task); `detail` names the variable, expression and setters; the columns are not mapped |
+| `package_expression` | an SSIS expression could not be parsed (step `partial`, lineage ids in it kept as inputs) |
+| `package_metadata` | a metadata link is missing or inconsistent (unconnected input, unknown lineage id, no external column) |
+| `package_column_not_mapped` | an in-scope destination loads the table but maps no input to this column (not raised for identity, computed or rowversion columns); the `source_without_writer` stop detail says the same |
+| `package_database_unknown` | the database of a connection is not proven by the package (see Identities); `detail` has the connection, reason, expressions, design-time database and `.conmgr` file |
+
+Context gaps: an Execute SQL task in the same package whose statement is not in the file
+(from a variable, a property expression or a file connection) is added to every trace
+that passes through that package's destinations.
+
+### Package copies
+
+When several in-scope package files write the same column (destinations, or Execute SQL
+tasks from different package files), the deployed version and run order need evidence
+outside the files, so none is treated as the active writer: each copy's steps are
+candidates with status `ambiguous` and one `ambiguous_package_copy` gap lists the copies.
+Narrow the scope with `--package-include` / `--package-exclude`. Several destinations in
+one package file are ordinary alternatives.
+
+A destination that loads a table explains only the columns it maps. Every other column
+of that table gets no package step; if nothing else writes it, it keeps the stop it would
+have without packages and gains a `package_column_not_mapped` gap, so it is never complete
+because the table was loaded.
+
+### Execute SQL tasks and OLE DB Commands
+
+Direct-input Execute SQL statements and OLE DB Command `SqlCommand` text are indexed by the SQL catalog (`Catalog.add_embedded`) under the
+package's root-relative path, one virtual unit per task: a `USE [db]` from the connection
+precedes the statement, its first line is the line of the task's `SqlTaskData` element
+(later lines count on from there), its scope is `<root>/<package>::<task path>` and its
+`procedure` label is the package and task. OLE DB `?` markers become `@ssis_param_<n>`;
+the adapter binds each to the variable in the task's `ParameterBinding`, or for an OLE DB
+Command to the input column mapped to the n-th external (parameter) column. Precedence
+branches of the task (and `OLE DB Command <name>: runs once per row reaching it`) are
+added to the statements' control context. When the connection's database is unproven no
+`USE` is added and the writer steps get a `package_database_unknown` gap and status
+`ambiguous`. Statements from a variable, property expression or file connection are not
+indexed (context gap, above). An Execute SQL task that only clears a table (TRUNCATE)
+is not lineage, as in SQL files.
+
+### Not supported (gap or issue instead)
+
+Script components and tasks, third-party components, Fuzzy Lookup/Grouping, Pivot,
+Unpivot, Term Extraction, Slowly Changing Dimension, Character Map, Audit,
+sampling components, cache connections for Lookup, Excel/ODBC/XML/raw-file sources,
+flat-file and other non-database destinations, destinations whose table comes from a
+runtime variable, package configurations, `.params`/environment values (a parameter is
+a `package_parameter` stop; a connection set from one is unproven), lineage across
+Execute Package tasks (context note only), the row-selection context of the path into an
+OLE DB Command (its SQL is indexed as a writer; the binding steps carry the path), expression
+evaluation of variables (an expression is never evaluated, only its references are
+listed), and the run order of different packages.

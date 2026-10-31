@@ -152,6 +152,56 @@ The command writes two files:
 `missing_unexplained` means an expected source was not reached and nothing in the trace explains
 why. It is the strongest sign of a tool error.
 
+### SSIS packages (optional)
+
+Add SSIS packages (`.dtsx`) next to the SQL and their data flows become writers of database
+columns:
+
+```bash
+python -m column_lineage --column db.schema.table.column --source-root path/to/sql \
+       --package-root path/to/ssis --package-exclude "*/archive/*" --connection-map stage_conn=stage_db
+```
+
+| Option | Meaning |
+|---|---|
+| `--package-root DIR\|FILE ...` | Package files or folders (scanned recursively for `.dtsx`; project `.conmgr` files next to them are read for project connections). |
+| `--package-include GLOB ...` | Only packages whose path relative to the package root matches (case-insensitive, `/` separators). |
+| `--package-exclude GLOB ...` | Leave out matching packages (environment, test or historical copies). |
+| `--connection-map NAME=DB ...` | Database of a connection manager. Use it when the connection string has no Initial Catalog, or is set by an expression or parameter. |
+
+Without `--package-root` nothing changes.
+
+What is followed (metadata links only — never package, task, component, table or column
+names): destination input column → its destination table column; input lineage ids back
+through data-flow paths; OLE DB / ADO.NET sources (table, or SQL command analysed with the
+SQL analyzer); flat-file sources (the path ends at the file column, stop `external_file`);
+Data Conversion; Derived Column (conditions are condition inputs); Conditional Split (its
+condition is `filter` row selection); Lookup (join keys are `join_key` row selection, the
+returned column is traced into the reference query); Union All / Merge (one step per input);
+Merge Join; Sort; Aggregate (group-by row selection); Copy Column; Multicast and Row Count
+(pass-through); OLE DB Command and Execute SQL task SQL (indexed as SQL writers; `?`
+parameters bound to input columns or variables); precedence constraints, loops and disabled
+tasks (branch context).
+
+What becomes a gap or stays open:
+
+- `unsupported_package_step` — Script Component, third-party and other components on the
+  path, unsupported access modes;
+- `ambiguous_package_copy` — several in-scope package files write the column; each copy is
+  a candidate (`ambiguous`) until you narrow the scope with `--package-include/-exclude`;
+- `package_database_unknown` — the connection's database is not proven (connection string
+  from an expression or parameter, no Initial Catalog, project connection not found): the
+  step is a candidate, never verified; fix with `--connection-map`;
+- `package_runtime_value` — SQL or values from a variable that is an expression or is set at
+  run time (the gap names the variable and expression);
+- `package_expression`, `package_metadata` — an unparsable expression or a broken metadata link;
+- `package_column_not_mapped` — a package loads the table but not this column (loading a
+  table never explains its other columns).
+
+Every package step cites the package file (relative to its root), the XML line, and the
+package / task / component; `scan.packages` and `gap-summary.json` report packages found, in
+scope and excluded (counts only). Details: `docs/column-lineage-design.md`, "SSIS packages".
+
 ### Handing results back
 
 If you can't share the source or the traces, run with `--gap-summary` and share only

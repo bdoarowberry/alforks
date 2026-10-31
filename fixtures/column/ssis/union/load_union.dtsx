@@ -1,0 +1,366 @@
+<?xml version="1.0"?>
+<DTS:Executable xmlns:DTS="www.microsoft.com/SqlServer/Dts"
+  DTS:refId="Package"
+  DTS:CreationName="Microsoft.Package"
+  DTS:DTSID="{6A1F0E00-0000-4000-800C-000000000001}"
+  DTS:ExecutableType="Microsoft.Package"
+  DTS:ObjectName="load_union">
+  <DTS:Property
+    DTS:Name="PackageFormatVersion">8</DTS:Property>
+  <DTS:ConnectionManagers>
+    <DTS:ConnectionManager
+      DTS:refId="Package.ConnectionManagers[demo_db]"
+      DTS:CreationName="OLEDB"
+      DTS:DTSID="{6A1F0E00-0000-4000-800C-0000000000C1}"
+      DTS:ObjectName="demo_db">
+      <DTS:ObjectData>
+        <DTS:ConnectionManager
+          DTS:ConnectionString="Data Source=server_a;Initial Catalog=demo_db;Provider=SQLNCLI11.1;Integrated Security=SSPI;" />
+      </DTS:ObjectData>
+    </DTS:ConnectionManager>
+  </DTS:ConnectionManagers>
+  <DTS:Executables>
+    <DTS:Executable
+      DTS:refId="Package\Combine"
+      DTS:CreationName="Microsoft.Pipeline"
+      DTS:DTSID="{6A1F0E00-0000-4000-800C-0000000000E1}"
+      DTS:ExecutableType="Microsoft.Pipeline"
+      DTS:ObjectName="Combine">
+      <DTS:ObjectData>
+        <pipeline
+          version="1">
+          <components>
+            <component
+              refId="Package\Combine\Current"
+              componentClassID="Microsoft.OLEDBSource"
+              contactInfo="OLE DB Source;Microsoft Corporation; Microsoft SQL Server; (C) Microsoft Corporation; All Rights Reserved; http://www.microsoft.com/sql/support;7"
+              name="Current"
+              version="7">
+              <properties>
+                <property
+                  dataType="System.String"
+                  name="OpenRowset">[demo].[orders]</property>
+                <property
+                  dataType="System.Int32"
+                  name="AccessMode"
+                  typeConverter="AccessMode">0</property>
+              </properties>
+              <connections>
+                <connection
+                  refId="Package\Combine\Current.Connections[OleDbConnection]"
+                  connectionManagerID="Package.ConnectionManagers[demo_db]"
+                  connectionManagerRefId="Package.ConnectionManagers[demo_db]"
+                  name="OleDbConnection" />
+              </connections>
+              <outputs>
+                <output
+                  refId="Package\Combine\Current.Outputs[OLE DB Source Output]"
+                  name="OLE DB Source Output">
+                  <outputColumns>
+                    <outputColumn
+                      refId="Package\Combine\Current.Outputs[OLE DB Source Output].Columns[amount]"
+                      dataType="numeric"
+                      externalMetadataColumnId="Package\Combine\Current.Outputs[OLE DB Source Output].ExternalColumns[amount]"
+                      lineageId="Package\Combine\Current.Outputs[OLE DB Source Output].Columns[amount]"
+                      name="amount" />
+                    <outputColumn
+                      refId="Package\Combine\Current.Outputs[OLE DB Source Output].Columns[region_code]"
+                      dataType="str"
+                      length="10"
+                      externalMetadataColumnId="Package\Combine\Current.Outputs[OLE DB Source Output].ExternalColumns[region_code]"
+                      lineageId="Package\Combine\Current.Outputs[OLE DB Source Output].Columns[region_code]"
+                      name="region_code" />
+                  </outputColumns>
+                  <externalMetadataColumns
+                    isUsed="True">
+                    <externalMetadataColumn
+                      refId="Package\Combine\Current.Outputs[OLE DB Source Output].ExternalColumns[amount]"
+                      dataType="numeric"
+                      name="amount" />
+                    <externalMetadataColumn
+                      refId="Package\Combine\Current.Outputs[OLE DB Source Output].ExternalColumns[region_code]"
+                      dataType="str"
+                      length="10"
+                      name="region_code" />
+                  </externalMetadataColumns>
+                </output>
+              </outputs>
+            </component>
+            <component
+              refId="Package\Combine\Archive"
+              componentClassID="Microsoft.OLEDBSource"
+              contactInfo="OLE DB Source;Microsoft Corporation; Microsoft SQL Server; (C) Microsoft Corporation; All Rights Reserved; http://www.microsoft.com/sql/support;7"
+              name="Archive"
+              version="7">
+              <properties>
+                <property
+                  dataType="System.String"
+                  name="OpenRowset">[demo].[orders_archive]</property>
+                <property
+                  dataType="System.Int32"
+                  name="AccessMode"
+                  typeConverter="AccessMode">0</property>
+              </properties>
+              <connections>
+                <connection
+                  refId="Package\Combine\Archive.Connections[OleDbConnection]"
+                  connectionManagerID="Package.ConnectionManagers[demo_db]"
+                  connectionManagerRefId="Package.ConnectionManagers[demo_db]"
+                  name="OleDbConnection" />
+              </connections>
+              <outputs>
+                <output
+                  refId="Package\Combine\Archive.Outputs[OLE DB Source Output]"
+                  name="OLE DB Source Output">
+                  <outputColumns>
+                    <outputColumn
+                      refId="Package\Combine\Archive.Outputs[OLE DB Source Output].Columns[amount]"
+                      dataType="numeric"
+                      externalMetadataColumnId="Package\Combine\Archive.Outputs[OLE DB Source Output].ExternalColumns[amount]"
+                      lineageId="Package\Combine\Archive.Outputs[OLE DB Source Output].Columns[amount]"
+                      name="amount" />
+                  </outputColumns>
+                  <externalMetadataColumns
+                    isUsed="True">
+                    <externalMetadataColumn
+                      refId="Package\Combine\Archive.Outputs[OLE DB Source Output].ExternalColumns[amount]"
+                      dataType="numeric"
+                      name="amount" />
+                  </externalMetadataColumns>
+                </output>
+              </outputs>
+            </component>
+            <component
+              refId="Package\Combine\Union All"
+              componentClassID="Microsoft.UnionAll"
+              contactInfo="Union All;Microsoft Corporation; Microsoft SQL Server; (C) Microsoft Corporation; All Rights Reserved; http://www.microsoft.com/sql/support;1"
+              name="Union All"
+              version="1">
+              <inputs>
+                <input
+                  refId="Package\Combine\Union All.Inputs[Union All Input 1]"
+                  name="Union All Input 1">
+                  <inputColumns>
+                    <inputColumn
+                      refId="Package\Combine\Union All.Inputs[Union All Input 1].Columns[amount]"
+                      cachedDataType="numeric"
+                      cachedName="amount"
+                      lineageId="Package\Combine\Current.Outputs[OLE DB Source Output].Columns[amount]">
+                      <properties>
+                        <property
+                          containsID="true"
+                          dataType="System.Int32"
+                          name="OutputColumnLineageID">#{Package\Combine\Union All.Outputs[Union All Output 1].Columns[amount]}</property>
+                      </properties>
+                    </inputColumn>
+                    <inputColumn
+                      refId="Package\Combine\Union All.Inputs[Union All Input 1].Columns[region_code]"
+                      cachedDataType="str"
+                      cachedLength="10"
+                      cachedName="region_code"
+                      lineageId="Package\Combine\Current.Outputs[OLE DB Source Output].Columns[region_code]">
+                      <properties>
+                        <property
+                          containsID="true"
+                          dataType="System.Int32"
+                          name="OutputColumnLineageID">#{Package\Combine\Union All.Outputs[Union All Output 1].Columns[region_code]}</property>
+                      </properties>
+                    </inputColumn>
+                  </inputColumns>
+                  <externalMetadataColumns />
+                </input>
+                <input
+                  refId="Package\Combine\Union All.Inputs[Union All Input 2]"
+                  name="Union All Input 2">
+                  <inputColumns>
+                    <inputColumn
+                      refId="Package\Combine\Union All.Inputs[Union All Input 2].Columns[amount]"
+                      cachedDataType="numeric"
+                      cachedName="amount"
+                      lineageId="Package\Combine\Archive.Outputs[OLE DB Source Output].Columns[amount]">
+                      <properties>
+                        <property
+                          containsID="true"
+                          dataType="System.Int32"
+                          name="OutputColumnLineageID">#{Package\Combine\Union All.Outputs[Union All Output 1].Columns[amount]}</property>
+                      </properties>
+                    </inputColumn>
+                  </inputColumns>
+                  <externalMetadataColumns />
+                </input>
+              </inputs>
+              <outputs>
+                <output
+                  refId="Package\Combine\Union All.Outputs[Union All Output 1]"
+                  name="Union All Output 1">
+                  <outputColumns>
+                    <outputColumn
+                      refId="Package\Combine\Union All.Outputs[Union All Output 1].Columns[amount]"
+                      dataType="numeric"
+                      lineageId="Package\Combine\Union All.Outputs[Union All Output 1].Columns[amount]"
+                      name="amount" />
+                    <outputColumn
+                      refId="Package\Combine\Union All.Outputs[Union All Output 1].Columns[region_code]"
+                      dataType="str"
+                      length="10"
+                      lineageId="Package\Combine\Union All.Outputs[Union All Output 1].Columns[region_code]"
+                      name="region_code" />
+                  </outputColumns>
+                  <externalMetadataColumns />
+                </output>
+              </outputs>
+            </component>
+            <component
+              refId="Package\Combine\Total by region"
+              componentClassID="Microsoft.Aggregate"
+              contactInfo="Aggregate;Microsoft Corporation; Microsoft SQL Server; (C) Microsoft Corporation; All Rights Reserved; http://www.microsoft.com/sql/support;3"
+              name="Total by region"
+              version="3">
+              <inputs>
+                <input
+                  refId="Package\Combine\Total by region.Inputs[Aggregate Input 1]"
+                  name="Aggregate Input 1">
+                  <inputColumns>
+                    <inputColumn
+                      refId="Package\Combine\Total by region.Inputs[Aggregate Input 1].Columns[amount]"
+                      cachedDataType="numeric"
+                      cachedName="amount"
+                      lineageId="Package\Combine\Union All.Outputs[Union All Output 1].Columns[amount]" />
+                    <inputColumn
+                      refId="Package\Combine\Total by region.Inputs[Aggregate Input 1].Columns[region_code]"
+                      cachedDataType="str"
+                      cachedLength="10"
+                      cachedName="region_code"
+                      lineageId="Package\Combine\Union All.Outputs[Union All Output 1].Columns[region_code]" />
+                  </inputColumns>
+                  <externalMetadataColumns />
+                </input>
+              </inputs>
+              <outputs>
+                <output
+                  refId="Package\Combine\Total by region.Outputs[Aggregate Output 1]"
+                  name="Aggregate Output 1">
+                  <outputColumns>
+                    <outputColumn
+                      refId="Package\Combine\Total by region.Outputs[Aggregate Output 1].Columns[region_code]"
+                      dataType="str"
+                      length="10"
+                      lineageId="Package\Combine\Total by region.Outputs[Aggregate Output 1].Columns[region_code]"
+                      name="region_code">
+                      <properties>
+                        <property
+                          dataType="System.Int32"
+                          name="AggregationType"
+                          typeConverter="AggregationType">0</property>
+                        <property
+                          containsID="true"
+                          dataType="System.Int32"
+                          name="AggregationColumnId">#{Package\Combine\Union All.Outputs[Union All Output 1].Columns[region_code]}</property>
+                      </properties>
+                    </outputColumn>
+                    <outputColumn
+                      refId="Package\Combine\Total by region.Outputs[Aggregate Output 1].Columns[total_amount]"
+                      dataType="numeric"
+                      lineageId="Package\Combine\Total by region.Outputs[Aggregate Output 1].Columns[total_amount]"
+                      name="total_amount">
+                      <properties>
+                        <property
+                          dataType="System.Int32"
+                          name="AggregationType"
+                          typeConverter="AggregationType">4</property>
+                        <property
+                          containsID="true"
+                          dataType="System.Int32"
+                          name="AggregationColumnId">#{Package\Combine\Union All.Outputs[Union All Output 1].Columns[amount]}</property>
+                      </properties>
+                    </outputColumn>
+                  </outputColumns>
+                  <externalMetadataColumns />
+                </output>
+              </outputs>
+            </component>
+            <component
+              refId="Package\Combine\Write totals"
+              componentClassID="Microsoft.OLEDBDestination"
+              contactInfo="OLE DB Destination;Microsoft Corporation; Microsoft SQL Server; (C) Microsoft Corporation; All Rights Reserved; http://www.microsoft.com/sql/support;4"
+              name="Write totals"
+              version="4">
+              <properties>
+                <property
+                  dataType="System.String"
+                  name="OpenRowset">[demo].[union_target]</property>
+                <property
+                  dataType="System.Int32"
+                  name="AccessMode"
+                  typeConverter="AccessMode">3</property>
+              </properties>
+              <connections>
+                <connection
+                  refId="Package\Combine\Write totals.Connections[OleDbConnection]"
+                  connectionManagerID="Package.ConnectionManagers[demo_db]"
+                  connectionManagerRefId="Package.ConnectionManagers[demo_db]"
+                  name="OleDbConnection" />
+              </connections>
+              <inputs>
+                <input
+                  refId="Package\Combine\Write totals.Inputs[OLE DB Destination Input]"
+                  hasSideEffects="true"
+                  name="OLE DB Destination Input">
+                  <inputColumns>
+                    <inputColumn
+                      refId="Package\Combine\Write totals.Inputs[OLE DB Destination Input].Columns[region_code]"
+                      cachedDataType="str"
+                      cachedLength="10"
+                      cachedName="region_code"
+                      externalMetadataColumnId="Package\Combine\Write totals.Inputs[OLE DB Destination Input].ExternalColumns[region_code]"
+                      lineageId="Package\Combine\Total by region.Outputs[Aggregate Output 1].Columns[region_code]" />
+                    <inputColumn
+                      refId="Package\Combine\Write totals.Inputs[OLE DB Destination Input].Columns[total_amount]"
+                      cachedDataType="numeric"
+                      cachedName="total_amount"
+                      externalMetadataColumnId="Package\Combine\Write totals.Inputs[OLE DB Destination Input].ExternalColumns[total_amount]"
+                      lineageId="Package\Combine\Total by region.Outputs[Aggregate Output 1].Columns[total_amount]" />
+                  </inputColumns>
+                  <externalMetadataColumns
+                    isUsed="True">
+                    <externalMetadataColumn
+                      refId="Package\Combine\Write totals.Inputs[OLE DB Destination Input].ExternalColumns[region_code]"
+                      dataType="str"
+                      length="10"
+                      name="region_code" />
+                    <externalMetadataColumn
+                      refId="Package\Combine\Write totals.Inputs[OLE DB Destination Input].ExternalColumns[total_amount]"
+                      dataType="numeric"
+                      name="total_amount" />
+                  </externalMetadataColumns>
+                </input>
+              </inputs>
+            </component>
+          </components>
+          <paths>
+            <path
+              refId="Package\Combine.Paths[Current]"
+              endId="Package\Combine\Union All.Inputs[Union All Input 1]"
+              name="Current"
+              startId="Package\Combine\Current.Outputs[OLE DB Source Output]" />
+            <path
+              refId="Package\Combine.Paths[Archive]"
+              endId="Package\Combine\Union All.Inputs[Union All Input 2]"
+              name="Archive"
+              startId="Package\Combine\Archive.Outputs[OLE DB Source Output]" />
+            <path
+              refId="Package\Combine.Paths[Union All Output 1]"
+              endId="Package\Combine\Total by region.Inputs[Aggregate Input 1]"
+              name="Union All Output 1"
+              startId="Package\Combine\Union All.Outputs[Union All Output 1]" />
+            <path
+              refId="Package\Combine.Paths[Aggregate Output 1]"
+              endId="Package\Combine\Write totals.Inputs[OLE DB Destination Input]"
+              name="Aggregate Output 1"
+              startId="Package\Combine\Total by region.Outputs[Aggregate Output 1]" />
+          </paths>
+        </pipeline>
+      </DTS:ObjectData>
+    </DTS:Executable>
+  </DTS:Executables>
+</DTS:Executable>

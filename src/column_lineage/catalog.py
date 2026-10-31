@@ -551,6 +551,17 @@ class Catalog:
         masked = mask_noncode(text)
         self._ingest(source, root, root_label, rel, index, text, masked)
 
+    def add_embedded(self, source: SourceFile, root: Path, root_label: str, rel: str, adjust=None) -> Unit:
+        """Index SQL embedded in a non-SQL file (an SSIS Execute SQL task) under that file's root-relative
+        path ``rel``, so evidence cites the file. ``adjust`` may rewrite each statement (scope, label).
+        Not counted in ``stats["files"]``."""
+        index = self._parse_file(source, root, root_label)
+        if adjust is not None:
+            index.statements = [adjust(s) for s in index.statements]
+        self._ingest(source, root, root_label, rel, index, source.text, mask_noncode(source.text))
+        self.stats["files"] -= 1
+        return self.units[-1]
+
     def _parse_file(self, source: SourceFile, root: Path, root_label: str) -> SourceIndex:
         index = SourceIndex()
         rel = self._rel(source, root)
