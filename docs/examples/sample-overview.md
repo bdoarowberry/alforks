@@ -4,6 +4,8 @@
 
 - **Field:** `reporting.demo.output.result_value`
 - **Result:** Not fully traced: 1 open point on the value routes (see Open points); the routes below show what could be followed; 2 end points at the requested boundary (not traced beyond); 1 end point where proof stops.
+- **Proven to / origin unproven:** proven to 2 requested-boundary columns; origin unproven at 1 open point.
+- **Main evidence needed:** SQL built and run at run time (dynamic SQL) (1 place) — the SQL this statement builds and executes at runtime (a captured example or a confirmed mapping), or the metadata that drives it.
 - **Assertions:** none used; nothing here rests on a person's statement.
 - **Confidence:** 3 steps on the value routes — 2 proved from code (verified), 1 partial. Partial = some inputs of the step are not proved.
 - End points are where this trace stopped. None of them is claimed as the system where the value originates.
@@ -11,6 +13,11 @@
 ## Business definition
 
 Not confirmed — question for the source owner. (No glossary entry; the tool never derives business meaning from names.)
+
+## Sources at a glance
+
+- `staging.demo`: 2 end points (boundary reached)
+- `variable`: 1 end point (open point)
 
 ## Routes: how the value arrives
 

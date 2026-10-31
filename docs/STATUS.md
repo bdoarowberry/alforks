@@ -197,6 +197,12 @@
   row conditions, open points with next evidence); `--business-glossary FILE` for approved/proposed
   definitions; `routes-index.md` / `.json` group columns by shared terminal sources and writers.
   `python -m column_lineage.render_overview` re-renders from JSON. Tests: `tests/test_column_overview.py`.
+- After the tester's review of real overview pages: a "Proven to / origin unproven" line beside the
+  result, "Main evidence needed", a "Sources at a glance" section before the routes, and loop ends
+  listed and linked in the End points table.
+- `--entry-point` on the real run resolved none of the 56 writer-order traces: 256 of 261 gaps are
+  writers from separate integration jobs, not called from the report entry point; 5 are package loads
+  followed by SQL overwrites. Correct: their order needs schedule evidence.
 
 ## Known open issues
 

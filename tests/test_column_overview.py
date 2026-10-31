@@ -383,3 +383,15 @@ if __name__ == "__main__" and "--write-sample" in sys.argv:
     SAMPLE_OVERVIEW.write_text(render_overview(sample_trace().to_dict(), "sample-trace.lineage.json",
                                                detailed_page="sample-trace.md"), encoding="utf-8")
     print(SAMPLE_OVERVIEW)
+
+
+def test_proof_line_sources_at_a_glance_and_loop_ends(tmp_path):
+    """Tester review: a 'proven to / origin unproven' line beside the result; source families before the
+    routes; loop ends labelled in the End points table and linked to the cycle evidence."""
+    run(fixture("cycle"), "demo.beta.val", tmp_path)
+    md = overview(tmp_path, "demo.beta.val")
+    result = section(md, "Field and result")
+    assert "**Proven to / origin unproven:**" in result and "origin unproven at" in result and "1 loop" in result
+    assert md.index("## Sources at a glance") < md.index("## Routes")
+    endpoints = section(md, "End points")
+    assert "loop: values here feed each other" in endpoints and "#gaps" in endpoints

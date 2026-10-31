@@ -237,6 +237,14 @@ class Analysis:
         self.routes = self._routes()
         self.ends = self._ends()
         self.writers = self._writers()
+        # Route ends that are not leaves: the route walk stopped where values feed each other (a loop).
+        self.loop_ends = sorted({n for r in self.routes for n, info in r["agg"].ends.items()
+                                 if self.route_end_kind(n, info) == "cycle"})
+
+    def route_end_kind(self, node_id: str, info: dict) -> str:
+        if info.get("cycle") or (self.t.steps_by_target.get(node_id) and not info.get("no_inputs")):
+            return "cycle"
+        return self.end_kind(node_id)
 
     # objects ------------------------------------------------------------------
     def object_entry(self, node_id: str | None) -> tuple[str, str] | None:
@@ -575,12 +583,79 @@ def _result_sentence(a: Analysis) -> str:
     return head + ("; " + "; ".join(parts) if parts else "") + "."
 
 
+def _proof_line(a: Analysis) -> str:
+    """Where the value is traced to, and which ends leave its origin unproven, in one line."""
+    counts = Counter(e["kind"] for e in a.ends)
+    proven = [f"{_plural(counts[k], label)}" for k, label in (("boundary", "requested-boundary column"),
+                                                              ("constant", "constant")) if counts.get(k)]
+    accepted = counts.get("declared", 0)
+    unproven = [_plural(counts[k], one, many) for k, one, many in (
+        ("source_without_writer", "object with no writer in the selected sources",
+         "objects with no writer in the selected sources"),
+        ("external_file", "external file", "external files"),
+        ("parameter_without_caller", "parameter without a caller", "parameters without a caller"),
+        ("max_depth", "depth-limit cut", "depth-limit cuts"), ("gap", "open point", "open points"),
+        ("open", "untraced end", "untraced ends")) if counts.get(k)]
+    if a.loop_ends:
+        unproven.append(_plural(len(a.loop_ends), "loop"))
+    text = "proven to " + (", ".join(proven) if proven else "no requested boundary")
+    if accepted:
+        text += f"; {_plural(accepted, 'end')} accepted as terminals for this run (upstream not proved)"
+    text += "; origin unproven at " + (", ".join(unproven) if unproven else "no end") + "."
+    return text
+
+
+def _main_evidence(a: Analysis) -> str | None:
+    """The open point blocking the most of this field's value, with the evidence that would resolve it."""
+    gaps = [g for g in a.t.sorted_gaps() if g.get("affects", "value") != "row_selection"]
+    if not gaps:
+        return None
+    kinds = Counter(g.get("kind") or "gap" for g in gaps)
+    kind = max(kinds, key=lambda k: (any(g.get("affects") == "value" and g.get("kind") == k for g in gaps), kinds[k]))
+    return (f"{_text(GAP_TEXT.get(kind, kind))} ({_plural(kinds[kind], 'place')}) — "
+            f"{_text(NEXT_EVIDENCE.get(kind, 'manual review of the cited statement'))}.")
+
+
+def _section_sources(a: Analysis) -> list[str]:
+    """Source families at a glance: end points grouped by database and schema, file connection or kind."""
+    families: Counter = Counter()
+    kinds: dict[str, set] = {}
+    for end in a.ends:
+        node = a.t.nodes.get(end["node"]) or {}
+        obj = node.get("object") or {}
+        if node.get("kind") == "constant":
+            family = "constants"
+        elif obj.get("kind") == "flat_file":
+            family = f"file connection {obj.get('name')}"
+        elif obj.get("kind") in ("temp_table", "table_variable", "package_flow"):
+            family = "temp tables and package data flows"
+        elif obj:
+            family = ".".join(p for p in (obj.get("server"), obj.get("database") or "?", obj.get("schema") or "?") if p)
+        else:
+            family = _text(node.get("kind") or "other")
+        families[family] += 1
+        kinds.setdefault(family, set()).add(_end_short(end["kind"]))
+    if not families:
+        return ["No end points were recorded."]
+    out = []
+    for family, n in families.most_common(MAX_ROUTES):
+        out.append(f"- {_code(family)}: {_plural(n, 'end point')} ({', '.join(sorted(kinds[family]))})")
+    if len(families) > MAX_ROUTES:
+        out.append(f"- and {_plural(len(families) - MAX_ROUTES, 'more source family', 'more source families')} — "
+                   "see End points")
+    return out
+
+
 def _section_field(a: Analysis) -> list[str]:
     t, comp, data = a.t, a.comp, a.data
     out = [f"- **Field:** {_code(t.display(t.target_id))}"
            + (f" (requested as {_code(data.get('requested'))})"
               if data.get("requested") and _norm_name(data["requested"]) != _norm_name(t.display(t.target_id)) else "")]
     out.append(f"- **Result:** {_result_sentence(a)}")
+    out.append(f"- **Proven to / origin unproven:** {_proof_line(a)}")
+    main = _main_evidence(a)
+    if main:
+        out.append(f"- **Main evidence needed:** {main}")
     asserted = comp.get("asserted_steps") or 0
     if asserted:
         out.append(f"- **Assertions:** relies on {_plural(asserted, 'asserted step')} — stated by a person in an "
@@ -660,7 +735,7 @@ def _section_routes(a: Analysis, detailed: str) -> list[str]:
             hidden = len(seq) - (MAX_ROUTE_OBJECTS - 1)
             seq = seq[:3] + [f"… {hidden} more objects …"] + seq[-(MAX_ROUTE_OBJECTS - 4):]
         path = " ← ".join(_code(_truncate(s, NAME_LIMIT)) for s in seq)
-        kinds = Counter(a.end_kind(n) if not info.get("cycle") else "cycle" for n, info in agg.ends.items())
+        kinds = Counter(a.route_end_kind(n, info) for n, info in agg.ends.items())
         summary = ", ".join(f"{v} {_end_short(k)}" for k, v in sorted(kinds.items(), key=lambda kv: (
             END_ORDER.index(kv[0]) if kv[0] in END_ORDER else 99)))
         out += ["", f"**Route {index}** ({_plural(len(agg.ends), 'end')}: {summary}): {path}"]
@@ -793,6 +868,11 @@ def _section_endpoints(a: Analysis, detailed: str) -> list[str]:
             proof += " (" + ", ".join(f"[{t.label[s]}]({detailed}#{_anchor(s)})" for s in end["steps"][:2]) \
                      + (", …" if len(end["steps"]) > 2 else "") + ")"
         out.append("| " + " | ".join(_cell(c) for c in cells + [why, proof]) + " |")
+    for node_id in a.loop_ends[:MAX_ENDPOINTS]:
+        cells = list(_endpoint_cells(a, node_id))
+        why = ("loop: values here feed each other, so the route summary follows the loop once and stops — the "
+               f"loop and what feeds it are in the [detailed page]({detailed}#gaps) (cycles)")
+        out.append("| " + " | ".join(_cell(c) for c in cells) + f" | {why} | — |")
     if len(a.ends) > MAX_ENDPOINTS:
         kinds = Counter(e["kind"] for e in a.ends[MAX_ENDPOINTS:])
         out += ["", f"And {len(a.ends) - MAX_ENDPOINTS} more end points ("
@@ -875,6 +955,7 @@ def render_overview(data: dict, json_name: str | None = None, glossary: list[dic
     sections = (
         ("Field and result", _section_field(a)),
         ("Business definition", _section_definition(entry, others)),
+        ("Sources at a glance", _section_sources(a)),
         ("Routes: how the value arrives", _section_routes(a, detailed)),
         ("Rows included", _section_rows(a, detailed)),
         ("End points", _section_endpoints(a, detailed)),
