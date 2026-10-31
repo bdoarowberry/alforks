@@ -155,6 +155,9 @@
   context gaps to traces through their package; `gap-summary.json` lists anonymized shapes of SSIS
   expressions the parser rejects (`packages.unparsed_expression_samples`); `compare` accepts file
   sources (`<file connection>.<column>`) and counts file stops as reached ends.
+- Raw SSIS expressions bracket function names (`[LEN](#{...}) == 0`); these are now parsed as function
+  calls (this was the Conditional Split row-selection gap on the real package). Expression shapes in
+  the gap summary tag reference kinds (`[IDn]`, `#IDn`, `@IDn`).
 - Filegroup clauses on their own (`ON [PRIMARY]`) are non-lineage.
 
 ## Known open issues

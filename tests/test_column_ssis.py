@@ -499,3 +499,22 @@ def test_old_package_formats_are_read_or_reported(tmp_path):
     assert t.gaps("ambiguous_package_copy") and t.gaps("unsupported_package_step")
     summary = json.loads((tmp_path / "out" / "gap-summary.json").read_text())
     assert summary["packages"]["package_formats"] == {"2005": 1, "2008": 1}
+
+
+def test_bracketed_function_names_in_raw_expressions(tmp_path):
+    """The raw Expression property brackets function names: `[LEN](#{...}) == 0` (FriendlyExpression shows
+    `LEN(col) == 0`). It used to be rejected, leaving a package_expression row-selection gap."""
+    root = tmp_path / "pkgs"
+    root.mkdir()
+    text = (SSIS / "split" / "load_split.dtsx").read_text()
+    lineage = "#{Package\\Split orders\\Read orders.Outputs[OLE DB Source Output].Columns[status_code]}"
+    text = text.replace(f'{lineage} == "A"', f'[LEN]({lineage}) == 0 &amp;&amp; [TRIM]({lineage}) != "A"')
+    assert "[LEN]" in text
+    (root / "load_split.dtsx").write_text(text)
+    t = ssis_trace(root, "demo_db.demo.split_target.amount", tmp_path / "out")
+    assert "package_expression" not in t.gap_kinds
+    dest = t.only_step_for(t.target_id)
+    [amount] = inputs(dest, "value")
+    status = amount.rsplit(".", 1)[0] + ".status_code"
+    assert (status, "filter") in row_selection_pairs(dest)
+    assert t.complete

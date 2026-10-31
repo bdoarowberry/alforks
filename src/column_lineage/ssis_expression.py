@@ -168,7 +168,12 @@ class Parser:
         if token.kind == "lineage":
             return ENode("ref", token.start, token.end, strip_lineage(token.value), "lineage")
         if token.kind == "column":
-            return ENode("ref", token.start, token.end, token.value[1:-1].replace("]]", "]"), "column")
+            nxt = self.peek()
+            if nxt is not None and nxt.value == "(":
+                # The raw Expression property brackets function names: [LEN](#{...}) is LEN(...).
+                token = Token("ident", token.value[1:-1].replace("]]", "]"), token.start, token.end)
+            else:
+                return ENode("ref", token.start, token.end, token.value[1:-1].replace("]]", "]"), "column")
         if token.kind == "var":
             name = token.value[2:-1] if token.value.startswith("@[") else token.value[1:]
             return ENode("ref", token.start, token.end, name, "var")
@@ -331,6 +336,8 @@ def shape(text: str, error: str | None = None) -> str:
             out.append('"?"')
         elif kind == "num":
             out.append("0")
+        elif kind == "column" and SHAPE_KEEP.match(value[1:-1]) and re.match(r"\s*\(", text[m.end():]):
+            out.append(value.upper())   # a bracketed built-in function name: [LEN](...)
         elif kind in ("lineage", "var", "column") or (kind == "ident" and not SHAPE_KEEP.match(value)):
             names.setdefault(value.lower(), f"ID{len(names) + 1}")
             name = names[value.lower()]
