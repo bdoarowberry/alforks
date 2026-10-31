@@ -188,8 +188,15 @@
 - `server..schema.name` via `--local-server`: the database stays unknown instead of `--default-database`.
 - `compare`: two-part sources match only package file columns; `<package>::<connection>.<column>` pins one package.
 - Writer search looks statements up by binary search.
-- Not fixed yet: the detailed Markdown page grows quadratically with thousands of single-row writers into
-  one table (each step row links every other step).
+- The detailed Markdown page grew quadratically with thousands of writers into one table; cross-links
+  are now capped (every step is still shown once).
+
+## Added: overview pages and route index
+
+- `<column>.overview.md`: short business-facing page (result in plain words, routes, end points table,
+  row conditions, open points with next evidence); `--business-glossary FILE` for approved/proposed
+  definitions; `routes-index.md` / `.json` group columns by shared terminal sources and writers.
+  `python -m column_lineage.render_overview` re-renders from JSON. Tests: `tests/test_column_overview.py`.
 
 ## Known open issues
 

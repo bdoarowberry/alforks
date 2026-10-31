@@ -883,7 +883,7 @@ NEXT_EVIDENCE = {
     "ambiguous_object": "database context for the name: a USE, a three-part name or a --database-map entry",
     "ambiguous_column": "a qualified column reference or the schemas of the candidate sources",
     "unresolved_alias": "the query at the cited line; the alias names nothing in scope",
-    "ambiguous_writer_order": "the run order of the listed procedures (job steps or orchestration)",
+    "ambiguous_writer_order": "the run order of the listed procedures (job steps or orchestration); if they run from one entry procedure, name it with --entry-point",
     "positional_without_schema": "the ordered column list (CREATE TABLE) of the target",
     "wildcard_without_schema": "the ordered column list (CREATE TABLE) of the source behind the *",
     "column_count_mismatch": "the INSERT column list and SELECT list at the cited line",
