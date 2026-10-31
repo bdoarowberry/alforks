@@ -264,11 +264,14 @@ class Stop:
                                    # external_file (SSIS)
     detail: str | None = None
     writer_search: list[dict] | None = None   # source_without_writer: same-named writes not used, with why
+    declared_terminal: str | None = None      # accepted as a terminal by the run's --declared-terminals (reason)
 
     def to_dict(self) -> dict:
         out = {"node": self.node.id, "reason": self.reason, "detail": self.detail}
         if self.writer_search is not None:
             out["writer_search"] = self.writer_search
+        if self.declared_terminal is not None:
+            out["declared_terminal"] = self.declared_terminal
         return out
 
 
@@ -384,8 +387,12 @@ class TraceResult:
         for gap in open_gaps:
             if gap.kind in ("unsupported_package_step", "package_runtime_value") and effects[gap.id] != "row_selection":
                 ends[gap.kind] = ends.get(gap.kind, 0) + 1
+        declared = sum(1 for s in self.stops if s.declared_terminal is not None)
+        undeclared = [s for s in self.stops if s.declared_terminal is None and s.reason not in ("boundary", "constant")]
         if not complete:
             result = "incomplete"
+        elif declared and not undeclared:
+            result = "complete_to_declared_boundary"
         elif ends.get("no_writer_in_selected_scope"):
             result = "complete_within_selected_scope"
         elif ends.get("reached_requested_boundary"):
@@ -393,7 +400,8 @@ class TraceResult:
         else:
             result = "complete_within_selected_scope"
         return {"status": "complete" if complete else "incomplete", "result": result,
-                "ends_by_meaning": dict(sorted(ends.items())), "overall_step_status": overall,
+                "ends_by_meaning": dict(sorted(ends.items())), "declared_terminal_ends": declared,
+                "overall_step_status": overall,
                 "steps_by_status": dict(sorted(statuses.items())), "gaps_by_kind": dict(sorted(counts.items())),
                 "value_gaps_by_kind": dict(sorted(by_effect["value"].items())),
                 "context_gaps_by_kind": dict(sorted(by_effect["context"].items())),
@@ -404,7 +412,9 @@ class TraceResult:
                 "stops_by_reason": dict(sorted(_count(s.reason for s in self.stops).items())),
                 "note": "Complete means every value path ends at the requested boundary or at a source "
                         "object with no writer in the selected scanned sources, with no value-path or context gaps. "
-                        "result says which: reached_requested_boundary, or complete_within_selected_scope when "
+                        "result says which: reached_requested_boundary, complete_to_declared_boundary (every "
+                        "other end is a terminal declared for this run; their original stop reasons are kept and "
+                        "upstream population beyond them is not proved), or complete_within_selected_scope when "
                         "some paths end at objects with no writer in the selected sources (not proof that they "
                         "are ultimate sources). "
                         "Row-selection gaps (filters and joins that could not be fully resolved) are "

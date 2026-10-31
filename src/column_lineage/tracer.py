@@ -24,6 +24,7 @@ class Tracer:
                  assertions: list | None = None, packages=None):
         self.catalog = catalog
         self.packages = packages   # optional ssis.PackageCatalog: package destinations as writers
+        self.terminals: list[tuple[str, str]] = []   # (glob, reason) from --declared-terminals
         self.analyzer = analyzer or Analyzer(catalog)
         self.trace_row_selection = trace_row_selection
         self.analyzer.expand_row_selection = trace_row_selection
@@ -186,6 +187,8 @@ class Tracer:
         result.cycles.extend(c for c in find_cycles(edges) if c not in result.cycles)
         result.stops = dedupe_stops(result.stops)
         self._explain_ends(result)
+        for stop in result.stops:
+            stop.declared_terminal = declared_terminal(self.terminals, stop.node)
         return result
 
     @staticmethod
@@ -688,3 +691,16 @@ def find_cycles(edges: dict[str, set[str]]) -> list[list[str]]:
                 if len(component) > 1 or node in edges.get(node, ()):
                     result.append(sorted(component))
     return sorted(result)
+
+
+def declared_terminal(terminals: list[tuple[str, str]], node: Node) -> str | None:
+    """The reason a stop's node was declared an acceptable terminal for this run, if it was. A pattern
+    matches the column id (db.schema.table.column, or a package file column's id) or its object."""
+    if not terminals or node.kind in (CONSTANT, UNKNOWN):
+        return None
+    column = node.id.lower()
+    obj = column.rsplit(".", 1)[0]
+    for pattern, reason in terminals:
+        if fnmatch.fnmatchcase(column, pattern) or fnmatch.fnmatchcase(obj, pattern):
+            return reason
+    return None

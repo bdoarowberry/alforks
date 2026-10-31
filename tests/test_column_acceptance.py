@@ -347,3 +347,10 @@ def test_8_table_level_cli_on_column_fixture(tmp_path):
                 seen.add(nxt)
                 frontier.append(nxt)
     assert "demo.source" in seen
+
+
+def test_positional_mapping_cites_the_column_order_it_used(tmp_path):
+    result = trace("positional_schema", "demo.output.result_value", tmp_path / "r")
+    step = result.only_step_for(result.target_id)
+    schema = [e for e in step["evidence"] if e["role"] == "target_schema"]
+    assert schema and "column order of" in schema[0]["excerpt"] and "position" in schema[0]["excerpt"]

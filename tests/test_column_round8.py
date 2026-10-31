@@ -103,3 +103,30 @@ def test_filegroup_clause_on_its_own_is_non_lineage():
     assert non_lineage("ON [PRIMARY]\n-- ==========\n")
     assert non_lineage("ON [PRIMARY] TEXTIMAGE_ON [PRIMARY]")
     assert not non_lineage("ON x.a = y.a")
+
+
+def test_declared_terminals_label_ends_without_hiding_their_reason(tmp_path):
+    """A reviewer may accept no-writer sources as terminals for a run. The result says so
+    (complete_to_declared_boundary); the original stop reason, statuses and evidence are kept."""
+    terminals = tmp_path / "terminals.txt"
+    terminals.write_text("demo.stage.*   # staging loaded by an external feed (reviewer decision)\n", encoding="utf-8")
+    plain = trace(ROOT / "writer_shapes", "demo.dbo.dest1.ref_no", tmp_path / "a", *DB)
+    t = trace(ROOT / "writer_shapes", "demo.dbo.dest1.ref_no", tmp_path / "b", *DB,
+              "--declared-terminals", str(terminals))
+    assert plain.completeness["result"] == "complete_within_selected_scope"
+    assert t.completeness["result"] == "complete_to_declared_boundary"
+    [stop] = [s for s in t.stops() if s["node"] == "demo.stage.src.source_ref"]
+    assert stop["reason"] == "source_without_writer"
+    assert stop["declared_terminal"] == "staging loaded by an external feed (reviewer decision)"
+    assert t.completeness["declared_terminal_ends"] >= 1
+    assert [s["status"] for s in t.steps] == [s["status"] for s in plain.steps]
+    page = (tmp_path / "b" / "demo.dbo.dest1.ref_no.lineage.md").read_text(encoding="utf-8")
+    assert "declared terminal for this run" in page and "not proved" in page
+
+
+def test_declared_terminal_matching_only_some_ends_is_not_declared_complete(tmp_path):
+    terminals = tmp_path / "terminals.txt"
+    terminals.write_text("demo.other.*\n", encoding="utf-8")
+    t = trace(ROOT / "writer_shapes", "demo.dbo.dest1.ref_no", tmp_path / "c", *DB,
+              "--declared-terminals", str(terminals))
+    assert t.completeness["result"] == "complete_within_selected_scope"

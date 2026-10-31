@@ -14,7 +14,7 @@ from sqlglot import exp
 
 from table_lineage.index import Statement
 
-from .catalog import controls_of, restore_variable, Catalog, ColumnInfo, Unit, Writer, ident_text, norm, statement_id, table_parts, update_target
+from .catalog import controls_of, restore_variable, Catalog, ColumnInfo, Unit, Writer, ident_text, norm, statement_id, table_parts, update_target, function_summary, split_name
 from .model import (
     TOP_ORDER, AMBIGUOUS, COLUMN, CONDITION, CONSTANT, FILTER, GROUP_BY, HAVING, INFERRED, JOIN_KEY, JOIN_PREDICATE,
     LOCAL_COLUMN, MERGE_CONDITION, PARAMETER, PARTIAL, TEMP_COLUMN, UNKNOWN, UNRESOLVED, VALUE, VARIABLE,
@@ -120,6 +120,8 @@ class Ctx:
         # sources: row-selection columns are recorded, not traced (unless --trace-row-selection).
         self.no_expand = False
         self.in_row_selection = False
+        self.step_notes: list[str] = []     # notes the expression walk adds to the step being built
+        self.step_inferred = False          # the walk relied on a summary (e.g. of a user function)
 
     def position(self, node) -> int:
         """Stable ordinal of an AST node within its statement, so reused aliases stay distinct."""
@@ -576,7 +578,9 @@ class Analyzer:
         inputs: list[Input] = []
         extra_rows: list[RowSelection] = []
         gaps_before = {g.id for g in ctx.gaps}
+        notes_before, ctx.step_inferred = len(ctx.step_notes), False
         self.walk(value, VALUE, None, scope, ctx, inputs, extra_rows, True)
+        notes, inferred = list(dict.fromkeys(ctx.step_notes[notes_before:])), ctx.step_inferred
         inputs = dedupe_inputs(inputs)
         operation = classify(value, target.name)
         step = Step(target=target, writer_kind=writer_kind, expression=value.sql(dialect="tsql", comments=False),
@@ -591,6 +595,9 @@ class Analyzer:
             step.status = worst(PARTIAL, *[s for s in statuses if s != UNRESOLVED])
         if step.gaps and step.status in (VERIFIED, INFERRED):
             step.status = PARTIAL
+        if inferred:
+            step.status = worst(step.status, INFERRED)
+        step.notes.extend(notes)
         return step
 
     # ============================================================ expressions
@@ -679,11 +686,27 @@ class Analyzer:
             return
         if isinstance(e, exp.Dot) and isinstance(e.expression, (exp.Anonymous, exp.Func)):
             fname = f"{e.this.sql(dialect='tsql', comments=False)}.{e.expression.name}"
-            node = Node(UNKNOWN, fname + "(...)")
-            ctx.gap("opaque_function", f"User function {fname} is applied; its body is not traced, so other "
-                    "inputs it reads are not shown.", None, e)
-            for arg in e.expression.expressions or []:
-                self.walk(arg, role, branch, scope, ctx, out, rows, False)
+            args = list(e.expression.expressions or [])
+            schema = split_name(e.this.sql(dialect="tsql", comments=False))[-1]
+            summary = function_summary(self.catalog, schema, e.expression.name)
+            if isinstance(summary, str):
+                ctx.gap("opaque_function", f"User function {fname} is applied; its body is not traced ({summary}), "
+                        "so other inputs it reads are not shown.", None, e)
+                for arg in args:
+                    self.walk(arg, role, branch, scope, ctx, out, rows, False)
+                return
+            # A scalar function that reads no tables: its result depends only on the arguments its body uses.
+            used = [p for p, u in zip(summary.params, summary.used) if u]
+            where = f"{summary.unit.root_label}/{summary.unit.rel_path}:{summary.line}"
+            note = (f"{fname} is summarised from its definition at {where}: it reads no tables, and its result "
+                    f"depends on {', '.join(used) or 'none of its parameters'}"
+                    + (" and on the current date/time or a random value" if summary.time_dependent else "")
+                    + "; the function body is not traced expression by expression.")
+            ctx.step_notes.append(note)
+            ctx.step_inferred = True
+            for i, arg in enumerate(args):
+                if i >= len(summary.params) or summary.used[i]:
+                    self.walk(arg, role, join_branch(branch, f"{fname} argument {i + 1}"), scope, ctx, out, rows, False)
             return
         is_arith = isinstance(e, (exp.Add, exp.Sub, exp.Mul, exp.Div, exp.Mod, exp.DPipe, exp.Neg, exp.Concat))
         for child in e.iter_expressions():
@@ -921,11 +944,18 @@ class Analyzer:
         self._query_steps(query, None, insertable.index(column), column, target, ctx,
                           "insert_values" if isinstance(query, exp.Values) else "insert_select",
                           "positional_schema", ctes, len(insertable))
+        _, _, schema = self.catalog.schema_for(writer.ref)
         for step in ctx.steps:
             if step.target.id == target.id:
                 step.status = worst(step.status, INFERRED)
                 step.notes.append("Matched by position against the declared column order, skipping identity, "
                                   "computed and rowversion columns.")
+                if schema is not None:
+                    # The column order the match relied on.
+                    step.evidence.append(self.catalog.evidence(
+                        schema.unit, schema.statement, role="target_schema",
+                        excerpt=f"column order of {writer.ref.display}: position {insertable.index(column) + 1} "
+                                f"of {len(insertable)}"))
 
     def _omitted(self, column, target, ctx, writer, tree) -> None:
         """An INSERT whose column list omits the target column adds rows holding its default or NULL."""

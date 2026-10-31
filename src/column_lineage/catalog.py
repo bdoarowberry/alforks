@@ -516,6 +516,7 @@ class Catalog:
         self._evaluations: dict[int, object] | None = None   # id(issue) -> dynamic_eval.Evaluation
         self.skipped_files: list[tuple[str, str]] = []   # (label, path) of files the filters skipped
         self._write_mentions: dict | None = None
+        self._functions: dict | None = None
         self._writers_by_statement: dict | None = None
 
     # ---------------------------------------------------------------- loading
@@ -1657,3 +1658,86 @@ def writer_search(catalog: "Catalog", ref: ObjectRef, column: str, writers: list
                          "detail": f"{WRITER_SEARCH_LABELS[category]} (parsed as {type(statement.tree).__name__}"
                                    + (f", writing {others[0].ref.display})" if others else ")")})
     return findings
+
+
+# ----------------------------------------------------------------- scalar function summaries
+FUNCTION_HEADER = re.compile(rf"\b(?:CREATE\s+(?:OR\s+ALTER\s+)?|ALTER\s+)FUNCTION\s+(?P<name>{IDENT})\s*\(", re.I)
+READS_DATA = re.compile(r"(?<![\w@#$.])(?:FROM|JOIN|INTO|EXEC(?:UTE)?|UPDATE|INSERT|DELETE|MERGE|OPENQUERY|OPENROWSET)\b",
+                        re.I)
+USER_CALL = re.compile(rf"(?<![\w@#$.])(?P<name>(?:\[[^\]]+\]|[A-Za-z_][\w$#]*)(?:\s*\.\s*(?:\[[^\]]+\]|[A-Za-z_][\w$#]*))+)\s*\(")
+NONDETERMINISTIC = re.compile(r"\b(?:GETDATE|GETUTCDATE|SYSDATETIME|SYSUTCDATETIME|SYSDATETIMEOFFSET|CURRENT_TIMESTAMP|"
+                              r"NEWID|NEWSEQUENTIALID|RAND|CRYPT_GEN_RANDOM)\b", re.I)
+
+
+@dataclass
+class FunctionSummary:
+    """What a scalar user function's result can depend on, read from its body."""
+    key: tuple[str, str]               # (schema, name)
+    params: list[str]
+    used: list[bool]                   # per parameter: referenced in the body
+    unit: Unit
+    line: int
+    pure: bool                         # reads no tables and calls only pure user functions
+    reason: str | None = None          # why it is not pure
+    time_dependent: bool = False
+
+
+def _function_definitions(catalog: "Catalog") -> dict[tuple[str, str], list[FunctionSummary]]:
+    found: dict[tuple[str, str], list[FunctionSummary]] = defaultdict(list)
+    for unit in catalog.units:
+        masked = unit.masked
+        for match in FUNCTION_HEADER.finditer(masked):
+            parts = split_name(match.group("name"))
+            key = (norm(parts[-2]) if len(parts) > 1 and parts[-2] else catalog.default_schema, norm(parts[-1]))
+            close = match.end()
+            depth = 1
+            while close < len(masked) and depth:
+                depth += {"(": 1, ")": -1}.get(masked[close], 0)
+                close += 1
+            params = re.findall(r"@[\w$#@]+", masked[match.end():close - 1])
+            header_end = re.compile(r"\bRETURNS\b", re.I).search(masked, close)
+            if header_end is None:
+                continue
+            after = masked[header_end.end():header_end.end() + 200]
+            if re.match(r"\s*(?:@[\w$#@]+\s+)?TABLE\b", after, re.I):
+                continue   # table-valued: not a scalar function
+            end = len(masked)
+            for boundary in (GO.search(masked, close), FUNCTION_HEADER.search(masked, close), DEFINITION.search(masked, close)):
+                if boundary is not None:
+                    end = min(end, boundary.start())
+            body = masked[header_end.end():end]
+            used = [re.search(rf"(?<![\w@#$]){re.escape(p)}(?![\w$#@])", body, re.I) is not None for p in params]
+            reads = READS_DATA.search(body)
+            summary = FunctionSummary(key, [p.lower() for p in params], used, unit, unit.line_at(match.start()),
+                                      reads is None, None if reads is None else f"its body uses {reads.group().upper()}",
+                                      NONDETERMINISTIC.search(body) is not None)
+            summary._calls = [m.group("name") for m in USER_CALL.finditer(body)]
+            found[key].append(summary)
+    return found
+
+
+def function_summary(catalog: "Catalog", schema: str | None, name: str, _seen: set | None = None) -> FunctionSummary | str:
+    """The summary of scalar function schema.name, or a string saying why there is none."""
+    if catalog._functions is None:
+        catalog._functions = _function_definitions(catalog)
+    key = (norm(schema) or catalog.default_schema, norm(name))
+    candidates = catalog._functions.get(key, [])
+    if not candidates:
+        return "its definition is not in the scanned files"
+    if len(candidates) > 1:
+        shapes = {(tuple(c.params), tuple(c.used), c.pure) for c in candidates}
+        if len(shapes) > 1:
+            return f"it has {len(candidates)} different definitions in the scanned files"
+    summary = candidates[0]
+    if not summary.pure:
+        return summary.reason or "its body reads data"
+    seen = set(_seen or ()) | {key}
+    for call in getattr(summary, "_calls", []):
+        parts = split_name(call)
+        inner_key = (norm(parts[-2]) if len(parts) > 1 else catalog.default_schema, norm(parts[-1]))
+        if inner_key in seen:
+            return "it calls itself recursively"
+        inner = function_summary(catalog, inner_key[0], inner_key[1], seen)
+        if isinstance(inner, str):
+            return f"it calls {call}, and {inner}"
+    return summary

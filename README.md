@@ -40,6 +40,7 @@ The useful options:
 | `--default-schema S` | Schema for one-part names (default `dbo`). |
 | `--stop-at-database DB ...` | Stop when the trace reaches a column in one of these databases. |
 | `--stop-at-object GLOB ...` | Stop at matching objects (`db.schema.name`, case-insensitive). |
+| `--declared-terminals FILE` | Objects or columns the reviewer accepts as terminal sources for this run (one glob per line, `# reason` optional). Stops there keep their reason and are labelled; the result can be `complete_to_declared_boundary`. Upstream population is not proved. |
 | `--max-depth N` | Stop after N mapping steps. |
 | `--trace-row-selection` | Also trace filter and join columns upstream (larger output). |
 | `--gap-summary` | Also write `gap-summary.json`, a summary with no names in it, safe to share. |
@@ -133,6 +134,16 @@ description in `src/column_lineage/assertions.py`.
      from the other writers stay open.
 - **Privacy:** an assertions file names real objects. It belongs with the source and must not
   be shared outside it.
+
+### Declared terminals and scalar functions
+
+- `--declared-terminals` records a source-boundary decision for a run, e.g. `demo.stage.*  # loaded by an
+  external feed`. It does not stop the trace (use `--stop-at-object` for that) and never hides
+  anything: stops keep their original reason, steps keep their status, and the page says that how a
+  declared terminal is populated upstream is not proved.
+- A scalar user function whose definition is scanned, reads no tables and calls only such functions is
+  summarised: its result depends on the arguments its body uses (step status `inferred`, with a note
+  citing the definition). Otherwise the call is an `opaque_function` gap saying why.
 
 ### Comparing with known lineage
 

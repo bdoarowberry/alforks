@@ -151,6 +151,7 @@ def build(catalog, traces: list[dict], samples: int = 25, packages=None) -> dict
             "stops_by_reason": completeness["stops_by_reason"],
             "result": completeness.get("result"),
             "ends_by_meaning": completeness.get("ends_by_meaning", {}),
+            "declared_terminal_ends": completeness.get("declared_terminal_ends", 0),
             "asserted_steps": completeness.get("asserted_steps", 0),
             "gaps_resolved_by_assertions": completeness.get("gaps_resolved_by_assertions", 0),
             "gap_statements_by_kind": _gap_statements(data),
@@ -203,11 +204,13 @@ def _totals(traces: list[dict]) -> dict:
     outcome: Counter = Counter()
     results: Counter = Counter()
     ends: Counter = Counter()
+    declared_ends = 0
     no_writer = {"stops": 0, "distinct_objects": set(), "with_unused_writer_candidates": 0}
     near: Counter = Counter()
     for data in traces:
         results[data["completeness"].get("result", "?")] += 1
         ends.update(data["completeness"].get("ends_by_meaning", {}))
+        declared_ends += data["completeness"].get("declared_terminal_ends", 0)
         for stop in data.get("stops", []):
             if stop["reason"] != "source_without_writer":
                 continue
@@ -244,6 +247,7 @@ def _totals(traces: list[dict]) -> dict:
         "outcomes": dict(sorted(outcome.items())),
         "results": dict(sorted(results.items())),
         "value_path_ends_by_meaning": dict(sorted(ends.items())),
+        "declared_terminal_ends": declared_ends,
         "no_writer_stops": {"stops": no_writer["stops"], "distinct_objects": len(no_writer["distinct_objects"]),
                             "with_unused_writer_candidates": no_writer["with_unused_writer_candidates"],
                             "unused_writer_candidates_by_category": dict(sorted(near.items()))},

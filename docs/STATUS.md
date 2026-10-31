@@ -160,6 +160,13 @@
   the gap summary tag reference kinds (`[IDn]`, `#IDn`, `@IDn`).
 - Filegroup clauses on their own (`ON [PRIMARY]`) are non-lineage.
 
+## Added after the blocker triage
+
+- Scalar function summaries (pure functions are no longer `opaque_function` gaps); test
+  `tests/test_column_function_summary.py`. Two synthetic corpus chains became complete.
+- `--declared-terminals FILE` and the result `complete_to_declared_boundary` (stops keep their reasons).
+- Positional INSERT steps cite the column order they used (`target_schema` evidence).
+
 ## Known open issues
 
 - Corpus chain 08 ends in `missing_definition` (recall 0.6). Not investigated.

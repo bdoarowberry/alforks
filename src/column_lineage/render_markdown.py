@@ -292,6 +292,8 @@ def _result_text(t: _Trace) -> tuple[str, int]:
         if n_rows:
             qualifiers.append(f"value lineage{row_note}")
         label = {"reached_requested_boundary": "Complete — reached the requested boundary",
+                 "complete_to_declared_boundary": "Complete to the declared boundary — every other path ends at a "
+                                                  "terminal declared for this run (upstream population not proved)",
                  "complete_within_selected_scope": "Complete within the selected sources — some paths end at "
                                                    "objects with no writer in them"}.get(comp.get("result"), "Complete")
         return label + (f" ({'; '.join(qualifiers)})" if qualifiers else ""), n_gaps
@@ -928,6 +930,9 @@ def _where_proof_ends(t: _Trace, gaps: list[dict]) -> list[str]:
             line = f"  - {_code(t.display(stop.get('node')))}"
             if stop.get("detail"):
                 line += f" ({_text(stop['detail'])})"
+            if stop.get("declared_terminal"):
+                line += (f" — **declared terminal for this run** ({_text(stop['declared_terminal'])}); how this "
+                         "source is populated upstream is not proved")
             out.append(line)
             out += [f"    - {item}" for item in via(stop.get("node"))]
 

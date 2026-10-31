@@ -54,6 +54,10 @@ def build_parser() -> argparse.ArgumentParser:
                         help="Leave out packages whose path relative to a package root matches")
     parser.add_argument("--connection-map", nargs="+", action="extend", default=[], metavar="NAME=DB",
                         help="Database of an SSIS connection manager (overrides its Initial Catalog)")
+    parser.add_argument("--declared-terminals", metavar="FILE", default=None,
+                        help="Objects or columns accepted as terminal sources for this run: one glob per line "
+                             "(db.schema.table or db.schema.table.column), optionally followed by '# reason'. "
+                             "Stops there keep their reason and are labelled declared_terminal.")
     parser.add_argument("--gap-summary", action="store_true", help="Write sanitized gap-summary.json")
     parser.add_argument("--fail-on-incomplete", action="store_true")
     parser.add_argument("--no-progress", action="store_true")
@@ -143,6 +147,12 @@ def main(argv: list[str] | None = None) -> int:
             asserted.extend(assertions.load(path))
         except (OSError, ValueError) as exc:
             parser.error(f"--assertions: {exc}")
+    terminals = []
+    if args.declared_terminals:
+        try:
+            terminals = load_terminals(Path(args.declared_terminals))
+        except (OSError, ValueError) as exc:
+            parser.error(f"--declared-terminals: {exc}")
     # Cite assertion files relative to the output folder, where the pages are written.
     out_dir = Path(args.output).resolve()
     for assertion in asserted:
@@ -242,6 +252,8 @@ def main(argv: list[str] | None = None) -> int:
         boundary = Boundary(tuple(d.lower() for d in args.stop_at_database), tuple(args.stop_at_object), args.max_depth)
         tracer = Tracer(catalog, trace_row_selection=args.trace_row_selection, assertions=asserted, packages=packages)
         scan["assertions"] = len(asserted)
+        tracer.terminals = terminals
+        scan["declared_terminals"] = len(terminals)
         output = Path(args.output)
         output.mkdir(parents=True, exist_ok=True)
         traces = []
@@ -298,6 +310,25 @@ def main(argv: list[str] | None = None) -> int:
                                      for t in traces],
                           "written": [str(p) for p in written]}, indent=2))
     return 3 if (args.fail_on_incomplete and incomplete) else 0
+
+
+def load_terminals(path: Path) -> list[tuple[str, str]]:
+    """(lower-cased glob, reason) pairs. Text: one glob per line, '# reason' optional. JSON:
+    {"terminals": [{"pattern": "...", "reason": "..."}]}."""
+    text = path.read_text(encoding="utf-8-sig")
+    if text.lstrip().startswith("{"):
+        data = json.loads(text)
+        items = data.get("terminals")
+        if not isinstance(items, list) or not all(isinstance(i, dict) and i.get("pattern") for i in items):
+            raise ValueError('expected {"terminals": [{"pattern": ..., "reason": ...}]}')
+        return [(i["pattern"].strip().lower().replace("[", "").replace("]", ""),
+                 str(i.get("reason") or "declared terminal")) for i in items]
+    out = []
+    for line in text.splitlines():
+        pattern, _, reason = line.partition("#")
+        if pattern.strip():
+            out.append((pattern.strip().lower().replace("[", "").replace("]", ""), reason.strip() or "declared terminal"))
+    return out
 
 
 def issue_entry(catalog, issue) -> dict:
