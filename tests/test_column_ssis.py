@@ -312,6 +312,39 @@ def test_ssis_2008_format_with_integer_ids(tmp_path):
     assert t.complete
 
 
+def test_union_all_branches_and_aggregate_group_by(tmp_path):
+    t = ssis_trace("union", "demo_db.demo.union_target.total_amount", tmp_path)
+    [total] = inputs(t.only_step_for(t.target_id), "value")
+    agg = t.only_step_for(total)
+    assert agg["writer_kind"] == "package_aggregate" and agg["operation"] == "aggregate"
+    assert agg["expression"] == "SUM(amount)"
+    [group] = row_selection(agg, "group_by")
+    assert group.endswith("[union all.union all output 1].region_code")
+    [union_amount] = inputs(agg, "value")
+    branches = t.steps_for(union_amount)
+    assert sorted(b["branch_context"][-1] for b in branches) == [
+        "Union All Union All input 1 of 2 (Union All Input 1)", "Union All Union All input 2 of 2 (Union All Input 2)"]
+    assert {"demo_db.demo.orders.amount", "demo_db.demo.orders_archive.amount"} <= t.upstream(t.target_id)
+    assert t.complete
+    # An input that maps nothing to an output column contributes NULL rows.
+    r = ssis_trace("union", "demo_db.demo.union_target.region_code", tmp_path / "region")
+    assert "constant:null" in r.all_input_ids()
+
+
+def test_execute_sql_from_variable_is_a_context_gap_for_traces_through_the_package(tmp_path):
+    root = tmp_path / "pkgs"
+    root.mkdir()
+    text = (SSIS / "basic" / "load_stage.dtsx").read_text()
+    text = text.replace('SQLTask:SqlStatementSource="TRUNCATE TABLE demo.stage;"',
+                        'SQLTask:SqlStmtSourceType="Variable" SQLTask:SqlStatementSource="User::run_load"')
+    (root / "load_var_sql.dtsx").write_text(text)
+    t = ssis_trace(root, "demo.stage.amount", tmp_path / "out")
+    [gap] = t.gaps("package_runtime_value")
+    assert gap["affects"] == "context" and gap["detail"]["variable"] == "User::run_load"
+    assert "Truncate stage" in gap["message"]
+    assert not t.complete
+
+
 def test_execute_sql_task_statements_feed_the_sql_catalog(tmp_path):
     t = ssis_trace("exec_sql", "demo_db.demo.audit.row_total", tmp_path)
     insert = t.only_step_for(t.target_id)
@@ -380,4 +413,4 @@ def test_connection_map_rejects_bad_value(tmp_path):
 def test_all_package_roots_together(tmp_path):
     t = ssis_trace(SSIS, "demo.stage.amount", tmp_path)
     assert t.complete           # other packages in the tree do not write demo.stage
-    assert t.data["scan"]["packages"]["in_scope"] == 12
+    assert t.data["scan"]["packages"]["in_scope"] == 13

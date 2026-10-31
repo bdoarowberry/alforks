@@ -25,4 +25,6 @@ CREATE TABLE demo.script_target (amount decimal(18, 2) NULL);
 CREATE TABLE demo.name_target (amount decimal(18, 2) NULL, other_value decimal(18, 2) NULL);
 CREATE TABLE demo.legacy_target (amount_text varchar(30) NULL);
 CREATE TABLE demo.audit (row_total int NULL);
+CREATE TABLE demo.orders_archive (amount decimal(18, 2) NULL, region_code varchar(10) NULL);
+CREATE TABLE demo.union_target (region_code varchar(10) NULL, total_amount decimal(18, 2) NULL);
 GO

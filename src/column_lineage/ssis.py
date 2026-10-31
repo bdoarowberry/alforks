@@ -1092,8 +1092,8 @@ class PackageCatalog:
         inputs = comp.inputs
         for i, port in enumerate(inputs, 1):
             label = f"{'Union All' if comp.cls == 'union_all' else 'Merge'} {comp.name} input {i} of {len(inputs)} ({port.name})"
-            ic = next((c for c in port.columns if normalize_ref(c.props["OutputColumnLineageID"].value) == col.lineage)
-                      if any(c.props.get("OutputColumnLineageID") for c in port.columns) else iter(()), None)
+            ic = next((c for c in port.columns if c.props.get("OutputColumnLineageID")
+                       and normalize_ref(c.props["OutputColumnLineageID"].value) == col.lineage), None)
             if ic is None:
                 step, more = self._step(pkg, flow, comp, node, f"package_{comp.cls}", "NULL", "constant",
                                         "output_column_lineage", [Input(Node(CONSTANT, "NULL"), VALUE, "NULL")],
