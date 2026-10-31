@@ -387,7 +387,8 @@ class TraceResult:
         for gap in open_gaps:
             if gap.kind in ("unsupported_package_step", "package_runtime_value") and effects[gap.id] != "row_selection":
                 ends[gap.kind] = ends.get(gap.kind, 0) + 1
-        declared = sum(1 for s in self.stops if s.declared_terminal is not None)
+        # A boundary stop is already the strongest end; a declaration only matters for the other ends.
+        declared = sum(1 for s in self.stops if s.declared_terminal is not None and s.reason not in ("boundary", "constant"))
         undeclared = [s for s in self.stops if s.declared_terminal is None and s.reason not in ("boundary", "constant")]
         if not complete:
             result = "incomplete"

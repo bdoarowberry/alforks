@@ -130,3 +130,12 @@ def test_declared_terminal_matching_only_some_ends_is_not_declared_complete(tmp_
     t = trace(ROOT / "writer_shapes", "demo.dbo.dest1.ref_no", tmp_path / "c", *DB,
               "--declared-terminals", str(terminals))
     assert t.completeness["result"] == "complete_within_selected_scope"
+
+
+def test_boundary_only_trace_keeps_reached_boundary_when_terminals_match_it(tmp_path):
+    terminals = tmp_path / "terminals.txt"
+    terminals.write_text("demo.*\n", encoding="utf-8")
+    t = trace(ROOT / "writer_shapes", "demo.dbo.dest3.ref_no", tmp_path / "d", *DB, "--stop-at-object", "demo.stage.*",
+              "--declared-terminals", str(terminals))
+    assert t.completeness["result"] == "reached_requested_boundary"
+    assert t.completeness["declared_terminal_ends"] == 0
