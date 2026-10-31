@@ -1,0 +1,2 @@
+# Invented: the partner staging schema is loaded outside the scanned sources.
+partner_db.stage.*   # loaded by an external partner feed
