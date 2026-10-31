@@ -741,6 +741,10 @@ def _section_overview(t: _Trace) -> list[str]:
         out += ["", "<details><summary>Diagram (Mermaid)</summary>", ""]
         out += _mermaid(t)
         out += ["", "</details>"]
+    # Route families (the overview's diagram and tables link here); imported lazily: render_overview
+    # imports this module.
+    from .render_overview import detailed_family_lines
+    out += [""] + detailed_family_lines(t.data, t)
     return out
 
 

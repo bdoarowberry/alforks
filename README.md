@@ -68,10 +68,17 @@ For each `--column`, in `--output`:
   lineage tree, row-selection context, detailed steps with evidence, gaps. Regenerate it with
   `python -m column_lineage.render_markdown <json>`.
 - `<column>.overview.md` — a short page for a business reader (no SQL needed; list lengths are
-  capped, with links to the detailed page): field and result in plain words, business definition,
-  routes (how the value arrives, branch by branch), rows included (row selection, kept apart from
-  the value), end points with why each stops, open points with the next evidence, links. See
-  `docs/examples/sample-overview.md`. Skip it with `--no-overview`.
+  capped, with links to the detailed page). Its first screen answers "what feeds this field, where
+  does proof stop, and what is assumed": field and definition (approval status), a one- or
+  two-sentence plain answer, a coverage line, at most three evidence requests, a small Mermaid
+  diagram of *route families* (alternatives drawn side by side) with a family table, and a sources
+  table (database | schema | table | column; files and constants in their own rows). Then what
+  changes the value (CASE, fallbacks, overrides, merges, aggregations, package transformations),
+  which rows (row selection, kept apart from the value), evidence and uncertainty, and shortened
+  routes, open points and links. See `docs/examples/sample-overview.md` and the layout brief
+  `docs/presentation-brief.md`. Skip it with `--no-overview`.
+- The trace JSON also carries an additive `route_families` block: every family with all its member
+  routes (end, object sequences, step ids, gaps, branch labels). Nothing else in the JSON changes.
 
 Once per run: `scan-diagnostics.json` (parse statistics, files that failed, every
 statement-level issue with its location), `routes-index.md` and `routes-index.json` (below) and,
@@ -82,9 +89,11 @@ the set of terminal source objects their routes end at (files grouped by connect
 left out) and by the set of writer procedures, packages and scripts on their value routes. Each
 group has a stable id (`src-…`, `wr-…`), its members (linked to their overview pages), the shared
 objects or writers and the count of results. `routes-index.json` holds the same groups and, per
-column, its signatures and route ids, for tools and LLMs. A shared signature does **not** mean
-identical expressions, branch selection or business meaning; every column's own pages and JSON
-stay complete.
+column, its signatures, route ids and route family ids, for tools and LLMs. A shared signature
+does **not** mean identical expressions, branch selection or business meaning; every column's own
+pages and JSON stay complete. A **Needs attention** view comes first: unresolved origins by source
+family (with column counts), ambiguous writer order by statement, assertions awaiting review, and
+columns whose definition awaits owner approval.
 
 Re-render overview pages and the index from JSON only:
 
@@ -104,9 +113,10 @@ never derives business meaning from names. Definitions come from a JSON file:
 
 `column` is `db.schema.table.column` or a shorter suffix; globs are allowed (a column whose
 database is unknown is matched only by `*` in that position). An exact name wins over a glob,
-then approved over proposed. Approved entries are shown as the definition with their source;
-proposed ones as "Proposed (not approved): …"; a column without an entry reads "Not confirmed —
-question for the source owner."
+then approved over proposed. Approved entries are shown as "Definition (approved)" with their
+source; a proposed entry reads "Definition not approved" followed by a separately labelled
+*proposed interpretation* with its source; a column without an entry reads "Definition not
+approved" and nothing else.
 
 **A zero exit code does not mean the lineage is complete.** Read the result line at the
 top of the page, or `completeness.status` in the JSON.

@@ -300,6 +300,9 @@ def main(argv: list[str] | None = None) -> int:
                 result.target_gaps = [result.add_gap(Gap("unsupported_statement",
                                       f"The trace failed with {type(exc).__name__}: {str(exc)[:200]}"))]
             data = result.to_dict()
+            # Additive block: route families derived from the steps, stops and gaps above (nothing is dropped).
+            from .render_overview import route_families_block
+            data["route_families"] = route_families_block(data)
             traces.append(data)
             incomplete = incomplete or data["completeness"]["status"] != "complete"
             name = stem(spec)

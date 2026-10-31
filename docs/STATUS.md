@@ -203,6 +203,16 @@
 - `--entry-point` on the real run resolved none of the 56 writer-order traces: 256 of 261 gaps are
   writers from separate integration jobs, not called from the report entry point; 5 are package loads
   followed by SQL overwrites. Correct: their order needs schedule evidence.
+- Overview v2, after the reviewer's presentation brief (`docs/presentation-brief.md`): the first screen
+  is field and definition (approved, or "Definition not approved" plus a labelled proposed
+  interpretation), a generated plain answer, a coverage line, at most three evidence requests, a
+  Mermaid diagram of route families (parallel edges, shapes per end kind, at most 10 families) with a
+  family table, and a sources table (db | schema | table | column; files and constants apart). Then
+  what changes the value, which rows, evidence and uncertainty. Route families group routes only when
+  source family, value rule, stopping reason and evidence status agree (stable `fam-` ids); the trace
+  JSON gains an additive `route_families` block, the detailed page a "Route families" list with
+  anchors, and the route index family ids and a "Needs attention" view. Fixture:
+  `fixtures/column/overview_branches/`.
 
 ## Known open issues
 

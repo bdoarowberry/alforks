@@ -1,0 +1,222 @@
+<?xml version="1.0"?>
+<DTS:Executable xmlns:DTS="www.microsoft.com/SqlServer/Dts"
+  DTS:refId="Package"
+  DTS:CreationName="Microsoft.Package"
+  DTS:DTSID="{7B2E0F00-0000-4000-8000-000000000001}"
+  DTS:ExecutableType="Microsoft.Package"
+  DTS:ObjectName="load_file_limit">
+  <DTS:Property
+    DTS:Name="PackageFormatVersion">8</DTS:Property>
+  <DTS:ConnectionManagers>
+    <DTS:ConnectionManager
+      DTS:refId="Package.ConnectionManagers[rpt_db]"
+      DTS:CreationName="OLEDB"
+      DTS:DTSID="{7B2E0F00-0000-4000-8000-0000000000C1}"
+      DTS:ObjectName="rpt_db">
+      <DTS:ObjectData>
+        <DTS:ConnectionManager
+          DTS:ConnectionString="Data Source=server_r;Initial Catalog=rpt_db;Provider=SQLNCLI11.1;Integrated Security=SSPI;" />
+      </DTS:ObjectData>
+    </DTS:ConnectionManager>
+    <DTS:ConnectionManager
+      DTS:refId="Package.ConnectionManagers[limit_feed]"
+      DTS:CreationName="FLATFILE"
+      DTS:DTSID="{7B2E0F00-0000-4000-8000-0000000000C2}"
+      DTS:ObjectName="limit_feed">
+      <DTS:ObjectData>
+        <DTS:ConnectionManager
+          DTS:Format="Delimited"
+          DTS:ColumnNamesInFirstDataRow="True"
+          DTS:CodePage="1252"
+          DTS:ConnectionString="C:\data\inbound\limit_feed.csv">
+          <DTS:FlatFileColumns>
+            <DTS:FlatFileColumn
+              DTS:ColumnType="Delimited"
+              DTS:ColumnDelimiter="_x002C_"
+              DTS:MaximumWidth="10"
+              DTS:DataType="129"
+              DTS:ObjectName="customer_ref"
+              DTS:DTSID="{7B2E0F00-0000-4000-8000-0000000000D1}"
+              DTS:CreationName="" />
+            <DTS:FlatFileColumn
+              DTS:ColumnType="Delimited"
+              DTS:ColumnDelimiter="_x000D__x000A_"
+              DTS:MaximumWidth="50"
+              DTS:DataType="129"
+              DTS:ObjectName="limit_amount"
+              DTS:DTSID="{7B2E0F00-0000-4000-8000-0000000000D2}"
+              DTS:CreationName="" />
+          </DTS:FlatFileColumns>
+        </DTS:ConnectionManager>
+      </DTS:ObjectData>
+    </DTS:ConnectionManager>
+  </DTS:ConnectionManagers>
+  <DTS:Executables>
+    <DTS:Executable
+      DTS:refId="Package\Load file limit"
+      DTS:CreationName="Microsoft.Pipeline"
+      DTS:DTSID="{7B2E0F00-0000-4000-8000-0000000000E1}"
+      DTS:ExecutableType="Microsoft.Pipeline"
+      DTS:ObjectName="Load file limit">
+      <DTS:ObjectData>
+        <pipeline
+          version="1">
+          <components>
+            <component
+              refId="Package\Load file limit\Read limit_feed"
+              componentClassID="Microsoft.FlatFileSource"
+              name="Read limit_feed"
+              version="1">
+              <connections>
+                <connection
+                  refId="Package\Load file limit\Read limit_feed.Connections[FlatFileConnection]"
+                  connectionManagerID="Package.ConnectionManagers[limit_feed]"
+                  connectionManagerRefId="Package.ConnectionManagers[limit_feed]"
+                  name="FlatFileConnection" />
+              </connections>
+              <outputs>
+                <output
+                  refId="Package\Load file limit\Read limit_feed.Outputs[Flat File Source Output]"
+                  name="Flat File Source Output">
+                  <outputColumns>
+                    <outputColumn
+                      refId="Package\Load file limit\Read limit_feed.Outputs[Flat File Source Output].Columns[customer_ref]"
+                      dataType="str"
+                      length="10"
+                      externalMetadataColumnId="Package\Load file limit\Read limit_feed.Outputs[Flat File Source Output].ExternalColumns[customer_ref]"
+                      lineageId="Package\Load file limit\Read limit_feed.Outputs[Flat File Source Output].Columns[customer_ref]"
+                      name="customer_ref" />
+                    <outputColumn
+                      refId="Package\Load file limit\Read limit_feed.Outputs[Flat File Source Output].Columns[limit_amount]"
+                      dataType="str"
+                      length="50"
+                      externalMetadataColumnId="Package\Load file limit\Read limit_feed.Outputs[Flat File Source Output].ExternalColumns[limit_amount]"
+                      lineageId="Package\Load file limit\Read limit_feed.Outputs[Flat File Source Output].Columns[limit_amount]"
+                      name="limit_amount" />
+                  </outputColumns>
+                  <externalMetadataColumns
+                    isUsed="True">
+                    <externalMetadataColumn
+                      refId="Package\Load file limit\Read limit_feed.Outputs[Flat File Source Output].ExternalColumns[customer_ref]"
+                      dataType="str"
+                      length="10"
+                      name="customer_ref" />
+                    <externalMetadataColumn
+                      refId="Package\Load file limit\Read limit_feed.Outputs[Flat File Source Output].ExternalColumns[limit_amount]"
+                      dataType="str"
+                      length="50"
+                      name="limit_amount" />
+                  </externalMetadataColumns>
+                </output>
+              </outputs>
+            </component>
+            <component
+              refId="Package\Load file limit\Convert limit"
+              componentClassID="Microsoft.DataConvert"
+              name="Convert limit">
+              <inputs>
+                <input
+                  refId="Package\Load file limit\Convert limit.Inputs[Data Conversion Input]"
+                  name="Data Conversion Input">
+                  <inputColumns>
+                    <inputColumn
+                      refId="Package\Load file limit\Convert limit.Inputs[Data Conversion Input].Columns[limit_amount]"
+                      cachedDataType="str"
+                      cachedLength="50"
+                      cachedName="limit_amount"
+                      lineageId="Package\Load file limit\Read limit_feed.Outputs[Flat File Source Output].Columns[limit_amount]" />
+                  </inputColumns>
+                  <externalMetadataColumns />
+                </input>
+              </inputs>
+              <outputs>
+                <output
+                  refId="Package\Load file limit\Convert limit.Outputs[Data Conversion Output]"
+                  name="Data Conversion Output"
+                  synchronousInputId="Package\Load file limit\Convert limit.Inputs[Data Conversion Input]">
+                  <outputColumns>
+                    <outputColumn
+                      refId="Package\Load file limit\Convert limit.Outputs[Data Conversion Output].Columns[limit_text]"
+                      dataType="wstr"
+                      length="50"
+                      lineageId="Package\Load file limit\Convert limit.Outputs[Data Conversion Output].Columns[limit_text]"
+                      name="limit_text">
+                      <properties>
+                        <property
+                          containsID="true"
+                          dataType="System.Int32"
+                          name="SourceInputColumnLineageID">#{Package\Load file limit\Read limit_feed.Outputs[Flat File Source Output].Columns[limit_amount]}</property>
+                      </properties>
+                    </outputColumn>
+                  </outputColumns>
+                  <externalMetadataColumns />
+                </output>
+              </outputs>
+            </component>
+            <component
+              refId="Package\Load file limit\Write file_limit"
+              componentClassID="Microsoft.OLEDBDestination"
+              name="Write file_limit"
+              version="4">
+              <properties>
+                <property
+                  dataType="System.String"
+                  name="OpenRowset">[stage].[file_limit]</property>
+                <property
+                  dataType="System.Int32"
+                  name="AccessMode"
+                  typeConverter="AccessMode">3</property>
+              </properties>
+              <connections>
+                <connection
+                  refId="Package\Load file limit\Write file_limit.Connections[OleDbConnection]"
+                  connectionManagerID="Package.ConnectionManagers[rpt_db]"
+                  connectionManagerRefId="Package.ConnectionManagers[rpt_db]"
+                  name="OleDbConnection" />
+              </connections>
+              <inputs>
+                <input
+                  refId="Package\Load file limit\Write file_limit.Inputs[OLE DB Destination Input]"
+                  name="OLE DB Destination Input">
+                  <inputColumns>
+                    <inputColumn
+                      refId="Package\Load file limit\Write file_limit.Inputs[OLE DB Destination Input].Columns[limit_text]"
+                      cachedDataType="wstr"
+                      cachedLength="50"
+                      cachedName="limit_text"
+                      externalMetadataColumnId="Package\Load file limit\Write file_limit.Inputs[OLE DB Destination Input].ExternalColumns[limit_text]"
+                      lineageId="Package\Load file limit\Convert limit.Outputs[Data Conversion Output].Columns[limit_text]" />
+                  </inputColumns>
+                  <externalMetadataColumns
+                    isUsed="True">
+                    <externalMetadataColumn
+                      refId="Package\Load file limit\Write file_limit.Inputs[OLE DB Destination Input].ExternalColumns[customer_id]"
+                      dataType="i4"
+                      name="customer_id" />
+                    <externalMetadataColumn
+                      refId="Package\Load file limit\Write file_limit.Inputs[OLE DB Destination Input].ExternalColumns[limit_text]"
+                      dataType="wstr"
+                      length="50"
+                      name="limit_text" />
+                  </externalMetadataColumns>
+                </input>
+              </inputs>
+            </component>
+          </components>
+          <paths>
+            <path
+              refId="Package\Load file limit.Paths[Flat File Source Output]"
+              endId="Package\Load file limit\Convert limit.Inputs[Data Conversion Input]"
+              name="Flat File Source Output"
+              startId="Package\Load file limit\Read limit_feed.Outputs[Flat File Source Output]" />
+            <path
+              refId="Package\Load file limit.Paths[Data Conversion Output]"
+              endId="Package\Load file limit\Write file_limit.Inputs[OLE DB Destination Input]"
+              name="Data Conversion Output"
+              startId="Package\Load file limit\Convert limit.Outputs[Data Conversion Output]" />
+          </paths>
+        </pipeline>
+      </DTS:ObjectData>
+    </DTS:Executable>
+  </DTS:Executables>
+</DTS:Executable>

@@ -3,6 +3,7 @@
 Invented T-SQL used by `tests/test_column_acceptance.py` and `tests/test_column_messy.py`. One directory per scenario; each is passed as `--source-root`.
 
 - `rename_temp` - `demo.output.result_value` <- `#stage.staged_value` (SELECT INTO with alias rename) <- `demo.source.input_a`.
+- `overview_branches` - multi-branch overview fixture (invented): `rpt_db.report.customer_limit.credit_limit` from a CASE (constant `0` when a condition holds, else COALESCE of a primary and a fallback column in `core_db.crm`), a partner staging table with no writer (`partner_db.stage`), a file-staged table loaded by `packages/load_file_limit.dtsx` (flat file -> data conversion -> OLE DB destination), and a later UPDATE override from an adjustment table; WHERE filters on each branch. `terminals.txt` declares the partner schema as a terminal. Run with `--source-root sql --package-root packages`.
 - `case_choice` - searched CASE choosing `input_b` / `input_a` on `use_b` (value vs condition inputs, branch labels); a CASE without ELSE (implicit NULL).
 - `row_selection` - WHERE filter, ON equality join keys and a non-equality ON predicate; the joined lookup table has its own writer (for `--trace-row-selection`).
 - `positional_schema` - INSERT without a column list into a declared table with a leading IDENTITY column (positional mapping skips it).
