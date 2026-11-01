@@ -14,11 +14,11 @@ from sqlglot import exp
 
 from table_lineage.index import Statement
 
-from .catalog import controls_of, restore_variable, Catalog, ColumnInfo, Unit, Writer, ident_text, norm, statement_id, table_parts, update_target, function_summary, split_name
+from .catalog import inline_functions, controls_of, restore_variable, Catalog, ColumnInfo, Unit, Writer, ident_text, norm, statement_id, table_parts, update_target, function_summary, split_name
 from .model import (
     TOP_ORDER, AMBIGUOUS, COLUMN, CONDITION, CONSTANT, FILTER, GROUP_BY, HAVING, INFERRED, JOIN_KEY, JOIN_PREDICATE,
     LOCAL_COLUMN, MERGE_CONDITION, PARAMETER, PARTIAL, TEMP_COLUMN, UNKNOWN, UNRESOLVED, VALUE, VARIABLE,
-    VERIFIED, WINDOW, Gap, Input, Node, ObjectRef, RowSelection, Step, worst,
+    VERIFIED, WINDOW, Evidence, Gap, Input, Node, ObjectRef, RowSelection, Step, worst,
 )
 
 SET_OPS = (exp.Union, exp.Except, exp.Intersect)
@@ -80,6 +80,7 @@ class Source:
     gap: str | None = None
     note: str | None = None
     names: tuple[str, ...] = ()   # extra names this source answers to (object name, schema.name)
+    certain: frozenset = frozenset()   # when columns are unknown: names every candidate definition has
 
 
 @dataclass
@@ -89,6 +90,8 @@ class Item:
     source: Source | None = None   # set for columns expanded from a wildcard
     column: str | None = None
     unknown: bool = False          # a wildcard that could not be expanded
+    certain: frozenset = frozenset()   # unknown wildcard: names it certainly supplies
+    picked_by: str | None = None   # how a by-name lookup found it past an unexpanded wildcard
 
 
 @dataclass
@@ -201,6 +204,21 @@ class Scope:
                 return result
             scope = scope.parent
         ctx = self.ctx
+        outer_sources = False
+        scope = self.parent
+        while scope is not None:
+            outer_sources = outer_sources or bool(scope.sources)
+            scope = scope.parent
+        if not qualifier and len(self.sources) == 1 and self.sources[0].kind == "object" and not outer_sources:
+            # One source and nothing outside the query could supply the name: working SQL binds it there.
+            # Its scanned definition lacks the column (an out-of-date copy, a column added at run time or
+            # by an ALTER form not recognised), so the binding is a stated rule, not proof.
+            only = self.sources[0]
+            out = self.ctx.analyzer.source_column(only, name, self, column, expand_local)
+            what = only.refs[0][0].display if only.refs else only.alias
+            return [Binding(b.node, worst(b.status, INFERRED), b.gap,
+                            f"bound to the only source; the scanned definition of {what} does not list {name}")
+                    for b in out]
         node = Node(UNKNOWN, column.sql(dialect="tsql", comments=False))
         if qualifier:
             gap = ctx.gap("unresolved_alias", f"Alias or object '{qualifier}' in {column.sql(dialect='tsql', comments=False)} is not "
@@ -265,6 +283,8 @@ class Analyzer:
         self.catalog = catalog
         self.expand_row_selection = False   # set by the tracer for --trace-row-selection
         self._object_columns: dict[str, tuple[list[str] | None, bool]] = {}
+        self._result_sets: dict[int, tuple] = {}
+        self._inlined: dict[int, object] = {}   # id(query) -> InlineFunction it was read from
         self._object_columns_active: set[str] = set()
 
     # ================================================================ sources
@@ -304,23 +324,31 @@ class Analyzer:
                 func = node.this if not isinstance(node.this, exp.Dot) else node.this.expression
                 fname = (func.name or func.sql(dialect="tsql", comments=False)).lower()
                 kind = "external_object" if fname in EXTERNAL_FUNCTIONS else "table_valued_function"
+                if kind == "table_valued_function":
+                    inlined = self.inline_tvf(node, func, schema, scope, alias or fname, alias_columns)
+                    if inlined is not None:
+                        return inlined
                 n = Node(UNKNOWN, node.sql(dialect="tsql", comments=False))
                 gap = ctx.gap(kind, f"Rows come from {fname.upper()}(...); its columns are not traced.", n, node)
                 return Source(alias or fname, "opaque", gap=gap, names=(fname,))
             lname = norm(name) or ""
             if not database and not schema and lname in scope_ctes(scope):
                 local = scope_ctes(scope)[lname]
-                return Source(alias or lname, "local", columns=self.local_names(local, ctx), reliable=True,
-                              local=local, names=(lname,))
+                columns = self.local_names(local, ctx)
+                return Source(alias or lname, "local", columns=columns, reliable=True, local=local, names=(lname,),
+                              certain=self.local_certain(local, ctx) if columns is None else frozenset())
             refs = self.resolve_table(node, ctx)
             ref = refs[0][0]
             columns, reliable = self.object_columns(ref) if len(refs) == 1 else (None, False)
+            certain = self.object_certain(ref) if len(refs) == 1 and (columns is None or not reliable) \
+                else frozenset()
             names = {lname}
             if schema:
                 names.add(f"{norm(schema)}.{lname}")
             if database and schema:
                 names.add(f"{norm(database)}.{norm(schema)}.{lname}")
-            return Source(alias or lname, "object", refs, columns, reliable, names=tuple(sorted(names)))
+            return Source(alias or lname, "object", refs, columns, reliable, names=tuple(sorted(names)),
+                          certain=certain)
         if isinstance(node, (exp.Subquery, exp.Lateral)):
             inner = node.this
             if isinstance(inner, exp.Subquery):
@@ -334,7 +362,9 @@ class Analyzer:
             local = Local("derived", name, inner, alias_columns, ctes,
                           scope if isinstance(node, exp.Lateral) else scope.parent,
                           ObjectRef(name, kind="derived", scope=ctx.local_scope(node)))
-            return Source(name, "local", columns=self.local_names(local, ctx), reliable=True, local=local, names=(name,))
+            columns = self.local_names(local, ctx)
+            return Source(name, "local", columns=columns, reliable=True, local=local, names=(name,),
+                          certain=self.local_certain(local, ctx) if columns is None else frozenset())
         if isinstance(node, exp.Values):
             name = alias or f"values{len(scope.sources) + 1}"
             local = Local("values", name, node, alias_columns, {}, None, ObjectRef(name, kind="derived", scope=ctx.local_scope(node)))
@@ -411,6 +441,102 @@ class Analyzer:
             return None
         return [i.name for i in items]
 
+    def into_order(self, ref: ObjectRef):
+        """(ordered names, defining writer) of a table created only by SELECT ... INTO with one settled
+        column order, when no identity, computed or rowversion column can have been copied into it."""
+        definers = [w for w in self.catalog.writers_for(ref) if w.kind == "select_into"]
+        if not definers or any(w.kind == "view" for w in self.catalog.writers_for(ref)):
+            return None
+        columns, reliable = self.object_columns(ref)
+        if columns is None or not reliable:
+            return None
+        if not all(self._copies_plain_columns(w, set()) for w in definers):
+            return None
+        return list(columns), definers[0]
+
+    def _copies_plain_columns(self, writer: Writer, seen: set) -> bool:
+        """Whether a SELECT ... INTO certainly creates no identity, computed or rowversion column: every
+        source it reads has a known schema without such columns (or is itself such a plain copy)."""
+        tree = writer.statement.tree
+        first = branches(tree)[0]
+        if not isinstance(first, exp.Select):
+            return False
+        ctx = Ctx(self, writer.unit, writer.statement)
+        scope = Scope(ctx, statement_ctes(tree, ctx))
+        scope.add_select_sources(first)
+        for source in scope.sources:
+            if source.kind != "object" or len(source.refs) != 1:
+                # A CTE or derived table can pass an identity column through: not settled.
+                return False
+            ref = source.refs[0][0]
+            columns, status, _ = self.catalog.schema_for(ref)
+            if status == "declared":
+                if any(c.identity or c.computed or c.rowversion for c in columns):
+                    return False
+                continue
+            inner = [w for w in self.catalog.writers_for(ref) if w.kind == "select_into"]
+            if not inner or ref.key in seen:
+                return False
+            seen.add(ref.key)
+            if not all(self._copies_plain_columns(w, seen) for w in inner):
+                return False
+        return True
+
+    @staticmethod
+    def _certain_of(items: list[Item]) -> frozenset:
+        """Output names a projection certainly has: named items and what its * items certainly supply."""
+        out = set()
+        for item in items:
+            if item.unknown:
+                out |= item.certain
+            elif item.name:
+                out.add(item.name)
+        return frozenset(out)
+
+    def local_certain(self, local: Local, ctx: Ctx) -> frozenset:
+        if local.column_aliases or local.kind == "values":
+            return frozenset(local.column_aliases or ())
+        first = branches(local.query)[0]
+        if not isinstance(first, exp.Select):
+            return frozenset()
+        scope = Scope(ctx, local_ctes(local, first), local.parent)
+        scope.add_select_sources(first)
+        return self._certain_of(self.projection(first, scope))
+
+    def object_certain(self, ref: ObjectRef) -> frozenset:
+        """Column names every candidate definition of an object has (when its ordered list is not settled)."""
+        key = ("certain", ref.key)
+        if key in self._object_columns:
+            return self._object_columns[key]
+        if key in self._object_columns_active:
+            return frozenset()
+        self._object_columns_active.add(key)
+        try:
+            sets = [frozenset(n) for n in self.catalog.definition_name_sets(ref)]
+            for writer in self.catalog.writers_for(ref):
+                if writer.kind not in ("view", "select_into"):
+                    continue
+                if writer.kind == "view" and isinstance(writer.statement.tree.this, exp.Schema) \
+                        and writer.statement.tree.this.expressions:
+                    sets.append(frozenset(norm(ident_text(c)) for c in writer.statement.tree.this.expressions))
+                    continue
+                query = writer.statement.tree.args.get("expression") if writer.kind == "view" else writer.statement.tree
+                first = branches(query)[0] if query is not None else None
+                if not isinstance(first, exp.Select):
+                    sets.append(frozenset())
+                    continue
+                ctx = Ctx(self, writer.unit, writer.statement)
+                scope = Scope(ctx, statement_ctes(writer.statement.tree, ctx))
+                scope.add_select_sources(first)
+                sets.append(self._certain_of(self.projection(first, scope)))
+            added = {c.name for sch in self.catalog.schemas.get(ref.key, []) if sch.source == "alter_add"
+                     for c in sch.columns}
+            result = (frozenset.intersection(*sets) | added) if sets else frozenset(added)
+        finally:
+            self._object_columns_active.discard(key)
+        self._object_columns[key] = result
+        return result
+
     # ============================================================ projections
     def projection(self, select: exp.Select, scope: Scope) -> list[Item]:
         items: list[Item] = []
@@ -423,7 +549,7 @@ class Analyzer:
                 chosen = scope.find_alias(qualifier) if qualifier else list(scope.sources)
                 for source in chosen:
                     if source.columns is None or not source.reliable:
-                        items.append(Item(None, target, source, None, unknown=True))
+                        items.append(Item(None, target, source, None, unknown=True, certain=source.certain))
                         continue
                     for column in source.columns:
                         items.append(Item(column, target, source, column))
@@ -499,6 +625,7 @@ class Analyzer:
                 parts = branches(local.query)
                 names = self.local_names(local, ctx)
                 label = set_op_label(local.query)
+                first_new = len(ctx.steps)
                 for i, select in enumerate(parts, 1):
                     if not isinstance(select, exp.Select):
                         continue
@@ -514,6 +641,18 @@ class Analyzer:
                     context = [f"{label} branch {i} of {len(parts)}"] if len(parts) > 1 else []
                     method = "column_alias_list" if local.column_aliases else "projection_alias"
                     ctx.steps.append(self.item_step(node, local.kind, item, scope, ctx, method, context, select))
+                definition = self._inlined.get(id(local.query))
+                if definition is not None:
+                    for step in ctx.steps[first_new:]:
+                        if step.target.id != node.id:
+                            continue
+                        step.status = worst(step.status, INFERRED)
+                        step.notes.append(f"Read from the inline table-valued function {definition.schema}."
+                                          f"{definition.name} (its RETURN query, with the call's arguments in "
+                                          "place of its parameters).")
+                        step.evidence.append(Evidence(definition.unit.rel_path, definition.line, definition.line,
+                                                      f"inline function {definition.schema}.{definition.name}",
+                                                      "function_definition", None, definition.unit.root_label))
             ctx.local_done[key] = node
         finally:
             ctx.local_active.discard(key)
@@ -531,9 +670,17 @@ class Analyzer:
             return None
         if by_name:
             matches = [it for it in items if it.name == name and not it.unknown]
-            prior_unknown = any(it.unknown for it in items)
-            if len(matches) == 1 and not prior_unknown:
+            stars = [it for it in items if it.unknown and name in it.certain]
+            if len(matches) == 1 and not any(it.unknown for it in items):
                 return matches[0]
+            # A by-name lookup is only made where output names must be unique (CTE, derived table,
+            # SELECT ... INTO, view), so an unexpanded * cannot also supply a name found elsewhere.
+            if len(matches) + len(stars) == 1:
+                if matches:
+                    return Item(matches[0].name, matches[0].expr, matches[0].source, matches[0].column,
+                                picked_by="unique_name")
+                star = stars[0]
+                return Item(name, star.expr, star.source, name, picked_by="certain_name")
         return None
 
     # ================================================================= steps
@@ -549,10 +696,21 @@ class Analyzer:
                                                    excerpt=f"{star}  [{item.source.alias}.{item.column} by position]")]
             step.evidence.extend(self.schema_evidence(item.source))
             step.status = worst(step.status, INFERRED)
-            step.notes.append(f"{star} was expanded using the ordered column list of {item.source.alias} "
-                              "(see the source_schema evidence); the column is not named in this statement.")
+            if item.picked_by == "certain_name":
+                step.evidence[0] = self.catalog.evidence(ctx.unit, ctx.statement, item.expr, "wildcard",
+                                                         excerpt=f"{star}  [{item.source.alias}.{item.column} by name]")
+                step.notes.append(f"{star} could not be expanded in full (the definitions of {item.source.alias} "
+                                  f"differ or are incomplete), but every candidate definition has {item.column}, and "
+                                  "output names are unique here, so it supplies this column.")
+            else:
+                step.notes.append(f"{star} was expanded using the ordered column list of {item.source.alias} "
+                                  "(see the source_schema evidence); the column is not named in this statement.")
         else:
             step = self.make_step(target, writer_kind, item.expr, scope, ctx, method, context)
+            if item.picked_by == "unique_name":
+                step.status = worst(step.status, INFERRED)
+                step.notes.append("Found by name although a * in the same projection could not be expanded; "
+                                  "output names are unique here, so the * cannot also supply it.")
         if select is not None:
             step.row_selection.extend(self.row_selection(select, scope, ctx))
         return step
@@ -832,6 +990,8 @@ class Analyzer:
                 self._update(tree, column, target, ctx, writer)
             elif writer.kind == "merge":
                 self._merge(tree, column, target, ctx, writer)
+            elif writer.kind == "insert_exec":
+                return self._insert_exec(writer, column, target, ctx)
         except RecursionError:
             ctx.gap("depth_limit", "Expression nesting is too deep to analyse.", target)
         if (f"{writer.unit.root_label}/{writer.unit.rel_path}", writer.statement.start) in self.catalog.top_limited:
@@ -839,6 +999,115 @@ class Analyzer:
                 step.notes.append("This statement has TOP (n): it writes only some of the qualifying rows, and "
                                   "which ones is not determined.")
         return ctx.steps, ctx.gaps, ctx.cycles
+
+    # ------------------------------------------------------------ inline table-valued functions
+    def inline_tvf(self, node, func, schema, scope: Scope, name: str, alias_columns):
+        """A call of an inline table-valued function, read as a derived table: its RETURN query with the
+        call's arguments in place of the parameters. Only for one definition and positional arguments."""
+        ctx = scope.ctx
+        fname = norm(func.name if not isinstance(func, exp.Anonymous) else str(func.this))
+        defs = inline_functions(self.catalog).get((norm(schema) or self.catalog.default_schema, fname), [])
+        if len(defs) != 1:
+            return None
+        definition = defs[0]
+        args = list(func.expressions)
+        if len(args) != len(definition.params) or any(isinstance(a, exp.Var) and a.name.upper() == "DEFAULT"
+                                                       for a in args):
+            return None
+        mapping = dict(zip(definition.params, args))
+        query = definition.query.copy()
+
+        def substitute(n):
+            if isinstance(n, (exp.Parameter, exp.Var)):
+                text = restore_variable(n.sql(dialect="tsql", comments=False)).lower()
+                if text in mapping:
+                    return mapping[text].copy()
+            return n
+
+        query = query.transform(substitute)
+        local = Local("derived", name, query, alias_columns, {}, scope,
+                      ObjectRef(name, kind="derived", scope=ctx.local_scope(node)))
+        self._inlined[id(query)] = definition
+        columns = self.local_names(local, ctx)
+        return Source(name, "local", columns=columns, reliable=True, local=local, names=(name, fname),
+                      certain=self.local_certain(local, ctx) if columns is None else frozenset())
+
+    # ------------------------------------------------------------ INSERT ... EXEC
+    def result_set(self, issue):
+        """(callee ProcInfo, its one result SELECT statement, target column names) for an INSERT ... EXEC
+        of a named procedure, or (None, reason). Only a settled result set is mapped: one callee
+        definition, exactly one statement returning rows, and no nested EXEC or dynamic SQL there
+        (their result sets would be captured too)."""
+        key = id(issue)
+        if key in self._result_sets:
+            return self._result_sets[key]
+        detail = issue.detail or {}
+        callee = detail.get("callee")
+        out = (None, "the statement executes a string, not a named procedure")
+        if callee is not None:
+            procs = self.catalog.procs_for(callee)
+            if len(procs) != 1:
+                out = (None, f"{callee.display} has {'no definition' if not procs else 'several definitions'} "
+                             "in the scanned files")
+            else:
+                proc = procs[0]
+                body = [st for st in proc.unit.index.statements if st.scope == proc.scope]
+                nested = self.catalog.calls_by_caller.get(proc.scope) or self.catalog.dynamic_by_scope.get(proc.scope)
+                unparsed = [i for i in self.catalog.issues if i.statement.scope == proc.scope
+                            and i.kind in ("parse_error", "insert_exec", "unsupported_statement")]
+                results = [st for st in body if self._returns_rows(st)]
+                if nested:
+                    out = (None, f"{callee.display} runs other procedures or dynamic SQL, whose result sets "
+                                 "would be captured too")
+                elif unparsed:
+                    out = (None, f"{callee.display} has statements that could not be analysed")
+                elif len(results) != 1:
+                    out = (None, f"{callee.display} has {len(results)} statements that return rows")
+                else:
+                    names = detail.get("target_columns")
+                    if names is None:
+                        columns, status, _ = self.catalog.schema_for(detail["target"])
+                        names = ([c.name for c in columns if not (c.identity or c.computed or c.rowversion)]
+                                 if status == "declared" else None)
+                    out = (proc, results[0], names) if names else \
+                        (None, "the INSERT has no column list and the target has no declared column order")
+        self._result_sets[key] = out
+        return out
+
+    @staticmethod
+    def _returns_rows(statement) -> bool:
+        tree = statement.tree
+        if not isinstance(tree, (exp.Select, exp.Union, exp.Except, exp.Intersect)):
+            return False
+        first = branches(tree)[0]
+        if not isinstance(first, exp.Select) or first.args.get("into") is not None:
+            return False
+        # SELECT @v = ... assigns and returns nothing.
+        return not any(isinstance(e, exp.EQ) and isinstance(e.this, exp.Parameter) for e in first.expressions)
+
+    def _insert_exec(self, writer: Writer, column: str, target: Node, ctx: Ctx):
+        issue = next((i for i in self.catalog.issues if i.kind == "insert_exec" and i.statement is writer.statement), None)
+        found = self.result_set(issue) if issue is not None else (None, "no issue")
+        if found[0] is None:
+            return [], [], []   # the insert_exec gap on the object explains it
+        proc, select, names = found
+        if column not in names:
+            return [], [], []
+        inner = Ctx(self, proc.unit, select, controls_of(proc.unit, select))
+        query = select.tree
+        self._query_steps(query, None, names.index(column), column, target, inner, "insert_exec",
+                          "result_set_position", statement_ctes(query, inner), len(names))
+        call_ev = self.catalog.evidence(writer.unit, writer.statement, role="insert_exec_call")
+        for step in inner.steps:
+            if step.target.id == target.id:
+                step.status = worst(step.status, INFERRED)
+                step.procedure = writer.statement.procedure or step.procedure
+                step.evidence.insert(0, call_ev)
+                step.notes.append(f"Rows come from the result set of {proc.ref.display} (its only statement that "
+                                  f"returns rows), matched by position: column {names.index(column) + 1} of "
+                                  f"{len(names)}.")
+            step._origin = (proc.unit.path, select.start, select.scope)
+        return inner.steps, inner.gaps, inner.cycles
 
     def through_column(self, writer: Writer, column: str, ctx: Ctx) -> str | None:
         """Output column of the CTE/view written by ``writer`` that is base column ``column``."""
@@ -982,6 +1251,24 @@ class Analyzer:
                               "target_list", ctes, len(names))
             return
         columns, status, _ = self.catalog.schema_for(writer.ref)
+        derived = self.into_order(writer.ref) if status == "missing" else None
+        if derived is not None:
+            names, definer = derived
+            if column not in names:
+                return
+            self._query_steps(query, None, names.index(column), column, target, ctx,
+                              "insert_values" if isinstance(query, exp.Values) else "insert_select",
+                              "positional_schema", ctes, len(names))
+            for step in ctx.steps:
+                if step.target.id == target.id:
+                    step.status = worst(step.status, INFERRED)
+                    step.notes.append("Matched by position against the column order set by the SELECT ... INTO "
+                                      "that creates the table (no identity, computed or rowversion column is copied).")
+                    step.evidence.append(self.catalog.evidence(
+                        definer.unit, definer.statement, role="target_schema",
+                        excerpt=f"column order of {writer.ref.display}: position {names.index(column) + 1} of "
+                                f"{len(names)}, from SELECT ... INTO"))
+            return
         if status != "declared":
             message = ("INSERT without a column list, and the target has no declared ordered schema in the "
                        "scanned files, so its columns cannot be matched by position.") if status == "missing" else \

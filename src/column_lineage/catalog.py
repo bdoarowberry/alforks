@@ -31,7 +31,8 @@ TOP = r"(?:TOP\s*\([^)]*\)\s*(?:PERCENT\s+)?)?"
 WRITE_TARGET = re.compile(
     rf"\b(?:INSERT\s+{TOP}(?:INTO\s+)?|UPDATE\s+{TOP}|MERGE\s+{TOP}(?:INTO\s+)?|\bINTO\s+)(?P<target>{IDENT})", re.I)
 SYNONYM = re.compile(rf"\bCREATE\s+SYNONYM\s+(?P<name>{IDENT})\s+FOR\s+(?P<target>{IDENT})", re.I)
-ALTER_ADD = re.compile(rf"\bALTER\s+TABLE\s+(?P<name>{IDENT})\s+ADD\s+(?P<body>[^;]*)", re.I)
+ALTER_ADD = re.compile(rf"\bALTER\s+TABLE\s+(?P<name>{IDENT})\s+(?:WITH\s+(?:NO)?CHECK\s+)?ADD\s+(?P<body>[^;]*)",
+                       re.I)
 TEMP_MARK = "#"
 COMPOUND = re.compile(r"(?P<lhs>@[\w$#@]+|(?:\[[^\]]+\]|[A-Za-z_][\w$#]*)(?:\.(?:\[[^\]]+\]|[A-Za-z_][\w$#]*))*)"
                       r"\s*(?P<op>[-+*/%&|^])=(?!=)")
@@ -471,7 +472,7 @@ class TableSchema:
 @dataclass
 class Writer:
     ref: ObjectRef
-    kind: str          # insert, select_into, update, merge, view
+    kind: str          # insert, select_into, update, merge, view, insert_exec (named procedure's result set)
     statement: Statement
     unit: Unit
     procedure: str | None
@@ -511,6 +512,7 @@ class StatementIssue:
     unit: Unit
     targets: tuple[str, ...]   # normalized names mentioned as write targets, when known
     message: str
+    detail: dict = field(default_factory=dict)   # insert_exec: callee, target_columns, target
 
 
 class Catalog:
@@ -1088,9 +1090,10 @@ class Catalog:
                 insert_exec = INSERT_EXEC.match(mask_noncode(text) + " EXEC")
         if insert_exec:
             target = self.ref_from_text(insert_exec.group("target"), unit, statement)
-            self._issue("insert_exec", unit, statement, (target.name,),
-                        "INSERT ... EXEC: rows come from a procedure result set, which is not mapped to columns.")
-            self._writer_ref(target, unit, statement)
+            issue = self._issue("insert_exec", unit, statement, (target.name,),
+                                "INSERT ... EXEC: rows come from a procedure result set, which is not mapped to columns.")
+            ref = self._writer_ref(target, unit, statement)
+            self._insert_exec_call(unit, statement, issue, ref, insert_exec, order)
             return
         if tree is None or isinstance(tree, exp.Command):
             targets = write_targets(mask_noncode(text))
@@ -1311,6 +1314,31 @@ class Catalog:
         self.assignments[(statement.scope, name)].append(Assignment(name, statement.scope, statement, unit, value, select,
                                                                     kind, note))
 
+    def _insert_exec_call(self, unit: Unit, statement: Statement, issue: StatementIssue, ref: ObjectRef,
+                          match: re.Match, order: int) -> None:
+        """INSERT ... EXEC of a named procedure: record the call and a writer whose columns the analyzer
+        maps from the callee's result set when that is settled (EXEC of a string stays a gap)."""
+        masked = mask_noncode(statement.text)
+        exec_at = match.end() - len(re.search(r"EXEC(?:UTE)?$", match.group(0), re.I).group(0))
+        exec_text = statement.text[exec_at:].strip().rstrip(";")
+        if not exec_text or re.match(r"EXEC(?:UTE)?\s*\(", masked[exec_at:].strip(), re.I):
+            return
+        try:
+            tree = sqlglot.parse_one(exec_text, read="tsql", error_level=ErrorLevel.RAISE)
+        except (SqlglotError, ValueError):
+            return
+        if not isinstance(tree, exp.Execute) or not isinstance(tree.this, exp.Table):
+            return
+        columns = re.search(r"\((?P<cols>[^)]*)\)\s*EXEC", masked[:match.end()], re.I)
+        names = [norm(split_name(c.strip())[-1]) for c in columns.group("cols").split(",")] if columns else None
+        calls_before = len(self.calls_by_caller[statement.scope])
+        self._call(unit, statement, tree)
+        if len(self.calls_by_caller[statement.scope]) == calls_before:
+            return
+        call = self.calls_by_caller[statement.scope][-1]
+        issue.detail.update({"callee": call.callee, "target_columns": names, "call": call, "target": ref})
+        self._add_writer(Writer(ref, "insert_exec", statement, unit, statement.procedure, order))
+
     def _call(self, unit: Unit, statement: Statement, tree: exp.Execute) -> None:
         target = tree.this
         if not isinstance(target, exp.Table):
@@ -1454,6 +1482,19 @@ class Catalog:
                         names.add(views[0].ref.name)
         return names
 
+    def issue_reaches(self, issue: StatementIssue, ref: ObjectRef) -> bool:
+        """Whether a statement issue recorded under ``ref``'s name can concern ``ref``. A #temp table is
+        private to the procedure that creates it and the procedures it calls: an issue in another
+        procedure that creates its own same-named #temp table, or that cannot see this one, does not."""
+        if ref.kind != "temp_table":
+            return True
+        scope = issue.statement.scope
+        if scope == ref.scope:
+            return True
+        if ref.name in self.temp_creators.get(scope, ()):
+            return False
+        return ref.scope in self.temp_scopes(ref.name, scope)
+
     def dynamic_literal_args(self) -> dict[str, list]:
         """Object name -> (call, issue) for calls passing that name as a string literal to a procedure
         that runs dynamic SQL not fully evaluated (a generic loader called with its target's name)."""
@@ -1528,6 +1569,17 @@ class Catalog:
                 if all(x.name != c.name for x in columns):
                     columns.append(ColumnInfo(c.name, len(columns) + 1, c.identity, c.computed, c.rowversion, c.default))
         return columns, "declared", creates[0]
+
+    def definition_name_sets(self, ref: ObjectRef) -> list[tuple[str, ...]]:
+        """Column names of each CREATE TABLE / table variable definition of ``ref`` (scoped for temps)."""
+        schemas = list(self.schemas.get(ref.key, []))
+        if not schemas:
+            for key in self.aliases_of(ref):
+                schemas.extend(self.schemas.get(key, []))
+        creates = [s for s in schemas if s.source in ("create_table", "table_variable")]
+        if ref.kind == "temp_table":
+            creates = [s for s in creates if s.statement.scope == ref.scope]
+        return [tuple(c.name for c in s.columns) for s in creates]
 
     def is_known(self, ref: ObjectRef) -> bool:
         keys = [ref.key] + self.aliases_of(ref)
@@ -1743,6 +1795,58 @@ class FunctionSummary:
     database: str | None = None
     body_hash: str = ""
     condition_only: list[bool] | None = None   # per parameter: used only in IF/WHILE conditions
+
+
+@dataclass
+class InlineFunction:
+    """An inline table-valued function: RETURNS TABLE AS RETURN (SELECT ...)."""
+    schema: str
+    name: str
+    params: list[str]
+    query: exp.Expression
+    unit: "Unit"
+    line: int
+    database: str | None
+
+
+def inline_functions(catalog: "Catalog") -> dict[tuple[str, str], list[InlineFunction]]:
+    cached = getattr(catalog, "_inline_functions", None)
+    if cached is not None:
+        return cached
+    found: dict[tuple[str, str], list[InlineFunction]] = defaultdict(list)
+    for unit in catalog.units:
+        masked = unit.masked
+        for match in FUNCTION_HEADER.finditer(masked):
+            parts = split_name(match.group("name"))
+            key = (norm(parts[-2]) if len(parts) > 1 and parts[-2] else catalog.default_schema, norm(parts[-1]))
+            close, depth = match.end(), 1
+            while close < len(masked) and depth:
+                depth += {"(": 1, ")": -1}.get(masked[close], 0)
+                close += 1
+            params = [p.lower() for p in re.findall(r"@[\w$#@]+", masked[match.end():close - 1])]
+            head = re.compile(r"\s*RETURNS\s+TABLE\b(?:\s+WITH\s+\w+(?:\s*,\s*\w+)*)?\s+AS\s+RETURN\b", re.I)
+            returns = head.match(masked, close)
+            if returns is None:
+                continue
+            end = len(masked)
+            for boundary in (GO.search(masked, returns.end()), FUNCTION_HEADER.search(masked, returns.end()),
+                             DEFINITION.search(masked, returns.end())):
+                if boundary is not None:
+                    end = min(end, boundary.start())
+            body = unit.text[returns.end():end].strip().rstrip(";").strip()
+            try:
+                query = sqlglot.parse_one(body, read="tsql", error_level=ErrorLevel.RAISE)
+            except (SqlglotError, ValueError):
+                continue
+            while isinstance(query, (exp.Subquery, exp.Paren)):
+                query = query.this
+            if not isinstance(query, (exp.Select, exp.Union, exp.Except, exp.Intersect)):
+                continue
+            database, _ = unit.database_at(match.start(), catalog.default_database)
+            found[key].append(InlineFunction(key[0], key[1], params, query, unit,
+                                             unit.text.count("\n", 0, match.start()) + 1, database))
+    catalog._inline_functions = found
+    return found
 
 
 def _function_definitions(catalog: "Catalog") -> dict[tuple[str, str], list[FunctionSummary]]:

@@ -18,7 +18,7 @@ from .model import (
 
 OVERWRITING = ("update", "merge")
 UPDATING_STEPS = ("update", "merge_update")      # steps that change rows that already exist
-ROW_CREATING_WRITERS = ("insert", "select_into", "view")
+ROW_CREATING_WRITERS = ("insert", "select_into", "view", "insert_exec")
 MERGE_INSERTS = re.compile(r"\bWHEN\s+NOT\s+MATCHED\b(?!\s+BY\s+SOURCE\b)", re.I)
 # Open points that may themselves add rows to an object.
 GAPS_THAT_MAY_ADD_ROWS = ("insert_exec", "dynamic_sql", "parse_error", "unsupported_statement",
@@ -498,7 +498,8 @@ class Tracer:
         gaps = []
         issues = []
         for name in sorted(self.catalog.issue_names(ref)):
-            issues.extend(i for i in self.catalog.issues_by_target.get(name, []) if i not in issues)
+            issues.extend(i for i in self.catalog.issues_by_target.get(name, [])
+                          if i not in issues and self.catalog.issue_reaches(i, ref))
         for call, issue in self.catalog.dynamic_literal_args().get(ref.name, []):
             gaps.append(Gap("dynamic_sql", f"{call.statement.procedure or call.unit.rel_path} passes {ref.name} to "
                             f"{issue.statement.procedure or 'a procedure'}, which builds and runs dynamic SQL; "
@@ -508,6 +509,8 @@ class Tracer:
         for issue in issues:
             if self.catalog.dead_dynamic(issue) or self.catalog.dynamic_resolved(issue):
                 continue
+            if issue.kind == "insert_exec" and self.analyzer.result_set(issue)[0] is not None:
+                continue   # mapped from the callee's result set (writer kind insert_exec)
             wording = {"dynamic_sql": "Dynamic SQL in {where} names {obj} as a write target; what it writes is not analysed.",
                        "parse_error": "An unparsed statement in {where} appears to write {obj}.",
                        "insert_exec": "INSERT ... EXEC in {where} writes {obj} from a procedure result set; columns are not mapped.",
@@ -566,8 +569,10 @@ class Tracer:
             cycles.extend(found_cycles)
             mark_evaluated(found, writer.statement)
             for step in found:
-                step._scope = writer.statement.scope
-                step._position = (writer.unit.path, writer.statement.start, writer.statement.scope)
+                # Steps mapped from another statement (a callee's result set) read where that statement runs.
+                origin = getattr(step, "_origin", None)
+                step._scope = origin[2] if origin else writer.statement.scope
+                step._position = origin or (writer.unit.path, writer.statement.start, writer.statement.scope)
                 if step.target.id == node.id:
                     writing.append((writer, step))
                     if ref.kind == "temp_table" and writer.statement.scope != ref.scope:
@@ -605,8 +610,13 @@ class Tracer:
                 if ref.kind in ("temp_table", "table_variable"):
                     gaps.append(Gap("missing_definition", f"No writer of {ref.display} was found before this read.", node))
                 elif schema_status == "missing" and not self.catalog.is_known(ref):
-                    gaps.append(Gap("missing_definition", f"{ref.display} has no definition or writer in the scanned "
-                                    "files.", node))
+                    if ref.kind in ("table", "view") and declared_terminal(self.terminals, node):
+                        # The reviewer accepts this object as a terminal for the run: an end, not a gap.
+                        stops.append(Stop(node, "source_without_writer", "No definition or writer of this object "
+                                          "in the scanned files; declared as a terminal for this run."))
+                    else:
+                        gaps.append(Gap("missing_definition", f"{ref.display} has no definition or writer in the "
+                                        "scanned files.", node))
                 else:
                     stops.append(Stop(node, "source_without_writer", "No statement in the scanned files writes this object."))
             elif not writers:
