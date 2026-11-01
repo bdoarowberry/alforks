@@ -533,6 +533,7 @@ class Catalog:
         self.calls_by_caller: dict[str, list[Call]] = defaultdict(list)
         self.assignments: dict[tuple[str, str], list[Assignment]] = defaultdict(list)
         self.temp_creators: dict[str, set[str]] = defaultdict(set)   # scope -> {#name}
+        self.temp_create_points: dict[tuple[str, str], list] = defaultdict(list)   # (scope, #name) -> [(unit, stmt)]
         self.temp_writer_scopes: dict[str, set[str]] = defaultdict(set)  # #name -> {scope}
         self.synonyms: dict[str, tuple[ObjectRef, Statement, Unit]] = {}
         self.issues: list[StatementIssue] = []
@@ -963,10 +964,20 @@ class Catalog:
         if ref.kind in ("table", "view") and ref.database and ref.schema and ref.server is None:
             self.known_databases[(ref.schema, ref.name)].add(ref.database)
 
+    def creates_temp_unconditionally(self, scope: str, name: str) -> bool:
+        """Whether ``scope`` always creates its own #temp ``name`` (not only under IF / WHILE / CATCH, as in
+        ``IF OBJECT_ID('tempdb..#t') IS NULL CREATE TABLE #t``, which keeps a caller's table when it exists)."""
+        if name not in self.temp_creators.get(scope, ()):
+            return False
+        points = self.temp_create_points.get((scope, name)) or []
+        return not points or any(all(c.startswith("TRY") for c in controls_of(unit, statement))
+                                 for unit, statement in points)
+
     def temp_scopes(self, name: str, scope: str, depth: int = 0, seen: set | None = None) -> list[str]:
         """Scopes whose #temp table ``name`` is visible to code running in ``scope``."""
-        if name in self.temp_creators.get(scope, ()):
+        if self.creates_temp_unconditionally(scope, name):
             return [scope]
+        own = [scope] if name in self.temp_creators.get(scope, ()) else []
         if depth > 12:
             return []
         seen = seen or set()
@@ -982,9 +993,9 @@ class Catalog:
                 earlier = sorted((int(m.group(1)), other) for other, names in self.temp_creators.items()
                                  if name in names and other.startswith(prefix + "::<batch@")
                                  for m in [re.search(r"<batch@(\d+)>$", other)] if m and int(m.group(1)) < int(batch.group(1)))
-                return [earlier[-1][1]] if earlier else []
-            return []
-        found: list[str] = []
+                return own + ([earlier[-1][1]] if earlier else [])
+            return own
+        found: list[str] = list(own)
         for call in self.calls_by_callee.get(proc.key, []):
             for candidate in self.temp_scopes(name, call.caller_scope, depth + 1, seen):
                 if candidate not in found:
@@ -1174,6 +1185,7 @@ class Catalog:
                 self._add_writer(Writer(ref, "select_into", statement, unit, statement.procedure, order))
                 if ref.kind == "temp_table":
                     self.temp_creators[statement.scope].add(ref.name)
+                    self.temp_create_points[(statement.scope, ref.name)].append((unit, statement))
                     self.temp_resets[(statement.scope, ref.name)].append(statement.start)
                 return
             if isinstance(tree, exp.Select):
@@ -1247,6 +1259,7 @@ class Catalog:
         ref = self.ref_from_table(schema.this, unit, statement)
         if ref.kind == "temp_table":
             self.temp_creators[statement.scope].add(ref.name)
+            self.temp_create_points[(statement.scope, ref.name)].append((unit, statement))
         else:
             self._register(ref)
         columns = []
@@ -1491,7 +1504,7 @@ class Catalog:
         scope = issue.statement.scope
         if scope == ref.scope:
             return True
-        if ref.name in self.temp_creators.get(scope, ()):
+        if self.creates_temp_unconditionally(scope, ref.name):
             return False
         return ref.scope in self.temp_scopes(ref.name, scope)
 
@@ -1531,7 +1544,7 @@ class Catalog:
                                                 writer.order, ("view", view_key)))
         if ref.kind == "temp_table":
             for scope in sorted(self.temp_writer_scopes.get(ref.name, ())):
-                if scope == ref.scope or ref.name in self.temp_creators.get(scope, ()):
+                if scope == ref.scope or self.creates_temp_unconditionally(scope, ref.name):
                     continue
                 if ref.scope in self.temp_scopes(ref.name, scope):
                     found.extend(self.writers.get(ObjectRef(ref.name, kind="temp_table", scope=scope).key, []))

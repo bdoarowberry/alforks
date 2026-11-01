@@ -1,0 +1,14 @@
+CREATE TABLE dbo.Twice (id int, col_a int);
+CREATE TABLE dbo.Other (id int, col_a int);
+CREATE TABLE dbo.NoDefCopy (id int);
+CREATE TABLE dbo.Parent (id int, code int);
+CREATE TABLE dbo.Child (id int, col_a int, code int);
+CREATE TABLE dbo.Narrow (id int, col_a int);
+CREATE TABLE dbo.Src (id int, col_a int, col_b int, amount int);
+CREATE TABLE dbo.Log (id int, col_a int);
+CREATE TABLE dbo.Thing (id int, col_a int);
+CREATE TABLE dbo.Out_u (col_a int); CREATE TABLE dbo.Out_v (col_a int);
+CREATE TABLE dbo.Out_shadow (pid int); CREATE TABLE dbo.Out_escape (code int);
+CREATE TABLE dbo.Out_other_db (col_a int); CREATE TABLE dbo.Out_fn_cte (col_a int);
+CREATE TABLE dbo.Out_del (col_a int); CREATE TABLE dbo.Out_fetch (col_a int);
+CREATE TABLE dbo.Out_caller_temp (v int); CREATE TABLE dbo.Out_conditional (amount int);

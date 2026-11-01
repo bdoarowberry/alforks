@@ -7,6 +7,11 @@ CTEs and derived tables become statement-local nodes with their own steps.
 """
 from __future__ import annotations
 
+import dataclasses
+
+from table_lineage.index import mask_noncode
+import re
+
 from dataclasses import dataclass, field
 
 import sqlglot
@@ -158,6 +163,7 @@ class Scope:
         self.ctes = ctes
         self.parent = parent
         self.sources: list[Source] = []
+        self.qualified_only = False   # private argument sources of an inlined function: reached by alias only
 
     # ---------------------------------------------------------------- sources
     def add_from(self, node) -> Source | None:
@@ -176,7 +182,7 @@ class Scope:
     def could_supply(self, name: str) -> bool:
         scope = self
         while scope is not None:
-            if any(s.columns is not None and name in s.columns for s in scope.sources):
+            if not scope.qualified_only and any(s.columns is not None and name in s.columns for s in scope.sources):
                 return True
             scope = scope.parent
         return False
@@ -207,9 +213,10 @@ class Scope:
         outer_sources = False
         scope = self.parent
         while scope is not None:
-            outer_sources = outer_sources or bool(scope.sources)
+            outer_sources = outer_sources or (bool(scope.sources) and not scope.qualified_only)
             scope = scope.parent
-        if not qualifier and len(self.sources) == 1 and self.sources[0].kind == "object" and not outer_sources:
+        if not qualifier and len(self.sources) == 1 and self.sources[0].kind == "object" and not outer_sources \
+                and not ctx.in_row_selection:
             # One source and nothing outside the query could supply the name: working SQL binds it there.
             # Its scanned definition lacks the column (an out-of-date copy, a column added at run time or
             # by an ALTER form not recognised), so the binding is a stated rule, not proof.
@@ -228,6 +235,8 @@ class Scope:
         return [Binding(node, UNRESOLVED, gap)]
 
     def _bind_here(self, name, qualifier, column, expand_local) -> list[Binding] | None:
+        if self.qualified_only and not qualifier:
+            return None
         if qualifier:
             candidates = self.find_alias(qualifier.split(".")[-1]) if "." not in qualifier else \
                 [s for s in self.sources if qualifier in s.names or qualifier.split(".")[-1] == s.alias]
@@ -461,6 +470,9 @@ class Analyzer:
         first = branches(tree)[0]
         if not isinstance(first, exp.Select):
             return False
+        if any((f.name or "").upper() == "IDENTITY" for e in first.expressions
+               for f in e.find_all(exp.Anonymous, exp.Func)):
+            return False   # SELECT IDENTITY(int, 1, 1) AS id INTO ... creates an identity column
         ctx = Ctx(self, writer.unit, writer.statement)
         scope = Scope(ctx, statement_ctes(tree, ctx))
         scope.add_select_sources(first)
@@ -637,6 +649,10 @@ class Analyzer:
                         if i == 1:
                             ctx.gap("wildcard_without_schema" if any(it.unknown for it in items) else "missing_definition",
                                     f"Output column {name} of {local.kind} {local.name} could not be located.", node, select)
+                        else:
+                            # Later branches match by position, which a * of unknown width hides.
+                            ctx.gap("wildcard_without_schema", f"Branch {i} of {local.kind} {local.name}: the position "
+                                    f"of {name} is unknown because a * cannot be expanded.", node, select)
                         continue
                     context = [f"{label} branch {i} of {len(parts)}"] if len(parts) > 1 else []
                     method = "column_alias_list" if local.column_aliases else "projection_alias"
@@ -1003,17 +1019,44 @@ class Analyzer:
     # ------------------------------------------------------------ inline table-valued functions
     def inline_tvf(self, node, func, schema, scope: Scope, name: str, alias_columns):
         """A call of an inline table-valued function, read as a derived table: its RETURN query with the
-        call's arguments in place of the parameters. Only for one definition and positional arguments."""
+        call's arguments in place of the parameters. Only for one definition in the caller's database,
+        positional arguments, and arguments whose columns are qualified by a caller alias. The body is
+        isolated from the caller: its own names never see the caller's sources, and an argument's
+        columns are bound to the caller's sources under private aliases the body cannot capture."""
         ctx = scope.ctx
         fname = norm(func.name if not isinstance(func, exp.Anonymous) else str(func.this))
-        defs = inline_functions(self.catalog).get((norm(schema) or self.catalog.default_schema, fname), [])
+        _, database, _, _ = table_parts(node)
+        current = norm(ctx.unit.database_at(ctx.statement.start, self.catalog.default_database)[0])
+        if database and norm(database) != current:
+            return None   # the body would be resolved in another database
+        defs = [d for d in inline_functions(self.catalog).get((norm(schema) or self.catalog.default_schema, fname), [])
+                if norm(d.database) == current]
         if len(defs) != 1:
             return None
         definition = defs[0]
-        args = list(func.expressions)
-        if len(args) != len(definition.params) or any(isinstance(a, exp.Var) and a.name.upper() == "DEFAULT"
-                                                       for a in args):
+        args = [a.copy() for a in func.expressions]
+        if len(args) != len(definition.params) or any(
+                (isinstance(a, exp.Var) or (isinstance(a, exp.Column) and not a.table)) and a.name.upper() == "DEFAULT"
+                for a in args):
             return None
+        arg_scope = Scope(ctx, {}, None)
+        arg_scope.qualified_only = True
+        private: dict[str, str] = {}
+        for arg in args:
+            for column in arg.find_all(exp.Column):
+                qualifier = column.table
+                if not qualifier:
+                    return None   # which caller source an unqualified argument column names is not settled
+                found, level = [], scope
+                while level is not None and not found:
+                    found = level.find_alias(qualifier)
+                    level = level.parent
+                if len(found) != 1:
+                    return None
+                alias = private.setdefault(qualifier.lower(), f"__arg{len(private) + 1}_{qualifier.lower()}")
+                if not any(src.alias == alias for src in arg_scope.sources):
+                    arg_scope.sources.append(dataclasses.replace(found[0], alias=alias, names=(alias,)))
+                column.set("table", exp.to_identifier(alias))
         mapping = dict(zip(definition.params, args))
         query = definition.query.copy()
 
@@ -1025,7 +1068,7 @@ class Analyzer:
             return n
 
         query = query.transform(substitute)
-        local = Local("derived", name, query, alias_columns, {}, scope,
+        local = Local("derived", name, query, alias_columns, statement_ctes(query, ctx), arg_scope,
                       ObjectRef(name, kind="derived", scope=ctx.local_scope(node)))
         self._inlined[id(query)] = definition
         columns = self.local_names(local, ctx)
@@ -1056,11 +1099,16 @@ class Analyzer:
                 unparsed = [i for i in self.catalog.issues if i.statement.scope == proc.scope
                             and i.kind in ("parse_error", "insert_exec", "unsupported_statement")]
                 results = [st for st in body if self._returns_rows(st)]
+                end = max((st.end for st in body), default=proc.start)
+                hidden = self._may_return_rows(mask_noncode(proc.unit.text[proc.start:end]))
                 if nested:
                     out = (None, f"{callee.display} runs other procedures or dynamic SQL, whose result sets "
                                  "would be captured too")
                 elif unparsed:
                     out = (None, f"{callee.display} has statements that could not be analysed")
+                elif hidden:
+                    out = (None, f"{callee.display} has statements that may also return rows (OUTPUT without INTO, "
+                                 "FETCH without INTO, or a statement form not analysed)")
                 elif len(results) != 1:
                     out = (None, f"{callee.display} has {len(results)} statements that return rows")
                 else:
@@ -1073,6 +1121,19 @@ class Analyzer:
                         (None, "the INSERT has no column list and the target has no declared column order")
         self._result_sets[key] = out
         return out
+
+    @staticmethod
+    def _may_return_rows(body: str) -> bool:
+        """Whether a procedure body (comments and strings masked) has a statement other than a plain SELECT
+        that can send rows to its caller: OUTPUT without INTO, FETCH without INTO, DBCC, RESTORE, ...
+        Checked on the text, so statements the indexer does not split out are not missed."""
+        for match in re.finditer(r"\bOUTPUT\s+(?:inserted|deleted|\$action)\b[^;]*", body, re.I):
+            if not re.search(r"\bINTO\b", match.group(0), re.I):
+                return True
+        for match in re.finditer(r"\bFETCH\b[^;\n]*", body, re.I):
+            if not re.search(r"\bINTO\b", match.group(0), re.I):
+                return True
+        return re.search(r"(?:^|[;\s])(?:RESTORE|DBCC|READTEXT|RECEIVE)\b", body, re.I) is not None
 
     @staticmethod
     def _returns_rows(statement) -> bool:
@@ -1098,6 +1159,16 @@ class Analyzer:
         self._query_steps(query, None, names.index(column), column, target, inner, "insert_exec",
                           "result_set_position", statement_ctes(query, inner), len(names))
         call_ev = self.catalog.evidence(writer.unit, writer.statement, role="insert_exec_call")
+        # A #temp table the callee reads but does not create is the calling procedure's (or one visible to
+        # it), not the same-named #temp table of every other caller.
+        def visible(node) -> bool:
+            if node.kind != TEMP_COLUMN or node.object is None or node.object.kind != "temp_table" \
+                    or node.object.scope == proc.scope:
+                return True
+            return node.object.scope in self.catalog.temp_scopes(node.object.name, writer.statement.scope)
+        for step in inner.steps:
+            step.inputs = [i for i in step.inputs if visible(i.node)]
+            step.row_selection = [r for r in step.row_selection if visible(r.node)]
         for step in inner.steps:
             if step.target.id == target.id:
                 step.status = worst(step.status, INFERRED)
@@ -1228,13 +1299,17 @@ class Analyzer:
                     continue
                 item = items[position]
             else:
+                at = names.index(column) if names and column in names else None
                 item = self.pick(items, names, column, True) if i == 1 else (
-                    items[names.index(column)] if names and column in names and names.index(column) < len(items)
-                    and not any(it.unknown for it in items[:names.index(column) + 1]) else None)
+                    items[at] if at is not None and at < len(items) and None not in names[:at + 1]
+                    and not any(it.unknown for it in items[:at + 1]) else None)
                 if item is None:
                     if any(it.unknown for it in items):
                         ctx.gap("wildcard_without_schema", "A * in the projection cannot be expanded, so it is unknown "
                                 f"whether it supplies {column}.", target, select)
+                    elif i > 1:
+                        ctx.gap("wildcard_without_schema", f"Branch {i}: the position of {column} is unknown because a "
+                                "* in the first branch cannot be expanded.", target, select)
                     continue
             ctx.steps.append(self.item_step(target, writer_kind, item, scope, ctx, method, context, select))
 

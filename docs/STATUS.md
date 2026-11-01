@@ -351,3 +351,26 @@ The tester classified the remaining gaps (counts are affected traces). Changes:
 - **Missing definition (35, six backup-style tables).** Unchanged by default: no definition and no
   writer is a gap. `--declared-terminals` can now accept such a table as a terminal for the run (a
   declared stop), so the scope decision can be recorded without changing the tool.
+
+### Adversarial review 6 of these rules (tests/test_column_review6.py, fixtures/column/review6/)
+
+Eight high-severity findings, all fixed. Each test fails on the code before the fix.
+
+- **H1.** A UNION branch after a `*` of unknown width was dropped silently; now it is a gap. This also
+  closes an older silent drop of a later branch with `*`.
+- **H2–H5: inline functions.**
+  - The body is now isolated from the caller: its own names never see the caller's sources.
+  - Argument columns must be qualified by a caller alias. They are bound under private aliases that the
+    body cannot capture.
+  - Only a definition in the caller's database is inlined.
+  - CTEs in the RETURN query are used.
+- **H6.** An INSERT … EXEC callee stays a gap when its body can return other rows: DML OUTPUT without
+  INTO, FETCH without INTO, DBCC, RESTORE, READTEXT, RECEIVE. This is checked on the procedure text.
+- **H7.** A callee's read of a #temp it does not create resolves to the calling procedure's #temp only.
+- **H8.** A #temp created only under IF / WHILE / CATCH (`IF OBJECT_ID('tempdb..#t') IS NULL CREATE
+  TABLE #t`) no longer hides the caller's same-named table, both for issues and for writers. This also
+  closes an older false complete.
+- **Low.**
+  - The single-source binding fallback is not used in row-selection clauses (an ORDER BY alias).
+  - A DEFAULT argument blocks inlining.
+  - `SELECT IDENTITY(...) INTO` blocks the copied column order.
