@@ -123,10 +123,10 @@ def end_rows(md: str) -> dict[str, str]:
 
 # --------------------------------------------------------------------------- Mermaid validator
 
-MERMAID_SHAPES = {'["': '"]', '[("': '")]', '[/"': '"/]', '(["': '"])', '[["': '"]]', '{{"': '"}}'}
+MERMAID_SHAPES = {'["': '"]', '[("': '")]', '[/"': '"/]', '(["': '"])', '[["': '"]]', '{{"': '"}}', '(("': '"))'}
 MERMAID_NODE = re.compile(
-    r'^  (?P<id>[A-Za-z][A-Za-z0-9_]*)(?P<open>\[\("|\[/"|\(\["|\[\["|\{\{"|\[")(?P<label>[^"]*)'
-    r'(?P<close>"\)\]|"/\]|"\]\)|"\]\]|"\}\}|"\])'
+    r'^  (?P<id>[A-Za-z][A-Za-z0-9_]*)(?P<open>\[\("|\[/"|\(\["|\[\["|\{\{"|\(\("|\[")(?P<label>[^"]*)'
+    r'(?P<close>"\)\]|"/\]|"\]\)|"\]\]|"\}\}|"\)\)|"\])'
     r'(?: (?P<arrow>-->|-\.->|-\.-)(?:\|"(?P<edge>[^"]*)"\|)? (?P<to>[A-Za-z][A-Za-z0-9_]*))?$')
 MERMAID_STYLE = re.compile(r"^  (classDef [a-z]+ [a-z0-9:\- ]+|class [A-Za-z0-9,]+ [a-z]+)$")
 MERMAID_SAFE = re.compile(r"^[\w .,:'()/?@$*+=%!~\-#|\[\]{}&`‹›]*$")   # characters checked to render raw
@@ -491,12 +491,14 @@ def test_loop_ends_are_unresolved_origins(tmp_path):
     """Loop ends are counted as unresolved origins, labelled in the sources table and linked to the cycles."""
     run(fixture("cycle"), "demo.beta.val", tmp_path)
     md = overview(tmp_path, "demo.beta.val")
-    assert "2 unresolved origins (1 with no writer in the selected sources, 1 loop)" in section(md, "Coverage")
+    coverage = section(md, "Coverage")
+    assert "1 unresolved origin (1 with no writer in the selected sources)" in coverage
+    assert "1 loop (values feed each other; every input into it is traced, so no source is missing there)" in coverage
     assert "1 route stops at a loop" in section(md, "Plain answer")
     assert md.index("## Sources at a glance") < md.index("## Routes")
     endpoints = section(md, "Sources at a glance")
     assert "loop: values here feed each other" in endpoints and "#gaps" in endpoints
-    assert '{{"F3 Unresolved origin' in "\n".join(mermaid_block(md))
+    assert '(("F3 Loop, no new source' in "\n".join(mermaid_block(md))
 
 
 # --------------------------------------------------------------------------- first screen (multi-branch fixture)

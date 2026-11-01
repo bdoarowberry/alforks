@@ -880,6 +880,47 @@ class Analyzer:
                     matches.append(out_name)
         return matches[0] if len(matches) == 1 else None
 
+    @staticmethod
+    def _constant_truth(e) -> bool | None:
+        """True/False when a predicate's value does not depend on any row (literals only), else None."""
+        if isinstance(e, exp.Paren):
+            return Analyzer._constant_truth(e.this)
+        if isinstance(e, exp.Not):
+            inner = Analyzer._constant_truth(e.this)
+            return None if inner is None else not inner
+        if isinstance(e, exp.And):
+            a, b = Analyzer._constant_truth(e.this), Analyzer._constant_truth(e.expression)
+            return False if False in (a, b) else (True if a is True and b is True else None)
+        if isinstance(e, exp.Or):
+            a, b = Analyzer._constant_truth(e.this), Analyzer._constant_truth(e.expression)
+            return True if True in (a, b) else (False if a is False and b is False else None)
+        if isinstance(e, (exp.EQ, exp.NEQ, exp.GT, exp.GTE, exp.LT, exp.LTE)) and \
+                isinstance(e.this, exp.Literal) and isinstance(e.expression, exp.Literal):
+            a, b = e.this, e.expression
+            if a.is_string != b.is_string:
+                return None
+            left, right = (a.this, b.this) if a.is_string else (float(a.this), float(b.this))
+            return {exp.EQ: left == right, exp.NEQ: left != right, exp.GT: left > right, exp.GTE: left >= right,
+                    exp.LT: left < right, exp.LTE: left <= right}[type(e)]
+        if isinstance(e, exp.Boolean):
+            return bool(e.this)
+        return None
+
+    @staticmethod
+    def yields_no_rows(select) -> bool:
+        """A SELECT that can return no row whatever the data: TOP (0), or a WHERE that is constant-false
+        (`WHERE 1 = 2`, the usual way to copy a table's layout into an empty table)."""
+        if not isinstance(select, exp.Select):
+            return False
+        limit = select.args.get("limit")
+        count = limit.args.get("expression") if isinstance(limit, exp.Limit) else None
+        if isinstance(count, exp.Paren):
+            count = count.this
+        if isinstance(count, exp.Literal) and not count.is_string and float(count.this) == 0:
+            return True
+        where = select.args.get("where")
+        return where is not None and Analyzer._constant_truth(where.this) is False
+
     def _query_steps(self, query, names: list[str] | None, position: int | None, column: str, target: Node,
                      ctx: Ctx, writer_kind: str, method: str, ctes: dict, expected: int | None = None) -> None:
         parts = branches(query)
@@ -899,6 +940,8 @@ class Analyzer:
             if not isinstance(select, exp.Select):
                 ctx.gap("unsupported_statement", f"Unsupported query form {type(select).__name__}.", target, select)
                 continue
+            if self.yields_no_rows(select):
+                continue   # copies the layout only (WHERE 1 = 2, TOP (0)): no row, so no value comes from here
             scope = Scope(ctx, local_ctes_from(select, None, ctes))
             scope.add_select_sources(select)
             items = self.projection(select, scope)

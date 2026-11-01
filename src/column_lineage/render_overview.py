@@ -243,6 +243,7 @@ SHAPES = {   # diagram node kind -> (open, close, label prefix)
     "constant": ('(["', '"])', "Constant"),
     "declared": ('[["', '"]]', "Declared terminal"),
     "unresolved": ('{{"', '"}}', "Unresolved origin"),
+    "loop": ('(("', '"))', "Loop, no new source"),
 }
 
 
@@ -740,6 +741,8 @@ class Analysis:
             return "file"
         if kind == "database" and stop in ("boundary", "source_without_writer"):
             return "database"
+        if stop == "cycle":
+            return "loop"
         return "unresolved"
 
     # ends ---------------------------------------------------------------------
@@ -934,7 +937,8 @@ def _end_text(a: Analysis, node_id: str, kind: str) -> str:
         kinds = sorted({g.get("kind") or "gap" for g in t.gaps_by_node.get(node_id, [])})
         return "open point: " + "; ".join(_text(GAP_TEXT.get(k, k)) for k in kinds) + " — not proved"
     if kind == "cycle":
-        return "loop: values here feed each other — the loop is followed once; see the cycles on the detailed page"
+        return ("loop: values here feed each other — the loop is followed once and adds no new source (every "
+                "input into it is traced); see the cycles on the detailed page")
     return "not traced further — not proved"
 
 
@@ -1010,7 +1014,8 @@ def _fam_ends_text(a: Analysis, fam: dict, limit: int = 2) -> str:
 
 
 def _is_unresolved(kind: str) -> bool:
-    return kind not in ("boundary", "declared", "constant")
+    # A loop adds no source: every input into it is traced elsewhere on the page.
+    return kind not in ("boundary", "declared", "constant", "cycle")
 
 
 def _end_kinds(a: Analysis) -> Counter:
@@ -1242,10 +1247,10 @@ def _section_coverage(a: Analysis, detailed: str) -> list[str]:
         ("source_without_writer", "with no writer in the selected sources", "with no writer in the selected sources"),
         ("external_file", "external file", "external files"),
         ("parameter_without_caller", "parameter without caller", "parameters without caller"),
-        ("max_depth", "depth cut", "depth cuts"), ("gap", "open point", "open points"), ("cycle", "loop", "loops"),
+        ("max_depth", "depth cut", "depth cuts"), ("gap", "open point", "open points"),
         ("open", "not traced further", "not traced further")) if counts.get(k)]
     unresolved = sum(counts.get(k, 0) for k in ("source_without_writer", "external_file", "parameter_without_caller",
-                                                 "max_depth", "gap", "cycle", "open"))
+                                                 "max_depth", "gap", "open"))
     if comp.get("status") != "complete":
         n_open = sum((comp.get("value_gaps_by_kind") or {}).values()) + \
             sum((comp.get("context_gaps_by_kind") or {}).values())
@@ -1281,6 +1286,9 @@ def _section_coverage(a: Analysis, detailed: str) -> list[str]:
             f"{_plural(unresolved, 'unresolved origin')}"
             + (f" ({', '.join(unresolved_parts)})" if unresolved_parts else "")
             + (f" · {_plural(counts['constant'], 'constant')}" if counts.get("constant") else "")
+            + (f" · {_plural(counts['cycle'], 'loop')} (values feed each other; every input into "
+               f"{'it' if counts['cycle'] == 1 else 'them'} is traced, so no source is missing there)"
+               if counts.get("cycle") else "")
             + f" · steps: {step_text}")
     return [f"- **Status:** {status}.", f"- **Coverage:** {line}.",
             "- A requested boundary or declared terminal is where this run stopped; it is not an originating system. "
@@ -1309,7 +1317,7 @@ def _evidence_candidates(a: Analysis, detailed: str) -> list[tuple[int, int, str
     groups: dict[tuple[str, str], list[dict]] = {}
     for fam in a.families:
         stop = fam["stop"]
-        if stop in ("source_without_writer", "external_file", "parameter_without_caller", "max_depth", "cycle"):
+        if stop in ("source_without_writer", "external_file", "parameter_without_caller", "max_depth"):
             groups.setdefault((stop, fam["source"]["key"]), []).append(fam)
     for (stop, _), fams in groups.items():
         routes = sum(f["route_count"] for f in fams)

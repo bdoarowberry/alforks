@@ -139,3 +139,29 @@ def test_boundary_only_trace_keeps_reached_boundary_when_terminals_match_it(tmp_
               "--declared-terminals", str(terminals))
     assert t.completeness["result"] == "reached_requested_boundary"
     assert t.completeness["declared_terminal_ends"] == 0
+
+
+@pytest.mark.parametrize("column", ["col_a", "col_b"])
+def test_empty_layout_copy_is_not_a_value_source(column, tmp_path):
+    """`SELECT * INTO #r FROM target WHERE 1 = 2` (or TOP (0)) copies the layout, zero rows: no value edge
+    from the target into #r, so no false loop (real data: 153 of 178 traces had one)."""
+    t = trace(ROOT / "empty_copy", f"demo.dbo.targettable.{column}", tmp_path, *DB)
+    assert not t.data["cycles"]
+    assert f"demo.dbo.sourcetable.{column}" in reached(t)
+    assert f"demo.dbo.targettable.{column}" not in {i for s in t.steps for i in inputs(s, "value")}
+    # A constant-true filter (1 = 1, NOT (1 = 0)) keeps its rows: the real writers stay traced.
+    assert t.complete
+
+
+def test_yields_no_rows_only_for_row_independent_predicates():
+    import sqlglot
+    from column_lineage.analyzer import Analyzer
+    def no_rows(sql):
+        return Analyzer.yields_no_rows(sqlglot.parse_one(sql, read="tsql"))
+    for sql in ("SELECT * FROM t WHERE 1 = 2", "SELECT a FROM t WHERE 1 = 0 AND a > 1", "SELECT TOP (0) a FROM t",
+                "SELECT TOP 0 a FROM t", "SELECT a FROM t WHERE 'x' = 'y'", "SELECT a FROM t WHERE NOT (1 = 1)",
+                "SELECT a FROM t WHERE 1 = 2 OR 0 > 1"):
+        assert no_rows(sql), sql
+    for sql in ("SELECT a FROM t WHERE 1 = 1", "SELECT a FROM t WHERE a = 2", "SELECT a FROM t WHERE 1 = 2 OR a = 1",
+                "SELECT TOP 1 a FROM t", "SELECT a FROM t WHERE @p = 0", "SELECT a FROM t WHERE '1' = 1"):
+        assert not no_rows(sql), sql

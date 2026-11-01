@@ -251,3 +251,11 @@
 - Plain answer = three bullets: headline, sources with family links (each named once), value rules.
   A scope-complete trace with unproven origins leads with "Trace stopped at unresolved sources".
 
+## Fixed: empty layout copies created false loops (real run: 153 of 178 traces)
+
+- `SELECT * INTO #r FROM target WHERE 1 = 2` (and `TOP (0)`, any constant-false WHERE) copies the layout
+  and no rows. Such a branch gives no value steps, so the target no longer feeds #r and no false loop
+  forms. Tests: `test_empty_layout_copy_is_not_a_value_source`, `test_yields_no_rows_only_for_row_independent_predicates`.
+- Overview: a loop end is no longer an unresolved origin (every input into a loop is traced); it is
+  counted separately and drawn as "Loop, no new source", so headline, coverage and end points agree.
+
