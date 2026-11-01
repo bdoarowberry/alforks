@@ -298,6 +298,7 @@ class Analyzer:
         self._object_columns: dict[str, tuple[list[str] | None, bool]] = {}
         self._result_sets: dict[int, tuple] = {}
         self._inlined: dict[int, object] = {}   # id(query) -> InlineFunction it was read from
+        self._inline_why: str | None = None     # why the last inline_tvf call did not inline
         self._object_columns_active: set[str] = set()
 
     # ================================================================ sources
@@ -337,13 +338,16 @@ class Analyzer:
                 func = node.this if not isinstance(node.this, exp.Dot) else node.this.expression
                 fname = (func.name or func.sql(dialect="tsql", comments=False)).lower()
                 kind = "external_object" if fname in EXTERNAL_FUNCTIONS else "table_valued_function"
+                why = None
                 if kind == "table_valued_function":
+                    self._inline_why = None
                     inlined = self.inline_tvf(node, func, schema, scope, alias or fname, alias_columns)
                     if inlined is not None:
                         return inlined
+                    why = self._inline_why
                 n = Node(UNKNOWN, node.sql(dialect="tsql", comments=False))
                 gap = ctx.gap(kind, f"Rows come from {fname.upper()}(...); its columns are not traced.", n, node)
-                return Source(alias or fname, "opaque", gap=gap, names=(fname,))
+                return Source(alias or fname, "opaque", gap=gap, names=(fname,), note=why)
             lname = norm(name) or ""
             if not database and not schema and lname in scope_ctes(scope):
                 local = scope_ctes(scope)[lname]
@@ -498,10 +502,42 @@ class Analyzer:
                 return False
         return True
 
-    def star_reason(self, source: Source) -> str:
-        """Why a * over ``source`` could not be expanded, as an anonymous category."""
+    def written_names(self, ref: ObjectRef) -> set[str]:
+        """Column names that writers of ``ref`` name explicitly: INSERT column lists, UPDATE SET targets,
+        MERGE insert lists and SET targets (not through views or CTEs)."""
+        key = ("written", ref.key)
+        if key in self._object_columns:
+            return self._object_columns[key]
+        names: set[str] = set()
+        for writer in self.catalog.writers_for(ref):
+            tree = writer.statement.tree
+            if writer.via or tree is None:
+                continue
+            nodes = []
+            if writer.kind == "insert" and isinstance(tree, exp.Insert):
+                nodes = [tree]
+            elif writer.kind == "update" and isinstance(tree, exp.Update):
+                nodes = [tree]
+            elif writer.kind == "merge":
+                nodes = [w.args.get("then") for w in tree.find_all(exp.When)]
+            for node in nodes:
+                if isinstance(node, exp.Insert) and isinstance(node.this, exp.Schema):
+                    names |= {norm(ident_text(c)) for c in node.this.expressions}
+                elif isinstance(node, exp.Insert) and isinstance(node.this, exp.Tuple):
+                    names |= {norm(ident_text(c.this if isinstance(c, exp.Column) else c)) for c in node.this.expressions}
+                elif isinstance(node, exp.Update):
+                    names |= {norm(ident_text(e.this.this)) for e in node.expressions
+                              if isinstance(e, exp.EQ) and isinstance(e.this, exp.Column)}
+        names.discard(None)
+        names.discard("")
+        self._object_columns[key] = names
+        return names
+
+    def star_reason(self, source: Source, depth: int = 0) -> str:
+        """Why a * over ``source`` could not be expanded, as an anonymous category (one level deeper for
+        a SELECT ... INTO copy or a view)."""
         if source.kind == "opaque":
-            return "function_or_external_source"
+            return "function_or_external_source" + (f"/{source.note}" if source.note else "")
         if source.kind == "local":
             return "cte_or_derived_with_unexpanded_star"
         if len(source.refs) != 1:
@@ -516,8 +552,20 @@ class Analyzer:
         if definers:
             if len(definers) > 1:
                 return "several_select_into_or_view_definitions_differ"
-            return "select_into_copy_of_an_unexpandable_source" if definers[0] == "select_into" else \
+            label = "select_into_copy_of_an_unexpandable_source" if definers[0] == "select_into" else \
                 "view_over_an_unexpandable_source"
+            if depth < 3:
+                writer = next(w for w in self.catalog.writers_for(ref) if w.kind in ("select_into", "view"))
+                query = writer.statement.tree.args.get("expression") if writer.kind == "view" else writer.statement.tree
+                first = branches(query)[0] if query is not None else None
+                if isinstance(first, exp.Select):
+                    inner_ctx = Ctx(self, writer.unit, writer.statement)
+                    inner = Scope(inner_ctx, statement_ctes(writer.statement.tree, inner_ctx))
+                    inner.add_select_sources(first)
+                    unknown = [x for x in inner.sources if x.columns is None or not x.reliable]
+                    if unknown:
+                        label += "/" + self.star_reason(unknown[0], depth + 1)
+            return label
         if ref.kind == "temp_table":
             return "temp_table_created_elsewhere_or_by_unparsed_statement"
         return "no_definition_in_selected_sources" if not self.catalog.is_known(ref) else \
@@ -572,6 +620,9 @@ class Analyzer:
                 sets.append(self._certain_of(self.projection(first, scope)))
             added = {c.name for sch in self.catalog.schemas.get(ref.key, []) if sch.source == "alter_add"
                      for c in sch.columns}
+            # A statement in the scanned files that names a column of the object in its INSERT column list,
+            # UPDATE SET or MERGE proves the column exists (not where it sits).
+            added |= self.written_names(ref)
             result = (frozenset.intersection(*sets) | added) if sets else frozenset(added)
         finally:
             self._object_columns_active.discard(key)
@@ -1059,16 +1110,21 @@ class Analyzer:
         _, database, _, _ = table_parts(node)
         current = norm(ctx.unit.database_at(ctx.statement.start, self.catalog.default_database)[0])
         if database and norm(database) != current:
+            self._inline_why = "called_in_another_database"
             return None   # the body would be resolved in another database
-        defs = [d for d in inline_functions(self.catalog).get((norm(schema) or self.catalog.default_schema, fname), [])
-                if norm(d.database) == current]
+        every = inline_functions(self.catalog).get((norm(schema) or self.catalog.default_schema, fname), [])
+        defs = [d for d in every if norm(d.database) == current]
         if len(defs) != 1:
+            self._inline_why = ("several_inline_definitions" if len(defs) > 1 else
+                                "inline_definition_in_another_database" if every else
+                                "no_inline_definition_multi_statement_or_not_scanned")
             return None
         definition = defs[0]
         args = [a.copy() for a in func.expressions]
         if len(args) != len(definition.params) or any(
                 (isinstance(a, exp.Var) or (isinstance(a, exp.Column) and not a.table)) and a.name.upper() == "DEFAULT"
                 for a in args):
+            self._inline_why = "argument_count_or_default"
             return None
         arg_scope = Scope(ctx, {}, None)
         arg_scope.qualified_only = True
@@ -1077,12 +1133,14 @@ class Analyzer:
             for column in arg.find_all(exp.Column):
                 qualifier = column.table
                 if not qualifier:
+                    self._inline_why = "unqualified_column_in_argument"
                     return None   # which caller source an unqualified argument column names is not settled
                 found, level = [], scope
                 while level is not None and not found:
                     found = level.find_alias(qualifier)
                     level = level.parent
                 if len(found) != 1:
+                    self._inline_why = "argument_alias_not_settled"
                     return None
                 alias = private.setdefault(qualifier.lower(), f"__arg{len(private) + 1}_{qualifier.lower()}")
                 if not any(src.alias == alias for src in arg_scope.sources):

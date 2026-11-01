@@ -393,3 +393,19 @@ Eight high-severity findings, all fixed. Each test fails on the code before the 
   - `totals.wildcard_traces_by_unexpanded_star_reason`, which says why each value-path `*` could not be
     expanded: no definition, differing definitions, a copy of an unexpandable source, a temp table
     created elsewhere, a function source, …
+
+## After the 821e657 run (same 80 / 4 / 94; identical step ids)
+
+- The new diagnostics showed the real cause of the remaining wildcard gaps. The CREATE TABLE fixes
+  engaged no definition here (all three counts 0). The reasons were:
+  - `select_into_copy_of_an_unexpandable_source` (28 traces);
+  - `written_but_no_definition_in_selected_sources` (10);
+  - `function_or_external_source` (2).
+  The copied tables have no CREATE TABLE in the selected sources.
+- **Fix:** a column that a scanned INSERT column list, UPDATE SET or MERGE names certainly exists. It is
+  now one of the names a `*` over that object certainly supplies, so a lookup by name through the `*`
+  binds it (inferred, "by name"). Positions stay unknown, so positional uses remain gaps, and so do
+  names that no writer mentions. Tests: `tests/test_column_no_definition.py`.
+- The reasons now go one level deeper (`select_into_copy_of_an_unexpandable_source/<inner reason>`).
+  A function source says why it was not inlined (another database, no inline definition, an unqualified
+  argument column, …).
