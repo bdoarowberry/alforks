@@ -25,7 +25,7 @@ Options that matter on real estates:
 | Leave out copies that are not on the execution path | `--exclude GLOB` |
 | SSIS packages | `--package-root DIR`, `--package-include/--package-exclude GLOB` (select the deployed copies), `--connection-map NAME=DB` (only when documented) |
 | Steps the code cannot prove (dynamic SQL, external loads) | `--assertions FILE` (each scoped to a writer; record `origin`: ai_assisted or person, and `review`: unreviewed or reviewed; pages show both, or "not recorded") |
-| Sources the reviewer accepts as terminals for this investigation | `--declared-terminals FILE` |
+| Sources the reviewer accepts as terminals for this investigation (also tables with no definition or writer) | `--declared-terminals FILE` |
 | Where to stop | `--stop-at-database DB`, `--stop-at-object GLOB` |
 | Run order fixed by an entry procedure's calls | `--entry-point PROCEDURE` |
 | Business definitions | `--business-glossary FILE` (approved / proposed) |

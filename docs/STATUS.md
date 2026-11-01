@@ -318,3 +318,36 @@
   `test_shortened_lists_call_earlier_content_by_its_name`.
 - Real run after these fixes: no cycles remain (102 loops cut, all ending at traced earlier content),
   no `unexplained_end` gaps, and no outcome changes (78 / 4 / 96).
+
+## Gap shapes from the 178-column run (tests: tests/test_column_gap_shapes.py, fixtures/column/gap_shapes/)
+
+The tester classified the remaining gaps (counts are affected traces). Changes:
+
+- **Wildcard without schema (38).**
+  - A `*` over a table with differing scanned definitions now supplies the names every definition has.
+    These names carry through SELECT INTO copies and CTEs, and the lookup is inferred, noted "by name".
+    This covers the empty-copy-then-CTE shape (28 traces).
+  - A positional INSERT into a SELECT ... INTO table uses that SELECT's column order. It does not when an
+    identity, computed or rowversion column may have been copied; a CTE or derived source also leaves
+    it unsettled.
+  - A by-name lookup past an unexpanded `*` relies on output names being unique (CTE, derived table,
+    SELECT INTO, view).
+  - A call of an inline table-valued function is read as its RETURN query, with the arguments in place
+    of the parameters (inferred; cites the function). Multi-statement functions stay gaps.
+- **Ambiguous column (10).**
+  - `ALTER TABLE … WITH CHECK|NOCHECK ADD col` is now read.
+  - An unqualified column with one source and nothing outside the query binds to that source, even when
+    its scanned definition lacks the column. The gap is then `missing_definition` ("no column … in its
+    known schema"), not "could not be bound".
+  - Joins with two candidates stay ambiguous.
+- **INSERT … EXEC (8).**
+  - A #temp table is private to the procedure that creates it and its callees. An INSERT … EXEC or
+    dynamic-SQL issue in another procedure with its own same-named #temp no longer applies. This was the
+    archive-procedure shape behind 330 gap ids.
+  - INSERT … EXEC of a named procedure is mapped by position from the callee's one row-returning
+    statement (writer kind `insert_exec`, inferred; cites the call). It stays a gap when the callee has
+    zero or several result statements, nested EXEC or dynamic SQL, unparsed statements or several
+    definitions, and when the INSERT has no column list and the target has no declared order.
+- **Missing definition (35, six backup-style tables).** Unchanged by default: no definition and no
+  writer is a gap. `--declared-terminals` can now accept such a table as a terminal for the run (a
+  declared stop), so the scope decision can be recorded without changing the tool.
