@@ -1322,10 +1322,30 @@ def _section_coverage(a: Analysis, detailed: str) -> list[str]:
                f"{'it' if counts['cycle'] == 1 else 'them'} is traced, so no source is missing there)"
                if counts.get("cycle") else "")
             + f" · steps: {step_text}")
-    return [f"- **Status:** {status}.", f"- **Coverage:** {line}.",
-            "- A requested boundary or declared terminal is where this run stopped; it is not an originating system. "
-            "An end with no writer in the selected sources is an unresolved origin even when the step reaching it "
-            "is verified."]
+    out = [f"- **Status:** {status}.", f"- **Coverage:** {line}.",
+           "- A requested boundary or declared terminal is where this run stopped; it is not an originating system. "
+           "An end with no writer in the selected sources is an unresolved origin even when the step reaching it "
+           "is verified."]
+    run = _run_context_line(a)
+    if run:
+        out.insert(2, run)
+    return out
+
+
+def _run_context_line(a: Analysis) -> str | None:
+    """Which SQL Agent jobs (from --job-scripts) run the writers on the value routes."""
+    contexts = [s.get("run_context") for s in a.t.steps if s["id"] in a.value_steps and s.get("run_context")]
+    if not contexts:
+        return None
+    counts = Counter(c["status"] for c in contexts)
+    jobs = sorted({(j["job"], j.get("schedule") or "") for c in contexts for j in c.get("jobs") or []})
+    shown = ", ".join(_code(name) + (f" ({_text(sched)})" if sched else "") for name, sched in jobs[:4]) + \
+        (f" and {len(jobs) - 4} more" if len(jobs) > 4 else "")
+    parts = [f"{counts['run_by_enabled_job']} run by enabled jobs" if counts["run_by_enabled_job"] else "",
+             f"{counts['only_disabled_jobs']} only by disabled jobs" if counts["only_disabled_jobs"] else "",
+             f"{counts['not_in_job_scripts']} by no job in the scripts" if counts["not_in_job_scripts"] else ""]
+    return (f"- **Run by (job scripts, static copies):** {_plural(len(contexts), 'writing step')}: "
+            + ", ".join(p for p in parts if p) + (f" — jobs: {shown}" if jobs else "") + ".")
 
 
 # --------------------------------------------------------------------------- 4. main evidence needed

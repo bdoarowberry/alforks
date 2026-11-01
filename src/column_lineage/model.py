@@ -237,6 +237,7 @@ class Step:
     gaps: list[str] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
     order: int = 0                 # source order of the writer within its scope, for overwrite reasoning
+    run_context: dict | None = None   # --job-scripts: which jobs run this writer (context, not order)
 
     @property
     def id(self) -> str:
@@ -252,7 +253,8 @@ class Step:
                 "inputs": [i.to_dict() for i in self.inputs],
                 "row_selection": [r.to_dict() for r in self.row_selection],
                 "evidence": [e.to_dict() for e in self.evidence],
-                "gaps": sorted(self.gaps), "notes": list(self.notes), "order": self.order}
+                "gaps": sorted(self.gaps), "notes": list(self.notes), "order": self.order,
+                **({"run_context": self.run_context} if self.run_context is not None else {})}
 
 
 @dataclass

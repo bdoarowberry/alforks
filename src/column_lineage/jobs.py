@@ -39,17 +39,43 @@ class JobStep:
     line: int
 
     def procedures(self) -> list[str]:
-        """Procedure names the step's T-SQL command executes, in order (dynamic EXEC (...) is skipped)."""
+        """Procedure names the step's T-SQL command executes, in order (dynamic EXEC (...), sp_start_job
+        and SSISDB catalog calls are reported separately)."""
         if self.subsystem.upper() != "TSQL":
             return []
         masked = mask_noncode(self.command)
         names = []
         for match in PROC_IN_COMMAND.finditer(masked):
             name = self.command[match.start("name"):match.end("name")]
-            if name.lower().lstrip("[").startswith(("sp_executesql", "sys.sp_executesql")) or name.upper() == "AS":
+            last = re.split(r"\s*\.\s*", name)[-1].strip("[]").lower()
+            if last in ("sp_executesql", "sp_start_job", "create_execution", "start_execution",
+                        "set_execution_parameter_value") or name.upper() == "AS":
                 continue
             names.append(name)
         return names
+
+    def started_jobs(self) -> list[str]:
+        """Names of jobs this step starts with msdb.dbo.sp_start_job (asynchronously)."""
+        if self.subsystem.upper() != "TSQL":
+            return []
+        return [m.group(1) for m in re.finditer(r"\bsp_start_job\b\s*(?:@job_name\s*=\s*)?N?'((?:[^']|'')+)'",
+                                                self.command, re.I)]
+
+    def packages(self) -> list[str]:
+        """Package names (file stem, lower case) the step runs: an SSIS step (/ISSERVER, /FILE, /SQL) or a
+        T-SQL step creating an SSISDB execution with @package_name."""
+        out = []
+        if self.subsystem.upper() == "SSIS":
+            for match in re.finditer(r"([^\\/\"']+?)\.dtsx\b", self.command, re.I):
+                out.append(match.group(1).strip().lower())
+            if not out:
+                sql = re.search(r"/SQL\s+\"?\\?(?:[^\"\\]*\\)*([^\"\\]+)", self.command, re.I)
+                if sql:
+                    out.append(sql.group(1).strip().lower())
+        else:
+            for match in re.finditer(r"@package_name\s*=\s*N?'([^']+?)(?:\.dtsx)?'", self.command, re.I):
+                out.append(match.group(1).strip().lower())
+        return list(dict.fromkeys(out))
 
 
 @dataclass
@@ -61,6 +87,29 @@ class Job:
     line: int
     steps: list[JobStep] = field(default_factory=list)
     schedules: list[dict] = field(default_factory=list)
+
+    def schedule_text(self) -> str:
+        """Plain words for the job's enabled schedules (static script; not proof of the deployed ones)."""
+        parts = []
+        for sch in self.schedules:
+            if sch.get("enabled", 1) == 0:
+                continue
+            freq = {1: "once", 4: "daily", 8: "weekly", 16: "monthly", 32: "monthly (relative)",
+                    64: "when SQL Agent starts", 128: "when the CPU is idle"}.get(sch.get("freq_type"), "")
+            start = sch.get("active_start_time")
+            text = freq
+            if sch.get("freq_subday_type") in (2, 4, 8) and (sch.get("freq_subday_interval") or 0) > 0:
+                unit = {2: "seconds", 4: "minutes", 8: "hours"}[sch["freq_subday_type"]]
+                text += f", every {sch['freq_subday_interval']} {unit}"
+            if isinstance(start, int) and freq not in ("when SQL Agent starts", "when the CPU is idle"):
+                text += f" from {start // 10000:02d}:{start // 100 % 100:02d}"
+            if text:
+                parts.append(text)
+        return "; ".join(parts)
+
+    @property
+    def scheduled(self) -> bool:
+        return any(sch.get("enabled", 1) != 0 for sch in self.schedules)
 
     def sequence(self) -> list[JobStep]:
         """Steps in the order they run when each succeeds, from the start step to the first quit."""

@@ -461,3 +461,19 @@ Eight high-severity findings, all fixed. Each test fails on the code before the 
   - Chained `SELECT *` CTEs are no longer exponential (depth 16: 9.9 s → 0.3 s).
   - `ALTER … ADD … IDENTITY` blocks a SELECT INTO order.
   - A package destination whose database is unsettled proves nothing.
+
+## Job scripts, extended
+
+- **Package steps:** SSIS job steps (`/ISSERVER`, `/FILE`, `/SQL`) and T-SQL steps calling
+  `SSISDB.catalog.create_execution @package_name` are matched to package writers by file name. A
+  package load and a SQL fix in one job are now ordered, which settles the adapter's
+  `package_and_sql_writers` gap.
+- **Chained jobs:** a job started by exactly one `sp_start_job` step, and with no enabled schedule of
+  its own, runs after the earlier steps of the job that starts it. `sp_start_job` does not wait, so the
+  started job overlaps the later steps (`writers_overlap_in_chained_jobs`).
+- **Run context:** each writing step says which job and step run it, with the schedule in words, or
+  that only a disabled job runs it, or that no job in the scripts runs it (a hand-run or legacy copy?
+  context only, never dropped). JSON: `run_context`. Overview: a "Run by (job scripts, static copies)"
+  line. gap-summary: `writer_steps_by_job_context`.
+- System procedures in job steps (msdb, master, unresolved `sp_*` / `xp_*`) are ignored.
+- Tests: `tests/test_column_jobs.py` (11).

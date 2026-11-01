@@ -79,8 +79,10 @@ another repository, or a manual process.
 These need evidence from outside the source files:
 
 - **Run order between jobs** (`ambiguous_writer_order`): several procedures or packages write the same
-  column and which runs last is decided by schedules. Needed: a current SQL Agent export (job steps,
-  schedules, enabled state, success/failure transitions) and execution history for the run in question.
+  column and which runs last is decided by schedules. `--job-scripts` orders writers that run in one job
+  (including package steps and jobs chained with `sp_start_job`), and says which job runs each writer.
+  Writers in independently scheduled jobs stay unordered. Needed beyond that: a current SQL Agent export
+  (to confirm the scripts) and execution history for the run in question.
 - **Dynamic SQL built from data** (`dynamic_sql`): column lists or table choices read from metadata or
   tables at run time. Needed: owner confirmation of the possible texts (then an assertion), or runtime
   capture.

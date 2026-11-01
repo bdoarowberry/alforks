@@ -211,6 +211,7 @@ def _totals(traces: list[dict]) -> dict:
     near: Counter = Counter()
     star_reasons: Counter = Counter()   # traces whose value-path * gaps have each reason
     gap_reasons: dict[str, Counter] = {}   # gap kind -> reason -> traces (value-path and context gaps)
+    run_context: dict[str, str] = {}       # step id -> job-script run status (each writing step once)
     earlier = {"traces_with_earlier_content": 0, "loops_cut_traced": 0, "update_only_untraced": 0,
                "rows_not_updated_steps": 0, "traces_with_remaining_cycles": 0, "remaining_cycles": 0}
     for data in traces:
@@ -248,6 +249,9 @@ def _totals(traces: list[dict]) -> dict:
         reasons_here = {r for g in data.get("gaps", []) if g["kind"] == "wildcard_without_schema"
                         and g.get("affects") != "row_selection" for r in (g.get("detail") or {}).get("unexpanded_star", [])}
         star_reasons.update(reasons_here)
+        for step in data.get("steps", []):
+            if step.get("run_context"):
+                run_context[step["id"]] = step["run_context"]["status"]
         seen_reasons: set[tuple[str, str]] = set()
         for g in data.get("gaps", []):
             if g.get("affects") == "row_selection":
@@ -280,6 +284,7 @@ def _totals(traces: list[dict]) -> dict:
         "traces_blocked_by_gap_kind": dict(sorted(blocked.items())),
         "wildcard_traces_by_unexpanded_star_reason": dict(sorted(star_reasons.items())),
         "value_gap_traces_by_reason": {k: dict(sorted(v.items())) for k, v in sorted(gap_reasons.items())},
+        "writer_steps_by_job_context": dict(sorted(Counter(run_context.values()).items())),
         "gaps_by_kind": dict(sorted(gaps.items())),
         "distinct_gap_statements_by_kind": {k: len(v) for k, v in sorted(statements.items())},
         "statements_blocking_most_traces": shared[:10],
