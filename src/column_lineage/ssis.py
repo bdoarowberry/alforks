@@ -600,7 +600,8 @@ class PackageCatalog:
                 new_gaps.append(Gap("ambiguous_writer_order",
                                     f"{node.display} is loaded by a package and overwritten by SQL (UPDATE/MERGE); which "
                                     "value survives depends on run order.", node,
-                                    [s.evidence[0] for s in overwriting + new_steps if s.evidence][:10]))
+                                    [s.evidence[0] for s in overwriting + new_steps if s.evidence][:10],
+                                    {"reason": "package_and_sql_writers"}))
         if loaders:
             text = (f" In-scope package destination(s) load this table but map no input to this column: "
                     f"{'; '.join(sorted(loaders))}.")

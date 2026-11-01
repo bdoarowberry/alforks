@@ -58,6 +58,10 @@ def build_parser() -> argparse.ArgumentParser:
                         help="Objects or columns accepted as terminal sources for this run: one glob per line "
                              "(db.schema.table or db.schema.table.column), optionally followed by '# reason'. "
                              "Stops there keep their reason and are labelled declared_terminal.")
+    parser.add_argument("--job-scripts", nargs="+", action="extend", default=[], metavar="PATH",
+                        help="SQL Agent job scripts (files, or directories of .sql files) as SSMS writes them: "
+                             "the step order of one enabled job orders writers it runs (inferred: a script is "
+                             "a static copy, not proof of the deployed job)")
     parser.add_argument("--entry-point", nargs="+", action="extend", default=[], metavar="PROCEDURE",
                         help="Procedure(s) the run starts from. When writers in several procedures conflict and the "
                              "call sequence from here fixes their order, the order is noted instead of a gap.")
@@ -282,6 +286,9 @@ def main(argv: list[str] | None = None) -> int:
                 parser.error(f"--entry-point: {name} has {len(procs)} definitions; exclude the copies that do not run")
             tracer.entry_points.append(procs[0].scope)
         scan["entry_points"] = len(tracer.entry_points)
+        if args.job_scripts:
+            from .jobs import parse_job_scripts
+            tracer.jobs, scan["job_scripts"] = parse_job_scripts(args.job_scripts)
         scan["declared_terminals"] = len(terminals)
         output = Path(args.output)
         output.mkdir(parents=True, exist_ok=True)

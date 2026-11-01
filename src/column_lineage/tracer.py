@@ -17,6 +17,15 @@ from .model import (
 )
 
 OVERWRITING = ("update", "merge")
+JOB_REASON_TEXT = {
+    "writer_not_run_by_any_job_script": "a writer is not run by any job step in the scripts",
+    "writer_run_by_several_jobs": "a writer is run by more than one job",
+    "writer_reached_by_several_steps_or_paths": "a writer is reached by several steps or call paths",
+    "writers_in_different_jobs": "the writers run in different jobs, so their schedules decide",
+    "writer_only_in_disabled_job": "a writer runs only in a job its script disables (it may still be run by hand)",
+    "job_runs_procedures_not_in_scan": "the job runs procedures that are not in the scanned files",
+    "same_job_step_order_not_settled": "within one step, a call or write on the way is conditional",
+}
 UPDATING_STEPS = ("update", "merge_update")      # steps that change rows that already exist
 ROW_CREATING_WRITERS = ("insert", "select_into", "view", "insert_exec")
 MERGE_INSERTS = re.compile(r"\bWHEN\s+NOT\s+MATCHED\b(?!\s+BY\s+SOURCE\b)", re.I)
@@ -35,6 +44,7 @@ class Tracer:
         self.packages = packages   # optional ssis.PackageCatalog: package destinations as writers
         self.terminals: list[tuple[str, str]] = []   # (glob, reason) from --declared-terminals
         self.entry_points: list[str] = []            # procedure scopes the run starts from (--entry-point)
+        self.jobs: list = []                         # SQL Agent jobs read from --job-scripts
         self._keys: dict = {}
         self.analyzer = analyzer or Analyzer(catalog)
         self.trace_row_selection = trace_row_selection
@@ -590,17 +600,26 @@ class Tracer:
         # Overwrite order across procedures is unknown, unless the call sequence from a declared entry
         # point (--entry-point) fixes it.
         scopes = {w.statement.scope for w, _ in writing}
-        ordered, why = (self._call_order(writing) if len(scopes) > 1 and self.entry_points
-                        else (False, None))
-        if len(scopes) > 1 and any(w.kind in OVERWRITING for w, _ in writing) and ordered:
-            self._note_call_order(writing)
-        elif len(scopes) > 1 and any(w.kind in OVERWRITING for w, _ in writing):
+        overwrites = len(scopes) > 1 and any(w.kind in OVERWRITING for w, _ in writing)
+        ordered, why, reason, job = False, None, "no_job_scripts_or_entry_point", None
+        if overwrites and self.entry_points:
+            ordered, why = self._call_order(writing)
+            reason = "entry_point_does_not_settle"
+        if overwrites and not ordered and self.jobs:
+            ordered, job_why, job = self._job_order(writing)
+            reason = job_why or reason
+        if overwrites and ordered:
+            self._note_call_order(writing, job)
+        elif overwrites:
             names = sorted({(w.statement.procedure or w.unit.rel_path) for w, _ in writing})
             gaps.append(Gap("ambiguous_writer_order",
                             f"{node.display} is written by {len(names)} procedures/scripts ({', '.join(names)}), at least "
                             "one of which overwrites existing rows; which value survives depends on run order."
-                            + (f" The call sequence from the entry point does not settle it: {why}." if why else ""),
-                            node, [self.catalog.evidence(w.unit, w.statement, role="writer") for w, _ in writing][:10]))
+                            + (f" The call sequence from the entry point does not settle it: {why}." if why else "")
+                            + (f" The job scripts do not settle it ({JOB_REASON_TEXT.get(reason, reason)})."
+                               if self.jobs else ""),
+                            node, [self.catalog.evidence(w.unit, w.statement, role="writer") for w, _ in writing][:10],
+                            {"reason": reason}))
         elif len({id(w.statement) for w, _ in writing}) > 1:
             first = min(w.statement.start for w, _ in writing)
             for writer, step in writing:
@@ -638,10 +657,10 @@ class Tracer:
         return steps, gaps, stops, cycles
 
     # ------------------------------------------------------- call order
-    def _call_paths(self, scope: str, limit: int = 3) -> list[tuple[str, list]]:
+    def _call_paths(self, scope: str, limit: int = 3, entries: list[str] | None = None) -> list[tuple[str, list]]:
         """(entry scope, calls) for each call path from an entry point to ``scope`` (at most ``limit``)."""
         found: list[tuple[str, list]] = []
-        for entry in self.entry_points:
+        for entry in (self.entry_points if entries is None else entries):
             stack = [(entry, [])]
             while stack and len(found) < limit:
                 current, path = stack.pop()
@@ -655,6 +674,71 @@ class Tracer:
                         if proc.scope not in {c.caller_scope for c in path} | {current}:
                             stack.append((proc.scope, path + [call]))
         return found
+
+    # -------------------------------------------------------- job order
+    def _step_scopes(self, step) -> list[str | None]:
+        """Procedure scopes a job step runs (None for a name with no single definition in the scan)."""
+        out = []
+        for name in step.procedures():
+            parts = [norm(p) for p in split_name(name)][-3:]
+            parts = [None] * (3 - len(parts)) + parts
+            ref = ObjectRef(parts[2], parts[1] or self.catalog.default_schema, parts[0] or norm(step.database),
+                            None, "procedure")
+            procs = self.catalog.procs_for(ref)
+            out.append(procs[0].scope if len(procs) == 1 else None)
+        return out
+
+    def _job_order(self, writing):
+        """(ordered, reason, job): whether the step order of one enabled SQL Agent job, read from
+        --job-scripts, orders every pair of writers. Writers in different jobs stay unordered (their
+        schedules decide); so do writers a job reaches more than once or through unresolved steps."""
+        placements = []
+        self._job_steps = {}
+        for writer, _ in writing:
+            found = []
+            for job in self.jobs:
+                for position, step in enumerate(job.sequence()):
+                    for sub, scope in enumerate(self._step_scopes(step)):
+                        if scope is None:
+                            continue
+                        paths = self._call_paths(writer.statement.scope, entries=[scope])
+                        if paths:
+                            found.append((job, position, sub, step, scope, paths))
+            if not found:
+                return False, "writer_not_run_by_any_job_script", None
+            if len({id(f[0]) for f in found}) > 1:
+                return False, "writer_run_by_several_jobs", None
+            if len(found) > 1 or len(found[0][5]) > 1:
+                return False, "writer_reached_by_several_steps_or_paths", None
+            placements.append(found[0])
+        job = placements[0][0]
+        if any(not p[0].enabled for p in placements):
+            return False, "writer_only_in_disabled_job", None
+        if any(p[0] is not job for p in placements):
+            return False, "writers_in_different_jobs", None
+        if any(scope is None for step in job.sequence() for scope in self._step_scopes(step)):
+            return False, "job_runs_procedures_not_in_scan", None
+        keys = {}
+        groups: dict[tuple[int, int], list] = {}
+        for (writer, step), placement in zip(writing, placements):
+            groups.setdefault((placement[1], placement[2]), []).append(((writer, step), placement))
+            self._job_steps[id(writer)] = placement[3]
+        saved = self.entry_points
+        try:
+            for (position, sub), members in groups.items():
+                entry = members[0][1][4]
+                if len(members) > 1:
+                    self.entry_points = [entry]
+                    ok, _ = self._call_order([m[0] for m in members])
+                    if not ok:
+                        return False, "same_job_step_order_not_settled", None
+                for (writer, _), _ in members:
+                    inner = self._keys.get(id(writer)) if len(members) > 1 else [(writer.statement.start, ())]
+                    keys[id(writer)] = [(position * 1000 + sub, ())] + list(inner)
+        finally:
+            self.entry_points = saved
+        self._keys = keys
+        return True, None, job
 
     def _call_key(self, writer) -> tuple[list, str | None]:
         """[(offset, controls)] from the entry point down to the writer, or (None, reason)."""
@@ -700,13 +784,23 @@ class Tracer:
         self._keys = {id(w): k for (w, _), k in zip(writing, keys)}
         return True, None
 
-    def _note_call_order(self, writing) -> None:
+    def _note_call_order(self, writing, job=None) -> None:
         order = sorted(writing, key=lambda ws: [o for o, _ in self._keys[id(ws[0])]])
         names = [w.statement.procedure or w.unit.rel_path for w, _ in order]
         for rank, (writer, step) in enumerate(order):
             earlier = sorted(set(names[:rank]) - {names[rank]})
             later = sorted(set(names[rank + 1:]) - {names[rank]})
-            text = "From the entry point's call sequence, this write runs"
+            if job is not None:
+                placed = self._job_steps.get(id(writer))
+                step.status = worst(step.status, INFERRED)
+                if placed is not None:
+                    step.evidence.append(Evidence(placed.path, placed.line, placed.line,
+                                                  f"job {job.name}, step {placed.step_id} {placed.name}".strip(),
+                                                  "job_step", None, "jobs"))
+                text = (f"From the step order of SQL Agent job {job.name} in its script (a static copy, not confirmed "
+                        "as the deployed job), this write runs")
+            else:
+                text = "From the entry point's call sequence, this write runs"
             if earlier:
                 text += f" after {', '.join(earlier)}"
             if later:
