@@ -183,7 +183,7 @@ GAP_SHORT = {
     "external_object": "external object", "ambiguous_column": "ambiguous column", "ambiguous_object": "ambiguous object",
 }
 END_ORDER = ("boundary", "declared", "source_without_writer", "external_file", "parameter_without_caller",
-             "max_depth", "constant", "gap", "cycle", "open")
+             "max_depth", "constant", "gap", "earlier", "cycle", "open")
 
 # Value-rule tags of a route family, in display order: (short label, phrase).
 RULE_TAGS = {
@@ -956,11 +956,17 @@ def _end_text(a: Analysis, node_id: str, kind: str) -> str:
     return "not traced further — not proved"
 
 
+def _short_kind(a: Analysis, node_id: str, kind: str) -> str:
+    """An end kind for short lists: earlier content before a write is not called a loop."""
+    return "earlier" if kind == "cycle" and a.t.kind(node_id) == "prior_state" else kind
+
+
 def _end_short(kind: str) -> str:
     return {"boundary": "boundary reached", "declared": "declared terminal", "source_without_writer":
             "no writer in selected sources", "external_file": "external file", "parameter_without_caller":
             "parameter without caller", "max_depth": "depth limit", "constant": "constant",
-            "gap": "open point", "cycle": "loop", "open": "not traced further"}.get(kind, kind)
+            "gap": "open point", "earlier": "earlier content", "cycle": "loop",
+            "open": "not traced further"}.get(kind, kind)
 
 
 def _node_short(a: Analysis, node_id: str, limit: int = NAME_LIMIT) -> str:
@@ -1442,7 +1448,8 @@ def family_mermaid(a: Analysis) -> list[str]:
     rest = a.families[MAX_DIAGRAM_FAMILIES:]
     if rest:
         routes = sum(f["route_count"] for f in rest)
-        kinds = Counter(_end_short(f["stop"] if not f["stop"].startswith("gap:") else "gap") for f in rest)
+        kinds = Counter(_end_short("earlier" if f["stop"] == "cycle" and f["source"]["kind"] == "prior_state"
+                                   else f["stop"] if not f["stop"].startswith("gap:") else "gap") for f in rest)
         what = ", ".join(f"{n} {k}" for k, n in kinds.most_common(3))
         label = (f"Summary, not a source: {len(rest)} more route families ({routes} routes; {what}) - "
                  "each listed in the family table below")
@@ -1562,7 +1569,7 @@ def _section_sources(a: Analysis, detailed: str) -> list[str]:
         family = ", ".join(_fam_link(f, detailed) for f in fams[:3]) + (", …" if len(fams) > 3 else "")
         out.append("| " + " | ".join(_cell(c) for c in cells + [family, why, proof]) + " |")
     if len(ends) > MAX_ENDPOINTS:
-        rest = Counter(a.end_kind(n) for n in ends[MAX_ENDPOINTS:])
+        rest = Counter(_short_kind(a, n, a.end_kind(n)) for n in ends[MAX_ENDPOINTS:])
         out += ["", f"And {len(ends) - MAX_ENDPOINTS} more end points ("
                 + ", ".join(f"{_end_short(k)}: {v}" for k, v in sorted(rest.items())) + f") — see the "
                 f"[route families]({detailed}#route-families) and the JSON."]
@@ -1812,7 +1819,7 @@ def _section_routes(a: Analysis, detailed: str) -> list[str]:
             hidden = len(seq) - (MAX_ROUTE_OBJECTS - 1)
             seq = seq[:3] + [f"… {hidden} more objects …"] + seq[-(MAX_ROUTE_OBJECTS - 4):]
         path = " ← ".join(_code(_truncate(s, NAME_LIMIT)) for s in seq)
-        kinds = Counter(a.route_end_kind(n, info) for n, info in agg.ends.items())
+        kinds = Counter(_short_kind(a, n, a.route_end_kind(n, info)) for n, info in agg.ends.items())
         summary = ", ".join(f"{v} {_end_short(k)}" for k, v in sorted(kinds.items(), key=lambda kv: (
             END_ORDER.index(kv[0]) if kv[0] in END_ORDER else 99)))
         out += ["", f"**Route {index}** ({_plural(len(agg.ends), 'end')}: {summary}): {path}"]

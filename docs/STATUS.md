@@ -312,3 +312,9 @@
   - The pages say that candidate earlier writers are shown and that the code does not prove which of
     them populated the rows before this run.
   - Genuine loops (recursive CTEs) keep the loop wording.
+- Shortened lists (the "And N more end points" line, route summaries and the diagram's summary node)
+  now say "earlier content: N", not "loop: N". The generic completeness note no longer calls an
+  earlier-content read a loop. "Loop" is kept for genuine cycles such as recursive CTEs. Test:
+  `test_shortened_lists_call_earlier_content_by_its_name`.
+- Real run after these fixes: no cycles remain (102 loops cut, all ending at traced earlier content),
+  no `unexplained_end` gaps, and no outcome changes (78 / 4 / 96).

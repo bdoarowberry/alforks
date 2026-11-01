@@ -127,3 +127,23 @@ def test_multi_column_update_reads_every_column_before_the_update(tmp_path):
                 reads = {i["node"] for i in update["inputs"]}
                 assert f"prior_state:{node}" in reads and node not in reads
         assert t.data["completeness"]["status"] == "complete"
+
+
+def test_shortened_lists_call_earlier_content_by_its_name(tmp_path):
+    """When the end-point table is cut short, earlier-content ends are counted as such, not as loops."""
+    cols = [f"c{i}" for i in range(1, 10)]
+    sql = tmp_path / "sql"
+    sql.mkdir()
+    (sql / "load.sql").write_text(
+        f"CREATE TABLE dbo.Src ({', '.join(c + ' int' for c in cols)});\n"
+        f"CREATE TABLE dbo.Work ({', '.join(c + ' int' for c in cols)});\n"
+        "CREATE TABLE dbo.Total (v int);\nGO\nCREATE PROCEDURE dbo.load_total AS\nBEGIN\n"
+        f"    INSERT INTO dbo.Work ({', '.join(cols)}) SELECT {', '.join(cols)} FROM dbo.Src;\n"
+        f"    UPDATE dbo.Work SET {', '.join(f'{c} = {c} + 1' for c in cols)};\n"
+        f"    INSERT INTO dbo.Total (v) SELECT {' + '.join(cols)} FROM dbo.Work;\nEND\n", encoding="utf-8")
+    t = trace(sql, "demo.dbo.Total.v", tmp_path / "out", *DB)
+    assert t.data["cycles"] == []
+    page = (tmp_path / "out" / "demo.dbo.total.v.overview.md").read_text(encoding="utf-8")
+    more = next(line for line in page.splitlines() if line.startswith("And ") and "more end points" in line)
+    assert "earlier content:" in more
+    assert "loop" not in page.lower()
