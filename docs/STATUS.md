@@ -289,3 +289,26 @@
   unresolved origins.
 - `gap-summary.json` → `totals.earlier_content` gives the counts: `loops_cut_traced`,
   `update_only_untraced`, `rows_not_updated_steps` and `remaining_cycles`.
+
+## Fixed after the earlier-content run (real run: 10 cycles left in 5 traces; 48 false unexplained ends)
+
+- **Batch-only false gap.** Expansions are memoized across the targets of one run, and the earlier-content
+  pass changed those cached steps in place. A later target then reused a step that pointed to an
+  earlier-content node but had no stop, which gave `unexplained_end` and `incomplete`. Each trace now
+  works on its own copies of the steps. Tests:
+  - `test_batch_and_single_target_runs_agree` compares batch and single-target JSON
+    (`fixtures/column/earlier_state_batch/`);
+  - a sweep over all earlier-content fixtures finds no batch/single difference.
+- **Multi-column UPDATE with a derived expression over the columns it sets** (`SET a = CASE ... t.a ...,
+  b = CASE ... t.b ...` with `CROSS APPLY (SELECT t.a + t.b)`). Loop cuts that landed on a
+  derived-table column were skipped, so a cycle remained. Loops are now cut per strongly connected
+  group, always at the table column or variable nearest the target, and the cutting repeats until no
+  such group is left. Every right-hand-side read, including the CROSS APPLY read, is now the value
+  before the UPDATE. Test: `test_multi_column_update_reads_every_column_before_the_update`
+  (`fixtures/column/earlier_state_multi/`).
+- **Wording.**
+  - These ends are now "earlier content before this write", not "loops": the pages, the stop detail,
+    the diagram ("Before this write: …") and the coverage line ("earlier-content ends") all use it.
+  - The pages say that candidate earlier writers are shown and that the code does not prove which of
+    them populated the rows before this run.
+  - Genuine loops (recursive CTEs) keep the loop wording.

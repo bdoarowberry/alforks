@@ -236,7 +236,7 @@ STOP_SHORT = {
     "parameter_without_caller": "no caller found",
     "max_depth": "depth limit reached",
     "constant": "constant",
-    "cycle": "loop: earlier content, sources traced",
+    "cycle": "earlier content before this write",
     "open": "not traced further",
 }
 SHAPES = {   # diagram node kind -> (open, close, label prefix)
@@ -246,7 +246,7 @@ SHAPES = {   # diagram node kind -> (open, close, label prefix)
     "declared": ('[["', '"]]', "Declared terminal"),
     "unresolved": ('{{"', '"}}', "Unresolved origin"),
     "loop": ('(("', '"))', "Loop, no new source"),
-    "earlier": ('(("', '"))', "No new source"),
+    "earlier": ('(("', '"))', "Before this write"),
 }
 
 
@@ -516,7 +516,8 @@ class Analysis:
             return {"kind": "constant", "key": "constant", "label": "constants"}
         if kind == "prior_state" and self.end_kind(node_id) == "cycle":
             return {"kind": "prior_state", "key": "prior_state",
-                    "label": "earlier content read back (loops; its sources are the other routes)"}
+                    "label": "earlier content before a write (candidate earlier writers are shown on the other "
+                             "routes)"}
         if obj:
             okind = obj.get("kind") or "table"
             entry = self.object_entry(node_id)
@@ -947,9 +948,9 @@ def _end_text(a: Analysis, node_id: str, kind: str) -> str:
         return "open point: " + "; ".join(_text(GAP_TEXT.get(k, k)) for k in kinds) + " — not proved"
     if kind == "cycle":
         if t.kind(node_id) == "prior_state":
-            return ("earlier content read back: a write here reads the value this column (or variable) already "
-                    "had; that earlier value comes from the writes traced on the other routes, so this adds no "
-                    "new source")
+            return ("earlier content before this write: the write reads the value the column (or variable) "
+                    "already had. Candidate earlier writers are shown on the other routes; the code does not prove "
+                    "which of them populated the rows before this run")
         return ("loop: values here feed each other — the loop is followed once and adds no new source (every "
                 "input into it is traced); see the cycles on the detailed page")
     return "not traced further — not proved"
@@ -1032,16 +1033,23 @@ def _is_unresolved(kind: str) -> bool:
 
 
 def _end_kinds(a: Analysis) -> Counter:
-    """Distinct end nodes by kind, loop ends included."""
-    counts = Counter(e["kind"] for e in a.ends)
-    counts["cycle"] += len(set(a.loop_ends) - {e["node"] for e in a.ends})
-    seen = {e["node"] for e in a.ends} | set(a.loop_ends)
+    """Distinct end nodes by kind, loop ends included; earlier content before a write is counted apart."""
+    counts: Counter = Counter()
+    seen: set[str] = set()
+
+    def add(node_id: str, kind: str) -> None:
+        if node_id not in seen:
+            seen.add(node_id)
+            counts["earlier" if a.t.kind(node_id) == "prior_state" else kind] += 1
+
+    for e in a.ends:
+        add(e["node"], e["kind"])
+    for node_id in a.loop_ends:
+        add(node_id, "cycle")
     for fam in a.families:   # ends of steps without inputs (not leaves)
         for end in fam["ends"]:
-            if end not in seen:
-                seen.add(end)
-                counts["cycle" if fam["stop"] == "cycle" else (fam["stop"] if not fam["stop"].startswith("gap:")
-                                                                else "gap")] += 1
+            add(end, "cycle" if fam["stop"] == "cycle" else (fam["stop"] if not fam["stop"].startswith("gap:")
+                                                             else "gap"))
     return +counts
 
 
@@ -1149,12 +1157,15 @@ def _section_answer(a: Analysis, detailed: str = "") -> list[str]:
     total = sum(f["route_count"] for f in value_fams)
     unproven = sum(f["route_count"] for f in value_fams
                    if f["stop"] in ("source_without_writer", "external_file", "parameter_without_caller"))
-    def routes(test) -> int:
-        return sum(f["route_count"] for f in value_fams if test(f["stop"]))
+    def routes(test, earlier: bool | None = None) -> int:
+        return sum(f["route_count"] for f in value_fams if test(f["stop"])
+                   and (earlier is None or (f["source"]["kind"] == "prior_state") == earlier))
     stops = []
     for n, one, many in (
             (routes(lambda s: s.startswith("gap:") or s == "open"), "stops at an open point", "stop at open points"),
-            (routes(lambda s: s == "cycle"), "stops at a loop", "stop at loops"),
+            (routes(lambda s: s == "cycle", True), "ends at earlier content before a write (candidate earlier "
+             "writers are shown)", "end at earlier content before a write (candidate earlier writers are shown)"),
+            (routes(lambda s: s == "cycle", False), "stops at a loop", "stop at loops"),
             (routes(lambda s: s == "max_depth"), "is cut at the depth limit", "are cut at the depth limit"),
             (routes(lambda s: s == "declared"), "ends at a terminal declared for this run (upstream not traced)",
              "end at terminals declared for this run (upstream not traced)")):
@@ -1299,8 +1310,9 @@ def _section_coverage(a: Analysis, detailed: str) -> list[str]:
             f"{_plural(unresolved, 'unresolved origin')}"
             + (f" ({', '.join(unresolved_parts)})" if unresolved_parts else "")
             + (f" · {_plural(counts['constant'], 'constant')}" if counts.get("constant") else "")
-            + (f" · {_plural(counts['cycle'], 'loop')} (a write reads earlier content of its own column or "
-               "variable; every input into "
+            + (f" · {_plural(counts['earlier'], 'earlier-content end')} (the value before a write that reads "
+               "it; candidate earlier writers are shown on the other routes)" if counts.get("earlier") else "")
+            + (f" · {_plural(counts['cycle'], 'loop')} (values feed each other; every input into "
                f"{'it' if counts['cycle'] == 1 else 'them'} is traced, so no source is missing there)"
                if counts.get("cycle") else "")
             + f" · steps: {step_text}")
@@ -1389,6 +1401,10 @@ def _diagram_node_label(a: Analysis, fam: dict) -> str:
         values = [(a.t.nodes.get(n) or {}).get("name") or n for n in ends]
         what = ", ".join(_truncate(v, 20) for v in values[:3]) + (f" and {len(values) - 3} more" if len(values) > 3 else "")
         prefix = "Constant" if len(values) == 1 else "Constants"
+    elif fam["source"]["kind"] == "prior_state" and len(ends) > 1:
+        later = [a.t.display((a.t.nodes.get(n) or {}).get("earlier_state_of") or n) for n in ends]
+        what = _truncate("earlier content of " + ", ".join(later[:3])
+                         + (f" and {len(later) - 3} more" if len(later) > 3 else ""), DIAGRAM_NAME_LIMIT)
     elif len(ends) == 1:
         what = _truncate(a.t.display(ends[0]), DIAGRAM_NAME_LIMIT)
     else:

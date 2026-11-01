@@ -6,7 +6,7 @@ never traced. The read now points to an "earlier content of" node that ends with
 ``prior_state`` when the writes that produce that content are traced on the page, or
 ``source_without_writer`` when nothing in the selected sources adds the rows.
 """
-from column_helpers import FIXTURES, inputs, trace
+from column_helpers import FIXTURES, cli_args, inputs, load_trace, run_cli, trace
 
 ROOT = FIXTURES / "earlier_state"
 DB = ("--default-database", "demo")
@@ -90,3 +90,40 @@ def test_variable_accumulation_reads_its_earlier_value(tmp_path):
     assert stop(t, prior)["reason"] == "prior_state"
     page = (tmp_path / "demo.dbo.labels.label.overview.md").read_text(encoding="utf-8")
     assert "earlier value of @s" in page
+
+
+def test_batch_and_single_target_runs_agree(tmp_path):
+    """Expansions are shared between the targets of one run; the earlier-content pass of one trace must
+    not change the steps another trace reuses (real run: 48 unexplained ends in 10 traces)."""
+    root = FIXTURES / "earlier_state_batch"
+    first, second = "demo.dbo.Doubled.amount", "demo.dbo.Copy.first_amount"
+    assert run_cli(cli_args(root, [first, second], tmp_path / "batch", *DB)) == 0
+    batch = load_trace(tmp_path / "batch", first, root)
+    batch_second = load_trace(tmp_path / "batch", second, root)
+    alone = trace(root, second, tmp_path / "alone", *DB)
+    for t in (batch_second, alone):
+        assert t.data["completeness"]["result"] == "complete_within_selected_scope"
+        assert not t.gaps("unexplained_end")
+        assert stop(t, "prior_state:demo.dbo.doubled.amount")["reason"] == "prior_state"
+    strip = lambda t: (t.data["steps"], t.data["stops"], t.data["gaps"], t.data["completeness"])
+    assert strip(batch_second) == strip(alone)
+    assert batch.data["completeness"]["result"] == "complete_within_selected_scope"
+
+
+def test_multi_column_update_reads_every_column_before_the_update(tmp_path):
+    """SET a = ..., b = ... with a derived expression over both: every right-hand-side read, including
+    the CROSS APPLY one, is the value before this UPDATE, with no cycle between the updated columns."""
+    root = FIXTURES / "earlier_state_multi"
+    for column in ("demo.dbo.Target.col_a", "demo.dbo.Capped.col_b"):
+        t = trace(root, column, tmp_path / column, *DB)
+        assert t.data["cycles"] == []
+        derived = next(n["id"] for n in t.data["nodes"] if n["id"].startswith("derived:"))
+        assert sorted(inputs(t.only_step_for(derived), "value")) == [
+            "constant:0", "prior_state:demo.dbo.target.col_a", "prior_state:demo.dbo.target.col_b"]
+        for col in ("col_a", "col_b"):
+            node = f"demo.dbo.target.{col}"
+            if t.steps_for(node):
+                update = next(s for s in t.steps_for(node) if s["writer_kind"] == "update")
+                reads = {i["node"] for i in update["inputs"]}
+                assert f"prior_state:{node}" in reads and node not in reads
+        assert t.data["completeness"]["status"] == "complete"

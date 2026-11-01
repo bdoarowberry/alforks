@@ -444,7 +444,8 @@ class TraceResult:
                         "upstream population beyond them is not proved), or complete_within_selected_scope when "
                         "some paths end at objects with no writer in the selected sources (not proof that they "
                         "are ultimate sources). Where a write reads the column's own earlier content (a loop), that read ends at "
-                        "an 'earlier content' node (stop prior_state) whose sources are the writers already traced. "
+                        "an 'earlier content' node (stop prior_state): the value before that write, with its candidate "
+                        "earlier writers traced (which of them populated the rows is not proved). "
                         "Row-selection gaps (filters and joins that could not be fully resolved) are "
                         "reported separately and do not make the value lineage incomplete. A complete "
                         "trace does not claim its stops are ultimate source-system fields."}

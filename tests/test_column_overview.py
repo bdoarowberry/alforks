@@ -493,13 +493,15 @@ def test_loop_ends_are_unresolved_origins(tmp_path):
     md = overview(tmp_path, "demo.beta.val")
     coverage = section(md, "Coverage")
     assert "1 unresolved origin (1 with no writer in the selected sources)" in coverage
-    assert ("1 loop (a write reads earlier content of its own column or variable; every input into it is traced, "
-            "so no source is missing there)") in coverage
-    assert "1 route stops at a loop" in section(md, "Plain answer")
+    assert ("1 earlier-content end (the value before a write that reads it; candidate earlier writers are shown "
+            "on the other routes)") in coverage and "loop" not in coverage
+    assert "1 route ends at earlier content before a write (candidate earlier writers are shown)" in \
+        section(md, "Plain answer")
     assert md.index("## Sources at a glance") < md.index("## Routes")
     endpoints = section(md, "Sources at a glance")
-    assert "earlier content read back" in endpoints and "earlier content of a DB column" in endpoints
-    assert '(("F3 No new source: earlier content of' in "\n".join(mermaid_block(md))
+    assert "earlier content before this write" in endpoints and "earlier content of a DB column" in endpoints
+    assert "does not prove which of them populated the rows" in endpoints
+    assert '(("F3 Before this write: earlier content of' in "\n".join(mermaid_block(md))
 
 
 # --------------------------------------------------------------------------- first screen (multi-branch fixture)

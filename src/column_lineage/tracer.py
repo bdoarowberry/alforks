@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from collections import deque
+import copy
 import fnmatch
 import re
 
@@ -228,6 +229,9 @@ class Tracer:
         ``SET @s = @s + ...``). Each loop is cut where it reads back into a node already on the walk: that
         read now points to an "earlier content of" node with an explicit stop, so the dependency stays on
         the page and the walk ends with a stated reason instead of an unexplained cycle."""
+        # Expansion results are memoized across the targets of one run: never change a cached step,
+        # work on this trace's own copies.
+        result.steps = [_own_copy(step) for step in result.steps]
         by_target: dict[str, list[Step]] = {}
         for step in result.steps:
             by_target.setdefault(step.target.id, []).append(step)
@@ -282,39 +286,44 @@ class Tracer:
             priors[prior.id]["reads"].append({"step": retained.id, "target": node.id,
                                               "why": "rows_not_matched_by_update"})
 
-        # (2) Loops: cut every back edge of a depth-first walk from the target.
-        edges: dict[str, list[str]] = {}
+        # (2) Loops. Within each group of nodes that feed each other, cut the reads into the table column or
+        # variable nearest the target (all reads into it from inside the group), and repeat until no such
+        # group remains. A cut always lands on a stateful node, never on a CTE or derived-table column,
+        # so a multi-column UPDATE whose derived expression reads several of the columns it sets ends
+        # with every right-hand-side read on the earlier content of that column.
+        edges: dict[str, set[str]] = {}
         for step in result.steps:
             for item in step.inputs:
-                edges.setdefault(step.target.id, [])
-                if item.node.id not in edges[step.target.id]:
-                    edges[step.target.id].append(item.node.id)
-        components = {n: c for c in find_cycles({k: set(v) for k, v in edges.items()}) for n in c}
-        state: dict[str, int] = {}     # 1 on the walk, 2 finished
-        back: list[tuple[str, str]] = []
-        for root in [result.target.id] + sorted(edges):
-            if state.get(root):
-                continue
-            state[root] = 1
-            work = [(root, iter(sorted(edges.get(root, ()))))]
-            while work:
-                current, children = work[-1]
-                for child in children:
-                    seen = state.get(child, 0)
-                    if seen == 1:
-                        back.append((current, child))
-                    elif seen == 0:
-                        state[child] = 1
-                        work.append((child, iter(sorted(edges.get(child, ())))))
-                        break
-                else:
-                    state[current] = 2
-                    work.pop()
-        for reader, read in back:
-            node = result.nodes.get(read)
-            if node is None or node.kind not in STATEFUL_KINDS:
-                continue   # e.g. a recursive CTE: reported as a cycle
-            prior = prior_of(node)
+                edges.setdefault(step.target.id, set()).add(item.node.id)
+        depth = {result.target.id: 0}
+        frontier = deque([result.target.id])
+        while frontier:
+            current = frontier.popleft()
+            for child in sorted(edges.get(current, ())):
+                if child not in depth:
+                    depth[child] = depth[current] + 1
+                    frontier.append(child)
+        cut: set[tuple[str, str]] = set()
+        loops: dict[str, list[str]] = {}
+        while True:
+            remaining = {u: {v for v in vs if (u, v) not in cut} for u, vs in edges.items()}
+            progressed = False
+            for component in find_cycles(remaining):
+                heads = sorted((n for n in component if result.nodes.get(n) is not None
+                                and result.nodes[n].kind in STATEFUL_KINDS),
+                               key=lambda n: (depth.get(n, 10 ** 9), n))
+                if not heads:
+                    continue   # e.g. a recursive CTE: reported as a cycle
+                head = heads[0]
+                for reader in component:
+                    if head in remaining.get(reader, ()):
+                        cut.add((reader, head))
+                        progressed = True
+                loops.setdefault(head, sorted(component))
+            if not progressed:
+                break
+        for reader, read in sorted(cut):
+            prior = prior_of(result.nodes[read])
             for step in by_target.get(reader, []):
                 for item in step.inputs:
                     if item.node.id == read:
@@ -322,7 +331,7 @@ class Tracer:
                         item.note = "; ".join(x for x in (item.note, "reads the value before this write") if x)
                         priors[prior.id]["reads"].append({"step": step.id, "target": reader,
                                                           "why": "reads_back_in_loop"})
-            priors[prior.id]["loop"] = sorted(components.get(read, [read]))
+            priors[prior.id]["loop"] = loops.get(read, [read])
 
         for entry in priors.values():
             prior, later = entry["node"], entry["later"]
@@ -333,11 +342,11 @@ class Tracer:
                 loop["loop_nodes"] = entry["loop"]
             if adds_rows(later):
                 noun = "value" if later.kind not in (COLUMN, TEMP_COLUMN) else "content"
-                again = ("the content that earlier runs of these writes left" if later.kind == COLUMN
-                         else "the writes that run before it")
-                detail = (f"The {noun} of {later.display} before it is written again. Its sources are the writes of "
-                          f"{later.display} traced on this page ({_count_text(len(outside), 'step')} outside the loop; "
-                          f"for this read: {again}), so the loop adds no source of its own.")
+                which = ("the code does not prove which of them populated the rows before this run" if later.kind == COLUMN
+                         else "the code does not prove which of them ran last before this read")
+                detail = (f"The {noun} of {later.display} before this write. The writes of {later.display} that "
+                          f"could have produced it are shown on this page as candidate earlier writers "
+                          f"({_count_text(len(outside), 'step')} outside the loop); {which}.")
                 result.stops.append(Stop(prior, "prior_state", detail, loop=loop))
             else:
                 detail = (f"No statement in the selected sources adds rows to {later.object.display}; the updates "
@@ -884,6 +893,14 @@ def dedupe_stops(stops: list[Stop]) -> list[Stop]:
     for stop in stops:
         seen.setdefault((stop.node.id, stop.reason), stop)
     return list(seen.values())
+
+
+def _own_copy(step: Step) -> Step:
+    """A copy of a step whose inputs and notes can change without touching the memoized original."""
+    clone = copy.copy(step)
+    clone.inputs = [copy.copy(item) for item in step.inputs]
+    clone.notes = list(step.notes)
+    return clone
 
 
 def _count_text(n: int, noun: str) -> str:
