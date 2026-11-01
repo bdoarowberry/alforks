@@ -422,7 +422,7 @@ Eight high-severity findings, all fixed. Each test fails on the code before the 
     - `missing_definition`: column not in the scanned definition, object without definition or writer, …
   - For a quick check, rerun only the affected columns with `--columns-file`.
 
-## After the 83253bf run (81 / 4 / 92→93; wildcard 39 → 2)
+## After the 83253bf run (81 / 4 / 93; wildcard 39 → 2)
 
 - Existence proof closed 37 of the 39 wildcard traces: 874 new steps, and spot checks were correct.
   The 2 left are multi-statement table-valued functions (or ones not scanned).
