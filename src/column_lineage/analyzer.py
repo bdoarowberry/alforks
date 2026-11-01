@@ -130,6 +130,7 @@ class Ctx:
         self.in_row_selection = False
         self.step_notes: list[str] = []     # notes the expression walk adds to the step being built
         self.step_inferred = False          # the walk relied on a summary (e.g. of a user function)
+        self.star_reasons: set[str] = set()  # why a * seen in this statement could not be expanded
 
     def position(self, node) -> int:
         """Stable ordinal of an AST node within its statement, so reused aliases stay distinct."""
@@ -146,6 +147,9 @@ class Ctx:
         detail = dict(detail or {})
         if self.in_row_selection:
             detail["raised_in_row_selection"] = True
+        if kind == "wildcard_without_schema" and self.star_reasons:
+            # Why a * in this statement could not be expanded (anonymous categories, for gap-summary.json).
+            detail.setdefault("unexpanded_star", sorted(self.star_reasons))
         gap = Gap(kind, message, node, [self.catalog.evidence(self.unit, self.statement, expr, "gap")], detail)
         if all(g.id != gap.id for g in self.gaps):
             self.gaps.append(gap)
@@ -494,6 +498,31 @@ class Analyzer:
                 return False
         return True
 
+    def star_reason(self, source: Source) -> str:
+        """Why a * over ``source`` could not be expanded, as an anonymous category."""
+        if source.kind == "opaque":
+            return "function_or_external_source"
+        if source.kind == "local":
+            return "cte_or_derived_with_unexpanded_star"
+        if len(source.refs) != 1:
+            return "object_resolves_to_several_databases"
+        ref = source.refs[0][0]
+        _, status, _ = self.catalog.schema_for(ref)
+        if status == "ambiguous":
+            return "differing_create_table_definitions"
+        if status == "declared":
+            return "declared_but_order_unsettled"
+        definers = [w.kind for w in self.catalog.writers_for(ref) if w.kind in ("select_into", "view")]
+        if definers:
+            if len(definers) > 1:
+                return "several_select_into_or_view_definitions_differ"
+            return "select_into_copy_of_an_unexpandable_source" if definers[0] == "select_into" else \
+                "view_over_an_unexpandable_source"
+        if ref.kind == "temp_table":
+            return "temp_table_created_elsewhere_or_by_unparsed_statement"
+        return "no_definition_in_selected_sources" if not self.catalog.is_known(ref) else \
+            "written_but_no_definition_in_selected_sources"
+
     @staticmethod
     def _certain_of(items: list[Item]) -> frozenset:
         """Output names a projection certainly has: named items and what its * items certainly supply."""
@@ -561,11 +590,13 @@ class Analyzer:
                 chosen = scope.find_alias(qualifier) if qualifier else list(scope.sources)
                 for source in chosen:
                     if source.columns is None or not source.reliable:
+                        scope.ctx.star_reasons.add(self.star_reason(source))
                         items.append(Item(None, target, source, None, unknown=True, certain=source.certain))
                         continue
                     for column in source.columns:
                         items.append(Item(column, target, source, column))
                 if not chosen:
+                    scope.ctx.star_reasons.add("qualifier_not_found")
                     items.append(Item(None, target, None, None, unknown=True))
                 continue
             if isinstance(expression, exp.Alias):

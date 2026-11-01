@@ -75,6 +75,16 @@ ALTER_DEFAULT = re.compile(rf"\bALTER\s+TABLE\s+(?P<name>{IDENT})\s+(?:WITH\s+(?
                            r"DEFAULT\s*(?P<expr>\((?:[^()]|\((?:[^()]|\([^()]*\))*\))*\)|N?'(?:''|[^'])*'|[-\w.]+)\s+FOR\s+"
                            r"(?P<col>\[[^\]]+\]|[A-Za-z_][\w$#@]*)", re.I)
 # Index options left over from a CREATE INDEX / constraint the indexer did not keep, glued to the next statement.
+CREATE_TABLE_HEAD = re.compile(rf"\s*CREATE\s+TABLE\s+(?P<name>{IDENT})", re.I)
+# Storage and column options that do not change a table's column list (blanked before re-parsing).
+DDL_NOISE = re.compile(
+    r"\bTEXTIMAGE_ON\s+(?:\[[^\]]*\]|\w+)|\bFILESTREAM_ON\s+(?:\[[^\]]*\]|\w+)"
+    r"|\bSPARSE\b|\bROWGUIDCOL\b|\bFILESTREAM\b|\bNOT\s+FOR\s+REPLICATION\b|\bHIDDEN\b"
+    r"|\bCOLUMN_SET\s+FOR\s+ALL_SPARSE_COLUMNS\b"
+    r"|\b(?:MASKED|ENCRYPTED)\s+WITH\s*\((?:[^()]|\([^()]*\))*\)"
+    r"|\)\s*WITH\s*\((?:[^()]|\([^()]*\))*\)\s*$"
+    r"|\bWITH\s*\(\s*(?:DATA_COMPRESSION|MEMORY_OPTIMIZED|DURABILITY|SYSTEM_VERSIONING|LEDGER|XML_COMPRESSION)"
+    r"(?:[^()]|\((?:[^()]|\([^()]*\))*\))*\)", re.I)
 INDEX_OPTIONS_PREFIX = re.compile(r"\s*WITH\s*\(\s*[A-Za-z_]+\s*=\s*(?:ON|OFF|\d+)\b(?:[^()]|\([^()]*\))*\)\s*"
                                   r"(?:ON\s+(?:\[[^\]]+\]|[A-Za-z_]\w*)(?:\s*\([^()]*\))?\s*)?(?=\S)", re.I)
 # Procedure options the indexer leaves in front of the first body statement: WITH <options> AS
@@ -1106,6 +1116,16 @@ class Catalog:
             ref = self._writer_ref(target, unit, statement)
             self._insert_exec_call(unit, statement, issue, ref, insert_exec, order)
             return
+        if (tree is None or isinstance(tree, exp.Command)) and CREATE_TABLE_HEAD.match(mask_noncode(text)):
+            repaired = self._reparse_create_table(text)
+            if repaired is not None:
+                tree = repaired
+                self.stats["create_table_options_blanked"] = self.stats.get("create_table_options_blanked", 0) + 1
+            else:
+                read = self._create_table_from_text(unit, statement)
+                key = "create_table_read_from_text" if read else "create_table_unread"
+                self.stats[key] = self.stats.get(key, 0) + 1
+                return
         if tree is None or isinstance(tree, exp.Command):
             targets = write_targets(mask_noncode(text))
             if targets:
@@ -1252,6 +1272,72 @@ class Catalog:
         if writer.ref.kind in ("table", "view") and writer.ref.database is None:
             self.unknown_db_writers[(writer.ref.schema, writer.ref.name)].append(writer)
 
+    @staticmethod
+    def _reparse_create_table(text: str) -> exp.Create | None:
+        """CREATE TABLE with storage or column options SQLGlot does not read (TEXTIMAGE_ON, SPARSE,
+        ROWGUIDCOL, MASKED WITH, ENCRYPTED WITH, table WITH (...)): blank them and parse again. None of
+        them changes the column list or order."""
+        masked = mask_noncode(text)
+        chars = list(text)
+        for match in DDL_NOISE.finditer(masked):
+            for i in range(match.start(), match.end()):
+                if chars[i] != "\n":
+                    chars[i] = " "
+        cleaned = "".join(chars)
+        try:
+            tree = sqlglot.parse_one(cleaned, read="tsql", error_level=ErrorLevel.RAISE)
+        except (SqlglotError, ValueError):
+            return None
+        return tree if isinstance(tree, exp.Create) and isinstance(tree.this, exp.Schema) else None
+
+    def _create_table_from_text(self, unit: Unit, statement: Statement) -> bool:
+        """Column list of a CREATE TABLE that does not parse even after blanking options: names in order,
+        identity, computed and rowversion read from each top-level element of the column list."""
+        masked = mask_noncode(statement.text)
+        head = CREATE_TABLE_HEAD.match(masked)
+        open_at = masked.find("(", head.end())
+        if open_at < 0:
+            return False
+        depth, close = 0, None
+        for i in range(open_at, len(masked)):
+            depth += {"(": 1, ")": -1}.get(masked[i], 0)
+            if depth == 0:
+                close = i
+                break
+        if close is None:
+            return False
+        ref = self.ref_from_text(head.group("name"), unit, statement)
+        if ref.kind == "temp_table":
+            self.temp_creators[statement.scope].add(ref.name)
+            self.temp_create_points[(statement.scope, ref.name)].append((unit, statement))
+            self.temp_resets[(statement.scope, ref.name)].append(statement.start)
+        else:
+            self._register(ref)
+        body, start, depth, parts = masked[open_at + 1:close], 0, 0, []
+        for i, ch in enumerate(body):
+            depth += {"(": 1, ")": -1}.get(ch, 0)
+            if ch == "," and depth == 0:
+                parts.append(body[start:i])
+                start = i + 1
+        parts.append(body[start:])
+        columns = []
+        for part in parts:
+            element = part.strip()
+            if not element or re.match(r"(?:CONSTRAINT|PRIMARY|UNIQUE|FOREIGN|CHECK|INDEX|PERIOD)\b", element, re.I):
+                continue
+            name = re.match(r"(\[(?:[^\]]|\]\])+\]|\"[^\"]+\"|[\w@#$]+)\s*(.*)", element, re.S)
+            if not name:
+                continue
+            rest = name.group(2)
+            computed = "computed" if re.match(r"AS\b", rest, re.I) else (
+                "generated always" if re.search(r"\bGENERATED\s+ALWAYS\s+AS\b", rest, re.I) else None)
+            columns.append(ColumnInfo(norm(name.group(1)), len(columns) + 1,
+                                      bool(re.search(r"\bIDENTITY\b", rest, re.I)), computed,
+                                      bool(re.match(r"(?:\[?(?:rowversion|timestamp)\]?)\b", rest, re.I)), None))
+        if columns:
+            self.schemas[ref.key].append(TableSchema(ref, columns, statement, unit, "create_table"))
+        return bool(columns)
+
     def _create_table(self, unit: Unit, statement: Statement, tree: exp.Create) -> None:
         schema = tree.this
         if not isinstance(schema, exp.Schema) or not isinstance(schema.this, exp.Table):
@@ -1264,14 +1350,23 @@ class Catalog:
             self._register(ref)
         columns = []
         masked = mask_noncode(statement.text)
+        inline_index = re.search(r"[,(]\s*INDEX\s+(?:\[[^\]]+\]|\w+)\s+(?:CLUSTERED|NONCLUSTERED|UNIQUE|\()", masked, re.I)
         for definition in schema.expressions:
             if not isinstance(definition, exp.ColumnDef):
                 continue
+            if inline_index and isinstance(definition.this, exp.Identifier) and not definition.this.quoted \
+                    and definition.this.name.lower() == "index":
+                continue   # an inline INDEX clause, read by SQLGlot as a column named index
             info = column_info(definition, len(columns) + 1)
             if info:
                 # SQLGlot reads ROWVERSION/TIMESTAMP as VARBINARY; check the source text.
                 if re.search(r"(?:^|[\s,(])\[?" + re.escape(info.name) + r"\]?\s+(?:rowversion|timestamp)\b", masked, re.I):
                     info.rowversion = True
+                # Temporal period columns are generated: they take no explicit value.
+                if not info.computed and re.search(r"(?:^|[\s,(])\[?" + re.escape(info.name) + r"\]?\s+[^,]*?"
+                                                   r"\bGENERATED\s+ALWAYS\s+AS\s+(?:ROW|TRANSACTION_ID|SEQUENCE_NUMBER)\b",
+                                                   masked, re.I):
+                    info.computed = "generated always"
                 columns.append(info)
         self.schemas[ref.key].append(TableSchema(ref, columns, statement, unit, "create_table"))
 

@@ -166,7 +166,9 @@ def build(catalog, traces: list[dict], samples: int = 25, packages=None) -> dict
     result = {
         "schema_version": "column-lineage-gap-summary/1.0",
         "note": "Contains no object, column, path or file names. Anonymized SQL replaces identifiers with IDn.",
-        "scan": {**catalog.stats, "file_encodings": getattr(catalog, "file_encodings", {})},
+        "scan": {**{k: 0 for k in ("create_table_options_blanked", "create_table_read_from_text",
+                                   "create_table_unread")},
+                 **catalog.stats, "file_encodings": getattr(catalog, "file_encodings", {})},
         "statement_issues_by_kind": dict(sorted(issue_kinds.items())),
         "dynamic_sql_evaluation": dict(sorted(evaluations.items())),
         "unparsed_statements_by_keyword": dict(sorted(statements.items())),
@@ -207,6 +209,7 @@ def _totals(traces: list[dict]) -> dict:
     declared_ends = 0
     no_writer = {"stops": 0, "distinct_objects": set(), "with_unused_writer_candidates": 0}
     near: Counter = Counter()
+    star_reasons: Counter = Counter()   # traces whose value-path * gaps have each reason
     earlier = {"traces_with_earlier_content": 0, "loops_cut_traced": 0, "update_only_untraced": 0,
                "rows_not_updated_steps": 0, "traces_with_remaining_cycles": 0, "remaining_cycles": 0}
     for data in traces:
@@ -241,6 +244,9 @@ def _totals(traces: list[dict]) -> dict:
         for kind in blocking:
             blocked[kind] += 1
         seen_here = set()
+        reasons_here = {r for g in data.get("gaps", []) if g["kind"] == "wildcard_without_schema"
+                        and g.get("affects") != "row_selection" for r in (g.get("detail") or {}).get("unexpanded_star", [])}
+        star_reasons.update(reasons_here)
         for gap in data.get("gaps", []):
             gaps[gap["kind"]] += 1
             for ev in gap.get("evidence", [])[:1]:
@@ -262,6 +268,7 @@ def _totals(traces: list[dict]) -> dict:
                             "unused_writer_candidates_by_category": dict(sorted(near.items()))},
         "earlier_content": earlier,
         "traces_blocked_by_gap_kind": dict(sorted(blocked.items())),
+        "wildcard_traces_by_unexpanded_star_reason": dict(sorted(star_reasons.items())),
         "gaps_by_kind": dict(sorted(gaps.items())),
         "distinct_gap_statements_by_kind": {k: len(v) for k, v in sorted(statements.items())},
         "statements_blocking_most_traces": shared[:10],

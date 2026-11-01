@@ -374,3 +374,22 @@ Eight high-severity findings, all fixed. Each test fails on the code before the 
   - The single-source binding fallback is not used in row-selection clauses (an ORDER BY alias).
   - A DEFAULT argument blocks inlining.
   - `SELECT IDENTITY(...) INTO` blocks the copied column order.
+
+## After the a1bbf08 run (80 / 4 / 94; wildcard still 39 traces)
+
+- **SSMS-scripted CREATE TABLE was not read.**
+  - `TEXTIMAGE_ON` (scripted for every table with `(max)` or xml columns), `SPARSE`, `ROWGUIDCOL`,
+    `MASKED WITH`, `ENCRYPTED WITH` and table `WITH (...)` options made the statement fall back to a
+    command, so the table had no column list. Every `*` over it and every positional INSERT into it was
+    then a gap. This is the most likely cause of the empty-copy-then-CTE shape that the earlier
+    differing-definitions fix did not close.
+  - These options are now blanked and the statement parsed again. If it still fails, the column list
+    is read from the text.
+  - An inline `INDEX` clause is no longer read as a column named `index`.
+  - Temporal `GENERATED ALWAYS AS ROW START/END` columns are skipped in positional matching.
+  - Tests: `tests/test_column_ssms_ddl.py`.
+- **Diagnostics** (anonymous counts in gap-summary.json):
+  - `scan.create_table_options_blanked`, `scan.create_table_read_from_text`, `scan.create_table_unread`;
+  - `totals.wildcard_traces_by_unexpanded_star_reason`, which says why each value-path `*` could not be
+    expanded: no definition, differing definitions, a copy of an unexpandable source, a temp table
+    created elsewhere, a function source, …
