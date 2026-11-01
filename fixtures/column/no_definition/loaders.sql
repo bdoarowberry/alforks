@@ -46,3 +46,24 @@ BEGIN
     INSERT INTO dbo.Out_read (col_r) SELECT col_r FROM c;
 END
 GO
+GO
+-- Inner-versus-outer binding: dbo.Feed (no definition) certainly has col_a (its loader names it).
+CREATE TABLE dbo.Outside (id int, col_a int);
+CREATE TABLE dbo.Out_inner (col_a int);
+GO
+CREATE PROCEDURE dbo.load_inner AS
+    INSERT INTO dbo.Out_inner (col_a)
+    SELECT (SELECT MAX(col_a) FROM dbo.Feed WHERE id = o.id) FROM dbo.Outside AS o;
+GO
+-- INSERT ... EXEC into a SELECT ... INTO table with no column list.
+CREATE TABLE dbo.Out_exec (col_a int);
+GO
+CREATE PROCEDURE dbo.GetPairs AS SELECT id, col_a FROM dbo.Raw;
+GO
+CREATE PROCEDURE dbo.load_exec AS
+BEGIN
+    SELECT TOP (0) id, col_a INTO #pairs FROM dbo.Raw;
+    INSERT INTO #pairs EXEC dbo.GetPairs;
+    INSERT INTO dbo.Out_exec (col_a) SELECT col_a FROM #pairs;
+END
+GO

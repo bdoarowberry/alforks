@@ -259,6 +259,11 @@ class Scope:
             only = self.sources[0]
             if only.columns is not None and only.reliable and name not in only.columns:
                 return None  # not supplied here: an outer (correlated) reference
+            if only.columns is None and name in only.certain:
+                # The scanned code proves the inner source has the column, and SQL binds the innermost one.
+                out = self.ctx.analyzer.source_column(only, name, self, column, expand_local)
+                return [Binding(b.node, worst(b.status, INFERRED), b.gap,
+                                "bound to the inner source, which certainly has this column") for b in out]
             if only.columns is None and self.parent is not None and self.parent.could_supply(name):
                 # SQL binds to the inner source if it has the column, else the outer one; with no
                 # schema for the inner source we cannot tell which.
@@ -1243,6 +1248,9 @@ class Analyzer:
                         columns, status, _ = self.catalog.schema_for(detail["target"])
                         names = ([c.name for c in columns if not (c.identity or c.computed or c.rowversion)]
                                  if status == "declared" else None)
+                        if names is None and status == "missing":
+                            derived = self.into_order(detail["target"])   # a SELECT ... INTO table
+                            names = derived[0] if derived else None
                     out = (proc, results[0], names) if names else (None, "no_column_list_and_no_target_order")
         self._result_sets[key] = out
         return out

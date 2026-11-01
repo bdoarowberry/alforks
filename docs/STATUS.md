@@ -421,3 +421,20 @@ Eight high-severity findings, all fixed. Each test fails on the code before the 
     - `ambiguous_column`: several joined candidates, inner-or-outer, …
     - `missing_definition`: column not in the scanned definition, object without definition or writer, …
   - For a quick check, rerun only the affected columns with `--columns-file`.
+
+## After the 83253bf run (81 / 4 / 92→93; wildcard 39 → 2)
+
+- Existence proof closed 37 of the 39 wildcard traces: 874 new steps, and spot checks were correct.
+  The 2 left are multi-statement table-valued functions (or ones not scanned).
+- Using the new reason counts:
+  - Inner-versus-outer binding: when the scanned code proves the inner source has the column, the inner
+    one binds (SQL binds the innermost source that has it); inferred.
+  - INSERT … EXEC with no column list into a SELECT ... INTO table now uses that table's column order.
+- What is left needs evidence or decisions rather than code:
+  - writer order (54): a SQL Agent export;
+  - dynamic SQL (53): assertions or runtime capture;
+  - backup tables without a definition (35): a scope decision, then `--declared-terminals`;
+  - column not in the scanned definition (8): the deployed definition;
+  - linked-server objects (8): their definitions;
+  - several joined candidates (4) and positional INSERT into a target with no definition (2): the
+    missing table definitions.

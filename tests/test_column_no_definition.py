@@ -65,3 +65,14 @@ def test_package_destination_mapping_proves_the_column_exists(tmp_path):
               "--package-root", str(FIXTURES / "ssis" / "basic"))
     assert "wildcard_without_schema" not in blocking(t)
     assert "demo_db.demo.stage.amount" in reached(t)
+
+
+def test_inner_source_that_certainly_has_the_column_wins(tmp_path):
+    t = trace(ROOT, "demo.dbo.Out_inner.col_a", tmp_path, *DB)
+    assert "ambiguous_column" not in blocking(t)
+    assert "demo.dbo.feed.col_a" in reached(t) and "demo.dbo.outside.col_a" not in reached(t)
+
+
+def test_insert_exec_into_a_select_into_table_uses_its_order(tmp_path):
+    t = trace(ROOT, "demo.dbo.Out_exec.col_a", tmp_path, *DB)
+    assert "insert_exec" not in blocking(t) and "demo.dbo.raw.col_a" in reached(t)
