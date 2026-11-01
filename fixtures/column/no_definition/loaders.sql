@@ -31,3 +31,18 @@ BEGIN
     INSERT INTO dbo.Out_missing (col_z) SELECT col_z FROM c;
 END
 GO
+GO
+-- dbo.Loaded has no definition and no SQL writer; a report reads it with a qualified column.
+CREATE TABLE dbo.Out_read (col_r int);
+GO
+CREATE PROCEDURE dbo.report AS
+    SELECT l.col_r, l.id FROM dbo.Loaded AS l WHERE l.id > 0;
+GO
+CREATE PROCEDURE dbo.load_read AS
+BEGIN
+    SELECT TOP (0) * INTO #r FROM dbo.Loaded;
+    INSERT INTO #r (id) SELECT id FROM dbo.Raw;
+    WITH c AS (SELECT * FROM dbo.Loaded)
+    INSERT INTO dbo.Out_read (col_r) SELECT col_r FROM c;
+END
+GO

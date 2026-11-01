@@ -44,3 +44,24 @@ def test_name_no_writer_mentions_stays_a_gap_with_its_reason(tmp_path):
     summary = json.loads((tmp_path / "gap-summary.json").read_text(encoding="utf-8"))
     assert summary["totals"]["wildcard_traces_by_unexpanded_star_reason"] == {
         "written_but_no_definition_in_selected_sources": 1}
+
+
+def test_qualified_read_elsewhere_proves_the_column_exists(tmp_path):
+    t = trace(ROOT, "demo.dbo.Out_read.col_r", tmp_path, *DB)
+    assert "wildcard_without_schema" not in blocking(t) and "demo.dbo.loaded.col_r" in reached(t)
+
+
+def test_package_destination_mapping_proves_the_column_exists(tmp_path):
+    """demo.stage is loaded by a package and has no CREATE TABLE in this SQL root; the destination's
+    column mapping proves it has amount."""
+    sql = tmp_path / "sql"
+    sql.mkdir()
+    (sql / "report.sql").write_text(
+        "USE demo_db;\nGO\nCREATE TABLE demo.report (amount nvarchar(50));\nGO\n"
+        "CREATE PROCEDURE demo.build_report AS\nBEGIN\n"
+        "    WITH c AS (SELECT * FROM demo.stage)\n"
+        "    INSERT INTO demo.report (amount) SELECT amount FROM c;\nEND\nGO\n", encoding="utf-8")
+    t = trace(sql, "demo_db.demo.report.amount", tmp_path / "out",
+              "--package-root", str(FIXTURES / "ssis" / "basic"))
+    assert "wildcard_without_schema" not in blocking(t)
+    assert "demo_db.demo.stage.amount" in reached(t)

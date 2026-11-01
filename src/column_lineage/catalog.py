@@ -544,6 +544,7 @@ class Catalog:
         self.assignments: dict[tuple[str, str], list[Assignment]] = defaultdict(list)
         self.temp_creators: dict[str, set[str]] = defaultdict(set)   # scope -> {#name}
         self.temp_create_points: dict[tuple[str, str], list] = defaultdict(list)   # (scope, #name) -> [(unit, stmt)]
+        self.proven_columns: dict[str, set[str]] = defaultdict(set)   # object key -> names proved by packages
         self.temp_writer_scopes: dict[str, set[str]] = defaultdict(set)  # #name -> {scope}
         self.synonyms: dict[str, tuple[ObjectRef, Statement, Unit]] = {}
         self.issues: list[StatementIssue] = []

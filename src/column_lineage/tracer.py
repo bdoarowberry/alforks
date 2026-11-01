@@ -509,7 +509,8 @@ class Tracer:
         for issue in issues:
             if self.catalog.dead_dynamic(issue) or self.catalog.dynamic_resolved(issue):
                 continue
-            if issue.kind == "insert_exec" and self.analyzer.result_set(issue)[0] is not None:
+            mapped = self.analyzer.result_set(issue) if issue.kind == "insert_exec" else None
+            if mapped is not None and mapped[0] is not None:
                 continue   # mapped from the callee's result set (writer kind insert_exec)
             wording = {"dynamic_sql": "Dynamic SQL in {where} names {obj} as a write target; what it writes is not analysed.",
                        "parse_error": "An unparsed statement in {where} appears to write {obj}.",
@@ -520,9 +521,11 @@ class Tracer:
                 wording = ("Dynamic SQL in {where} names {obj} as a write target; the texts known from the code are "
                            "analysed, but others may be executed (see the open pieces).")
             where = issue.statement.procedure or issue.unit.rel_path
+            detail = self.dynamic_detail(issue)
+            if mapped is not None:
+                detail = {**detail, "reason": mapped[1]}
             gaps.append(Gap(issue.kind, wording.format(where=where, obj=ref.name), node,
-                            [self.catalog.evidence(issue.unit, issue.statement, role=issue.kind)],
-                            self.dynamic_detail(issue)))
+                            [self.catalog.evidence(issue.unit, issue.statement, role=issue.kind)], detail))
         if ref.kind in ("table", "view") and ref.database:
             for writer in self.catalog.unknown_db_writers.get((ref.schema, ref.name), []):
                 dbs = sorted(self.catalog.known_databases.get((ref.schema, ref.name), ()))

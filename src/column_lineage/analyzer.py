@@ -299,6 +299,7 @@ class Analyzer:
         self._result_sets: dict[int, tuple] = {}
         self._inlined: dict[int, object] = {}   # id(query) -> InlineFunction it was read from
         self._inline_why: str | None = None     # why the last inline_tvf call did not inline
+        self._read_names: dict[str, set[str]] | None = None
         self._object_columns_active: set[str] = set()
 
     # ================================================================ sources
@@ -528,10 +529,48 @@ class Analyzer:
                 elif isinstance(node, exp.Update):
                     names |= {norm(ident_text(e.this.this)) for e in node.expressions
                               if isinstance(e, exp.EQ) and isinstance(e.this, exp.Column)}
+        names |= self.read_names().get(ref.key, set())
+        names |= self.catalog.proven_columns.get(ref.key, set())
         names.discard(None)
         names.discard("")
         self._object_columns[key] = names
         return names
+
+    def read_names(self) -> dict[str, set[str]]:
+        """Object key -> column names that some parsed statement qualifies with an alias of that object
+        (``s.col_a`` with ``FROM dbo.T AS s``): working SQL proves the column exists. Aliases a statement
+        also uses for a CTE, derived table or another object are not used."""
+        if self._read_names is not None:
+            return self._read_names
+        found: dict[str, set[str]] = {}
+        for unit in self.catalog.units:
+            for statement in unit.index.statements:
+                tree = statement.tree
+                if tree is None or isinstance(tree, exp.Command):
+                    continue
+                try:
+                    ctes = {norm(c.alias) for c in tree.find_all(exp.CTE)}
+                    other = {norm(a.name) for a in tree.find_all(exp.TableAlias) if not isinstance(a.parent, exp.Table)}
+                    aliases: dict[str, set[str]] = {}
+                    refs: dict[str, ObjectRef] = {}
+                    for table in tree.find_all(exp.Table):
+                        if not isinstance(table.this, exp.Identifier) or norm(table.name) in ctes:
+                            continue
+                        ref = self.catalog.ref_from_table(table, unit, statement)
+                        refs[ref.key] = ref
+                        for name in {norm(table.alias_or_name), norm(table.name)}:
+                            aliases.setdefault(name, set()).add(ref.key)
+                    for column in tree.find_all(exp.Column):
+                        qualifier = norm(column.table) if column.table else None
+                        if not qualifier or column.args.get("db") or qualifier in other or qualifier in ctes:
+                            continue
+                        keys = aliases.get(qualifier, set())
+                        if len(keys) == 1 and isinstance(column.this, exp.Identifier):
+                            found.setdefault(next(iter(keys)), set()).add(norm(column.name))
+                except Exception:  # noqa: BLE001 - a proof source only; never fail the run on it
+                    continue
+        self._read_names = found
+        return found
 
     def star_reason(self, source: Source, depth: int = 0) -> str:
         """Why a * over ``source`` could not be expanded, as an anonymous category (one level deeper for
@@ -1175,12 +1214,11 @@ class Analyzer:
             return self._result_sets[key]
         detail = issue.detail or {}
         callee = detail.get("callee")
-        out = (None, "the statement executes a string, not a named procedure")
+        out = (None, "executes_a_string_not_a_named_procedure")
         if callee is not None:
             procs = self.catalog.procs_for(callee)
             if len(procs) != 1:
-                out = (None, f"{callee.display} has {'no definition' if not procs else 'several definitions'} "
-                             "in the scanned files")
+                out = (None, "callee_has_no_definition" if not procs else "callee_has_several_definitions")
             else:
                 proc = procs[0]
                 body = [st for st in proc.unit.index.statements if st.scope == proc.scope]
@@ -1191,23 +1229,21 @@ class Analyzer:
                 end = max((st.end for st in body), default=proc.start)
                 hidden = self._may_return_rows(mask_noncode(proc.unit.text[proc.start:end]))
                 if nested:
-                    out = (None, f"{callee.display} runs other procedures or dynamic SQL, whose result sets "
-                                 "would be captured too")
+                    out = (None, "callee_runs_other_procedures_or_dynamic_sql")
                 elif unparsed:
-                    out = (None, f"{callee.display} has statements that could not be analysed")
+                    out = (None, "callee_has_unanalysed_statements")
                 elif hidden:
-                    out = (None, f"{callee.display} has statements that may also return rows (OUTPUT without INTO, "
-                                 "FETCH without INTO, or a statement form not analysed)")
+                    out = (None, "callee_may_return_other_rows")
                 elif len(results) != 1:
-                    out = (None, f"{callee.display} has {len(results)} statements that return rows")
+                    out = (None, "callee_has_no_result_statement" if not results
+                           else "callee_has_several_result_statements")
                 else:
                     names = detail.get("target_columns")
                     if names is None:
                         columns, status, _ = self.catalog.schema_for(detail["target"])
                         names = ([c.name for c in columns if not (c.identity or c.computed or c.rowversion)]
                                  if status == "declared" else None)
-                    out = (proc, results[0], names) if names else \
-                        (None, "the INSERT has no column list and the target has no declared column order")
+                    out = (proc, results[0], names) if names else (None, "no_column_list_and_no_target_order")
         self._result_sets[key] = out
         return out
 
@@ -1437,7 +1473,16 @@ class Analyzer:
             message = ("INSERT without a column list, and the target has no declared ordered schema in the "
                        "scanned files, so its columns cannot be matched by position.") if status == "missing" else \
                 ("INSERT without a column list, and the target has conflicting CREATE TABLE definitions.")
-            ctx.gap("positional_without_schema", message, target, tree.this)
+            if status == "ambiguous":
+                reason = "target_has_differing_definitions"
+            elif any(w.kind == "select_into" for w in self.catalog.writers_for(writer.ref)):
+                reason = "select_into_target_order_not_settled"
+            elif writer.ref.kind in ("temp_table", "table_variable"):
+                reason = "temp_target_created_elsewhere_or_unparsed"
+            else:
+                reason = ("target_written_but_no_definition" if self.catalog.is_known(writer.ref)
+                          else "target_has_no_definition")
+            ctx.gap("positional_without_schema", message, target, tree.this, {"reason": reason})
             return
         insertable = [c.name for c in columns if not (c.identity or c.computed or c.rowversion)]
         if column not in insertable:

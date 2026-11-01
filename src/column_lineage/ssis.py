@@ -393,6 +393,8 @@ class PackageCatalog:
             return
         self.counts["destinations"] += 1
         self.destinations.setdefault(ref.key, []).append(destination)
+        # A destination column mapping names columns the table has (existence, not position).
+        self.catalog.proven_columns[ref.key].update(mapping)
         if ref.database and ref.schema and unknown is None:
             self.catalog._register(ref)
 

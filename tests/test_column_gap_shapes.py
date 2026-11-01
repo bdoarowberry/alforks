@@ -107,3 +107,17 @@ def test_table_without_definition_can_be_declared_a_terminal(tmp_path):
     t = trace(ROOT, "demo.dbo.Out_backup.col_a", tmp_path / "declared", *DB, "--declared-terminals", str(terminals))
     assert kinds(t) == set()
     assert t.data["completeness"]["result"] == "complete_to_declared_boundary"
+
+
+def test_gap_summary_gives_anonymous_reasons_per_gap_kind(tmp_path):
+    from column_helpers import cli_args, run_cli
+    columns = ["demo.dbo.Out_join.col_a", "demo.dbo.Out_two.amount", "demo.dbo.Out_identity.col_a",
+               "demo.dbo.Out_late.col_new"]
+    assert run_cli(cli_args(ROOT, columns, tmp_path, *DB, "--gap-summary")) == 0
+    reasons = json.loads((tmp_path / "gap-summary.json").read_text(encoding="utf-8"))["totals"][
+        "value_gap_traces_by_reason"]
+    assert reasons["ambiguous_column"] == {"several_joined_candidates": 1}
+    assert reasons["insert_exec"] == {"callee_has_several_result_statements": 1}
+    assert reasons["positional_without_schema"] == {"select_into_target_order_not_settled": 1}
+    assert reasons["missing_definition"] == {"column_not_in_scanned_definition": 1}
+    assert "demo" not in json.dumps(reasons).lower()   # categories only, no names

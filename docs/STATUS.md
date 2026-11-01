@@ -409,3 +409,15 @@ Eight high-severity findings, all fixed. Each test fails on the code before the 
 - The reasons now go one level deeper (`select_into_copy_of_an_unexpandable_source/<inner reason>`).
   A function source says why it was not inlined (another database, no inline definition, an unqualified
   argument column, …).
+- **Batched with that fix** (so one run tests more than one hypothesis):
+  - More existence proof for names a `*` certainly supplies:
+    - a qualified read anywhere in the scanned SQL (`s.col_a` with `FROM dbo.T AS s`), where the alias is
+      not also used for a CTE, derived table or another object;
+    - a package destination's column mapping.
+    Still names only, never positions.
+  - `gap-summary.json` → `totals.value_gap_traces_by_reason`: anonymous reasons per value-path gap kind.
+    - `insert_exec`: callee has several result statements, no definition, nested EXEC, …
+    - `positional_without_schema`: target has no definition, SELECT INTO order not settled, …
+    - `ambiguous_column`: several joined candidates, inner-or-outer, …
+    - `missing_definition`: column not in the scanned definition, object without definition or writer, …
+  - For a quick check, rerun only the affected columns with `--columns-file`.

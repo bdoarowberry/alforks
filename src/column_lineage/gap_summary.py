@@ -210,6 +210,7 @@ def _totals(traces: list[dict]) -> dict:
     no_writer = {"stops": 0, "distinct_objects": set(), "with_unused_writer_candidates": 0}
     near: Counter = Counter()
     star_reasons: Counter = Counter()   # traces whose value-path * gaps have each reason
+    gap_reasons: dict[str, Counter] = {}   # gap kind -> reason -> traces (value-path and context gaps)
     earlier = {"traces_with_earlier_content": 0, "loops_cut_traced": 0, "update_only_untraced": 0,
                "rows_not_updated_steps": 0, "traces_with_remaining_cycles": 0, "remaining_cycles": 0}
     for data in traces:
@@ -247,6 +248,15 @@ def _totals(traces: list[dict]) -> dict:
         reasons_here = {r for g in data.get("gaps", []) if g["kind"] == "wildcard_without_schema"
                         and g.get("affects") != "row_selection" for r in (g.get("detail") or {}).get("unexpanded_star", [])}
         star_reasons.update(reasons_here)
+        seen_reasons: set[tuple[str, str]] = set()
+        for g in data.get("gaps", []):
+            if g.get("affects") == "row_selection":
+                continue
+            reason = gap_reason(g)
+            if reason:
+                seen_reasons.add((g["kind"], reason))
+        for kind, reason in seen_reasons:
+            gap_reasons.setdefault(kind, Counter())[reason] += 1
         for gap in data.get("gaps", []):
             gaps[gap["kind"]] += 1
             for ev in gap.get("evidence", [])[:1]:
@@ -269,6 +279,7 @@ def _totals(traces: list[dict]) -> dict:
         "earlier_content": earlier,
         "traces_blocked_by_gap_kind": dict(sorted(blocked.items())),
         "wildcard_traces_by_unexpanded_star_reason": dict(sorted(star_reasons.items())),
+        "value_gap_traces_by_reason": {k: dict(sorted(v.items())) for k, v in sorted(gap_reasons.items())},
         "gaps_by_kind": dict(sorted(gaps.items())),
         "distinct_gap_statements_by_kind": {k: len(v) for k, v in sorted(statements.items())},
         "statements_blocking_most_traces": shared[:10],
@@ -307,3 +318,37 @@ def _depth(data: dict) -> int:
             for item in step["inputs"]:
                 frontier.append((item["node"], depth + 1))
     return best
+
+
+# Anonymous reason categories of a gap: its detail's reason when it has one, else the fixed wording.
+GAP_REASON_PATTERNS = {
+    "ambiguous_column": [
+        (r"could not be bound to any source", "not_bound_to_any_source"),
+        (r"^Qualifier .* matches several sources", "qualifier_matches_several_sources"),
+        (r"binds to .* if it has that column", "inner_or_outer_query_inner_schema_unknown"),
+        (r"could come from any of", "several_joined_candidates"),
+        (r"has no output column", "cte_or_derived_lacks_the_column"),
+    ],
+    "missing_definition": [
+        (r"has no column .* in its known schema", "column_not_in_scanned_definition"),
+        (r"No writer of .* was found before this read", "temp_table_without_writer_before_read"),
+        (r"has no definition or writer in the scanned files", "object_without_definition_or_writer"),
+        (r"^No definition or writer of", "requested_target_not_found"),
+        (r"is declared without a column", "requested_column_not_declared"),
+        (r"could not be located", "cte_or_derived_output_not_located"),
+    ],
+    "insert_exec": [(r"", "unclassified")],
+    "external_object": [(r"linked server|four-part|server", "linked_server_object"),
+                        (r"database", "object_in_unscanned_database"), (r"", "other_external")],
+    "column_count_mismatch": [(r"", "column_count_mismatch")],
+}
+
+
+def gap_reason(gap: dict) -> str | None:
+    detail = gap.get("detail") or {}
+    if detail.get("reason"):
+        return str(detail["reason"])
+    for pattern, reason in GAP_REASON_PATTERNS.get(gap.get("kind"), []):
+        if re.search(pattern, gap.get("message") or "", re.I):
+            return reason
+    return None
