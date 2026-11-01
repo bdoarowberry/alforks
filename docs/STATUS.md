@@ -259,3 +259,33 @@
 - Overview: a loop end is no longer an unresolved origin (every input into a loop is traced); it is
   counted separately and drawn as "Loop, no new source", so headline, coverage and end points agree.
 
+
+## Earlier content instead of cycles (real run: 24 traces with 62 cycle entries)
+
+- A write that reads its own column's earlier value is a real dependency, not an error. Each loop is now
+  cut where it reads back into a node already on the walk (depth-first from the target): that read
+  points to an **earlier content of X** node (`kind: prior_state`, `earlier_state_of: X`), so the trace
+  shows the value before the write (the new node) and after it (X). The node ends with an explicit
+  stop:
+  - `prior_state` when the writes that produce X are traced on the page (its sources are the other
+    routes; for a permanent table, the content earlier runs left). It needs no proof of its own, so it
+    does not prevent `reached_requested_boundary`. The stop's `loop` records `earlier_state_of`,
+    `read_by_steps` and `loop_nodes`, which keeps the dependency in the JSON.
+  - `source_without_writer` when nothing in the selected sources adds rows to X's table (only UPDATE or
+    MERGE-update steps write it): the earlier rows are an untraced source.
+- **False complete fixed:** `UPDATE t SET a = a * 2` with no writer adding rows used to end only at
+  `constant:2`. A column written only by updates now also gets a `retained` step ("rows not updated
+  keep earlier content", inferred) when the updates are filtered or joined, and the earlier content
+  is an unresolved origin. The SQL writers that add rows are INSERT, SELECT INTO, a view, a MERGE with
+  WHEN NOT MATCHED; package destinations also count.
+- Shapes covered (invented, `fixtures/column/earlier_state/`, `tests/test_column_earlier_state.py`):
+  - preserve and restore of target rows through a holding table;
+  - aggregate-then-update of a working table;
+  - a self-update with and without a row creator;
+  - an update-only joined update;
+  - variable accumulation (`SELECT @s = @s + part`).
+- Recursive CTEs stay as cycles.
+- Overview: earlier-content ends are drawn as "No new source: earlier content of …" and are not
+  unresolved origins.
+- `gap-summary.json` → `totals.earlier_content` gives the counts: `loops_cut_traced`,
+  `update_only_untraced`, `rows_not_updated_steps` and `remaining_cycles`.

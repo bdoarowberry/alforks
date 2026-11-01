@@ -12,10 +12,18 @@ from .catalog import Catalog, controls_of, norm, split_name, writer_search
 from .model import (
     AMBIGUOUS, ASSERTED, COLUMN, CONSTANT, FILTER, INFERRED, LOCAL_COLUMN, PARAMETER, TEMP_COLUMN, UNKNOWN, UNRESOLVED,
     VALUE, VARIABLE, VERIFIED, WINDOW, CONDITION, Boundary, Evidence, Gap, Input, Node, ObjectRef, RowSelection, Step,
-    Stop, TraceResult, worst, FILE_COLUMN, PACKAGE_COLUMN, PACKAGE_VARIABLE,
+    Stop, TraceResult, worst, FILE_COLUMN, PACKAGE_COLUMN, PACKAGE_VARIABLE, PRIOR_STATE,
 )
 
 OVERWRITING = ("update", "merge")
+UPDATING_STEPS = ("update", "merge_update")      # steps that change rows that already exist
+ROW_CREATING_WRITERS = ("insert", "select_into", "view")
+MERGE_INSERTS = re.compile(r"\bWHEN\s+NOT\s+MATCHED\b(?!\s+BY\s+SOURCE\b)", re.I)
+# Open points that may themselves add rows to an object.
+GAPS_THAT_MAY_ADD_ROWS = ("insert_exec", "dynamic_sql", "parse_error", "unsupported_statement",
+                          "unsupported_package_step")
+# Nodes whose earlier state a loop may read back.
+STATEFUL_KINDS = (COLUMN, TEMP_COLUMN, VARIABLE, PARAMETER, PACKAGE_VARIABLE)
 TRACED_KINDS = (COLUMN, TEMP_COLUMN, VARIABLE, PARAMETER, PACKAGE_COLUMN, FILE_COLUMN, PACKAGE_VARIABLE)
 
 
@@ -186,6 +194,11 @@ class Tracer:
                     self._record_effect(explained.id, gap, result.requested)
                     continue
                 result.add_gap(gap)
+        self._earlier_states(result)
+        edges = {}
+        for step in result.steps:
+            for item in step.inputs:
+                edges.setdefault(step.target.id, set()).add(item.node.id)
         result.cycles.extend(c for c in find_cycles(edges) if c not in result.cycles)
         result.stops = dedupe_stops(result.stops)
         self._explain_ends(result)
@@ -193,6 +206,143 @@ class Tracer:
             if stop.reason in ("source_without_writer", "external_file", "boundary"):
                 stop.declared_terminal = declared_terminal(self.terminals, stop.node)
         return result
+
+    # ------------------------------------------------------ earlier states
+    def _creates_rows(self, ref: ObjectRef) -> bool:
+        """Whether any statement in the selected sources adds rows to ``ref`` (not only changes them)."""
+        for writer in self.catalog.writers_for(ref):
+            if writer.kind in ROW_CREATING_WRITERS:
+                return True
+            if writer.kind == "merge" and MERGE_INSERTS.search(mask_noncode(writer.statement.text)):
+                return True
+        # Package data-flow destinations add rows (OLE DB commands only change them and are not listed).
+        return self.packages is not None and ref.kind in ("table", "view") and self.packages.writes_object(ref)
+
+    def _earlier_states(self, result: TraceResult) -> None:
+        """Represent the value *before* a write wherever the trace reads it.
+
+        Two shapes read a column's earlier content. (1) A column written only by UPDATE / MERGE-update
+        steps: rows the update does not match keep the value they already had, and no traced statement
+        adds the rows. (2) A loop: a write reads, directly or through other objects, the column it writes
+        (preserve-and-restore of rows, aggregate-then-update of a working table, ``SET a = a * 2``,
+        ``SET @s = @s + ...``). Each loop is cut where it reads back into a node already on the walk: that
+        read now points to an "earlier content of" node with an explicit stop, so the dependency stays on
+        the page and the walk ends with a stated reason instead of an unexplained cycle."""
+        by_target: dict[str, list[Step]] = {}
+        for step in result.steps:
+            by_target.setdefault(step.target.id, []).append(step)
+        open_objects = {g.node.object.key for g in result.gaps.values()
+                        if g.kind in GAPS_THAT_MAY_ADD_ROWS and g.node is not None and g.node.object is not None}
+        creates: dict[str, bool] = {}
+
+        def adds_rows(node: Node) -> bool:
+            if node.kind not in (COLUMN, TEMP_COLUMN) or node.object is None:
+                return True   # a variable starts as NULL or its declared value; other writes are traced
+            if node.id not in creates:
+                creates[node.id] = (any(s.writer_kind not in UPDATING_STEPS + ("retained",)
+                                        for s in by_target.get(node.id, []))
+                                    or node.object.key in open_objects or self._creates_rows(node.object))
+            return creates[node.id]
+
+        priors: dict[str, dict] = {}   # prior node id -> {"node", "later", "reads"}
+
+        def prior_of(node: Node) -> Node:
+            prior = Node(PRIOR_STATE, node.name, node.object, node.scope, of=node.kind)
+            priors.setdefault(prior.id, {"node": prior, "later": node, "reads": []})
+            result.add_node(prior)
+            return prior
+
+        # (1) Columns that only UPDATE / MERGE-update steps write.
+        for node_id in sorted(by_target):
+            steps = by_target[node_id]
+            node = steps[0].target
+            if node.kind not in (COLUMN, TEMP_COLUMN) or any(s.writer_kind not in UPDATING_STEPS for s in steps):
+                continue
+            if adds_rows(node):
+                continue
+            table = node.object.display
+            filtered = [s for s in steps if s.row_selection]
+            if not filtered:
+                for step in steps:
+                    step.notes.append(f"No statement in the selected sources adds rows to {table}; this update "
+                                      "sets every row that exists, so which rows exist is not traced here.")
+                continue
+            prior = prior_of(node)
+            retained = Step(target=node, writer_kind="retained", expression=f"earlier content of {node.name}",
+                            operation="direct",
+                            inputs=[Input(prior, VALUE, f"earlier content of {node.name}",
+                                          note="rows the update does not match")],
+                            mapping_method="rows_not_updated", status=INFERRED, procedure=filtered[0].procedure,
+                            evidence=[s.evidence[0] for s in filtered if s.evidence][:5],
+                            notes=[f"Rows the {'UPDATE' if len(filtered) == 1 else 'UPDATEs'} above do not match keep "
+                                   f"the value they already had, and no statement in the selected sources adds rows "
+                                   f"to {table}: that earlier content is a value source whose origin is not traced."])
+            result.steps.append(retained)
+            steps.append(retained)
+            priors[prior.id]["reads"].append({"step": retained.id, "target": node.id,
+                                              "why": "rows_not_matched_by_update"})
+
+        # (2) Loops: cut every back edge of a depth-first walk from the target.
+        edges: dict[str, list[str]] = {}
+        for step in result.steps:
+            for item in step.inputs:
+                edges.setdefault(step.target.id, [])
+                if item.node.id not in edges[step.target.id]:
+                    edges[step.target.id].append(item.node.id)
+        components = {n: c for c in find_cycles({k: set(v) for k, v in edges.items()}) for n in c}
+        state: dict[str, int] = {}     # 1 on the walk, 2 finished
+        back: list[tuple[str, str]] = []
+        for root in [result.target.id] + sorted(edges):
+            if state.get(root):
+                continue
+            state[root] = 1
+            work = [(root, iter(sorted(edges.get(root, ()))))]
+            while work:
+                current, children = work[-1]
+                for child in children:
+                    seen = state.get(child, 0)
+                    if seen == 1:
+                        back.append((current, child))
+                    elif seen == 0:
+                        state[child] = 1
+                        work.append((child, iter(sorted(edges.get(child, ())))))
+                        break
+                else:
+                    state[current] = 2
+                    work.pop()
+        for reader, read in back:
+            node = result.nodes.get(read)
+            if node is None or node.kind not in STATEFUL_KINDS:
+                continue   # e.g. a recursive CTE: reported as a cycle
+            prior = prior_of(node)
+            for step in by_target.get(reader, []):
+                for item in step.inputs:
+                    if item.node.id == read:
+                        item.node = prior
+                        item.note = "; ".join(x for x in (item.note, "reads the value before this write") if x)
+                        priors[prior.id]["reads"].append({"step": step.id, "target": reader,
+                                                          "why": "reads_back_in_loop"})
+            priors[prior.id]["loop"] = sorted(components.get(read, [read]))
+
+        for entry in priors.values():
+            prior, later = entry["node"], entry["later"]
+            in_loop = set(entry.get("loop") or ()) | {prior.id}
+            outside = [s for s in by_target.get(later.id, []) if not any(i.node.id in in_loop for i in s.inputs)]
+            loop = {"earlier_state_of": later.id, "read_by_steps": entry["reads"]}
+            if entry.get("loop"):
+                loop["loop_nodes"] = entry["loop"]
+            if adds_rows(later):
+                noun = "value" if later.kind not in (COLUMN, TEMP_COLUMN) else "content"
+                again = ("the content that earlier runs of these writes left" if later.kind == COLUMN
+                         else "the writes that run before it")
+                detail = (f"The {noun} of {later.display} before it is written again. Its sources are the writes of "
+                          f"{later.display} traced on this page ({_count_text(len(outside), 'step')} outside the loop; "
+                          f"for this read: {again}), so the loop adds no source of its own.")
+                result.stops.append(Stop(prior, "prior_state", detail, loop=loop))
+            else:
+                detail = (f"No statement in the selected sources adds rows to {later.object.display}; the updates "
+                          "change existing rows only, so the earlier content they keep or read is not traced.")
+                result.stops.append(Stop(prior, "source_without_writer", detail, loop=loop))
 
     @staticmethod
     def _explain_ends(result: TraceResult) -> None:
@@ -734,6 +884,10 @@ def dedupe_stops(stops: list[Stop]) -> list[Stop]:
     for stop in stops:
         seen.setdefault((stop.node.id, stop.reason), stop)
     return list(seen.values())
+
+
+def _count_text(n: int, noun: str) -> str:
+    return f"{n} {noun}" + ("" if n == 1 else "s")
 
 
 def find_cycles(edges: dict[str, set[str]]) -> list[list[str]]:

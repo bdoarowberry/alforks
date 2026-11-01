@@ -65,6 +65,11 @@ statement in an assertions file), **partial / ambiguous / unresolved** (proof in
 Row-selection conditions (filters, joins) are kept apart from value sources and do not make the value
 lineage incomplete.
 
+"Earlier content of X" is the value X had before a write that reads it back (rows preserved and
+restored, a working table aggregated into itself, `SET a = a * 2`, `@s = @s + ...`). When X's writes are
+traced it adds no new source; when only updates write X and nothing adds its rows, it is an unresolved
+origin. Loops that remain listed as cycles are recursive CTEs.
+
 "No writer in the selected sources" means only that: the loader may be a package, a feed, a job in
 another repository, or a manual process.
 

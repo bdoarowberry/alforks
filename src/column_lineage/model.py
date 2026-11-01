@@ -33,6 +33,9 @@ PACKAGE_COLUMN = "package_column"      # column inside an SSIS data flow (compon
 FILE_COLUMN = "file_column"            # column of a flat file read by an SSIS package
 PACKAGE_VARIABLE = "package_variable"  # SSIS variable or parameter, scoped to a package
 PACKAGE_OBJECT_KINDS = ("package_flow", "flat_file")  # ObjectRef kinds of package-internal objects
+PRIOR_STATE = "prior_state"    # the earlier content of a column (or earlier value of a variable) that a
+                               # write reads back: the value *before* the write, where the node itself is
+                               # the value *after* it. ``of`` holds the kind of the node it precedes.
 
 # Input roles. VALUE inputs compute the target value; CONDITION inputs choose
 # between value alternatives (CASE/IIF predicates, simple CASE operands).
@@ -122,9 +125,17 @@ class Node:
     name: str                      # column, variable, parameter name, or literal SQL
     object: ObjectRef | None = None
     scope: str | None = None       # for variables and parameters
+    of: str | None = None          # PRIOR_STATE: kind of the node whose earlier state this is
+
+    @property
+    def later(self) -> "Node":
+        """PRIOR_STATE: the node whose earlier state this is."""
+        return Node(self.of, self.name, self.object, self.scope) if self.kind == PRIOR_STATE else self
 
     @property
     def id(self) -> str:
+        if self.kind == PRIOR_STATE:
+            return f"{PRIOR_STATE}:{self.later.id}"
         if self.object is not None:
             return f"{self.object.key}.{quote_part(self.name)}"
         if self.kind in (VARIABLE, PARAMETER):
@@ -133,6 +144,10 @@ class Node:
 
     @property
     def display(self) -> str:
+        if self.kind == PRIOR_STATE:
+            later = self.later
+            noun = "value" if later.kind in (VARIABLE, PARAMETER, PACKAGE_VARIABLE) else "content"
+            return f"earlier {noun} of {later.display}"
         if self.object is not None and self.object.kind in PACKAGE_OBJECT_KINDS:
             return f"{self.object.name}.{self.name} (in {self.object.scope})"
         if self.object is not None:
@@ -143,8 +158,12 @@ class Node:
         return self.name
 
     def to_dict(self) -> dict:
-        return {"id": self.id, "kind": self.kind, "name": self.name, "display": self.display,
-                "object": self.object.to_dict() if self.object else None, "scope": self.scope}
+        out = {"id": self.id, "kind": self.kind, "name": self.name, "display": self.display,
+               "object": self.object.to_dict() if self.object else None, "scope": self.scope}
+        if self.kind == PRIOR_STATE:
+            out["earlier_state_of"] = self.later.id
+            out["of_kind"] = self.of
+        return out
 
 
 @dataclass(frozen=True)
@@ -261,10 +280,11 @@ class Stop:
     """Where a value path ends without a gap."""
     node: Node
     reason: str                    # boundary, source_without_writer, constant, parameter_without_caller, max_depth,
-                                   # external_file (SSIS)
+                                   # external_file (SSIS), prior_state (earlier content whose sources are traced)
     detail: str | None = None
     writer_search: list[dict] | None = None   # source_without_writer: same-named writes not used, with why
     declared_terminal: str | None = None      # accepted as a terminal by the run's --declared-terminals (reason)
+    loop: dict | None = None                  # PRIOR_STATE stops: the dependency kept, {"reads_back": ...}
 
     def to_dict(self) -> dict:
         out = {"node": self.node.id, "reason": self.reason, "detail": self.detail}
@@ -272,6 +292,8 @@ class Stop:
             out["writer_search"] = self.writer_search
         if self.declared_terminal is not None:
             out["declared_terminal"] = self.declared_terminal
+        if self.loop is not None:
+            out["loop"] = self.loop
         return out
 
 
@@ -390,7 +412,8 @@ class TraceResult:
                 ends[gap.kind] = ends.get(gap.kind, 0) + 1
         # A boundary stop is already the strongest end; a declaration only matters for sources (no writer
         # in the selected sources, external files). Depth cuts and parameters are never declared away.
-        ends_needing_proof = [s for s in self.stops if s.reason not in ("boundary", "constant")]
+        # An earlier state whose writers are all traced on the page adds no source of its own.
+        ends_needing_proof = [s for s in self.stops if s.reason not in ("boundary", "constant", "prior_state")]
         declared = sum(1 for s in ends_needing_proof if s.declared_terminal is not None)
         undeclared = [s for s in ends_needing_proof if s.declared_terminal is None]
         if not complete:
@@ -420,7 +443,8 @@ class TraceResult:
                         "other end is a terminal declared for this run; their original stop reasons are kept and "
                         "upstream population beyond them is not proved), or complete_within_selected_scope when "
                         "some paths end at objects with no writer in the selected sources (not proof that they "
-                        "are ultimate sources). "
+                        "are ultimate sources). Where a write reads the column's own earlier content (a loop), that read ends at "
+                        "an 'earlier content' node (stop prior_state) whose sources are the writers already traced. "
                         "Row-selection gaps (filters and joins that could not be fully resolved) are "
                         "reported separately and do not make the value lineage incomplete. A complete "
                         "trace does not claim its stops are ultimate source-system fields."}
@@ -457,6 +481,7 @@ END_MEANING = {
     "parameter_without_caller": "parameter_without_caller",
     "max_depth": "max_depth",
     "external_file": "external_file_source",
+    "prior_state": "earlier_content_traced",
 }
 
 

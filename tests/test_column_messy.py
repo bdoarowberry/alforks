@@ -246,15 +246,20 @@ def test_parameter_without_caller_stops(tmp_path):
 
 # ------------------------------------------------------------------- cycles
 
-def test_cycle_terminates_and_is_reported(tmp_path):
+def test_cycle_terminates_at_earlier_content(tmp_path):
+    """A loop is cut where it reads back: the read keeps its dependency, on an explicit earlier-content node."""
     root = fixture("cycle")
     proc = run_cli_subprocess(cli_args(root, "demo.beta.val", tmp_path), timeout=120)
     assert proc.returncode == 0, proc.stderr[-2000:]
     t = load_trace(tmp_path, "demo.beta.val", root)
     alpha, beta = "?.demo.alpha.val", "?.demo.beta.val"
-    assert t.data["cycles"], "cycle was not reported"
-    assert any({alpha, beta} <= {n.lower() for n in cycle} for cycle in t.data["cycles"])
+    prior = "prior_state:" + beta
+    assert t.data["cycles"] == []
     assert len(t.steps_for(alpha)) == 2  # seed writer and the cyclic writer
+    assert sorted(tuple(inputs(s, "value")) for s in t.steps_for(alpha)) == [("?.demo.seed.seed_val",), (prior,)]
+    stop = next(s for s in t.data["stops"] if s["node"] == prior)
+    assert stop["reason"] == "prior_state"
+    assert stop["loop"]["earlier_state_of"] == beta and set(stop["loop"]["loop_nodes"]) == {alpha, beta}
     assert "?.demo.seed.seed_val" in t.upstream(t.target_id)
 
 

@@ -149,7 +149,9 @@ class Trace:
         return [s for s in self.steps if norm(s["target"]) == norm(node_id)]
 
     def only_step_for(self, node_id: str) -> dict:
-        found = self.steps_for(node_id)
+        """The one writing step of a node; the synthetic "rows not updated keep earlier content" step of
+        an update-only column is not a writer and is left out."""
+        found = [s for s in self.steps_for(node_id) if s["writer_kind"] != "retained"]
         assert len(found) == 1, f"expected one step for {node_id}, got {len(found)}: {[s['writer_kind'] for s in found]}"
         return found[0]
 

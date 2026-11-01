@@ -210,6 +210,8 @@ RULE_TAGS = {
     "condition": ("decides between values", "a condition that decides between values (not a value source)"),
     "window": ("orders or partitions rows", "orders or partitions rows of a window calculation"),
     "aggregate": ("aggregated", "aggregated over rows"),
+    "retained": ("rows not updated keep earlier content",
+                 "kept from the rows' earlier content (rows an UPDATE does not match)"),
     "conditional": ("conditional expression", "a conditional expression"),
     "conversion": ("type conversion", "a type conversion"),
     "arithmetic": ("arithmetic", "arithmetic"),
@@ -234,7 +236,7 @@ STOP_SHORT = {
     "parameter_without_caller": "no caller found",
     "max_depth": "depth limit reached",
     "constant": "constant",
-    "cycle": "loop",
+    "cycle": "loop: earlier content, sources traced",
     "open": "not traced further",
 }
 SHAPES = {   # diagram node kind -> (open, close, label prefix)
@@ -244,6 +246,7 @@ SHAPES = {   # diagram node kind -> (open, close, label prefix)
     "declared": ('[["', '"]]', "Declared terminal"),
     "unresolved": ('{{"', '"}}', "Unresolved origin"),
     "loop": ('(("', '"))', "Loop, no new source"),
+    "earlier": ('(("', '"))', "No new source"),
 }
 
 
@@ -511,6 +514,9 @@ class Analysis:
         obj = node.get("object") or {}
         if kind == "constant":
             return {"kind": "constant", "key": "constant", "label": "constants"}
+        if kind == "prior_state" and self.end_kind(node_id) == "cycle":
+            return {"kind": "prior_state", "key": "prior_state",
+                    "label": "earlier content read back (loops; its sources are the other routes)"}
         if obj:
             okind = obj.get("kind") or "table"
             entry = self.object_entry(node_id)
@@ -609,7 +615,8 @@ class Analysis:
             tags.append("assertion")
         if kind == "update":
             siblings = self.t.steps_by_target.get(step.get("target") or "", [])
-            others = [s for s in siblings if s.get("writer_kind") not in ("update", "merge_update", "assertion")]
+            others = [s for s in siblings
+                      if s.get("writer_kind") not in ("update", "merge_update", "assertion", "retained")]
             if not others:
                 tags.append("update")
             elif all(s.get("procedure") == step.get("procedure") and (s.get("order") or 0) < (step.get("order") or 0)
@@ -617,7 +624,7 @@ class Analysis:
                 tags.append("override")
             else:
                 tags.append("override_unordered")
-        elif kind in ("merge_update", "merge_insert"):
+        elif kind in ("merge_update", "merge_insert", "retained"):
             tags.append(kind)
         for label in step.get("branch_context") or []:
             tags.append(_context_tag(label))
@@ -742,7 +749,7 @@ class Analysis:
         if kind == "database" and stop in ("boundary", "source_without_writer"):
             return "database"
         if stop == "cycle":
-            return "loop"
+            return "earlier" if kind == "prior_state" else "loop"
         return "unresolved"
 
     # ends ---------------------------------------------------------------------
@@ -753,6 +760,8 @@ class Analysis:
             stop = stops[0]
             if stop.get("declared_terminal") and stop.get("reason") not in ("boundary", "constant"):
                 return "declared"
+            if stop.get("reason") == "prior_state":
+                return "cycle"   # earlier content read back in a loop; its sources are traced on the page
             return stop.get("reason") or "open"
         if t.gaps_by_node.get(node_id):
             return "gap"
@@ -937,6 +946,10 @@ def _end_text(a: Analysis, node_id: str, kind: str) -> str:
         kinds = sorted({g.get("kind") or "gap" for g in t.gaps_by_node.get(node_id, [])})
         return "open point: " + "; ".join(_text(GAP_TEXT.get(k, k)) for k in kinds) + " — not proved"
     if kind == "cycle":
+        if t.kind(node_id) == "prior_state":
+            return ("earlier content read back: a write here reads the value this column (or variable) already "
+                    "had; that earlier value comes from the writes traced on the other routes, so this adds no "
+                    "new source")
         return ("loop: values here feed each other — the loop is followed once and adds no new source (every "
                 "input into it is traced); see the cycles on the detailed page")
     return "not traced further — not proved"
@@ -1021,7 +1034,7 @@ def _is_unresolved(kind: str) -> bool:
 def _end_kinds(a: Analysis) -> Counter:
     """Distinct end nodes by kind, loop ends included."""
     counts = Counter(e["kind"] for e in a.ends)
-    counts["cycle"] += len(a.loop_ends)
+    counts["cycle"] += len(set(a.loop_ends) - {e["node"] for e in a.ends})
     seen = {e["node"] for e in a.ends} | set(a.loop_ends)
     for fam in a.families:   # ends of steps without inputs (not leaves)
         for end in fam["ends"]:
@@ -1286,7 +1299,8 @@ def _section_coverage(a: Analysis, detailed: str) -> list[str]:
             f"{_plural(unresolved, 'unresolved origin')}"
             + (f" ({', '.join(unresolved_parts)})" if unresolved_parts else "")
             + (f" · {_plural(counts['constant'], 'constant')}" if counts.get("constant") else "")
-            + (f" · {_plural(counts['cycle'], 'loop')} (values feed each other; every input into "
+            + (f" · {_plural(counts['cycle'], 'loop')} (a write reads earlier content of its own column or "
+               "variable; every input into "
                f"{'it' if counts['cycle'] == 1 else 'them'} is traced, so no source is missing there)"
                if counts.get("cycle") else "")
             + f" · steps: {step_text}")
@@ -1442,7 +1456,8 @@ def _section_families(a: Analysis, detailed: str) -> list[str]:
     out += ["", "| Family | Source | Value rule | Stops because | Evidence | Routes |", "|---|---|---|---|---|---|"]
     for fam in a.families[:MAX_FAMILY_ROWS]:
         source = fam["source"]
-        kind = {"database": "DB", "file": "file", "constant": "constant"}.get(source["kind"], _text(source["kind"]))
+        kind = {"database": "DB", "file": "file", "constant": "constant",
+                "prior_state": "earlier content"}.get(source["kind"], _text(source["kind"]))
         what = _fam_ends_text(a, fam, 2) if len(fam["ends"]) <= 2 else \
             f"{_code(_truncate(source['label'], NAME_LIMIT))} ({len(fam['ends'])} {'values' if source['kind'] == 'constant' else 'columns'})"
         routes = f"{'≥' if fam['route_count_is_lower_bound'] else ''}{fam['route_count']}"
@@ -1459,9 +1474,13 @@ def _section_families(a: Analysis, detailed: str) -> list[str]:
 
 # --------------------------------------------------------------------------- 6. sources at a glance
 
-def _endpoint_cells(a: Analysis, node_id: str) -> tuple[str, str, str, str, str]:
+def _endpoint_cells(a: Analysis, node_id: str, node: dict | None = None) -> tuple[str, str, str, str, str]:
     t = a.t
-    node = t.nodes.get(node_id) or {}
+    node = node if node is not None else (t.nodes.get(node_id) or {})
+    if node.get("kind") == "prior_state":
+        later = dict(node, kind=node.get("of_kind"))
+        cells = _endpoint_cells(a, node.get("earlier_state_of") or node_id, later)
+        return (f"earlier content of a {cells[0]}",) + tuple(cells[1:])
     obj = node.get("object") or {}
     kind = node.get("kind")
     name = node.get("name") or node_id
@@ -1510,7 +1529,7 @@ def _section_sources(a: Analysis, detailed: str) -> list[str]:
         stop_kinds = {f["stop"] for f in fams}
         kind = "cycle" if stop_kinds == {"cycle"} else a.end_kind(node_id)
         why = _end_text(a, node_id, kind)
-        if kind == "cycle":
+        if kind == "cycle" and t.kind(node_id) != "prior_state":
             why += f" ([cycles]({detailed}#gaps))"
         roles = {"condition" if f["role"] == "condition" else "value" for f in fams}
         if roles == {"condition"}:

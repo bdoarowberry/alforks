@@ -259,7 +259,11 @@ After loading, every `dynamic_sql` statement issue (other than dead dynamic SQL)
 `route_families` is additive (written by the CLI next to the fields above, derived from them; the
 renderers recompute it from the steps, stops and gaps and never read it back).
 
-`Node`: `{id, kind, name, display, object: ObjectRef|null, scope}`.
+`Node`: `{id, kind, name, display, object: ObjectRef|null, scope}`. A `prior_state` node is the earlier
+content of another node (`earlier_state_of`, `of_kind`; id `prior_state:<that id>`): the value a write
+reads back before it writes again. Its stop is `prior_state` (the writes producing it are traced on the
+page; no proof needed of its own; `loop` lists the steps that read it and the loop it cuts) or
+`source_without_writer` (only updates write the column; nothing in the selected sources adds rows).
 `Input`: `{node, role, expression, branch, status, gap, note}`.
 `RowSelection`: `{node, role, expression, evidence, status, gap}`.
 `Evidence`: `{root, path, start_line, end_line, role, excerpt, statement_id}` — `path` is

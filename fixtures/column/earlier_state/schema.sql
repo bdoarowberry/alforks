@@ -1,0 +1,11 @@
+CREATE TABLE dbo.Target (group_id int, col_a int);
+CREATE TABLE dbo.NewInput (group_id int, col_a int);
+CREATE TABLE dbo.Feed (group_id int, col_a int);
+CREATE TABLE dbo.Result (group_id int, col_a int);
+CREATE TABLE dbo.Scaled (id int, amount int);
+CREATE TABLE dbo.Flags (id int, flag int);
+CREATE TABLE dbo.FlagSource (id int, flag int);
+CREATE TABLE dbo.Doubled (id int, amount int);
+CREATE TABLE dbo.Labels (id int, label varchar(400));
+CREATE TABLE dbo.Parts (id int, part varchar(40));
+CREATE TABLE dbo.Raw (id int, amount int);

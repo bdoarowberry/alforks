@@ -493,12 +493,13 @@ def test_loop_ends_are_unresolved_origins(tmp_path):
     md = overview(tmp_path, "demo.beta.val")
     coverage = section(md, "Coverage")
     assert "1 unresolved origin (1 with no writer in the selected sources)" in coverage
-    assert "1 loop (values feed each other; every input into it is traced, so no source is missing there)" in coverage
+    assert ("1 loop (a write reads earlier content of its own column or variable; every input into it is traced, "
+            "so no source is missing there)") in coverage
     assert "1 route stops at a loop" in section(md, "Plain answer")
     assert md.index("## Sources at a glance") < md.index("## Routes")
     endpoints = section(md, "Sources at a glance")
-    assert "loop: values here feed each other" in endpoints and "#gaps" in endpoints
-    assert '(("F3 Loop, no new source' in "\n".join(mermaid_block(md))
+    assert "earlier content read back" in endpoints and "earlier content of a DB column" in endpoints
+    assert '(("F3 No new source: earlier content of' in "\n".join(mermaid_block(md))
 
 
 # --------------------------------------------------------------------------- first screen (multi-branch fixture)

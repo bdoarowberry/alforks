@@ -55,6 +55,7 @@ STOP_LABEL = {
     "parameter_without_caller": "parameter with no caller in the scanned files",
     "max_depth": "maximum depth reached",
     "external_file": "external file read by an SSIS package",
+    "prior_state": "earlier content read back (its sources are the writes traced on this page)",
 }
 
 SECTION_TITLES = (

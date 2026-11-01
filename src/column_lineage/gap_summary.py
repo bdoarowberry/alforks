@@ -207,7 +207,16 @@ def _totals(traces: list[dict]) -> dict:
     declared_ends = 0
     no_writer = {"stops": 0, "distinct_objects": set(), "with_unused_writer_candidates": 0}
     near: Counter = Counter()
+    earlier = {"traces_with_earlier_content": 0, "loops_cut_traced": 0, "update_only_untraced": 0,
+               "rows_not_updated_steps": 0, "traces_with_remaining_cycles": 0, "remaining_cycles": 0}
     for data in traces:
+        priors = [s for s in data.get("stops", []) if s.get("loop")]
+        earlier["traces_with_earlier_content"] += bool(priors)
+        earlier["loops_cut_traced"] += sum(1 for s in priors if s["reason"] == "prior_state")
+        earlier["update_only_untraced"] += sum(1 for s in priors if s["reason"] != "prior_state")
+        earlier["rows_not_updated_steps"] += sum(1 for s in data.get("steps", []) if s.get("writer_kind") == "retained")
+        earlier["traces_with_remaining_cycles"] += bool(data.get("cycles"))
+        earlier["remaining_cycles"] += len(data.get("cycles") or [])
         results[data["completeness"].get("result", "?")] += 1
         ends.update(data["completeness"].get("ends_by_meaning", {}))
         declared_ends += data["completeness"].get("declared_terminal_ends", 0)
@@ -251,12 +260,17 @@ def _totals(traces: list[dict]) -> dict:
         "no_writer_stops": {"stops": no_writer["stops"], "distinct_objects": len(no_writer["distinct_objects"]),
                             "with_unused_writer_candidates": no_writer["with_unused_writer_candidates"],
                             "unused_writer_candidates_by_category": dict(sorted(near.items()))},
+        "earlier_content": earlier,
         "traces_blocked_by_gap_kind": dict(sorted(blocked.items())),
         "gaps_by_kind": dict(sorted(gaps.items())),
         "distinct_gap_statements_by_kind": {k: len(v) for k, v in sorted(statements.items())},
         "statements_blocking_most_traces": shared[:10],
         "note": "statements_blocking_most_traces lists, for the ten statements behind value or context gaps "
-                "in the most traces, how many traces each blocks (counts only).",
+                "in the most traces, how many traces each blocks (counts only). earlier_content counts reads "
+                "of a column's or variable's own earlier value: loops_cut_traced end where that value's writes "
+                "are traced (stop prior_state); update_only_untraced end where nothing in the selected sources "
+                "adds the rows (stop source_without_writer); remaining_cycles are loops left as cycles "
+                "(for example recursive CTEs).",
     }
 
 

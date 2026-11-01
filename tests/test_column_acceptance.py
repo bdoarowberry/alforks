@@ -255,9 +255,11 @@ def test_6_sp_executesql_writer_is_gap_and_fail_on_incomplete(tmp_path):
 
 def test_6_updates_from_two_procedures_are_ambiguous_writer_order(tmp_path):
     t = trace("ambiguous_writers", "demo.output.result_value", tmp_path)
-    steps = t.steps_for(t.target_id)
+    steps = [s for s in t.steps_for(t.target_id) if s["writer_kind"] != "retained"]
     assert len(steps) == 2
     assert {s["writer_kind"] for s in steps} == {"update"}
+    # Only UPDATEs write it: rows they do not match keep earlier content whose origin is not traced.
+    assert [s["writer_kind"] for s in t.steps_for(t.target_id) if s["writer_kind"] == "retained"] == ["retained"]
     assert len({(s["procedure"] or "").lower() for s in steps}) == 2
     assert sorted(tuple(inputs(s, "value")) for s in steps) == [(SOURCE_A,), (SOURCE_B,)]
 
