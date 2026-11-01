@@ -28,6 +28,7 @@ Options that matter on real estates:
 | Sources the reviewer accepts as terminals for this investigation (also tables with no definition or writer) | `--declared-terminals FILE` |
 | Where to stop | `--stop-at-database DB`, `--stop-at-object GLOB` |
 | Run order fixed by an entry procedure's calls | `--entry-point PROCEDURE` |
+| Run order from SQL Agent job scripts (SSMS "Script Job as"; inferred, a script is not proof of the deployed job) | `--job-scripts PATH` |
 | Business definitions | `--business-glossary FILE` (approved / proposed) |
 | Sharing results without names | `--gap-summary` (writes `gap-summary.json`) |
 

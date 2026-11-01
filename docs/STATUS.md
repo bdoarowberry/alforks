@@ -438,3 +438,26 @@ Eight high-severity findings, all fixed. Each test fails on the code before the 
   - linked-server objects (8): their definitions;
   - several joined candidates (4) and positional INSERT into a target with no definition (2): the
     missing table definitions.
+
+## After the 0f220a7 run (81 / 4 / 93; no step changes)
+
+- **`--job-scripts PATH`** (`src/column_lineage/jobs.py`; tests: `tests/test_column_jobs.py`).
+  - The tester found 10 local SQL Agent job scripts; they are not confirmed as current production.
+  - The reader takes SSMS-style `sp_add_job` / `sp_add_jobstep` / `sp_update_job` / schedules.
+  - When every writer of a column runs from steps of one enabled job, the order follows the job's
+    success chain, and the call order inside each step. Inferred: the job step is cited and the page says
+    the script is a static copy.
+  - Otherwise the writer-order gap carries a reason: different jobs, a writer only in a disabled job,
+    several steps or paths, procedures not in the scan, no job scripts, an entry point that does not
+    settle it, or package and SQL writers. gap-summary counts these.
+- **Adversarial review 7 of the existence proofs** (`tests/test_column_review7.py`; each test fails
+  before the fix):
+  - An alias a statement also uses for a CTE, table variable or function no longer proves a column on
+    a real table.
+  - Write and read proofs are not used for a #temp that is dropped and re-created.
+  - `ALTER TABLE … DROP COLUMN` cancels a proof.
+  - `SET udt_col.Prop` is not a column.
+  - A bare `IDENTITY` is now an identity column (older bug; positional INSERT bound the wrong value).
+  - Chained `SELECT *` CTEs are no longer exponential (depth 16: 9.9 s → 0.3 s).
+  - `ALTER … ADD … IDENTITY` blocks a SELECT INTO order.
+  - A package destination whose database is unsettled proves nothing.

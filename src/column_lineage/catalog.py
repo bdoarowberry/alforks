@@ -75,6 +75,8 @@ ALTER_DEFAULT = re.compile(rf"\bALTER\s+TABLE\s+(?P<name>{IDENT})\s+(?:WITH\s+(?
                            r"DEFAULT\s*(?P<expr>\((?:[^()]|\((?:[^()]|\([^()]*\))*\))*\)|N?'(?:''|[^'])*'|[-\w.]+)\s+FOR\s+"
                            r"(?P<col>\[[^\]]+\]|[A-Za-z_][\w$#@]*)", re.I)
 # Index options left over from a CREATE INDEX / constraint the indexer did not keep, glued to the next statement.
+ALTER_DROP_COLUMN = re.compile(rf"\bALTER\s+TABLE\s+(?P<name>{IDENT})\s+DROP\s+COLUMN\s+(?:IF\s+EXISTS\s+)?"
+                               r"(?P<cols>[^;]*)", re.I)
 CREATE_TABLE_HEAD = re.compile(rf"\s*CREATE\s+TABLE\s+(?P<name>{IDENT})", re.I)
 # Storage and column options that do not change a table's column list (blanked before re-parsing).
 DDL_NOISE = re.compile(
@@ -545,6 +547,7 @@ class Catalog:
         self.temp_creators: dict[str, set[str]] = defaultdict(set)   # scope -> {#name}
         self.temp_create_points: dict[tuple[str, str], list] = defaultdict(list)   # (scope, #name) -> [(unit, stmt)]
         self.proven_columns: dict[str, set[str]] = defaultdict(set)   # object key -> names proved by packages
+        self.dropped_columns: dict[str, set[str]] = defaultdict(set)  # object key -> ALTER TABLE ... DROP COLUMN
         self.temp_writer_scopes: dict[str, set[str]] = defaultdict(set)  # #name -> {scope}
         self.synonyms: dict[str, tuple[ObjectRef, Statement, Unit]] = {}
         self.issues: list[StatementIssue] = []
@@ -1381,6 +1384,12 @@ class Catalog:
             self.column_defaults[ref.key][norm(split_name(match.group("col"))[-1])] = expr
 
     def _alter(self, unit: Unit, statement: Statement) -> None:
+        dropped = ALTER_DROP_COLUMN.search(mask_noncode(statement.text))
+        if dropped:
+            ref = self.ref_from_text(dropped.group("name"), unit, statement)
+            for column in re.split(r"\s*,\s*(?:COLUMN\s+)?", dropped.group("cols").strip()):
+                if column and not re.match(r"(?:CONSTRAINT|IF)\b", column, re.I):
+                    self.dropped_columns[ref.key].add(norm(split_name(column.split()[0])[-1]))
         match = ALTER_ADD.search(statement.text)
         if not match:
             return
@@ -1744,7 +1753,7 @@ def column_info(definition: exp.ColumnDef, ordinal: int) -> ColumnInfo | None:
     default = None
     for constraint in definition.args.get("constraints") or []:
         kind = constraint.args.get("kind") if isinstance(constraint, exp.ColumnConstraint) else constraint
-        if isinstance(kind, exp.GeneratedAsIdentityColumnConstraint):
+        if isinstance(kind, (exp.GeneratedAsIdentityColumnConstraint, exp.AutoIncrementColumnConstraint)):
             identity = True
         elif isinstance(kind, exp.ComputedColumnConstraint):
             computed = kind.this.sql(dialect="tsql", comments=False) if kind.this is not None else "computed"

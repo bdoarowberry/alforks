@@ -305,6 +305,7 @@ class Analyzer:
         self._inlined: dict[int, object] = {}   # id(query) -> InlineFunction it was read from
         self._inline_why: str | None = None     # why the last inline_tvf call did not inline
         self._read_names: dict[str, set[str]] | None = None
+        self._local_memo: dict[tuple, tuple] = {}   # (what, id(query)) -> (query, result); query kept alive
         self._object_columns_active: set[str] = set()
 
     # ================================================================ sources
@@ -450,6 +451,14 @@ class Analyzer:
         return [i.name for i in items]
 
     def local_names(self, local: Local, ctx: Ctx) -> list[str] | None:
+        memo = self._local_memo.get(("names", id(local.query)))
+        if memo is not None and memo[0] is local.query:
+            return memo[1]
+        out = self._local_names(local, ctx)
+        self._local_memo[("names", id(local.query))] = (local.query, out)
+        return out
+
+    def _local_names(self, local: Local, ctx: Ctx) -> list[str] | None:
         if local.column_aliases:
             return list(local.column_aliases)
         if local.kind == "values":
@@ -473,6 +482,9 @@ class Analyzer:
         columns, reliable = self.object_columns(ref)
         if columns is None or not reliable:
             return None
+        if any(c.identity or c.computed or c.rowversion for sch in self.catalog.schemas.get(ref.key, [])
+               if sch.source == "alter_add" for c in sch.columns):
+            return None   # ALTER TABLE ... ADD id int IDENTITY after the copy
         if not all(self._copies_plain_columns(w, set()) for w in definers):
             return None
         return list(columns), definers[0]
@@ -515,6 +527,11 @@ class Analyzer:
         if key in self._object_columns:
             return self._object_columns[key]
         names: set[str] = set()
+        if ref.kind == "temp_table" and len(self.catalog.temp_resets.get((ref.scope, ref.name), [])) > 1:
+            # Dropped and re-created in the procedure: a write or read proves a column of one
+            # incarnation only, and which one a * reads is not tracked here.
+            self._object_columns[key] = names
+            return names
         for writer in self.catalog.writers_for(ref):
             tree = writer.statement.tree
             if writer.via or tree is None:
@@ -532,10 +549,19 @@ class Analyzer:
                 elif isinstance(node, exp.Insert) and isinstance(node.this, exp.Tuple):
                     names |= {norm(ident_text(c.this if isinstance(c, exp.Column) else c)) for c in node.this.expressions}
                 elif isinstance(node, exp.Update):
-                    names |= {norm(ident_text(e.this.this)) for e in node.expressions
-                              if isinstance(e, exp.EQ) and isinstance(e.this, exp.Column)}
+                    target = node.this if isinstance(node.this, exp.Table) else (
+                        tree.this if writer.kind == "merge" and isinstance(tree.this, exp.Table) else None)
+                    allowed = {norm(target.alias_or_name), norm(target.name)} if target is not None else set()
+                    for e in node.expressions:
+                        if not (isinstance(e, exp.EQ) and isinstance(e.this, exp.Column)):
+                            continue
+                        qualifier = norm(e.this.table) if e.this.table else None
+                        # SET loc.Lat = ... on a UDT column is a property, not a column named Lat.
+                        if qualifier is None or qualifier in allowed:
+                            names.add(norm(ident_text(e.this.this)))
         names |= self.read_names().get(ref.key, set())
         names |= self.catalog.proven_columns.get(ref.key, set())
+        names -= self.catalog.dropped_columns.get(ref.key, set())   # ALTER TABLE ... DROP COLUMN wins
         names.discard(None)
         names.discard("")
         self._object_columns[key] = names
@@ -559,9 +585,16 @@ class Analyzer:
                     aliases: dict[str, set[str]] = {}
                     refs: dict[str, ObjectRef] = {}
                     for table in tree.find_all(exp.Table):
-                        if not isinstance(table.this, exp.Identifier) or norm(table.name) in ctes:
+                        if not isinstance(table.this, exp.Identifier) or norm(table.name) in ctes \
+                                or table.name.startswith("@"):
+                            # A CTE, table variable, function or rowset: its alias proves nothing here,
+                            # and must not prove anything for a real table that reuses it.
+                            other.add(norm(table.alias_or_name))
                             continue
                         ref = self.catalog.ref_from_table(table, unit, statement)
+                        if ref.kind == "temp_table" and len(self.catalog.temp_resets.get((ref.scope, ref.name), [])) > 1:
+                            other.add(norm(table.alias_or_name))
+                            continue
                         refs[ref.key] = ref
                         for name in {norm(table.alias_or_name), norm(table.name)}:
                             aliases.setdefault(name, set()).add(ref.key)
@@ -627,6 +660,14 @@ class Analyzer:
         return frozenset(out)
 
     def local_certain(self, local: Local, ctx: Ctx) -> frozenset:
+        memo = self._local_memo.get(("certain", id(local.query)))
+        if memo is not None and memo[0] is local.query:
+            return memo[1]
+        out = self._local_certain(local, ctx)
+        self._local_memo[("certain", id(local.query))] = (local.query, out)
+        return out
+
+    def _local_certain(self, local: Local, ctx: Ctx) -> frozenset:
         if local.column_aliases or local.kind == "values":
             return frozenset(local.column_aliases or ())
         first = branches(local.query)[0]
@@ -668,6 +709,7 @@ class Analyzer:
             # UPDATE SET or MERGE proves the column exists (not where it sits).
             added |= self.written_names(ref)
             result = (frozenset.intersection(*sets) | added) if sets else frozenset(added)
+            result -= self.catalog.dropped_columns.get(ref.key, set())
         finally:
             self._object_columns_active.discard(key)
         self._object_columns[key] = result
