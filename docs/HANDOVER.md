@@ -107,3 +107,46 @@ pages, assertions, targets, expected lineage, package XML or connection details.
   `python tools/perf.py --corpus corpus --tool column` (precision should stay 1.0).
 - Before trusting a new feature, run an adversarial review on invented fixtures: the nine adversarial
   reviews to date each found real false "complete" results.
+
+## 7. State at handover (2 November 2026)
+
+Branch `column-lineage`; 403 tests pass; synthetic corpus precision 1.0 (48 chains, 28/28 expectation
+checks). Every real-data defect found so far has an invented regression fixture.
+
+**Real estate (178 target columns, about 1,500 SQL files, SSIS packages, 10 job scripts, 170 unreviewed
+assertions), last tester run:** 81 reach the requested boundary, 4 complete within the selected
+sources, 93 incomplete. Blockers by trace: writer order 54, dynamic SQL 53, backup tables with no
+definition 35, linked-server objects 8, column missing from the scanned definition 8, ambiguous joins
+4, `INSERT ... EXEC` 4, positional INSERT 2, table-valued functions 2.
+
+**What the next run should show.** The build after that run (commits `ccdd142`..`6b46992`) changed
+behaviour the tester has not yet seen:
+- an asserted mapping no longer counts as a row creator, and an asserted writer in another procedure
+  keeps the writer-order question open: with 170 assertions in use, some traces may move from complete
+  to incomplete (an over-claim stopping, not a regression);
+- pages: possible writers whose effect is not traced now appear as a box and an unresolved origin; one
+  status label; evidence requests phrased for data owners; counts of input columns, not routes;
+- `gap-summary.json` now gives anonymous reasons for dynamic SQL (`<where>/<why>`), linked servers
+  (whether the linked database is one in the scan), writer order, and assertion use by review state.
+
+**What needs the business, not code:** job definitions or run history for the 54 writer-order traces
+(the 10 local job scripts run none of those writers); owner-confirmed assertions or runtime capture for
+dynamic SQL (the new reason categories say which traces an assertion could settle); a scope decision on
+the six backup tables (record it with `--declared-terminals`); the deployed definition for the 8
+columns missing from the scanned one; confirmation whether the linked server is this server
+(`--local-server`).
+
+**Open tool issues:** the robustness findings in `STATUS.md` (review 12), of which two matter on a real
+estate: quadratic time on one very large SQL file, and CR-only line endings hiding a file. Neither has
+been seen in the tester's runs (about 7 minutes for 178 columns), but a single-file SSMS export would
+trigger the first.
+
+**Paste-ready tester message** (counts and invented shapes only, as always):
+
+> New build on `column-lineage` (commit 6b46992). Please run the Windows tests (403 expected) and the
+> 178-column batch with the same settings plus `--job-scripts`. Send back: the outcome table and traces
+> blocked by gap kind; `value_gap_traces_by_reason` in full (dynamic_sql reasons are new, as
+> where/why); `totals.assertions`; steps added and removed; any trace that moved from complete to
+> incomplete (expected: some, where an asserted writer shares a column with SQL writers in another
+> procedure — give the count and one invented shape); and any page where a new "possible writer not
+> traced" box looks wrong.
