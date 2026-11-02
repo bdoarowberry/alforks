@@ -121,3 +121,14 @@ def test_gap_summary_gives_anonymous_reasons_per_gap_kind(tmp_path):
     assert reasons["positional_without_schema"] == {"select_into_target_order_not_settled": 1}
     assert reasons["missing_definition"] == {"column_not_in_scanned_definition": 1}
     assert "demo" not in json.dumps(reasons).lower()   # categories only, no names
+
+
+def test_insert_exec_split_over_two_lines_is_mapped(tmp_path):
+    t = trace(ROOT, "demo.dbo.Out_split.amount", tmp_path, *DB)
+    assert kinds(t) == set() and reaches(t, "demo.dbo.sourcetable.col_a")
+    assert [s for s in t.steps if s["writer_kind"] == "insert_exec"]
+
+
+def test_cross_apply_of_an_inline_function_without_a_subquery(tmp_path):
+    t = trace(ROOT, "demo.dbo.Out_apply.col_a", tmp_path, *DB)
+    assert kinds(t) == set() and reaches(t, "demo.dbo.sourcetable.col_a")

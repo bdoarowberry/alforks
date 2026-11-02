@@ -226,14 +226,10 @@
 ## Known open issues
 
 - Corpus chain 08 ends in `missing_definition` (recall 0.6). Not investigated.
-- `INSERT INTO #t (...)` with `EXEC proc` on the next line is split into two statements by the indexer, so
-  the callee is lost: the one-result-set mapping does not happen and the gap reason reads
-  `executes_a_string_not_a_named_procedure` although a named procedure is called (arguments play no part;
-  the same text on one line maps). Corpus: legacy chain 16 and extension chains `insert_exec_one` /
-  `insert_exec_two` variant 1 (the latter keeps its `insert_exec` gap but with that wrong reason).
-- An inline table-valued function applied directly (`CROSS APPLY dbo.fn(p.id) AS x`) is not read; only
-  the derived-table form (`CROSS APPLY (SELECT * FROM dbo.fn(p.id)) AS x`) is. The trace ends in
-  `unexplained_end` instead of a stated gap. Corpus: extension chain `itvf_apply` variant 1.
+- (Fixed) `INSERT INTO #t (...)` with `EXEC proc` on the next line, and `CROSS APPLY dbo.fn(p.id) AS x`
+  without a subquery wrapper, were found by the extended corpus (both variants of `insert_exec_one`,
+  `insert_exec_two` and `itvf_apply` now pass; expectation checks 28/28, static recall 0.99 over 48
+  chains).
 - Dynamic SQL that builds its projection from metadata cannot be followed. This is by design: it is
   reported as a `dynamic_sql` gap at the EXEC (its detail now says which piece is unknown).
 - A dynamic SQL issue's literal "targets" are guessed from all string literals in its scope; text like

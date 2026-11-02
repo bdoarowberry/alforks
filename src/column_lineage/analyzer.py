@@ -341,8 +341,18 @@ class Analyzer:
         alias_columns = [norm(ident_text(c)) for c in alias_node.columns] if isinstance(alias_node, exp.TableAlias) and alias_node.columns else None
         if isinstance(node, exp.Table):
             server, database, schema, name = table_parts(node)
-            if isinstance(node.this, (exp.Func, exp.Anonymous)) or (isinstance(node.this, exp.Dot) and isinstance(node.this.expression, exp.Func)):
+            if isinstance(node.this, (exp.Func, exp.Anonymous)) or (
+                    isinstance(node.this, exp.Dot) and isinstance(node.this.expression, (exp.Func, exp.Anonymous))):
                 func = node.this if not isinstance(node.this, exp.Dot) else node.this.expression
+                if isinstance(node.this, exp.Dot) and not schema:
+                    # schema.fn(...) parsed as Dot(schema, fn): the qualifier is the schema (or database.schema)
+                    qualifier = node.this.this
+                    if isinstance(qualifier, exp.Identifier):
+                        schema = qualifier.name
+                    elif isinstance(qualifier, exp.Dot) and isinstance(qualifier.expression, exp.Identifier):
+                        schema = qualifier.expression.name
+                        if isinstance(qualifier.this, exp.Identifier) and not database:
+                            database = qualifier.this.name
                 fname = (func.name or func.sql(dialect="tsql", comments=False)).lower()
                 kind = "external_object" if fname in EXTERNAL_FUNCTIONS else "table_valued_function"
                 why = None
@@ -373,6 +383,11 @@ class Analyzer:
                 names.add(f"{norm(database)}.{norm(schema)}.{lname}")
             return Source(alias or lname, "object", refs, columns, reliable, names=tuple(sorted(names)),
                           certain=certain)
+        if isinstance(node, exp.Lateral) and (isinstance(node.this, (exp.Func, exp.Anonymous)) or (
+                isinstance(node.this, exp.Dot) and isinstance(node.this.expression, (exp.Func, exp.Anonymous)))):
+            # CROSS APPLY fn(args) AS x without a subquery: the same as FROM fn(args) AS x.
+            table = exp.Table(this=node.this, alias=node.args.get("alias"))
+            return self.source_for(table, scope)
         if isinstance(node, (exp.Subquery, exp.Lateral)):
             inner = node.this
             if isinstance(inner, exp.Subquery):

@@ -125,11 +125,14 @@ def test_nested_procedure_fills_caller_temp_table(tmp_path):
     assert t.complete
 
 
-def test_insert_exec_is_gap(tmp_path):
+def test_insert_exec_from_a_single_result_set_is_mapped_not_verified(tmp_path):
+    """The callee returns one result set, so INSERT ... EXEC (split over two lines) maps by position;
+    the step is inferred, never verified, and the target is not a source."""
     t = trace("insert_exec", "demo.output.result_value", tmp_path)
-    assert "insert_exec" in t.gap_kinds
-    assert not t.complete
-    assert all(s["status"] != "verified" for s in t.steps_for(t.target_id))
+    assert "insert_exec" not in t.gap_kinds
+    [step] = t.steps_for(t.target_id)
+    assert step["writer_kind"] == "insert_exec" and step["status"] == "inferred"
+    assert inputs(step, "value") == ["?.demo.source.input_a"]
     assert (t.target_id, "source_without_writer") not in t.stop_pairs()
 
 

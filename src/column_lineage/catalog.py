@@ -1439,6 +1439,15 @@ class Catalog:
         masked = mask_noncode(statement.text)
         exec_at = match.end() - len(re.search(r"EXEC(?:UTE)?$", match.group(0), re.I).group(0))
         exec_text = statement.text[exec_at:].strip().rstrip(";")
+        split = False
+        if not exec_text:
+            # The indexer split INSERT ... EXEC at the EXEC: the call is the next statement. That statement
+            # is still processed on its own (and registers the call); here only the callee is needed.
+            following = next((st for st in unit.index.statements if st.start >= statement.end
+                              and st.text.strip()), None)
+            if following is None or not re.match(r"\s*EXEC(?:UTE)?\b", following.text, re.I):
+                return
+            exec_text, masked, exec_at, split = following.text.strip().rstrip(";"), mask_noncode(following.text), 0, True
         if not exec_text or re.match(r"EXEC(?:UTE)?\s*\(", masked[exec_at:].strip(), re.I):
             return
         try:
@@ -1446,6 +1455,15 @@ class Catalog:
         except (SqlglotError, ValueError):
             return
         if not isinstance(tree, exp.Execute) or not isinstance(tree.this, exp.Table):
+            return
+        if split:
+            columns = re.search(r"\((?P<cols>[^)]*)\)\s*$", mask_noncode(statement.text).rstrip().rstrip(";"), re.I)
+            names = [norm(split_name(c.strip())[-1]) for c in columns.group("cols").split(",")] if columns else None
+            callee = self.ref_from_table(tree.this, unit, statement)
+            callee = ObjectRef(callee.name, callee.schema, callee.database, callee.server, "procedure", None,
+                               callee.database_source)
+            issue.detail.update({"callee": callee, "target_columns": names, "target": ref})
+            self._add_writer(Writer(ref, "insert_exec", statement, unit, statement.procedure, order))
             return
         columns = re.search(r"\((?P<cols>[^)]*)\)\s*EXEC", masked[:match.end()], re.I)
         names = [norm(split_name(c.strip())[-1]) for c in columns.group("cols").split(",")] if columns else None

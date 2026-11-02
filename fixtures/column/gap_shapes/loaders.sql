@@ -89,3 +89,23 @@ BEGIN
     INSERT INTO #ident2 SELECT col_a FROM dbo.SourceTable;
     INSERT INTO dbo.Out_identity2 (col_a) SELECT col_a FROM #ident2;
 END
+GO
+-- INSERT ... EXEC split over two lines (the indexer starts a new statement at EXEC).
+CREATE TABLE dbo.Out_split (amount decimal(12, 2));
+GO
+CREATE PROCEDURE dbo.ReportSplit AS
+BEGIN
+    CREATE TABLE #split (amount decimal(12, 2));
+    INSERT INTO #split (amount)
+    EXEC dbo.GetAmounts;
+    INSERT INTO dbo.Out_split (amount) SELECT amount FROM #split;
+END
+GO
+-- CROSS APPLY of an inline function without a subquery wrapper.
+CREATE TABLE dbo.Out_apply (col_a int);
+GO
+CREATE PROCEDURE dbo.load_apply AS
+    INSERT INTO dbo.Out_apply (col_a)
+    SELECT x.col_a FROM dbo.Parent AS p
+    CROSS APPLY dbo.TableFunction(p.id) AS x;
+GO
