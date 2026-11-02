@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import hashlib
 import logging
 from pathlib import Path
 import re
@@ -81,9 +82,20 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+STEM_LIMIT = 120   # keeps "<stem>.overview.md" well inside 255 bytes and Windows MAX_PATH
+
+
 def stem(spec: str) -> str:
-    value = spec.strip().lower().replace("[", "").replace("]", "").replace('"', "")
-    return re.sub(r"[^a-z0-9._-]", "_", value)
+    """Output file stem of a column spec: the lower-cased dotted name, with a short hash appended when the
+    sanitised name is lossy (characters outside [a-z0-9._-]) or too long, so distinct columns never share
+    a file and no file name exceeds the file system's limit."""
+    raw = spec.strip().lower().replace("[", "").replace("]", "").replace('"', "")
+    value = re.sub(r"[^a-z0-9._-]", "_", raw)
+    lossy = value != raw or len(value) > STEM_LIMIT or not value.strip("._-")
+    if lossy:
+        digest = hashlib.sha1(raw.encode("utf-8")).hexdigest()[:8]
+        value = (value[:STEM_LIMIT].strip("._-") or "column") + "-" + digest
+    return value
 
 
 def source_revision(roots: list[Path]) -> str | None:
@@ -146,6 +158,14 @@ def main(argv: list[str] | None = None) -> int:
     args.column = list(dict.fromkeys(args.column))
     if not args.column:
         parser.error("give at least one --column or a --columns-file")
+    for spec in args.column:
+        parts = split_name(spec)
+        temp = spec.strip().startswith("#") and len(parts) == 2
+        if not (temp or 2 <= len(parts) <= 4) or any(not p or not p.strip() or ";" in p for p in parts):
+            parser.error(f"--column: {spec!r} is not db.schema.table.column (or #temp.column)")
+    for raw in args.job_scripts:
+        if not Path(raw).exists():
+            parser.error(f"--job-scripts: {raw} does not exist")
     if args.max_depth is not None and args.max_depth < 0:
         parser.error("--max-depth must be nonnegative")
     mapping = []
@@ -229,6 +249,17 @@ def main(argv: list[str] | None = None) -> int:
                 prepared_stream = pool.map(prepare_in_worker, work, chunksize=8)
             except (OSError, ValueError, NotImplementedError):
                 prepared_stream = None
+        # A folder and its sub-folder (or a file inside it) given as two roots must not index a file twice.
+        seen_paths: set[str] = set()
+        unique = []
+        for root, source in files:
+            key = str(source.path.resolve())
+            if key in seen_paths:
+                continue
+            seen_paths.add(key)
+            unique.append((root, source))
+        duplicate_root_files = len(files) - len(unique)
+        files = unique
         for done, (root, source) in enumerate(files, 1):
             progress.start_item(source.path.name, completed=done - 1, total=len(files))
             if prepared_stream is not None:
@@ -259,6 +290,8 @@ def main(argv: list[str] | None = None) -> int:
                                                                     "create_table_read_from_text",
                                                                     "create_table_unread")},
             "skipped_dated_snapshots": len(catalog.skipped_files),
+            "duplicate_root_files": duplicate_root_files,
+            "default_excludes": list(DEFAULT_EXCLUDES),
             "file_encodings": dict(sorted(encodings.items())),
             "files_without_statements": catalog.stats["files_without_statements"],
             "statement_issues": len(catalog.issues),
@@ -292,7 +325,10 @@ def main(argv: list[str] | None = None) -> int:
             scan["job_scripts"].update(tracer.job_diagnostics())
         scan["declared_terminals"] = len(terminals)
         output = Path(args.output)
+        if output.exists() and not output.is_dir():
+            parser.error(f"--output: {output} exists and is not a directory")
         output.mkdir(parents=True, exist_ok=True)
+        output_errors: list[str] = []
         traces = []
         trace_files = []
         incomplete = False
@@ -318,16 +354,21 @@ def main(argv: list[str] | None = None) -> int:
             incomplete = incomplete or data["completeness"]["status"] != "complete"
             name = stem(spec)
             json_path = output / f"{name}.lineage.json"
-            json_path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-            written.append(json_path)
-            trace_files.append((data, json_path))
-            if render_markdown is not None:
-                md_path = output / f"{name}.lineage.md"
-                md_path.write_text(render_markdown(data, json_path.name), encoding="utf-8")
-                written.append(md_path)
+            try:
+                json_path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+                written.append(json_path)
+                trace_files.append((data, json_path))
+                if render_markdown is not None:
+                    md_path = output / f"{name}.lineage.md"
+                    md_path.write_text(render_markdown(data, json_path.name), encoding="utf-8")
+                    written.append(md_path)
+            except OSError as exc:   # one unwritable page must not lose the run's index and diagnostics
+                output_errors.append(f"{spec}: {exc}")
+                print(f"warning: could not write {json_path.name}: {exc}", file=sys.stderr)
         diagnostics = {
             "schema_version": "column-lineage-scan/1.0",
             "scan": scan,
+            "output_errors": output_errors,
             "file_errors": [{"root": r, "path": p, "error": e} for r, p, e in sorted(catalog.file_errors)],
             "assertion_errors": sorted(set(tracer.assertion_errors)),
             "assertions_not_used": sorted(a.id for a in asserted if a.id not in tracer.assertions_seen),

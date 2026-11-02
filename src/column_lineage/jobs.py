@@ -270,16 +270,18 @@ def parse_job_scripts(paths: list[str]) -> tuple[list[Job], dict]:
     for raw in paths:
         p = Path(raw)
         if p.is_dir():
-            files.extend((f, f.relative_to(p).as_posix()) for f in sorted(p.rglob("*.sql")))
+            files.extend((f, f.relative_to(p).as_posix()) for f in sorted(p.rglob("*"))
+                         if f.is_file() and f.suffix.lower() == ".sql")
         else:
             files.append((p, p.name))
     calls = []   # (file index, rel, line, proc, args, complete)
     counts = {"files": 0, "jobs": 0, "steps": 0, "tsql_steps": 0, "ssis_steps": 0, "other_steps": 0,
-              "jobs_not_followed": 0}
+              "jobs_not_followed": 0, "unreadable_files": 0}
     for index, (path, rel) in enumerate(files):
         try:
             text, _ = decode_source(path.read_bytes())
         except OSError:
+            counts["unreadable_files"] += 1
             continue
         counts["files"] += 1
         masked = mask_noncode(text)

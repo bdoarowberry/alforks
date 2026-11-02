@@ -14,7 +14,18 @@ SUPPORTED_SUFFIXES = {".sql", ".tsql", ".ddl", ".prc", ".proc"}
 DEFAULT_EXCLUDES = (".git", ".venv", ".pytest_cache", ".pytest-run-*", "node_modules", "bin", "obj")
 
 
+def _normalise_newlines(text: str) -> str:
+    """A lone CR (old Mac / some tools) ends a line like LF: otherwise one ``--`` comment would hide the
+    rest of the file, and every line number would be 1."""
+    return re.sub(r"\r(?!\n)", "\n", text) if "\r" in text else text
+
+
 def decode_source(data: bytes) -> tuple[str, str]:
+    text, encoding = _decode(data)
+    return _normalise_newlines(text), encoding
+
+
+def _decode(data: bytes) -> tuple[str, str]:
     """Decode a SQL file: UTF-16 (BOM or NUL bytes, as SSMS saves "Unicode"), UTF-8, else Windows-1252.
 
     Reading UTF-16 as UTF-8 would silently hide every statement in the file, so any NUL bytes mean
@@ -25,10 +36,17 @@ def decode_source(data: bytes) -> tuple[str, str]:
     if data.startswith((b"\xff\xfe", b"\xfe\xff")):
         return data.decode("utf-16", errors="replace"), "utf-16-bom"
     sample = data[:8000]
-    if b"\x00" in sample:
+    nuls = sample.count(0)
+    if nuls:
         odd, even = sample[1::2].count(0), sample[0::2].count(0)
-        return data.decode("utf-16-le" if odd >= even else "utf-16-be", errors="replace"), \
-            "utf-16-le" if odd >= even else "utf-16-be"
+        # UTF-16 text has a NUL in nearly every other byte of ASCII; a stray NUL (in a comment, or
+        # padding) does not, and must not turn the whole file into mojibake.
+        if nuls * 4 >= len(sample) or (nuls >= 8 and max(odd, even) >= 0.9 * nuls and nuls * 20 >= len(sample)):
+            return data.decode("utf-16-le" if odd >= even else "utf-16-be", errors="replace"), \
+                "utf-16-le" if odd >= even else "utf-16-be"
+        data = data.replace(b"\x00", b"")
+        text, encoding = _decode(data)
+        return text, encoding + "-nul-stripped"
     try:
         return data.decode("utf-8"), "utf-8"
     except UnicodeDecodeError:

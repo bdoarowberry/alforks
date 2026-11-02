@@ -35,9 +35,9 @@ def norm(node_id: str | None) -> str | None:
 
 
 def stem_for(spec: str) -> str:
-    """Output stem rule from the design doc."""
-    lowered = spec.lower().replace("[", "").replace("]", "")
-    return re.sub(r"[^a-z0-9._-]", "_", lowered)
+    """Output file stem of a column spec, exactly as the CLI computes it."""
+    from column_lineage.cli import stem
+    return stem(spec)
 
 
 # --------------------------------------------------------------------------- CLI

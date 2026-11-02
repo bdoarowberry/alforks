@@ -532,39 +532,42 @@ Diagnostics for the 54 "writer not run by any job script" traces:
   an extension of the ground-truth corpus to the newer features were run as parallel agents; findings
   are recorded below as they are fixed.
 
-## Robustness review (review 12; findings recorded, not yet fixed)
+## Robustness review (review 12)
+
+Fixed in the build after 2829077: the four high items and the medium items marked (fixed) below;
+the rest remain open. Tests: `tests/test_column_robustness.py`.
 
 Invented inputs only; generators and timings under the session scratchpad are not kept. Fix in this
 order (the first two are realistic on a real estate):
 
 High
-- **A single very large SQL file is effectively a hang.** Per-file work is quadratic: `catalog._procedures`
+- (fixed) **A single very large SQL file is effectively a hang.** Per-file work is quadratic: `catalog._procedures`
   calls `procedure_scopes()` (a full-file regex scan) once per procedure, and `table_lineage.index`
   `context()` re-runs `GO.finditer` for every statement. Measured: 3,000 procedures in one file 76 s;
   10,000 statements in one procedure 177 s; a 20 MB file did not finish in 30 min. An SSMS "Generate
   Scripts" single-file export would not finish. Fix: compute procedure scopes and GO positions once per
   file (both are pure functions of the file text).
-- **CR-only line endings plus a `--` comment hide the whole file.** `mask_noncode` ends a line comment at
+- (fixed) **CR-only line endings plus a `--` comment hide the whole file.** `mask_noncode` ends a line comment at
   the next `\n`; with CR-only endings the first `--` masks everything after it, the file yields 0
   statements, and nothing counts it (the masked text is blank, so it is not even in
   `files_without_statements`). Fix: normalise lone `\r` to `\n` in `decode_source` (also fixes line
   numbers for such files).
-- **Crash on long column names.** A 128-character table and column make an output file name longer
+- (fixed) **Crash on long column names.** A 128-character table and column make an output file name longer
   than 255 bytes; `cli.py` raises `OSError` and the run aborts with no index or diagnostics written. On
   Windows the same happens earlier through MAX_PATH. Fix: cap the stem (about 120 characters) and append
   a short hash; catch `OSError` per trace and record it in `file_errors`.
-- **A nonexistent `--job-scripts` path is ignored silently** (`jobs.py` swallows `OSError`); a bad
+- (fixed) **A nonexistent `--job-scripts` path is ignored silently** (`jobs.py` swallows `OSError`); a bad
   `--source-root` errors, this should too.
 
 Medium
-- A RecursionError in sqlglot (expression nesting around 50 deep) drops **every** statement of that
+- (fixed) A RecursionError in sqlglot (expression nesting around 50 deep) drops **every** statement of that
   file (`index.add` catches only `SqlglotError`/`ValueError`); it should make one fallback statement.
-- Output stem collisions: `stem()` maps `[a b]` and `a_b`, `col-1` and `col_1` to the same file, and the
+- (fixed) Output stem collisions: `stem()` maps `[a b]` and `a_b`, `col-1` and `col_1` to the same file, and the
   index then points several columns at one trace. Fix: append a hash when sanitising is lossy.
-- Overlapping `--source-root`s (a folder and its sub-folder, or a folder and a file in it) index the
+- (fixed) Overlapping `--source-root`s (a folder and its sub-folder, or a folder and a file in it) index the
   same file twice, which duplicates writers and can add a spurious writer-order gap. Fix: dedupe by
   resolved path across roots.
-- One NUL byte in the first 8,000 bytes makes `decode_source` treat the file as UTF-16, so the file
+- (fixed) One NUL byte in the first 8,000 bytes makes `decode_source` treat the file as UTF-16, so the file
   yields nothing (counted only in `files_without_statements`). Fix: require a UTF-16 pattern (BOM or a
   high share of NULs), else strip stray NULs.
 - Default directory excludes (`.git .venv .pytest_cache .pytest-run-* node_modules bin obj`) are silent
@@ -572,11 +575,11 @@ Medium
   the scan diagnostics and document the list.
 - An INSERT with 50,000 VALUES rows gives one step per row (78 MB JSON) and every downstream column
   inherits them. Fix: collapse runs of literal rows into one step with a count note.
-- `_create_table` runs one regex per column over the whole statement (O(columns²)); harmless below the
+- (fixed) `_create_table` runs one regex per column over the whole statement (O(columns²)); harmless below the
   1,024-column limit but easy to precompute once.
 
 Low
-- `--output` pointing at an existing file gives a traceback; `--columns-file` accepts lines that are not
+- (fixed: both are errors now) `--output` pointing at an existing file gives a traceback; `--columns-file` accepts lines that are not
   columns (validate 2–4 dotted parts or `#temp.col`); stale `*.lineage.*` files from an earlier run are
   not marked; symlinked directories are never followed (document); `--job-scripts` `rglob("*.sql")` is
   case-sensitive on Linux.
@@ -585,3 +588,17 @@ What behaved correctly: all encodings tried (UTF-8 ± BOM, UTF-16 LE/BE ± BOM, 
 CRLF and mixed endings, every GO placement, 20,000 small files (32 s; `--jobs 1` and `--jobs 8`
 byte-identical), malformed and huge packages (all counted as unreadable), odd column quoting, repeat
 runs byte-identical.
+
+## After the 2829077 run (47 / 3 / 128)
+
+- 35 traces moved from reached-boundary to incomplete, all through the linked-server boundary fix:
+  `[alias].[db].schema.table` where `db` is a scanned database (109 gaps say
+  `linked_server_to_a_scanned_database_name`). Earlier runs silently counted such reads as reaching
+  the database boundary. If the alias is this server, `--local-server <alias>` restores those paths as
+  local reads, now as a stated setting rather than an assumption. Steps were unchanged (0 added, 0
+  removed); the assertion fixes moved nothing.
+- Possible-writer families appeared on 27 detailed pages, counts matching the dynamic-SQL gaps; the
+  label now reads "possible untraced writers (…): not sources, open points", and the diagram never cuts
+  open-point families into the summary node.
+- Windows: `tools/perf.py` no longer imports the Unix-only `resource` module unconditionally.
+- Assertions on the estate: 170 used, all AI-assisted and unreviewed; 171 traces rest on at least one.

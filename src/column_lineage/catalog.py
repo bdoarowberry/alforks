@@ -447,7 +447,11 @@ class Unit:
         return None, None
 
     def line_at(self, offset: int) -> int:
-        return self.text.count("\n", 0, offset) + 1
+        newlines = self.__dict__.get("_newlines")
+        if newlines is None:
+            newlines = [i for i, ch in enumerate(self.text) if ch == "\n"]
+            self.__dict__["_newlines"] = newlines
+        return bisect.bisect_left(newlines, offset) + 1
 
 
 @dataclass
@@ -1053,6 +1057,7 @@ class Catalog:
         masked = unit.masked
         procs = [m for m in DEFINITION.finditer(masked) if m.group("kind").lower().startswith("proc")]
         stops = sorted([m.start() for m in GO.finditer(masked)] + [m.start() for m in procs] + [len(masked)])
+        names = {start: name for start, _, name in procedure_scopes(unit.text, masked)}   # once per file
         for match in procs:
             limit = next((s for s in stops if s > match.start()), len(masked))
             end = header_end(masked, match.end(), limit)
@@ -1063,7 +1068,6 @@ class Catalog:
             fake = Statement(unit.path, unit.line_at(match.start()), match.start(), match.start(), "", None, "", "parsed")
             ref = self.ref_from_text(match.group("name"), unit, fake)
             ref = ObjectRef(ref.name, ref.schema, ref.database, ref.server, "procedure", None, ref.database_source)
-            names = {start: name for start, _, name in procedure_scopes(unit.text, masked)}
             scope = f"{unit.root_label}/{unit.rel_path}::{names.get(match.start(), normalize_name(match.group('name')))}"
             info = ProcInfo(proc_key(ref), ref, scope, unit, params, match.start(), unit.line_at(match.start()))
             if end:
@@ -1355,6 +1359,12 @@ class Catalog:
         columns = []
         masked = mask_noncode(statement.text)
         inline_index = re.search(r"[,(]\s*INDEX\s+(?:\[[^\]]+\]|\w+)\s+(?:CLUSTERED|NONCLUSTERED|UNIQUE|\()", masked, re.I)
+        # One pass over the statement for the column options SQLGlot does not report (not one per column).
+        rowversion_cols = {m.group(1).lower() for m in re.finditer(
+            r"(?:^|[\s,(])\[?([^\]\s,()]+)\]?\s+(?:rowversion|timestamp)\b", masked, re.I)}
+        generated_cols = {m.group(1).lower() for m in re.finditer(
+            r"(?:^|[\s,(])\[?([^\]\s,()]+)\]?\s+[^,]*?\bGENERATED\s+ALWAYS\s+AS\s+(?:ROW|TRANSACTION_ID|SEQUENCE_NUMBER)\b",
+            masked, re.I)}
         for definition in schema.expressions:
             if not isinstance(definition, exp.ColumnDef):
                 continue
@@ -1364,12 +1374,10 @@ class Catalog:
             info = column_info(definition, len(columns) + 1)
             if info:
                 # SQLGlot reads ROWVERSION/TIMESTAMP as VARBINARY; check the source text.
-                if re.search(r"(?:^|[\s,(])\[?" + re.escape(info.name) + r"\]?\s+(?:rowversion|timestamp)\b", masked, re.I):
+                if info.name in rowversion_cols:
                     info.rowversion = True
                 # Temporal period columns are generated: they take no explicit value.
-                if not info.computed and re.search(r"(?:^|[\s,(])\[?" + re.escape(info.name) + r"\]?\s+[^,]*?"
-                                                   r"\bGENERATED\s+ALWAYS\s+AS\s+(?:ROW|TRANSACTION_ID|SEQUENCE_NUMBER)\b",
-                                                   masked, re.I):
+                if not info.computed and info.name in generated_cols:
                     info.computed = "generated always"
                 columns.append(info)
         self.schemas[ref.key].append(TableSchema(ref, columns, statement, unit, "create_table"))

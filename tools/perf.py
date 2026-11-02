@@ -54,8 +54,11 @@ def _child(kind: str, spec: dict, result_path: str) -> int:
     sys.path.insert(0, str(SRC))
     import cProfile
     import pstats
-    import resource
     import tracemalloc
+    try:
+        import resource   # Unix only
+    except ImportError:   # Windows: no peak-RSS figure
+        resource = None
 
     phases: list[tuple[str, float]] = []
     try:
@@ -109,7 +112,8 @@ def _child(kind: str, spec: dict, result_path: str) -> int:
         "rc": rc,
         "error": error,
         "wall_s": round(ended - started, 3),
-        "peak_rss_mb": round(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024, 1),
+        "peak_rss_mb": (round(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024, 1)
+                        if resource is not None else None),
         "phases": _phase_durations(phases, started, ended),
         **extra,
     }

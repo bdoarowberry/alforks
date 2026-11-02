@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import bisect
 import re
 
 import sqlglot
@@ -122,6 +123,7 @@ def _next_statement_boundary(text: str, masked: str, start: int, limit: int, mat
 
 
 _NONCODE_START = re.compile("--|/\\*|['\\[\"]")
+_LINE_END = re.compile(r"[\r\n]")
 _BLOCK_COMMENT = re.compile(r"/\*|\*/")
 _NOT_NEWLINE = re.compile(r"[^\r\n]")
 
@@ -151,8 +153,8 @@ def mask_noncode(text: str) -> str:
         start = match.start()
         token = match.group()
         if token == "--":
-            end = text.find("\n", start)
-            end = len(text) if end < 0 else end
+            line_end = _LINE_END.search(text, start)
+            end = line_end.start() if line_end else len(text)
         elif token == "/*":
             depth = 1
             end = len(text)
@@ -230,16 +232,24 @@ class SourceIndex:
         masked = mask_noncode(text)
         definitions = list(DEFINITION.finditer(masked))
         procedures = [m for m in definitions if m.group('kind').lower().startswith('proc')]
-        boundaries = sorted([m.start() for m in GO.finditer(masked)] + [m.start() for m in procedures] + [len(text)])
+        go_starts = [m.start() for m in GO.finditer(masked)]
+        proc_starts = [m.start() for m in procedures]
+        boundaries = sorted(go_starts + proc_starts + [len(text)])
+        newlines = [i for i, ch in enumerate(text) if ch == '\n']
+
+        def line_of(offset: int) -> int:
+            return bisect.bisect_left(newlines, offset) + 1
 
         def context(offset: int) -> tuple[str | None, str]:
-            previous = [m for m in procedures if m.start() <= offset]
-            proc = previous[-1] if previous else None
-            prior_batches = [m.start() for m in GO.finditer(masked) if m.start() < offset]
-            if proc and prior_batches and proc.start() < prior_batches[-1]:
+            # Procedure and batch of an offset, by binary search (never a rescan of the file per statement).
+            at = bisect.bisect_right(proc_starts, offset)
+            proc = procedures[at - 1] if at else None
+            g = bisect.bisect_left(go_starts, offset)
+            last_go = go_starts[g - 1] if g else None
+            if proc and last_go is not None and proc.start() < last_go:
                 proc = None
             name = proc.group('name') if proc else None
-            batch = f'<batch@{prior_batches[-1] if prior_batches else 0}>'
+            batch = f'<batch@{last_go if last_go is not None else 0}>'
             return name, f'{source.path}::{normalize_name(name) if name else batch}'
 
         for match in definitions:
@@ -266,10 +276,10 @@ class SourceIndex:
                 if parsed is None or isinstance(parsed, exp.Command):
                     status = 'fallback'
                     error = 'SQLGlot returned no statement' if parsed is None else 'SQLGlot returned an unsupported Command'
-            except (SqlglotError, ValueError) as exc:
+            except (SqlglotError, ValueError, RecursionError) as exc:
                 status = 'fallback'
                 error = re.sub(r'\x1b\[[0-9;]*m', '', f'{type(exc).__name__}: {exc}')
-            self.statements.append(Statement(str(source.path), text.count('\n', 0, start) + 1,
+            self.statements.append(Statement(str(source.path), line_of(start),
                                              start, end, sql, procedure, scope, status, parsed, error))
             for temp in re.finditer(r'(?<![\w#])#(?!#)[A-Za-z_][\w$#]*', mask_noncode(sql)):
                 name = temp.group()

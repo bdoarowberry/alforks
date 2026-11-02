@@ -249,6 +249,7 @@ SHAPES = {   # diagram node kind -> (open, close, label prefix)
     "constant": ('(["', '"])', "Constant"),
     "declared": ('[["', '"]]', "Declared terminal"),
     "unresolved": ('{{"', '"}}', "Unresolved origin"),
+    "possible_writer": ('{{"', '"}}', "Possible untraced writer"),
     "loop": ('(("', '"))', "Loop, no new source"),
     "earlier": ('(("', '"))', "Before this write"),
 }
@@ -769,8 +770,8 @@ class Analysis:
                 families[(pseudo, (), stop, "unresolved")] = {
                     "id": _hash_list("fam", ["unknown_writer", gap["id"], stop]),
                     "source": {"kind": "unknown", "key": "unknown_writer",
-                               "label": "possible writers whose effect is not traced (SQL built at run time, rows "
-                                        "copied from another procedure, unparsed or unmapped statements)"},
+                               "label": "possible untraced writers (SQL built at run time, rows copied from another "
+                                        "procedure, unparsed or unmapped statements): not sources, open points"},
                     "value_rule": [], "value_rule_text": "mapping unknown", "headline": "unknown",
                     "stop": stop, "stop_text": stop_short(stop), "status": "unresolved",
                     "route_count": 1, "route_count_is_lower_bound": False, "ends": {pseudo},
@@ -794,6 +795,8 @@ class Analysis:
             return "database"
         if stop == "cycle":
             return "earlier" if kind == "prior_state" else "loop"
+        if kind == "unknown" and fam["source"].get("key") == "unknown_writer":
+            return "possible_writer"
         return "unresolved"
 
     # ends ---------------------------------------------------------------------
@@ -1595,7 +1598,12 @@ def family_mermaid(a: Analysis) -> list[str]:
     """Mermaid flowchart of route families: one node per family, each with its own edge into the target, so
     alternatives are drawn side by side and never as a chain."""
     t = a.t
-    fams = a.families[:MAX_DIAGRAM_FAMILIES]
+    # Open points (gap ends and possible untraced writers) are never cut from the diagram: the box that
+    # says "not proved" must not disappear into the summary node on a busy page.
+    open_fams = [f for f in a.families if f["stop"].startswith("gap:")]
+    others = [f for f in a.families if not f["stop"].startswith("gap:")]
+    fams = (open_fams + others)[:MAX_DIAGRAM_FAMILIES]
+    fams.sort(key=lambda f: a.families.index(f))
     lines = ["```mermaid", "flowchart LR",
              f'  T["{mermaid_text("Target: " + _truncate(t.display(t.target_id), DIAGRAM_NAME_LIMIT))}"]']
     classes: dict[str, list[str]] = {}
@@ -1604,7 +1612,7 @@ def family_mermaid(a: Analysis) -> list[str]:
         arrow = "-.->" if fam["role"] == "condition" else "-->"
         lines.append(f'  {fam["label"]}{opener}{_diagram_node_label(a, fam)}{closer} {arrow}|"{_diagram_edge_label(fam)}"| T')
         classes.setdefault(fam["diagram_kind"], []).append(fam["label"])
-    rest = a.families[MAX_DIAGRAM_FAMILIES:]
+    rest = [f for f in a.families if f not in fams]
     if rest:
         routes = sum(f["route_count"] for f in rest)
         kinds = Counter(_end_short("earlier" if f["stop"] == "cycle" and f["source"]["kind"] == "prior_state"
@@ -1618,11 +1626,13 @@ def family_mermaid(a: Analysis) -> list[str]:
     if rest:
         lines.append("  classDef summary stroke-dasharray:6 4")
         lines.append("  class MORE summary")
-    for kind, style in (("unresolved", "stroke-dasharray:5 3"), ("declared", "stroke-dasharray:2 2"),
+    for kind, style in (("unresolved", "stroke-dasharray:5 3"), ("possible_writer", "stroke-dasharray:5 3"),
+                        ("declared", "stroke-dasharray:2 2"),
                         ("constant", "stroke-dasharray:1 3")):
         if classes.get(kind):
-            lines.append(f"  classDef {kind} {style}")
-            lines.append(f"  class {','.join(classes[kind])} {kind}")
+            css = kind.replace("_", "")   # Mermaid class names: letters only
+            lines.append(f"  classDef {css} {style}")
+            lines.append(f"  class {','.join(classes[kind])} {css}")
     lines.append("```")
     return lines
 
