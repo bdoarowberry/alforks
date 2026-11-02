@@ -19,6 +19,16 @@ ground-truth graph, so ``DIR/manifest.json`` can list "known chains": a mart col
 the exact upstream source columns reachable through value/condition inputs, the
 number of persistent-object layers and the messy features on the path.
 
+After the warehouse and its chains, ``--extension-variants N`` (default 2) adds N
+variations of each extension chain kind (``EXT_KINDS``: earlier-content reads, INSERT ...
+EXEC, inline table-valued functions, * by name, positional INSERTs into SELECT ... INTO
+tables, SQL Agent job ordering with scripts under ``DIR/jobs/``, multi-column UPDATE with
+CROSS APPLY, ALTER TABLE ... ADD). Their manifest entries carry ``kind``, ``variant`` and
+``expect`` (gap kinds and reasons, forbidden gap kinds, stop reasons, evidence roles, step
+statuses, completeness, no cycles) so ``tools/perf.py`` scores a wrongly removed gap as a
+miss. They use their own random stream and add objects on top of ``--objects``: the legacy
+files and chains of a seed are byte-for-byte the same with or without them.
+
 Output is byte-for-byte deterministic for the same arguments (no set iteration
 order, clock or hash seed leaks into the files).
 """
@@ -34,8 +44,31 @@ import re
 import shutil
 import sys
 
-GENERATOR_VERSION = "1.0"
-MANIFEST_SCHEMA = "synthetic-corpus-manifest/1.0"
+GENERATOR_VERSION = "1.1"
+MANIFEST_SCHEMA = "synthetic-corpus-manifest/1.1"
+
+# Extension chain kinds (generator 1.1). Each is built in several variations after the layered warehouse
+# and its 20 legacy chains, with its own random stream, so the legacy output of a seed is unchanged.
+# The manifest entry of an extension chain carries ``kind``, ``variant`` and ``expect`` (what the column
+# tool's trace must contain: expected gap kinds and reasons, forbidden gap kinds, stop reasons, evidence
+# roles, step statuses, completeness and the absence of cycles) next to the usual expected leaves.
+EXT_KINDS = (
+    "self_update",            # UPDATE t SET a = a * 2 after an INSERT: insert source + prior_state stop, no cycle
+    "preserve_restore",       # rows saved to a #temp, deleted, reloaded and restored from the #temp
+    "aggregate_update",       # #working loaded, aggregated into #totals, updated from it, then copied out
+    "variable_accumulate",    # SELECT @s = @s + col, then the variable is inserted
+    "insert_exec_one",        # INSERT ... EXEC of a procedure with one result SELECT: mapped by position
+    "insert_exec_two",        # ... with two result SELECTs: insert_exec gap
+    "itvf_apply",             # inline table-valued function via CROSS / OUTER APPLY: its base table, inferred
+    "star_by_name",           # TOP (0) * INTO #t from a table with no CREATE TABLE but an INSERT list; CTE *
+    "positional_select_into", # INSERT without a column list into a SELECT ... INTO table: that order
+    "positional_identity",    # ... whose source has an IDENTITY column: positional_without_schema gap
+    "job_ordered",            # one SQL Agent job orders the loader and two UPDATE procedures: no order gap
+    "job_split",              # the loader and the UPDATE run in two different jobs: writers_in_different_jobs
+    "multi_update_apply",     # UPDATE SET a = ..., b = ... with CROSS APPLY reading both pre-update values
+    "alter_add_column",       # ALTER TABLE ... WITH CHECK ADD col, then a loader selects that column: bound
+)
+EXT_RNG_SALT = 1_000_003
 
 DB_NAMES = ["stage_db", "core_db", "mart_db", "mart2_db", "ref_db", "sandbox_db", "archive_db", "ops_db"]
 NOUNS = ["order", "shipment", "invoice", "account", "asset", "claim", "ledger", "visit", "policy",
@@ -104,9 +137,10 @@ MESSY_RATES = {
 }
 
 # Features after which a purely static analyzer is not expected to prove the path.
-OPAQUE_FEATURES = ("dynamic_sql", "parse_error", "insert_exec", "cursor", "udf_reads_table")
+OPAQUE_FEATURES = ("dynamic_sql", "parse_error", "insert_exec", "cursor", "udf_reads_table", "positional_identity")
 LIKELY_GAP = {"dynamic_sql": "dynamic_sql", "parse_error": "parse_error", "insert_exec": "insert_exec",
-              "cursor": "unsupported_statement", "udf_reads_table": "opaque_function"}
+              "cursor": "unsupported_statement", "udf_reads_table": "opaque_function",
+              "positional_identity": "positional_without_schema"}
 
 SQL_TYPES = {
     "int": ["int", "int", "bigint"],
@@ -345,7 +379,7 @@ class Picker:
 
 class Generator:
     def __init__(self, out: Path, objects: int, seed: int, databases: int, rates: dict[str, float],
-                 n_chains: int = 20) -> None:
+                 n_chains: int = 20, extension_variants: int = 2) -> None:
         if databases < 1:
             raise ValueError("--databases must be at least 1")
         self.out = out
@@ -353,7 +387,12 @@ class Generator:
         self.seed = seed
         self.rates = rates
         self.n_chains = n_chains
+        self.extension_variants = max(0, extension_variants)
         self.rng = random.Random(seed)
+        self.ext_rng = random.Random(seed * EXT_RNG_SALT + 11)   # extension chains: separate stream
+        self.ext_paths: set[str] = set()
+        self.ext_jobs: list[dict] = []
+        self.ext_objects = 0
         self.dbs = DB_NAMES[:databases] + [f"db{i:02d}" for i in range(len(DB_NAMES), databases)]
         self.folders = {db: self._folder_name(db) for db in self.dbs}
         self.stage_db = self.dbs[0]
@@ -506,23 +545,30 @@ class Generator:
         if self.out.exists():
             shutil.rmtree(self.out)
         self.out.mkdir(parents=True)
-        for path in sorted(self.files):
-            fb = self.files[path]
-            parts = []
-            for i, chunk in enumerate(fb.chunks):
-                parts.append(chunk)
-                last = i == len(fb.chunks) - 1
-                if not last or self.rng.random() > 0.15:
-                    parts.append(self.rng.choice(["GO", "GO", "GO", "go", "GO "]))
-            text = "\n".join(parts) + "\n"
-            if fb.crlf:
-                text = text.replace("\n", "\r\n")
-            data = text.encode("utf-8")
-            if fb.bom:
-                data = b"\xef\xbb\xbf" + data
-            target = self.out / path
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_bytes(data)
+        # Legacy files first with the main stream, extension files after with their own: the bytes of the
+        # legacy files do not depend on how many extension files exist.
+        for path in sorted(p for p in self.files if p not in self.ext_paths):
+            self._write_file(path, self.rng)
+        for path in sorted(self.ext_paths):
+            self._write_file(path, self.ext_rng)
+
+    def _write_file(self, path: str, rng: random.Random) -> None:
+        fb = self.files[path]
+        parts = []
+        for i, chunk in enumerate(fb.chunks):
+            parts.append(chunk)
+            last = i == len(fb.chunks) - 1
+            if not last or rng.random() > 0.15:
+                parts.append(rng.choice(["GO", "GO", "GO", "go", "GO "]))
+        text = "\n".join(parts) + "\n"
+        if fb.crlf:
+            text = text.replace("\n", "\r\n")
+        data = text.encode("utf-8")
+        if fb.bom:
+            data = b"\xef\xbb\xbf" + data
+        target = self.out / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(data)
 
     # -- DDL ---------------------------------------------------------------
     def table_ddl(self, obj: DbObject) -> str:
@@ -1504,29 +1550,643 @@ class Generator:
 
         chains = []
         for n, (node, table, col, result) in enumerate(sorted(chosen, key=lambda c: c[0]), start=1):
-            leaves = sorted(result["value_leaves"] | result["condition_leaves"])
-            features = sorted(result["features"])
-            opaque = sorted(set(features) & set(OPAQUE_FEATURES))
-            writers = sorted(self.truth.writers.get(node, ()))
-            chains.append({
-                "id": f"chain-{n:02d}",
-                "column": node,
-                "object": table.key,
-                "column_name": col.name,
-                "expected_leaves": leaves,
-                "value_leaves": sorted(result["value_leaves"]),
-                "condition_leaves": sorted(result["condition_leaves"]),
-                "static_expected_leaves": sorted(result["static_leaves"]),
-                "expected_layers": result["layers"][1],
-                "min_layers": result["layers"][0],
-                "path_objects": sorted(result["objects"]),
-                "writers": writers,
-                "features": features,
-                "statically_traceable": not opaque,
-                "opaque_features": opaque,
-                "likely_gap_kinds": sorted({LIKELY_GAP[f] for f in opaque}),
-            })
+            chains.append(self.chain_entry(f"chain-{n:02d}", node, table, col, result))
         return chains
+
+    def chain_entry(self, chain_id: str, node: str, table: DbObject, col: Column, result: dict, **extra) -> dict:
+        leaves = sorted(result["value_leaves"] | result["condition_leaves"])
+        features = sorted(result["features"])
+        opaque = sorted(set(features) & set(OPAQUE_FEATURES))
+        writers = sorted(self.truth.writers.get(node, ()))
+        entry = {
+            "id": chain_id,
+            "column": node,
+            "object": table.key,
+            "column_name": col.name,
+            "expected_leaves": leaves,
+            "value_leaves": sorted(result["value_leaves"]),
+            "condition_leaves": sorted(result["condition_leaves"]),
+            "static_expected_leaves": sorted(result["static_leaves"]),
+            "expected_layers": result["layers"][1],
+            "min_layers": result["layers"][0],
+            "path_objects": sorted(result["objects"]),
+            "writers": writers,
+            "features": features,
+            "statically_traceable": not opaque,
+            "opaque_features": opaque,
+            "likely_gap_kinds": sorted({LIKELY_GAP[f] for f in opaque}),
+        }
+        entry.update(extra)
+        return entry
+
+    # -- extension chains (generator 1.1) ----------------------------------------
+    # Built after the legacy corpus and its chains, with a separate random stream and without touching
+    # any open bundle file, so the legacy files and chains of a seed stay byte-for-byte the same.
+
+    def build_extension(self) -> list[dict]:
+        variants = self.extension_variants
+        if variants <= 0:
+            return []
+        saved_rng, saved_bundles, before = self.rng, self.open_bundles, set(self.files)
+        objects_before = len(self.objects)
+        self.rng, self.open_bundles = self.ext_rng, {}
+        specs: list[dict] = []
+        try:
+            for n in range(variants):
+                for kind in EXT_KINDS:
+                    specs.extend(getattr(self, f"ext_{kind}")(n))
+            self.write_job_scripts()
+        finally:
+            self.rng, self.open_bundles = saved_rng, saved_bundles
+        self.truth.finalize()
+        self.ext_paths = set(self.files) - before
+        self.ext_objects = len(self.objects) - objects_before
+        chains = []
+        for i, spec in enumerate(specs, start=1):
+            node, table = spec["node"], spec["table"]
+            col = table.col(node.rsplit(".", 1)[1])
+            result = self.truth.analyze(node)
+            chains.append(self.chain_entry(f"ext-{i:02d}", node, table, col, result, kind=spec["kind"],
+                                           variant=spec["variant"], expect=spec["expect"]))
+        return chains
+
+    @staticmethod
+    def ext_spec(node: str, kind: str, n: int, table: DbObject, expect: dict) -> dict:
+        return {"node": node, "kind": kind, "variant": n, "table": table, "expect": expect}
+
+    def ext_pick(self) -> tuple[dict, DbObject, str, str]:
+        """A subject (its always-defined landing table A is the source), and a target database/schema."""
+        info = self.rng.choice(self.subjects)
+        db = self.rng.choice(self.mart_dbs + [self.core_db])
+        schema = "core" if db == self.core_db else "mart"
+        return info, info["landing"][0], db, schema
+
+    def ext_other_landing(self, subject: str) -> DbObject:
+        others = [s for s in self.subjects if s["subject"] != subject] or self.subjects
+        return self.rng.choice(others)["landing"][0]
+
+    def ext_table(self, db: str, schema: str, name: str, subject: str, cols: list[Column], defined: bool = True,
+                  near: DbObject | None = None) -> DbObject:
+        obj = self.new_object(db, schema, name, "table", "extension", subject, cols, defined=defined)
+        if defined:
+            self.emit_table(obj, near=near)
+        else:
+            for col in obj.columns:
+                self.truth.node_feats[f"{obj.key}.{col.name}"].add("missing_ddl")
+        return obj
+
+    def ext_proc(self, db: str, schema: str, name: str, subject: str, params: list[str], build) -> DbObject:
+        proc = self.new_object(db, schema, name, "procedure", "extension", subject)
+        ctx = self.place(proc)
+        body = Body()
+        self.noise(body, ctx, proc)
+        build(body, ctx, proc)
+        self.emit(proc, self.proc_text(proc, params, body))
+        return proc
+
+    def ext_write(self, obj: DbObject, column: str, inputs: list, feats: set, writer: str) -> None:
+        self.truth.write(f"{obj.key}.{column}", inputs, feats, writer)
+
+    @staticmethod
+    def leaf(obj: DbObject | Src, column: str, feats=frozenset()) -> tuple:
+        key = obj.prefix if isinstance(obj, Src) else obj.key
+        src_feats = obj.feats if isinstance(obj, Src) else frozenset()
+        return (f"{key}.{column}", "value", frozenset(src_feats) | frozenset(feats))
+
+    def ext_target(self, db: str, schema: str, name: str, subject: str, cols: list[tuple[str, str]]) -> DbObject:
+        columns = [self.column(n, t) for n, t in cols] + [self.column("load_ts", "date")]
+        return self.new_object(db, schema, name, "table", "extension", subject, columns)
+
+    NO_ORDER_GAPS = ["ambiguous_writer_order", "unexplained_end"]
+
+    # 1a. UPDATE t SET a = a * 2 after an INSERT in the same procedure.
+    def ext_self_update(self, n: int) -> list[dict]:
+        info, land, db, schema = self.ext_pick()
+        subj = info["subject"]
+        t = self.ext_target(db, schema, f"{subj}_scaled_v{n}", subj, [("rec_id", "int"), ("amount", "num"), ("qty", "int")])
+        style = n % 3
+
+        def build(body: Body, ctx: Ctx, proc: DbObject) -> None:
+            a = self.src(land, "a", ctx)
+            tsql = self.ref(t, ctx)[0]
+            body.stmt(f"TRUNCATE TABLE {tsql};")
+            body.stmt(f"INSERT INTO {tsql} (rec_id, {self.cid('amount')}, qty, load_ts)\n"
+                      f"SELECT a.rec_id, a.{self.cid('amt_gross')}, a.qty, SYSDATETIME()\nFROM {a.sql} AS a{a.hint}\n"
+                      f"WHERE a.is_deleted = 0;")
+            self.ext_write(t, "rec_id", [self.leaf(a, "rec_id")], {"insert_select_target_list"}, proc.key)
+            self.ext_write(t, "amount", [self.leaf(a, "amt_gross")], {"insert_select_target_list"}, proc.key)
+            self.ext_write(t, "qty", [self.leaf(a, "qty")], {"insert_select_target_list"}, proc.key)
+            if style == 0:
+                body.stmt(f"UPDATE {tsql}\n   SET amount = amount * 2;")
+            elif style == 1:
+                body.stmt(f"UPDATE t\n   SET t.amount = t.amount + 1\nFROM {tsql} AS t\nWHERE t.qty > 0;")
+            else:
+                body.stmt(f"UPDATE {tsql}\n   SET {self.cid('amount')} = ROUND(amount * @factor, 2)\n WHERE amount IS NOT NULL;")
+            self.ext_write(t, "amount", [self.leaf(t, "amount")], {"self_update", "arithmetic"}, proc.key)
+
+        proc = self.ext_proc(db, schema, f"usp_load_{subj}_scaled_v{n}", subj,
+                             ["@factor decimal(9,4) = 2.0", "@run_id int = NULL"], build)
+        self.emit_table(t, near=proc)
+        return [self.ext_spec(f"{t.key}.amount", "self_update", n, t, {
+            "no_cycles": True, "stop_reasons": ["prior_state"], "no_gap_kinds": self.NO_ORDER_GAPS, "complete": True})]
+
+    # 1b. Preserve rows in a #temp, delete, reload, restore from the #temp.
+    def ext_preserve_restore(self, n: int) -> list[dict]:
+        info, land, db, schema = self.ext_pick()
+        subj = info["subject"]
+        t = self.ext_target(db, schema, f"{subj}_kept_v{n}", subj, [("rec_id", "int"), ("amount", "num"), ("region_cd", "str")])
+        style = n % 2
+
+        def build(body: Body, ctx: Ctx, proc: DbObject) -> None:
+            a = self.src(land, "a", ctx)
+            tsql = self.ref(t, ctx)[0]
+            saved = f"#{subj}_keep" if style else "#saved"
+            if style == 0:
+                body.stmt(f"CREATE TABLE {saved} (rec_id int NOT NULL, amount decimal(18,4) NULL);")
+                body.stmt(f"INSERT INTO {saved} (rec_id, amount)\nSELECT rec_id, amount\nFROM {tsql}\nWHERE region_cd = N'KEEP';")
+            else:
+                body.stmt(f"SELECT k.rec_id, k.{self.cid('amount')}\nINTO {saved}\nFROM {tsql} AS k\nWHERE k.region_cd = N'KEEP';")
+            saved_src = self.temp_src(proc.key, saved, "s", [self.column("rec_id", "int"), self.column("amount", "num")])
+            self.truth.write(f"{saved_src.prefix}.rec_id", [self.leaf(t, "rec_id")], {"preserve_restore"}, proc.key)
+            self.truth.write(f"{saved_src.prefix}.amount", [self.leaf(t, "amount")], {"preserve_restore"}, proc.key)
+            body.stmt(f"DELETE FROM {tsql};" if style == 0 else f"TRUNCATE TABLE {tsql};")
+            body.stmt(f"INSERT INTO {tsql} (rec_id, amount, region_cd, load_ts)\n"
+                      f"SELECT a.rec_id, a.amt_gross, a.{self.cid('region_cd')}, SYSDATETIME()\nFROM {a.sql} AS a{a.hint}\n"
+                      f"WHERE a.region_cd <> N'KEEP';")
+            self.ext_write(t, "rec_id", [self.leaf(a, "rec_id")], {"insert_select_target_list"}, proc.key)
+            self.ext_write(t, "amount", [self.leaf(a, "amt_gross")], {"insert_select_target_list"}, proc.key)
+            self.ext_write(t, "region_cd", [self.leaf(a, "region_cd")], {"insert_select_target_list"}, proc.key)
+            body.stmt(f"INSERT INTO {tsql} (rec_id, amount, region_cd, load_ts)\n"
+                      f"SELECT s.rec_id, s.amount, N'KEEP', SYSDATETIME()\nFROM {saved} AS s;")
+            self.ext_write(t, "rec_id", [self.leaf(saved_src, "rec_id")], {"insert_select_target_list", "preserve_restore"}, proc.key)
+            self.ext_write(t, "amount", [self.leaf(saved_src, "amount")], {"insert_select_target_list", "preserve_restore"}, proc.key)
+
+        proc = self.ext_proc(db, schema, f"usp_reload_{subj}_kept_v{n}", subj, ["@run_id int = NULL"], build)
+        self.emit_table(t, near=proc)
+        return [self.ext_spec(f"{t.key}.amount", "preserve_restore", n, t, {
+            "no_cycles": True, "stop_reasons": ["prior_state"], "no_gap_kinds": self.NO_ORDER_GAPS, "complete": True})]
+
+    # 1c. Aggregate a #working table into #totals, update #working from it, then copy it out.
+    def ext_aggregate_update(self, n: int) -> list[dict]:
+        info, land, db, schema = self.ext_pick()
+        subj = info["subject"]
+        t = self.ext_target(db, schema, f"{subj}_region_totals_v{n}", subj, [("region_cd", "str"), ("amount", "num")])
+        style = n % 2
+
+        def build(body: Body, ctx: Ctx, proc: DbObject) -> None:
+            a = self.src(land, "a", ctx)
+            tsql = self.ref(t, ctx)[0]
+            w_name, tot_name = f"#{subj}_working", f"#{subj}_totals"
+            if style == 0:
+                body.stmt(f"CREATE TABLE {w_name} (region_cd nvarchar(40) NULL, amount decimal(18,4) NULL);")
+                body.stmt(f"INSERT INTO {w_name} (region_cd, amount)\nSELECT a.region_cd, a.amt_gross\nFROM {a.sql} AS a{a.hint};")
+            else:
+                body.stmt(f"SELECT a.{self.cid('region_cd')}, a.amt_gross AS amount\nINTO {w_name}\nFROM {a.sql} AS a{a.hint}\n"
+                          f"WHERE a.is_deleted = 0;")
+            w = self.temp_src(proc.key, w_name, "w", [self.column("region_cd", "str"), self.column("amount", "num")])
+            self.truth.write(f"{w.prefix}.region_cd", [self.leaf(a, "region_cd")], {"insert_select_target_list" if style == 0 else "select_into_temp"}, proc.key)
+            self.truth.write(f"{w.prefix}.amount", [self.leaf(a, "amt_gross")], {"insert_select_target_list" if style == 0 else "select_into_temp"}, proc.key)
+            body.stmt(f"SELECT region_cd, SUM(amount) AS total_amount\nINTO {tot_name}\nFROM {w_name}\nGROUP BY region_cd;")
+            tot = self.temp_src(proc.key, tot_name, "t", [self.column("region_cd", "str"), self.column("total_amount", "num")])
+            self.truth.write(f"{tot.prefix}.region_cd", [self.leaf(w, "region_cd")], {"select_into_temp", "aggregate"}, proc.key)
+            self.truth.write(f"{tot.prefix}.total_amount", [self.leaf(w, "amount")], {"select_into_temp", "aggregate"}, proc.key)
+            set_col = "w.amount" if style else "amount"
+            body.stmt(f"UPDATE w\n   SET {set_col} = t.total_amount\nFROM {w_name} AS w\nINNER JOIN {tot_name} AS t ON t.region_cd = w.region_cd;")
+            self.truth.write(f"{w.prefix}.amount", [self.leaf(tot, "total_amount")], {"update_from", "aggregate_update"}, proc.key)
+            body.stmt(f"INSERT INTO {tsql} (region_cd, amount, load_ts)\nSELECT region_cd, amount, SYSDATETIME()\nFROM {w_name};")
+            self.ext_write(t, "region_cd", [self.leaf(w, "region_cd")], {"insert_select_target_list"}, proc.key)
+            self.ext_write(t, "amount", [self.leaf(w, "amount")], {"insert_select_target_list"}, proc.key)
+
+        proc = self.ext_proc(db, schema, f"usp_load_{subj}_region_totals_v{n}", subj, ["@run_id int = NULL"], build)
+        self.emit_table(t, near=proc)
+        return [self.ext_spec(f"{t.key}.amount", "aggregate_update", n, t, {
+            "no_cycles": True, "stop_reasons": ["prior_state"], "no_gap_kinds": self.NO_ORDER_GAPS, "complete": True})]
+
+    # 1d. A variable accumulating @s = @s + col over a table, then inserted.
+    def ext_variable_accumulate(self, n: int) -> list[dict]:
+        info, land, db, schema = self.ext_pick()
+        subj = info["subject"]
+        t = self.ext_target(db, schema, f"{subj}_labels_v{n}", subj, [("run_id", "int"), ("label", "str")])
+        style = n % 2
+        column = "region_cd" if style == 0 else "status_cd"
+
+        def build(body: Body, ctx: Ctx, proc: DbObject) -> None:
+            a = self.src(land, "a", ctx)
+            tsql = self.ref(t, ctx)[0]
+            if style == 0:
+                body.stmt("DECLARE @s nvarchar(max) = N'';")
+                body.stmt(f"SELECT @s = @s + a.{self.cid(column)} + N';'\nFROM {a.sql} AS a{a.hint}\nWHERE a.is_deleted = 0;")
+            else:
+                body.stmt("DECLARE @s nvarchar(4000);")
+                body.stmt("SET @s = N'';")
+                body.stmt(f"SELECT @s = @s + N',' + a.{column}\nFROM {a.sql} AS a{a.hint}\nORDER BY a.rec_id;")
+            var = f"var:{proc.key}::@s"
+            self.truth.write(var, [self.leaf(a, column), (var, "value", frozenset())], {"variable_accumulate"}, proc.key)
+            if style == 0:
+                body.stmt(f"INSERT INTO {tsql} (run_id, label, load_ts)\nVALUES (@run_id, @s, SYSDATETIME());")
+            else:
+                body.stmt(f"INSERT INTO {tsql} (run_id, {self.cid('label')}, load_ts)\nSELECT @run_id, @s, SYSDATETIME();")
+            self.ext_write(t, "label", [(var, "value", frozenset())], {"insert_values" if style == 0 else "insert_select_target_list"}, proc.key)
+
+        proc = self.ext_proc(db, schema, f"usp_build_{subj}_labels_v{n}", subj, ["@run_id int = NULL"], build)
+        self.emit_table(t, near=proc)
+        return [self.ext_spec(f"{t.key}.label", "variable_accumulate", n, t, {
+            "no_cycles": True, "stop_reasons": ["prior_state"], "no_gap_kinds": self.NO_ORDER_GAPS, "complete": True})]
+
+    # 2. INSERT ... EXEC of a named procedure: one result SELECT (mapped) or two (gap).
+    def _ext_insert_exec(self, n: int, two: bool) -> list[dict]:
+        info, land, db, schema = self.ext_pick()
+        subj = info["subject"]
+        kind = "insert_exec_two" if two else "insert_exec_one"
+        stem = f"{subj}_{'split' if two else 'bonus'}_v{n}"
+        t = self.ext_target(db, schema, stem, subj, [("rec_id", "int"), ("bonus_amt", "num")])
+        callee = self.new_object(db, schema, f"usp_get_{stem}", "procedure", "extension", subj)
+        cctx = self.place(callee)
+        cbody = Body()
+        b = self.src(land, "b", cctx)
+        work = None
+        if two:
+            cbody.stmt(f"SELECT b.rec_id,\n       b.amt_gross * 0.1 AS bonus_amt\nFROM {b.sql} AS b{b.hint}\nWHERE b.event_dt >= @from_dt;")
+            cbody.stmt(f"SELECT b.rec_id,\n       b.{self.cid('amt_tax')} AS bonus_amt\nFROM {b.sql} AS b{b.hint}\nWHERE b.amt_tax > 0;")
+        elif n % 2 == 0:
+            cbody.stmt(f"SELECT b.rec_id,\n       b.{self.cid('amt_gross')} * 0.1 AS bonus_amt\nFROM {b.sql} AS b{b.hint}\nWHERE b.event_dt >= @from_dt;")
+        else:
+            cbody.stmt("CREATE TABLE #work (rec_id int NOT NULL, bonus_amt decimal(18,4) NULL);")
+            cbody.stmt(f"INSERT INTO #work (rec_id, bonus_amt)\nSELECT b.rec_id, b.amt_gross * 0.1\nFROM {b.sql} AS b{b.hint}\n"
+                       f"WHERE b.event_dt >= @from_dt;")
+            cbody.stmt("SELECT rec_id, bonus_amt FROM #work;")
+            work = self.temp_src(callee.key, "#work", "w", [self.column("rec_id", "int"), self.column("bonus_amt", "num")])
+            self.truth.write(f"{work.prefix}.rec_id", [self.leaf(b, "rec_id")], {"insert_select_target_list"}, callee.key)
+            self.truth.write(f"{work.prefix}.bonus_amt", [self.leaf(b, "amt_gross")], {"insert_select_target_list", "arithmetic"}, callee.key)
+        self.emit(callee, self.proc_text(callee, ["@from_dt date = '19000101'"], cbody))
+        args = ["", " @from_dt = @from_dt", " @from_dt"][n % 3]
+        feat = "insert_exec" if two else "insert_exec_mapped"
+        # Even variants keep EXEC on the INSERT's line (as SSMS templates do), odd ones put it on its own line.
+        sep = " " if n % 2 == 0 else "\n"
+
+        def build(body: Body, ctx: Ctx, proc: DbObject) -> None:
+            tsql = self.ref(t, ctx)[0]
+            r_name = f"#{subj}_bonus"
+            body.stmt(f"CREATE TABLE {r_name} (rec_id int NOT NULL, bonus_amt decimal(18,4) NULL);")
+            body.stmt(f"INSERT INTO {r_name} (rec_id, bonus_amt){sep}EXEC {self.ref(callee, ctx, allow_one_part=False)[0]}{args};")
+            r = self.temp_src(proc.key, r_name, "r", [self.column("rec_id", "int"), self.column("bonus_amt", "num")])
+            if work is not None:
+                self.truth.write(f"{r.prefix}.rec_id", [self.leaf(work, "rec_id")], {feat}, proc.key)
+                self.truth.write(f"{r.prefix}.bonus_amt", [self.leaf(work, "bonus_amt")], {feat}, proc.key)
+            else:
+                self.truth.write(f"{r.prefix}.rec_id", [self.leaf(b, "rec_id")], {feat}, proc.key)
+                self.truth.write(f"{r.prefix}.bonus_amt", [self.leaf(b, "amt_gross")], {feat, "arithmetic"}, proc.key)
+                if two:
+                    self.truth.write(f"{r.prefix}.bonus_amt", [self.leaf(b, "amt_tax")], {feat}, proc.key)
+            body.stmt(f"INSERT INTO {tsql} (rec_id, bonus_amt, load_ts)\nSELECT rec_id, bonus_amt, SYSDATETIME()\nFROM {r_name};")
+            self.ext_write(t, "rec_id", [self.leaf(r, "rec_id")], {"insert_select_target_list"}, proc.key)
+            self.ext_write(t, "bonus_amt", [self.leaf(r, "bonus_amt")], {"insert_select_target_list"}, proc.key)
+
+        proc = self.ext_proc(db, schema, f"usp_load_{stem}", subj, ["@from_dt date = '19000101'", "@run_id int = NULL"], build)
+        self.emit_table(t, near=proc)
+        if two:
+            expect = {"gap_kinds": ["insert_exec"], "gap_reasons": {"insert_exec": "callee_has_several_result_statements"},
+                      "complete": False}
+        else:
+            expect = {"no_gap_kinds": ["insert_exec"] + self.NO_ORDER_GAPS, "evidence_roles": ["insert_exec_call"],
+                      "step_statuses": ["inferred"], "complete": True}
+        return [self.ext_spec(f"{t.key}.bonus_amt", kind, n, t, expect)]
+
+    def ext_insert_exec_one(self, n: int) -> list[dict]:
+        return self._ext_insert_exec(n, two=False)
+
+    def ext_insert_exec_two(self, n: int) -> list[dict]:
+        return self._ext_insert_exec(n, two=True)
+
+    # 3. Inline table-valued function read through CROSS / OUTER APPLY.
+    def ext_itvf_apply(self, n: int) -> list[dict]:
+        info, land, db, schema = self.ext_pick()
+        subj = info["subject"]
+        t = self.ext_target(db, schema, f"{subj}_applied_v{n}", subj, [("rec_id", "int"), ("amount", "num")])
+        keys = self.ext_table(db, schema, f"{subj}_keys_v{n}", subj, [self.column("rec_id", "int"), self.column("region_cd", "str")])
+        fn = self.new_object(db, schema, f"fn_{subj}_amounts_v{n}", "function", "extension", subj)
+        fctx = self.place(fn)
+        s = self.src(land, "s", fctx, hint=False)
+        self.emit(fn, f"CREATE FUNCTION {self.decl_name(fn)} (@rec_id int)\nRETURNS TABLE\nAS\nRETURN (\n"
+                      f"    SELECT s.{self.cid('amt_gross')} AS amount,\n           s.qty\n    FROM {s.sql} AS s\n"
+                      f"    WHERE s.rec_id = @rec_id\n);")
+        self.statement_count += 1
+        style = n % 3
+
+        def build(body: Body, ctx: Ctx, proc: DbObject) -> None:
+            tsql = self.ref(t, ctx)[0]
+            p = self.src(keys, "p", ctx)
+            fsql = self.ref(fn, ctx, allow_one_part=False)[0]
+            apply = {0: f"CROSS APPLY (SELECT * FROM {fsql}(p.rec_id)) AS x",
+                     1: f"CROSS APPLY {fsql}(p.rec_id) AS x",
+                     2: f"OUTER APPLY (SELECT f.amount FROM {fsql}(p.rec_id) AS f) AS x"}[style]
+            body.stmt(f"INSERT INTO {tsql} (rec_id, amount, load_ts)\nSELECT p.rec_id, x.amount, SYSDATETIME()\n"
+                      f"FROM {p.sql} AS p{p.hint}\n{apply};")
+            self.ext_write(t, "rec_id", [self.leaf(p, "rec_id")], {"insert_select_target_list"}, proc.key)
+            self.ext_write(t, "amount", [self.leaf(s, "amt_gross", {"itvf", "cross_apply"})], {"insert_select_target_list"}, proc.key)
+
+        proc = self.ext_proc(db, schema, f"usp_load_{subj}_applied_v{n}", subj, ["@run_id int = NULL"], build)
+        self.emit_table(t, near=proc)
+        return [self.ext_spec(f"{t.key}.amount", "itvf_apply", n, t, {
+            "no_gap_kinds": ["opaque_function", "missing_definition", "unsupported_statement"] + self.NO_ORDER_GAPS,
+            "evidence_roles": ["function_definition"], "step_statuses": ["inferred"], "complete": True})]
+
+    # 4. TOP (0) * INTO #t from a table with no CREATE TABLE (but an INSERT column list elsewhere), then CTE *.
+    def ext_star_by_name(self, n: int) -> list[dict]:
+        info, land, db, schema = self.ext_pick()
+        subj = info["subject"]
+        other = self.ext_other_landing(subj)
+        t = self.ext_target(db, schema, f"{subj}_fed_v{n}", subj, [("rec_id", "int"), ("amount", "num")])
+        feed = self.ext_table(self.stage_db, "landing", f"{subj}_feed_v{n}", subj,
+                              [self.column("rec_id", "int"), self.column("amount", "num"), self.column("status_cd", "str")],
+                              defined=False)
+
+        def build_loader(body: Body, ctx: Ctx, proc: DbObject) -> None:
+            a = self.src(land, "a", ctx)
+            body.stmt(f"INSERT INTO {self.ref(feed, ctx)[0]} (rec_id, amount, status_cd)\n"
+                      f"SELECT a.rec_id, a.amt_gross, a.status_cd\nFROM {a.sql} AS a{a.hint};")
+            self.ext_write(feed, "rec_id", [self.leaf(a, "rec_id")], {"insert_select_target_list"}, proc.key)
+            self.ext_write(feed, "amount", [self.leaf(a, "amt_gross")], {"insert_select_target_list"}, proc.key)
+            self.ext_write(feed, "status_cd", [self.leaf(a, "status_cd")], {"insert_select_target_list"}, proc.key)
+
+        self.ext_proc(self.stage_db, "stg", f"usp_load_{subj}_feed_v{n}", subj, ["@run_id int = NULL"], build_loader)
+        style = n % 2
+
+        def build(body: Body, ctx: Ctx, proc: DbObject) -> None:
+            tsql = self.ref(t, ctx)[0]
+            b = self.src(other, "b", ctx)
+            tmp = f"#{subj}_fed"
+            fsql = self.ref(feed, ctx)[0]
+            body.stmt(f"SELECT TOP (0) *\nINTO {tmp}\nFROM {fsql};" if style == 0 else
+                      f"SELECT *\nINTO {tmp}\nFROM {fsql}\nWHERE 1 = 2;")
+            body.stmt(f"INSERT INTO {tmp} (rec_id, amount)\nSELECT b.rec_id, b.{self.cid('amt_gross')}\nFROM {b.sql} AS b{b.hint};")
+            tmp_src = self.temp_src(proc.key, tmp, "x", [self.column("rec_id", "int"), self.column("amount", "num")])
+            self.truth.write(f"{tmp_src.prefix}.rec_id", [self.leaf(b, "rec_id")], {"empty_layout_copy", "insert_select_target_list"}, proc.key)
+            self.truth.write(f"{tmp_src.prefix}.amount", [self.leaf(b, "amt_gross")], {"empty_layout_copy", "insert_select_target_list"}, proc.key)
+            cte_prefix = f"cte:{proc.key}:{len(body.lines)}::c"
+            if style == 0:
+                body.stmt(f";WITH c AS (\n    SELECT * FROM {tmp}\n)\nINSERT INTO {tsql} (rec_id, amount, load_ts)\n"
+                          f"SELECT rec_id, amount, SYSDATETIME()\nFROM c;")
+            else:
+                body.stmt(f";WITH c AS (\n    SELECT *, ROW_NUMBER() OVER (PARTITION BY rec_id ORDER BY amount DESC) AS rn\n"
+                          f"    FROM {tmp}\n)\nINSERT INTO {tsql} (rec_id, amount, load_ts)\n"
+                          f"SELECT rec_id, amount, SYSDATETIME()\nFROM c\nWHERE rn = 1;")
+            self.truth.write(f"{cte_prefix}.rec_id", [self.leaf(tmp_src, "rec_id")], {"cte", "select_star"}, proc.key)
+            self.truth.write(f"{cte_prefix}.amount", [self.leaf(tmp_src, "amount")], {"cte", "select_star"}, proc.key)
+            self.ext_write(t, "rec_id", [(f"{cte_prefix}.rec_id", "value", frozenset())], {"insert_select_target_list"}, proc.key)
+            self.ext_write(t, "amount", [(f"{cte_prefix}.amount", "value", frozenset())], {"insert_select_target_list"}, proc.key)
+
+        proc = self.ext_proc(db, schema, f"usp_load_{subj}_fed_v{n}", subj, ["@run_id int = NULL"], build)
+        self.emit_table(t, near=proc)
+        return [self.ext_spec(f"{t.key}.amount", "star_by_name", n, t, {
+            "no_gap_kinds": ["wildcard_without_schema", "missing_definition"] + self.NO_ORDER_GAPS,
+            "step_statuses": ["inferred"], "no_cycles": True, "complete": True})]
+
+    # 5a. INSERT without a column list into a SELECT ... INTO table: positional by that order.
+    def ext_positional_select_into(self, n: int) -> list[dict]:
+        info, land, db, schema = self.ext_pick()
+        subj = info["subject"]
+        other = self.ext_other_landing(subj)
+        t = self.ext_target(db, schema, f"{subj}_copied_v{n}", subj, [("rec_id", "int"), ("amount", "num")])
+        style = n % 2
+        shape = None
+        if style == 1:
+            shape = self.ext_table(db, schema, f"{subj}_shape_v{n}", subj,
+                                   [self.column("rec_id", "int"), self.column("amt_gross", "num"), self.column("qty", "int")])
+
+        def build(body: Body, ctx: Ctx, proc: DbObject) -> None:
+            tsql = self.ref(t, ctx)[0]
+            b = self.src(other, "b", ctx)
+            tmp = f"#{subj}_copy"
+            if style == 0:
+                a = self.src(land, "a", ctx, hint=False)
+                body.stmt(f"SELECT TOP (0) a.rec_id, a.amt_gross, a.qty\nINTO {tmp}\nFROM {a.sql} AS a;")
+            else:
+                sh = self.src(shape, "s", ctx, hint=False)
+                body.stmt(f"SELECT TOP (0) s.*\nINTO {tmp}\nFROM {sh.sql} AS s;")
+            body.stmt(f"INSERT INTO {tmp}\nSELECT b.rec_id, b.{self.cid('amt_gross')}, b.qty\nFROM {b.sql} AS b{b.hint}\nWHERE b.is_deleted = 0;")
+            tmp_src = self.temp_src(proc.key, tmp, "c", [self.column("rec_id", "int"), self.column("amt_gross", "num"), self.column("qty", "int")])
+            for col in ("rec_id", "amt_gross", "qty"):
+                self.truth.write(f"{tmp_src.prefix}.{col}", [self.leaf(b, col)], {"insert_select_positional", "select_into_order"}, proc.key)
+            body.stmt(f"INSERT INTO {tsql} (rec_id, amount, load_ts)\nSELECT rec_id, amt_gross, SYSDATETIME()\nFROM {tmp};")
+            self.ext_write(t, "rec_id", [self.leaf(tmp_src, "rec_id")], {"insert_select_target_list"}, proc.key)
+            self.ext_write(t, "amount", [self.leaf(tmp_src, "amt_gross")], {"insert_select_target_list"}, proc.key)
+
+        proc = self.ext_proc(db, schema, f"usp_load_{subj}_copied_v{n}", subj, ["@run_id int = NULL"], build)
+        self.emit_table(t, near=proc)
+        return [self.ext_spec(f"{t.key}.amount", "positional_select_into", n, t, {
+            "no_gap_kinds": ["positional_without_schema"] + self.NO_ORDER_GAPS, "evidence_roles": ["target_schema"],
+            "step_statuses": ["inferred"], "complete": True})]
+
+    # 5b. ... into a SELECT ... INTO copy of a table with an IDENTITY column: positional_without_schema gap.
+    def ext_positional_identity(self, n: int) -> list[dict]:
+        info, land, db, schema = self.ext_pick()
+        subj = info["subject"]
+        t = self.ext_target(db, schema, f"{subj}_numbered_v{n}", subj, [("rec_id", "int"), ("amount", "num")])
+        ids = self.ext_table(db, schema, f"{subj}_ids_v{n}", subj,
+                             [self.column("id", "int", identity=True), self.column("rec_id", "int"), self.column("amount", "num")])
+        style = n % 2
+
+        def build(body: Body, ctx: Ctx, proc: DbObject) -> None:
+            tsql = self.ref(t, ctx)[0]
+            a = self.src(land, "a", ctx)
+            isql = self.ref(ids, ctx)[0]
+            tmp = f"#{subj}_ident"
+            body.stmt(f"SELECT TOP (0) *\nINTO {tmp}\nFROM {isql};" if style == 0 else
+                      f"SELECT TOP (0) *\nINTO {tmp}\nFROM (SELECT d.id, d.rec_id, d.amount FROM {isql} AS d) AS d;")
+            body.stmt(f"INSERT INTO {tmp}\nSELECT a.rec_id, a.amt_gross\nFROM {a.sql} AS a{a.hint};")
+            tmp_src = self.temp_src(proc.key, tmp, "i", [self.column("rec_id", "int"), self.column("amount", "num")])
+            self.truth.write(f"{tmp_src.prefix}.rec_id", [self.leaf(a, "rec_id")], {"insert_select_positional", "positional_identity"}, proc.key)
+            self.truth.write(f"{tmp_src.prefix}.amount", [self.leaf(a, "amt_gross")], {"insert_select_positional", "positional_identity"}, proc.key)
+            body.stmt(f"INSERT INTO {tsql} (rec_id, amount, load_ts)\nSELECT rec_id, amount, SYSDATETIME()\nFROM {tmp};")
+            self.ext_write(t, "rec_id", [self.leaf(tmp_src, "rec_id")], {"insert_select_target_list"}, proc.key)
+            self.ext_write(t, "amount", [self.leaf(tmp_src, "amount")], {"insert_select_target_list"}, proc.key)
+
+        proc = self.ext_proc(db, schema, f"usp_load_{subj}_numbered_v{n}", subj, ["@run_id int = NULL"], build)
+        self.emit_table(t, near=proc)
+        return [self.ext_spec(f"{t.key}.amount", "positional_identity", n, t, {
+            "gap_kinds": ["positional_without_schema"],
+            "gap_reasons": {"positional_without_schema": "select_into_target_order_not_settled"}, "complete": False})]
+
+    # 6. SQL Agent jobs: one job orders the writers (no gap); two jobs split them (gap).
+    def _ext_job_writers(self, n: int, split: bool) -> tuple[DbObject, list[DbObject], str, DbObject]:
+        info, land, db, schema = self.ext_pick()
+        subj = info["subject"]
+        stem = f"{subj}_{'split' if split else 'jobbed'}_v{n}"
+        t = self.ext_target(db, schema, stem, subj, [("rec_id", "int"), ("amount", "num"), ("region_cd", "str")])
+        fixes = [self.ext_table(db, schema, f"{subj}_corrections_v{n}_{'s' if split else 'j'}", subj,
+                                [self.column("rec_id", "int"), self.column("amount", "num")])]
+        if not split:
+            fixes.append(self.ext_table(db, schema, f"{subj}_overrides_v{n}", subj,
+                                        [self.column("rec_id", "int"), self.column("amount", "num"), self.column("reason", "str")]))
+
+        def build_load(body: Body, ctx: Ctx, proc: DbObject) -> None:
+            a = self.src(land, "a", ctx)
+            tsql = self.ref(t, ctx)[0]
+            body.stmt(f"TRUNCATE TABLE {tsql};")
+            body.stmt(f"INSERT INTO {tsql} (rec_id, amount, region_cd, load_ts)\n"
+                      f"SELECT a.rec_id, a.amt_gross, a.region_cd, SYSDATETIME()\nFROM {a.sql} AS a{a.hint};")
+            self.ext_write(t, "rec_id", [self.leaf(a, "rec_id")], {"insert_select_target_list"}, proc.key)
+            self.ext_write(t, "amount", [self.leaf(a, "amt_gross")], {"insert_select_target_list"}, proc.key)
+            self.ext_write(t, "region_cd", [self.leaf(a, "region_cd")], {"insert_select_target_list"}, proc.key)
+
+        load = self.ext_proc(db, schema, f"usp_load_{stem}", subj, ["@run_id int = NULL"], build_load)
+        fix_procs = []
+        for i, fix in enumerate(fixes):
+            def build_fix(body: Body, ctx: Ctx, proc: DbObject, fix=fix, i=i) -> None:
+                f = self.src(fix, "f", ctx)
+                tsql = self.ref(t, ctx)[0]
+                where = "\nWHERE f.reason IS NOT NULL" if fix.col("reason") else ""
+                set_col = "t.amount" if i == 0 else "amount"
+                body.stmt(f"UPDATE t\n   SET {set_col} = f.{self.cid('amount')}\nFROM {tsql} AS t\n"
+                          f"INNER JOIN {f.sql} AS f{f.hint} ON f.rec_id = t.rec_id{where};")
+                self.ext_write(t, "amount", [self.leaf(f, "amount")], {"update_from", "job_writer"}, proc.key)
+            fix_procs.append(self.ext_proc(db, schema, f"usp_fix_{stem}_{i + 1}", subj, ["@run_id int = NULL"], build_fix))
+        self.emit_table(t, near=load)
+        return t, fix_procs, subj, load
+
+    def ext_job_ordered(self, n: int) -> list[dict]:
+        t, fixes, subj, load = self._ext_job_writers(n, split=False)
+        if n % 2 == 0:
+            steps = [("Load", load), ("Fix corrections", fixes[0]), ("Apply overrides", fixes[1])]
+        else:
+            def build_run(body: Body, ctx: Ctx, proc: DbObject) -> None:
+                for fix in fixes:
+                    body.stmt(f"EXEC {self.ref(fix, ctx, allow_one_part=False)[0]} @run_id = @run_id;")
+            runner = self.ext_proc(t.db, t.schema, f"usp_run_{subj}_fixes_v{n}", subj, ["@run_id int = NULL"], build_run)
+            steps = [("Load", load), ("Run fixes", runner)]
+        self.ext_jobs.append({"name": f"Nightly {subj.replace('_', ' ')} v{n}", "steps": steps, "enabled": True,
+                              "start_time": 20000 + n * 10000})
+        return [self.ext_spec(f"{t.key}.amount", "job_ordered", n, t, {
+            "no_gap_kinds": ["ambiguous_writer_order"], "evidence_roles": ["job_step"],
+            "writer_kind_status": {"update": "inferred"}, "complete": True})]
+
+    def ext_job_split(self, n: int) -> list[dict]:
+        t, fixes, subj, load = self._ext_job_writers(n, split=True)
+        label = subj.replace("_", " ")
+        self.ext_jobs.append({"name": f"Load {label} v{n}", "steps": [("Load", load)], "enabled": True, "start_time": 10000})
+        self.ext_jobs.append({"name": f"Fix {label} v{n}", "steps": [("Fix", fixes[0])], "enabled": True,
+                              "start_time": 140000 + n * 10000})
+        return [self.ext_spec(f"{t.key}.amount", "job_split", n, t, {
+            "gap_kinds": ["ambiguous_writer_order"], "gap_reasons": {"ambiguous_writer_order": "writers_in_different_jobs"},
+            "complete": False})]
+
+    def write_job_scripts(self) -> None:
+        """One SSMS-style 'Script Job as > CREATE' file per job under jobs/."""
+        for job in self.ext_jobs:
+            slug = re.sub(r"[^a-z0-9]+", "_", job["name"].lower()).strip("_")
+            fb = self._new_file(f"jobs/{slug}.sql", None, capacity=1)
+            fb.chunks.append("USE [msdb]")
+            check = "IF (@@ERROR <> 0 OR @ReturnCode <> 0) GOTO QuitWithRollback"
+            lines = ["BEGIN TRANSACTION", "DECLARE @ReturnCode INT", "SELECT @ReturnCode = 0",
+                     "/****** Object:  Job [{0}]    Script Date: 2025-01-15 ******/".format(job["name"]),
+                     "DECLARE @jobId BINARY(16)",
+                     f"EXEC @ReturnCode =  msdb.dbo.sp_add_job @job_name=N'{job['name']}', \n\t\t@enabled={1 if job['enabled'] else 0}, "
+                     f"\n\t\t@notify_level_eventlog=0, \n\t\t@notify_level_email=0, \n\t\t@notify_level_netsend=0, "
+                     f"\n\t\t@notify_level_page=0, \n\t\t@delete_level=0, \n\t\t@description=N'Generated for the synthetic corpus.', "
+                     f"\n\t\t@category_name=N'[Uncategorized (Local)]', \n\t\t@owner_login_name=N'sa', @job_id = @jobId OUTPUT",
+                     check]
+            for i, (step_name, proc) in enumerate(job["steps"], start=1):
+                last = i == len(job["steps"])
+                command = f"EXEC {proc.schema}.{proc.name}" + (";" if i % 2 else " @run_id = NULL;")
+                lines += [f"EXEC @ReturnCode = msdb.dbo.sp_add_jobstep @job_id=@jobId, @step_name=N'{step_name}', "
+                          f"\n\t\t@step_id={i}, \n\t\t@cmdexec_success_code=0, \n\t\t@on_success_action={1 if last else 3}, "
+                          f"\n\t\t@on_success_step_id=0, \n\t\t@on_fail_action=2, \n\t\t@on_fail_step_id=0, "
+                          f"\n\t\t@retry_attempts=0, \n\t\t@retry_interval=0, \n\t\t@os_run_priority=0, @subsystem=N'TSQL', "
+                          f"\n\t\t@command=N'{command}', \n\t\t@database_name=N'{proc.db}', \n\t\t@flags=0", check]
+            lines += ["EXEC @ReturnCode = msdb.dbo.sp_update_job @job_id = @jobId, @start_step_id = 1", check,
+                      f"EXEC @ReturnCode = msdb.dbo.sp_add_jobschedule @job_id=@jobId, @name=N'Daily', \n\t\t@enabled=1, "
+                      f"\n\t\t@freq_type=4, \n\t\t@freq_interval=1, \n\t\t@freq_subday_type=1, \n\t\t@freq_subday_interval=0, "
+                      f"\n\t\t@freq_relative_interval=0, \n\t\t@freq_recurrence_factor=0, \n\t\t@active_start_date=20240101, "
+                      f"\n\t\t@active_end_date=99991231, \n\t\t@active_start_time={job['start_time']}, \n\t\t@active_end_time=235959",
+                      check,
+                      "EXEC @ReturnCode = msdb.dbo.sp_add_jobserver @job_id = @jobId, @server_name = N'(local)'", check,
+                      "COMMIT TRANSACTION", "GOTO EndSave", "QuitWithRollback:",
+                      "    IF (@@TRANCOUNT > 0) ROLLBACK TRANSACTION", "EndSave:"]
+            fb.chunks.append("\n".join(lines))
+
+    # 7. Multi-column UPDATE with CROSS APPLY reading both columns' pre-update values.
+    def ext_multi_update_apply(self, n: int) -> list[dict]:
+        info, land, db, schema = self.ext_pick()
+        subj = info["subject"]
+        caps = self.ext_table(db, schema, f"{subj}_caps_v{n}", subj,
+                              [self.column("rec_id", "int"), self.column("cap", "num"), self.column("amount_a", "num"),
+                               self.column("amount_b", "num")])
+        t = self.ext_target(db, schema, f"{subj}_capped_v{n}", subj, [("rec_id", "int"), ("col_a", "num"), ("col_b", "num")])
+        style = n % 2
+        out = None
+        if style == 0:
+            out = self.ext_target(db, schema, f"{subj}_capped_out_v{n}", subj, [("rec_id", "int"), ("col_a", "num"), ("col_b", "num")])
+
+        def build(body: Body, ctx: Ctx, proc: DbObject) -> None:
+            tsql = self.ref(t, ctx)[0]
+            s = self.src(caps, "s", ctx)
+            body.stmt(f"INSERT INTO {tsql} (rec_id, col_a, col_b, load_ts)\nSELECT s.rec_id, s.amount_a, s.amount_b, SYSDATETIME()\n"
+                      f"FROM {s.sql} AS s{s.hint};")
+            self.ext_write(t, "rec_id", [self.leaf(s, "rec_id")], {"insert_select_target_list"}, proc.key)
+            self.ext_write(t, "col_a", [self.leaf(s, "amount_a")], {"insert_select_target_list"}, proc.key)
+            self.ext_write(t, "col_b", [self.leaf(s, "amount_b")], {"insert_select_target_list"}, proc.key)
+            ca, cb = (self.cid("col_a"), self.cid("col_b")) if style else ("col_a", "col_b")
+            body.stmt(f"UPDATE t\n   SET {ca} = CASE WHEN x.total <= s.cap THEN t.{ca} ELSE s.cap END,\n"
+                      f"       {cb} = CASE WHEN x.total <= s.cap THEN t.{cb} ELSE s.cap END\n"
+                      f"FROM {tsql} AS t\nINNER JOIN {s.sql} AS s ON s.rec_id = t.rec_id\n"
+                      f"CROSS APPLY (SELECT COALESCE(t.{ca}, 0) + COALESCE(t.{cb}, 0) AS total) AS x;")
+            feats = {"update_from", "case", "cross_apply", "self_update"}
+            for col, other in (("col_a", "col_b"), ("col_b", "col_a")):
+                self.ext_write(t, col, [self.leaf(t, col), self.leaf(t, other), self.leaf(s, "cap"),
+                                        (f"{caps.key}.cap", "condition", s.feats), (f"{t.key}.{col}", "condition", frozenset()),
+                                        (f"{t.key}.{other}", "condition", frozenset())], feats, proc.key)
+            if out is not None:
+                osql = self.ref(out, ctx)[0]
+                body.stmt(f"INSERT INTO {osql} (rec_id, col_a, col_b, load_ts)\nSELECT rec_id, col_a, col_b, SYSDATETIME()\nFROM {tsql};")
+                for col in ("rec_id", "col_a", "col_b"):
+                    self.ext_write(out, col, [self.leaf(t, col)], {"insert_select_target_list"}, proc.key)
+
+        proc = self.ext_proc(db, schema, f"usp_cap_{subj}_v{n}", subj, ["@run_id int = NULL"], build)
+        self.emit_table(t, near=proc)
+        if out is not None:
+            self.emit_table(out, near=proc)
+        chain_table = out or t
+        return [self.ext_spec(f"{chain_table.key}.col_a", "multi_update_apply", n, chain_table, {
+            "no_cycles": True, "stop_reasons": ["prior_state"], "no_gap_kinds": self.NO_ORDER_GAPS, "complete": True})]
+
+    # 8. ALTER TABLE ... WITH CHECK ADD col, then a loader selecting that column.
+    def ext_alter_add_column(self, n: int) -> list[dict]:
+        info, land, db, schema = self.ext_pick()
+        subj = info["subject"]
+        extra = self.ext_table(self.stage_db, "landing", f"{subj}_extra_v{n}", subj,
+                               [self.column("rec_id", "int"), self.column("src_code", "str")])
+        added = [self.column("late_amount", "num")] + ([self.column("late_flag", "flag")] if n % 2 else [])
+        style = n % 2
+        decl = f"{self.cid(extra.schema)}.{self.cid(extra.name)}"
+        cols = ", ".join(f"{self.cid(c.name)} {c.sqltype} NULL" for c in added)
+        alter = f"ALTER TABLE {decl} WITH CHECK ADD {cols};"
+        if style == 0:
+            self.files[extra.file].chunks.append(alter)
+        else:
+            fb = self._new_file(f"{self.folders[extra.db]}/Scripts/alter_{extra.name}.sql", extra.db, capacity=1)
+            fb.chunks.append(alter)
+        extra.columns.extend(added)
+        t = self.ext_target(db, schema, f"{subj}_late_v{n}", subj, [("rec_id", "int"), ("late_amount", "num")])
+
+        def build(body: Body, ctx: Ctx, proc: DbObject) -> None:
+            tsql = self.ref(t, ctx)[0]
+            e = self.src(extra, "e", ctx)
+            if style == 0:
+                body.stmt(f"INSERT INTO {tsql} (rec_id, late_amount, load_ts)\nSELECT rec_id, {self.cid('late_amount')}, SYSDATETIME()\n"
+                          f"FROM {e.sql}{e.hint}\nWHERE late_amount IS NOT NULL;")
+            else:
+                a = self.src(land, "a", ctx)
+                body.stmt(f"INSERT INTO {tsql} (rec_id, late_amount, load_ts)\nSELECT e.rec_id, e.late_amount, SYSDATETIME()\n"
+                          f"FROM {e.sql} AS e{e.hint}\nINNER JOIN {a.sql} AS a{a.hint} ON a.rec_id = e.rec_id\nWHERE a.is_deleted = 0;")
+            self.ext_write(t, "rec_id", [self.leaf(e, "rec_id")], {"insert_select_target_list"}, proc.key)
+            self.ext_write(t, "late_amount", [self.leaf(e, "late_amount", {"alter_add_column"})], {"insert_select_target_list"}, proc.key)
+
+        proc = self.ext_proc(db, schema, f"usp_load_{subj}_late_v{n}", subj, ["@run_id int = NULL"], build)
+        self.emit_table(t, near=proc)
+        return [self.ext_spec(f"{t.key}.late_amount", "alter_add_column", n, t, {
+            "no_gap_kinds": ["missing_definition", "ambiguous_column", "wildcard_without_schema"] + self.NO_ORDER_GAPS,
+            "complete": True})]
 
     def build(self) -> dict:
         self.build_globals()
@@ -1543,6 +2203,7 @@ class Generator:
         self.build_orchestrators()
         self.truth.finalize()
         chains = self.select_chains()
+        chains += self.build_extension()
         self.write_files()
         return self.manifest(chains, long_procs)
 
@@ -1598,7 +2259,19 @@ class Generator:
                 "max_procedure_statements": max((o.statements for o in self.objects if o.kind == "procedure"), default=0),
                 "emitted_statements_estimate": self.statement_count,
                 "truth_column_nodes": len(set(self.truth.writers) | set(self.truth.edges)),
+                "extension_objects": self.ext_objects,
+                "job_script_files": sum(1 for p in self.files if p.startswith("jobs/")),
             },
+            "extension": {
+                "variants": self.extension_variants,
+                "kinds": list(EXT_KINDS),
+                "chains": sum(1 for c in chains if "kind" in c),
+                "jobs": len(self.ext_jobs),
+                "note": "chains with a `kind` were added by generator 1.1 after the legacy chains; `expect` lists "
+                        "what the column tool's trace must contain (gap kinds and reasons, forbidden gap kinds, "
+                        "stop reasons, evidence roles, step statuses, completeness, no cycles)",
+            },
+            "job_scripts": "jobs" if self.ext_jobs else None,
             "table_targets": self.table_target_truth(),
             "chains": chains,
             "notes": [
@@ -1627,9 +2300,10 @@ def parse_rates(values: list[str], messiness: float) -> dict[str, float]:
 
 
 def generate(out: str | Path, objects: int, seed: int, databases: int = 3, rates: dict | None = None,
-             chains: int = 20) -> dict:
+             chains: int = 20, extension_variants: int = 2) -> dict:
     """Generate a corpus into ``out`` (replacing it) and return the manifest."""
-    return Generator(Path(out), objects, seed, databases, rates or dict(DEFAULT_RATES), chains).build()
+    return Generator(Path(out), objects, seed, databases, rates or dict(DEFAULT_RATES), chains,
+                     extension_variants).build()
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -1639,6 +2313,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--seed", type=int, default=1)
     parser.add_argument("--databases", type=int, default=3)
     parser.add_argument("--chains", type=int, default=20, help="number of known chains in the manifest")
+    parser.add_argument("--extension-variants", type=int, default=2,
+                        help="variations of each extension chain kind (earlier content, INSERT EXEC, APPLY, jobs, ...) "
+                             "added after the legacy chains; 0 disables them")
     parser.add_argument("--messiness", type=float, default=1.0, help="multiplier for the messy-feature rates")
     parser.add_argument("--rate", action="append", default=[], metavar="NAME=VALUE",
                         help="override one rate (see DEFAULT_RATES in this file)")
@@ -1646,10 +2323,13 @@ def main(argv: list[str] | None = None) -> int:
     out = Path(args.out)
     if out.exists() and any(out.iterdir()) and not (out / "manifest.json").exists():
         parser.error(f"{out} exists and does not look like a generated corpus; refusing to replace it")
-    manifest = generate(out, args.objects, args.seed, args.databases, parse_rates(args.rate, args.messiness), args.chains)
+    manifest = generate(out, args.objects, args.seed, args.databases, parse_rates(args.rate, args.messiness), args.chains,
+                        args.extension_variants)
     stats = manifest["stats"]
+    ext = manifest["extension"]
     print(f"wrote {stats['files']} files, {stats['objects']} objects {stats['objects_by_kind']} "
-          f"across {len(manifest['databases'])} databases, {len(manifest['chains'])} known chains -> {out}")
+          f"across {len(manifest['databases'])} databases, {len(manifest['chains'])} known chains "
+          f"({ext['chains']} extension chains of {len(ext['kinds'])} kinds, {ext['jobs']} job scripts) -> {out}")
     return 0
 
 

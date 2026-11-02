@@ -14,6 +14,13 @@
 - Synthetic ~3,000-object corpus (`tools/generate_corpus.py --objects 3000 --seed 42`), 20 known chains:
   - precision 1.0, static recall 0.975;
   - about 20 s per run, most of it parsing.
+- Synthetic scale check, extended (generator 1.1): the same command now also writes 28 extension chains
+  (14 kinds x 2 variations: earlier-content reads, INSERT ... EXEC, inline TVF via APPLY, * by name,
+  positional INSERT into SELECT ... INTO tables, SQL Agent job ordering with scripts under `jobs/`, multi-column
+  UPDATE with CROSS APPLY, ALTER TABLE ... ADD) whose manifest entries state the expected gaps, stops and
+  evidence; `tools/perf.py` passes `--job-scripts`, checks them and scores a wrongly removed gap as a miss.
+  The 20 legacy chains and their files are byte-for-byte unchanged (precision 1.0, static recall 0.975).
+  Seeds 42 and 7: all chains precision 1.0, expectation checks 25/28; the 3 misses are tool limits (below).
 
 ## Fixed after the first real-source test (feedback round 1)
 
@@ -219,6 +226,14 @@
 ## Known open issues
 
 - Corpus chain 08 ends in `missing_definition` (recall 0.6). Not investigated.
+- `INSERT INTO #t (...)` with `EXEC proc` on the next line is split into two statements by the indexer, so
+  the callee is lost: the one-result-set mapping does not happen and the gap reason reads
+  `executes_a_string_not_a_named_procedure` although a named procedure is called (arguments play no part;
+  the same text on one line maps). Corpus: legacy chain 16 and extension chains `insert_exec_one` /
+  `insert_exec_two` variant 1 (the latter keeps its `insert_exec` gap but with that wrong reason).
+- An inline table-valued function applied directly (`CROSS APPLY dbo.fn(p.id) AS x`) is not read; only
+  the derived-table form (`CROSS APPLY (SELECT * FROM dbo.fn(p.id)) AS x`) is. The trace ends in
+  `unexplained_end` instead of a stated gap. Corpus: extension chain `itvf_apply` variant 1.
 - Dynamic SQL that builds its projection from metadata cannot be followed. This is by design: it is
   reported as a `dynamic_sql` gap at the EXEC (its detail now says which piece is unknown).
 - A dynamic SQL issue's literal "targets" are guessed from all string literals in its scope; text like

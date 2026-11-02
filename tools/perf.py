@@ -7,10 +7,15 @@
 * ``table``  runs the existing table-level CLI (``python -m table_lineage.cli``) on N mart
   targets from ``DIR/manifest.json`` and checks that the upstream objects known from the
   generator's ground truth appear in the table graph.
-* ``column`` runs ``python -m column_lineage`` once with K known-chain columns (sharing the
-  parse) using the manifest's ``--database-map`` folders, then compares the reached leaf
-  columns with each chain's expected leaves (precision and recall per chain). It is skipped
-  with a message when ``column_lineage`` has no ``__main__`` yet.
+* ``column`` runs ``python -m column_lineage`` once with the known-chain columns (sharing the
+  parse) using the manifest's ``--database-map`` folders and its ``job_scripts`` folder
+  (``--job-scripts``, unless ``--no-job-scripts``), then compares the reached leaf columns
+  with each chain's expected leaves (precision and recall per chain). Extension chains
+  (manifest ``kind``/``expect``) are also checked for the gap kinds and reasons, stop reasons,
+  evidence roles, step statuses and completeness they expect: an expected gap the tool reports
+  counts as a correct answer and a missing one as a wrong answer in the precision; the summary
+  reports the legacy chains alone and each extension kind. It is skipped with a message when
+  ``column_lineage`` has no ``__main__`` yet.
 * ``index``  indexes every file with ``table_lineage.index.SourceIndex`` (the parse every
   tool pays for) and reports statement and parse-fallback statistics.
 
@@ -242,8 +247,17 @@ def ratio(num: int, den: int) -> float | None:
     return round(num / den, 3) if den else None
 
 
+PRIOR_STATE = "prior_state:"
+
+
 def value_path_leaves(trace: dict) -> set[str]:
-    """Leaves reached from the target through step inputs only (row selection excluded)."""
+    """Leaves reached from the target through step inputs only (row selection excluded).
+
+    An "earlier content of X" node (``prior_state:X``) is the value X had before a write; when the trace
+    shows X's own writers (the tool's ``prior_state`` stop says exactly that), the walk continues through
+    them, so the earlier content is traced to its sources like any other input. An earlier-content node
+    whose writers are not on the page stays an end (and is a leaf only if its stop is a leaf stop).
+    """
     target = norm_node(trace.get("target"))
     by_target: dict[str, list[dict]] = {}
     for step in trace.get("steps", []):
@@ -256,6 +270,9 @@ def value_path_leaves(trace: dict) -> set[str]:
             continue
         seen.add(node)
         steps = by_target.get(node)
+        if not steps and node.startswith(PRIOR_STATE) and by_target.get(node[len(PRIOR_STATE):]):
+            stack.append(node[len(PRIOR_STATE):])
+            continue
         if not steps:
             if node != target and node in leaf_stops:
                 leaves.add(node)
@@ -266,11 +283,56 @@ def value_path_leaves(trace: dict) -> set[str]:
     return leaves
 
 
+def expectation_checks(expect: dict, trace: dict) -> dict[str, bool]:
+    """Evaluate a chain's ``expect`` block (generator 1.1) against the trace: each key -> passed.
+
+    ``gap_kinds``: value/context gap kinds that must be reported; ``no_gap_kinds``: kinds that must not be;
+    ``gap_reasons``: {kind: detail.reason} that some gap of that kind must carry; ``stop_reasons``: stop
+    reasons that must occur; ``no_cycles``: the trace reports no cycle; ``evidence_roles``: roles some step's
+    evidence must have; ``step_statuses``: statuses some step must have; ``writer_kind_status``: {writer kind:
+    status} every step of that kind must have (and at least one exists); ``complete``: completeness status.
+    """
+    gaps = [g for g in trace.get("gaps", []) if g.get("affects") != "row_selection"]
+    kinds = {g.get("kind") for g in gaps}
+    reasons = {(g.get("kind"), (g.get("detail") or {}).get("reason") if isinstance(g.get("detail"), dict) else None)
+               for g in gaps}
+    steps = trace.get("steps", [])
+    stop_reasons = {s.get("reason") for s in trace.get("stops", [])}
+    roles = {e.get("role") for s in steps for e in s.get("evidence", []) or []}
+    statuses = {s.get("status") for s in steps}
+    checks: dict[str, bool] = {}
+    if "gap_kinds" in expect:
+        checks["gap_kinds"] = all(k in kinds for k in expect["gap_kinds"])
+    if "no_gap_kinds" in expect:
+        checks["no_gap_kinds"] = not any(k in kinds for k in expect["no_gap_kinds"])
+    if "gap_reasons" in expect:
+        checks["gap_reasons"] = all((k, r) in reasons for k, r in expect["gap_reasons"].items())
+    if "stop_reasons" in expect:
+        checks["stop_reasons"] = all(r in stop_reasons for r in expect["stop_reasons"])
+    if expect.get("no_cycles"):
+        checks["no_cycles"] = not trace.get("cycles")
+    if "evidence_roles" in expect:
+        checks["evidence_roles"] = all(r in roles for r in expect["evidence_roles"])
+    if "step_statuses" in expect:
+        checks["step_statuses"] = all(s in statuses for s in expect["step_statuses"])
+    if "writer_kind_status" in expect:
+        ok = True
+        for kind, status in expect["writer_kind_status"].items():
+            mine = [s for s in steps if s.get("writer_kind") == kind]
+            ok = ok and bool(mine) and all(s.get("status") == status for s in mine)
+        checks["writer_kind_status"] = ok
+    if "complete" in expect:
+        status = (trace.get("completeness") or {}).get("status")
+        checks["complete"] = status == ("complete" if expect["complete"] else "incomplete")
+    return checks
+
+
 def evaluate_chain(chain: dict, trace: dict | None) -> dict:
     expected = set(chain["expected_leaves"])
     static = set(chain["static_expected_leaves"])
-    row = {"id": chain["id"], "column": chain["column"], "layers": chain["expected_layers"],
-           "opaque": chain["opaque_features"], "expected": len(expected), "static_expected": len(static)}
+    row = {"id": chain["id"], "kind": chain.get("kind", "legacy"), "column": chain["column"],
+           "layers": chain["expected_layers"], "opaque": chain["opaque_features"], "expected": len(expected),
+           "static_expected": len(static)}
     if trace is None:
         row["error"] = "trace JSON not found"
         return row
@@ -287,11 +349,20 @@ def evaluate_chain(chain: dict, trace: dict | None) -> dict:
     if not gaps:
         for gap in trace.get("gaps", []):
             gaps[gap.get("kind", "?")] = gaps.get(gap.get("kind", "?"), 0) + 1
+    # Expected gaps are answers too: a reported expected gap is a correct answer, a missing one is a wrong
+    # answer (the tool claimed more than the code proves), so it lowers precision like an unexpected leaf.
+    expect = chain.get("expect") or {}
+    value_gap_kinds = {g.get("kind") for g in trace.get("gaps", []) if g.get("affects") != "row_selection"}
+    expected_gaps_present = [k for k in expect.get("gap_kinds", []) if k in value_gap_kinds]
+    expected_gaps_missing = [k for k in expect.get("gap_kinds", []) if k not in value_gap_kinds]
+    correct = len(hits) + len(expected_gaps_present)
+    wrong = len(reached - expected) + len(expected_gaps_missing)
+    checks = expectation_checks(expect, trace) if expect else {}
     row.update({
         "reached": len(reached),
         "stop_leaves": len(stop_leaves),
         "stop_leaves_outside_value_path": len(stop_leaves - reached),
-        "precision": ratio(len(hits), len(reached)),
+        "precision": ratio(correct, correct + wrong),
         "recall_static": ratio(len(reached & static), len(static)),
         "recall_all": ratio(len(hits), len(expected)),
         "recall_lenient": ratio(len({suffix3(n) for n in lenient_hits}), len(lenient_expected)),
@@ -301,6 +372,9 @@ def evaluate_chain(chain: dict, trace: dict | None) -> dict:
         "status": completeness.get("status"),
         "gaps_by_kind": gaps,
         "likely_gaps_reported": all(kind in gaps for kind in chain.get("likely_gap_kinds", [])),
+        "expected_gaps_missing": expected_gaps_missing,
+        "checks": checks,
+        "checks_passed": all(checks.values()) if checks else None,
         "steps": len(trace.get("steps", [])),
         "nodes": len(trace.get("nodes", [])),
     })
@@ -326,7 +400,10 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Time the lineage CLIs on a generated corpus.")
     parser.add_argument("--corpus", help="generated corpus directory (contains manifest.json)")
     parser.add_argument("--tool", choices=("table", "column", "both", "index", "all"), default="both")
-    parser.add_argument("--columns", type=int, default=20, help="known-chain columns to trace (column tool)")
+    parser.add_argument("--columns", type=int, default=None,
+                        help="known-chain columns to trace (column tool); default: every chain in the manifest")
+    parser.add_argument("--no-job-scripts", action="store_true",
+                        help="do not pass the corpus job scripts (manifest `job_scripts`) to the column tool")
     parser.add_argument("--targets", type=int, default=3, help="mart targets for the table tool")
     parser.add_argument("--per-column", type=int, default=0, help="also time the first N chains one per run")
     parser.add_argument("--map-style", choices=("repeat", "list"), default="list",
@@ -416,10 +493,16 @@ def main(argv: list[str] | None = None) -> int:
             print(message)
             report["skipped"].append(message)
         else:
-            chains = manifest.get("chains", [])[: args.columns]
+            chains = manifest.get("chains", [])
+            if args.columns is not None:
+                chains = chains[: args.columns]
             maps = manifest.get("database_map_args", [])
             map_argv = ([x for m in maps for x in ("--database-map", m)] if args.map_style == "repeat"
                         else (["--database-map"] + maps if maps else []))
+            job_dir = manifest.get("job_scripts")
+            if job_dir and not args.no_job_scripts and (corpus / job_dir).is_dir():
+                # SSMS-style SQL Agent job scripts the generator wrote: they order writers run by one job.
+                map_argv += ["--job-scripts", str(corpus / job_dir)]
 
             def column_run(label: str, subset: list[dict], out: Path, i: int) -> dict:
                 argv_ = [x for c in subset for x in ("--column", c["column"])]
@@ -470,14 +553,29 @@ def main(argv: list[str] | None = None) -> int:
     _print_table(["tool", "run", "wall_s", "rss_mb", "detail"], rows)
     if report["chains"]:
         print()
-        _print_table(["chain", "layers", "exp", "reached", "prec", "rec_static", "rec_all", "status", "opaque/gaps"],
-                     [[c["id"], _s(c.get("layers")), _s(c.get("expected")), _s(c.get("reached")), _s(c.get("precision")),
-                       _s(c.get("recall_static")), _s(c.get("recall_all")), _s(c.get("status") or c.get("error")),
+        _print_table(["chain", "kind", "layers", "exp", "reached", "prec", "rec_static", "rec_all", "status", "checks",
+                      "opaque/gaps"],
+                     [[c["id"], c.get("kind", "legacy"), _s(c.get("layers")), _s(c.get("expected")), _s(c.get("reached")),
+                       _s(c.get("precision")), _s(c.get("recall_static")), _s(c.get("recall_all")),
+                       _s(c.get("status") or c.get("error")), _checks_text(c),
                        ",".join(c.get("opaque") or []) + (" -> " + ",".join(sorted(c.get("gaps_by_kind", {}))) if c.get("gaps_by_kind") else "")]
                       for c in report["chains"]])
         s = report["summary"].get("column", {})
         print(f"mean precision {s.get('mean_precision')}  mean static recall {s.get('mean_recall_static')}  "
-              f"traceable chains fully recalled {s.get('traceable_full_recall')}/{s.get('traceable_chains')}")
+              f"traceable chains fully recalled {s.get('traceable_full_recall')}/{s.get('traceable_chains')}"
+              + (f"  expectation checks passed {s.get('checks_passed')}/{s.get('checks_total')}"
+                 if s.get("checks_total") else ""))
+        legacy = s.get("legacy") or {}
+        if legacy and s.get("by_kind"):
+            print(f"legacy chains only: mean precision {legacy.get('mean_precision')}  mean static recall "
+                  f"{legacy.get('mean_recall_static')}  traceable chains fully recalled "
+                  f"{legacy.get('traceable_full_recall')}/{legacy.get('traceable_chains')}")
+            print()
+            _print_table(["kind", "chains", "prec", "rec_static", "full_recall", "checks", "failed checks"],
+                         [[kind, str(k["chains"]), _s(k["mean_precision"]), _s(k["mean_recall_static"]),
+                           f"{k['full_recall']}/{k['chains']}", f"{k['checks_passed']}/{k['checks_total']}",
+                           ", ".join(k["failed"])]
+                          for kind, k in s["by_kind"].items()])
     for run in report["runs"]:
         if run.get("profile_top"):
             print(f"\n--- profile: {run['tool']} {run['label']} (top {args.profile_top} by cumulative time) ---")
@@ -501,13 +599,40 @@ def _summary(report: dict) -> dict:
         def mean(key, items):
             values = [c[key] for c in items if c.get(key) is not None]
             return round(sum(values) / len(values), 3) if values else None
-        traceable = [c for c in chains if not c["opaque"]]
-        out["column"] = {"chains": len(chains), "mean_precision": mean("precision", chains),
-                         "mean_recall_static": mean("recall_static", chains), "mean_recall_all": mean("recall_all", chains),
-                         "traceable_chains": len(traceable),
-                         "traceable_full_recall": sum(1 for c in traceable if c.get("recall_static") == 1.0),
-                         "complete": sum(1 for c in chains if c.get("status") == "complete")}
+
+        def block(items):
+            traceable = [c for c in items if not c["opaque"]]
+            checked = [c for c in items if c.get("checks_passed") is not None]
+            return {"chains": len(items), "mean_precision": mean("precision", items),
+                    "mean_recall_static": mean("recall_static", items), "mean_recall_all": mean("recall_all", items),
+                    "traceable_chains": len(traceable),
+                    "traceable_full_recall": sum(1 for c in traceable if c.get("recall_static") == 1.0),
+                    "complete": sum(1 for c in items if c.get("status") == "complete"),
+                    "checks_total": len(checked), "checks_passed": sum(1 for c in checked if c["checks_passed"])}
+
+        out["column"] = block(chains)
+        legacy = [c for c in chains if c.get("kind", "legacy") == "legacy"]
+        extension = [c for c in chains if c.get("kind", "legacy") != "legacy"]
+        if extension:
+            out["column"]["legacy"] = block(legacy)
+            by_kind: dict[str, dict] = {}
+            for kind in sorted({c["kind"] for c in extension}):
+                items = [c for c in extension if c["kind"] == kind]
+                failed = sorted({f"{c['id']}:{name}" for c in items for name, ok in (c.get("checks") or {}).items() if not ok})
+                entry = block(items)
+                entry["full_recall"] = sum(1 for c in items if c.get("recall_static") in (1.0, None))
+                entry["failed"] = failed
+                by_kind[kind] = entry
+            out["column"]["by_kind"] = by_kind
     return out
+
+
+def _checks_text(chain: dict) -> str:
+    checks = chain.get("checks") or {}
+    if not checks:
+        return "-"
+    failed = [name for name, ok in checks.items() if not ok]
+    return "ok" if not failed else "FAIL " + ",".join(failed)
 
 
 def _sqlglot_version() -> str | None:
