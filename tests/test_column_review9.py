@@ -62,3 +62,23 @@ def test_boundaries_and_terminals_match_a_synonym_of_the_object(tmp_path):
     # The table has a writer, so the trace follows it (a terminal labels stops; it does not cut traces),
     # but the stop at the synonym's table carries the declared reason.
     assert any(s.get("declared_terminal") == "accepted synonym terminal" for s in t.data["stops"])
+
+
+def test_no_missing_source_is_not_presented_as_verified(tmp_path):
+    """Every route reaches the boundary, but the page rests on an assertion and a boundary the run chose."""
+    t = run("p01c", tmp_path, "--stop-at-database", "src_db")
+    page = (tmp_path / "demo.dbo.tgt.v.overview.md").read_text(encoding="utf-8")
+    needed = page[page.index("## Main evidence needed"):page.index("## Route families")]
+    assert "Nothing" not in needed
+    assert "Before treating these routes as verified" in needed or "Also to confirm" in needed
+    assert "**Confirm the asserted mapping**" in needed and "not independently reviewed" not in needed   # A1 is reviewed
+    assert "**Confirm the production identity of" in needed
+
+
+def test_local_server_assumption_is_shown_on_the_page(tmp_path):
+    main = FIXTURES / "review" / "linked_server" / "main"
+    remote = FIXTURES / "review" / "linked_server" / "remote"
+    t = trace(main, "demo.output.result_value", tmp_path, *DB, "--source-root", str(remote),
+              "--database-map", f"{remote}=remote_db", "--local-server", "LNK")
+    page = (tmp_path / "demo.output.result_value.overview.md").read_text(encoding="utf-8")
+    assert "**Confirm that linked server `lnk` is this server**" in page

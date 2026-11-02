@@ -22,6 +22,9 @@
 
 - **SQL built at run time** may write this: an example of the SQL it actually runs, or a confirmed mapping from its owner (recorded as an assertion) (1 place, 1 route affected) — [details](sample-trace.md#gap-2ff3f09fbe22902d)
 
+Also to confirm:
+- **Confirm the production identity of `staging.demo.source`**: the run was asked to stop there; that they are the deployed source objects is not proved by the code
+
 ## Route families
 
 Each box is a route family (routes with the same source family, value rule, stopping reason and evidence status); each has its own arrow into the field, so alternatives are side by side, not in sequence. Dotted arrows decide between values. Box and edge labels say where proof stops — no box is claimed as the originating system.

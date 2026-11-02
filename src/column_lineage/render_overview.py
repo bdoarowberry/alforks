@@ -1533,14 +1533,48 @@ def _evidence_candidates(a: Analysis, detailed: str) -> list[tuple[int, int, str
     return sorted(cands, key=lambda c: (-c[0], c[1], c[2]))
 
 
+def _validation_requests(a: Analysis, detailed: str) -> list[str]:
+    """What still needs confirming even when no source definition is missing: asserted mappings, the
+    production identity of boundary objects, and run settings that were assumed rather than proved."""
+    out = []
+    comp = a.comp
+    ids = sorted(set(a.data.get("assertions_used") or []))
+    if ids:
+        unreviewed = [p["id"] for p in a.data.get("assertion_provenance") or [] if p.get("review") != "reviewed"]
+        out.append(f"**Confirm the asserted {'mapping' if len(ids) == 1 else 'mappings'}** "
+                   f"({_and_list([_code(i) for i in ids], 4)})"
+                   + (f": {len(unreviewed)} not independently reviewed" if unreviewed else "")
+                   + f" — recorded in an assertions file, not proved from code ([evidence]({detailed}#gaps))")
+    boundary_ends = sorted({_object_text(a, e) for f in a.families if f["stop"] == "boundary" for e in f["ends"]},
+                           key=str.lower)
+    if boundary_ends:
+        out.append(f"**Confirm the production identity of {_limited(boundary_ends, 3)}**: the run was asked to stop "
+                   "there; that they are the deployed source objects is not proved by the code")
+    options = (a.data.get("scan") or {}).get("options") or {}
+    servers = options.get("local_servers") or []
+    if servers:
+        out.append(f"**Confirm that linked server {_and_list([_code(x) for x in servers], 3)} is this server**: the "
+                   "run treated it as local (--local-server), so four-part names through it were read as local tables")
+    if comp.get("result") == "complete_to_declared_boundary":
+        out.append("**Declared terminals** were accepted for this run; how they are populated upstream is not proved")
+    return out
+
+
 def _section_evidence_needed(a: Analysis, detailed: str) -> list[str]:
     cands = _evidence_candidates(a, detailed)
+    validation = _validation_requests(a, detailed)
     if not cands:
-        return ["Nothing: every route ends at the requested boundary, a declared terminal or a constant."]
+        out = ["No further source definition is needed: every route ends at the requested boundary, a declared "
+               "terminal or a constant."]
+        if validation:
+            out += ["", "Before treating these routes as verified:"] + [f"- {v}" for v in validation]
+        return out
     out = [f"- {text}" for _, _, text in cands[:MAX_EVIDENCE]]
     if len(cands) > MAX_EVIDENCE:
         out += ["", f"And {_plural(len(cands) - MAX_EVIDENCE, 'more request')} — see "
                     f"[gaps and next evidence]({detailed}#gaps)."]
+    if validation:
+        out += ["", "Also to confirm:"] + [f"- {v}" for v in validation]
     return out
 
 

@@ -602,3 +602,13 @@ runs byte-identical.
   open-point families into the summary node.
 - Windows: `tools/perf.py` no longer imports the Unix-only `resource` module unconditionally.
 - Assertions on the estate: 170 used, all AI-assisted and unreviewed; 171 traces rest on at least one.
+- Alias run (conditional: the alias is believed, not confirmed, to be the scanned staging instance):
+  79 / 4 / 95; 32 of the 35 traces returned to reached-boundary. The remaining `external_object` gaps
+  (29 traces) are mostly a linked database outside the scan.
+- "Main evidence needed" no longer says "Nothing" when every route reaches the boundary: it says no
+  further source definition is needed, then lists what is still to confirm before the routes count as
+  verified (asserted mappings and their review state, the production identity of boundary objects, a
+  linked server treated as local by `--local-server`, declared terminals).
+- Open: 1,270 step ids changed between builds 2829077 and c67a066 with no writer change; not reproduced
+  on CRLF fixtures. Candidates: overlapping-root dedupe (ask for `scan.duplicate_root_files`) or
+  changed file_errors (a deep statement no longer taking a file down).
