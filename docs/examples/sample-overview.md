@@ -9,9 +9,8 @@
 
 - **Not fully traced (1 open point on the value routes, so sources may be missing).** Also: 1 route stops at an open point.
 - **Sources:**
-    - `staging.demo` (CASE branch, CASE default; [F1](sample-trace.md#fam-7ff0de8a8f), [F2](sample-trace.md#fam-c93c713b4c))
-    - variables (UPDATE of unproved run order; [F3](sample-trace.md#fam-fcaa68cfb4))
-- **Value rules:** a CASE/IIF choice picks between the alternatives; an UPDATE may overwrite the value (run order not proved) — details under What changes the value.
+    - `staging.demo` (CASE branch, CASE default; [F1](sample-trace.md#fam-c93c713b4c), [F2](sample-trace.md#fam-7ff0de8a8f))
+- **Value rules:** a CASE/IIF choice picks between the alternatives; a later UPDATE overwrites the rows it matches — details under What changes the value.
 
 ## Coverage
 
@@ -21,7 +20,7 @@
 
 ## Main evidence needed
 
-- **SQL built and run at run time (dynamic SQL)** (1 place, 1 route affected): the SQL this statement builds and executes at runtime (a captured example or a confirmed mapping), or the metadata that drives it — [details](sample-trace.md#gap-2ff3f09fbe22902d)
+- **SQL built at run time** may write this: an example of the SQL it actually runs, or a confirmed mapping from its owner (recorded as an assertion) (1 place, 1 route affected) — [details](sample-trace.md#gap-2ff3f09fbe22902d)
 
 ## Route families
 
@@ -30,9 +29,9 @@ Each box is a route family (routes with the same source family, value rule, stop
 ```mermaid
 flowchart LR
   T["Target: reporting.demo.output.result_value"]
-  F1[("F1 DB column at requested boundary: staging.demo.source.input_b")] -->|"CASE default - requested boundary, not traced beyond"| T
-  F2[("F2 DB column at requested boundary: staging.demo.source.input_a")] -->|"CASE branch - requested boundary, not traced beyond"| T
-  F3{{"F3 Unresolved origin: @override_value (in reporting.demo.apply_overrides)"}} -->|"UPDATE (run order not proved), IF branch - open point: dynamic SQL - unresolved"| T
+  F1[("F1 DB column at requested boundary: staging.demo.source.input_a")] -->|"CASE branch - requested boundary, not traced beyond"| T
+  F2[("F2 DB column at requested boundary: staging.demo.source.input_b")] -->|"CASE default - requested boundary, not traced beyond"| T
+  F3{{"F3 Unresolved origin: @override_value (in reporting.demo.apply_overrides)"}} -->|"override (later UPDATE), IF branch - open point: dynamic SQL - unresolved"| T
   F4[("F4 DB column at requested boundary: staging.demo.source.input_a")] -.->|"decides between values - requested boundary, not traced beyond"| T
   classDef target stroke-width:3px
   class T target
@@ -42,9 +41,9 @@ flowchart LR
 
 | Family | Source | Value rule | Stops because | Evidence | Routes |
 |---|---|---|---|---|---|
-| [F1](sample-trace.md#fam-7ff0de8a8f) | DB: `staging.demo.source.input_b` | CASE default | requested boundary, not traced beyond | verified (proved from code) | 1 |
-| [F2](sample-trace.md#fam-c93c713b4c) | DB: `staging.demo.source.input_a` | CASE branch | requested boundary, not traced beyond | verified (proved from code) | 1 |
-| [F3](sample-trace.md#fam-fcaa68cfb4) | variable: `@override_value (in reporting.demo.apply_overrides)` | UPDATE (run order not proved), IF branch | open point: dynamic SQL | unresolved (not proved) | 1 |
+| [F1](sample-trace.md#fam-c93c713b4c) | DB: `staging.demo.source.input_a` | CASE branch | requested boundary, not traced beyond | verified (proved from code) | 1 |
+| [F2](sample-trace.md#fam-7ff0de8a8f) | DB: `staging.demo.source.input_b` | CASE default | requested boundary, not traced beyond | verified (proved from code) | 1 |
+| [F3](sample-trace.md#fam-ac0ad92d7a) | variable: `@override_value (in reporting.demo.apply_overrides)` | override (later UPDATE), IF branch | open point: dynamic SQL | unresolved (not proved) | 1 |
 | [F4](sample-trace.md#fam-418ab2a211) | DB: `staging.demo.source.input_a` | decides between values | requested boundary, not traced beyond | verified (proved from code) | 1 |
 
 ## Sources at a glance
@@ -53,14 +52,15 @@ One row per end point. Files, constants and variables are labelled in the first 
 
 | Kind | Database | Schema | Table / source | Column | Family | Why it stops | Proof of the step reaching it |
 |---|---|---|---|---|---|---|---|
-| DB column | `staging` | `demo` | `source` | `input_b` | [F1](sample-trace.md#fam-7ff0de8a8f) | requested boundary reached (the run was asked to stop here; not traced beyond) | verified (proved from code) ([S3](sample-trace.md#step-9fa99888e121e84d)) |
-| DB column | `staging` | `demo` | `source` | `input_a` | [F2](sample-trace.md#fam-c93c713b4c), [F4](sample-trace.md#fam-418ab2a211) | requested boundary reached (the run was asked to stop here; not traced beyond) (value, and decides between values) | verified (proved from code) ([S3](sample-trace.md#step-9fa99888e121e84d)) |
-| variable | — | — | `@override_value (in reporting.demo.apply_overrides)` | — | [F3](sample-trace.md#fam-fcaa68cfb4) | open point: SQL built and run at run time (dynamic SQL) — not proved | unresolved ([S2](sample-trace.md#step-a92b7a4a25e85778)) |
+| DB column | `staging` | `demo` | `source` | `input_a` | [F1](sample-trace.md#fam-c93c713b4c), [F4](sample-trace.md#fam-418ab2a211) | requested boundary reached (the run was asked to stop here; not traced beyond) (value, and decides between values) | verified (proved from code) ([S3](sample-trace.md#step-9fa99888e121e84d)) |
+| DB column | `staging` | `demo` | `source` | `input_b` | [F2](sample-trace.md#fam-7ff0de8a8f) | requested boundary reached (the run was asked to stop here; not traced beyond) | verified (proved from code) ([S3](sample-trace.md#step-9fa99888e121e84d)) |
+| variable | — | — | `@override_value (in reporting.demo.apply_overrides)` | — | [F3](sample-trace.md#fam-ac0ad92d7a) | open point: SQL built and run at run time (dynamic SQL) — not proved | unresolved ([S2](sample-trace.md#step-a92b7a4a25e85778)) |
 
 ## What changes the value
 
 - **CASE/IIF choice** in `reporting.demo.load_output` writing `#work.chosen_value (in reporting.demo.load_output)`: 1 condition on `staging.demo.source.input_a` decides between `staging.demo.source.input_a`, `staging.demo.source.input_b` — [S3](sample-trace.md#step-9fa99888e121e84d)
-- **Override** by UPDATE in `reporting.demo.apply_overrides`: replaces `reporting.demo.output.result_value` for the rows it matches with `@override_value (in reporting.demo.apply_override…` (run order relative to the other writers is not proved) — [S2](sample-trace.md#step-a92b7a4a25e85778)
+- **Override** by UPDATE in `reporting.demo.apply_overrides`: replaces `reporting.demo.output.result_value` for the rows it matches with `@override_value (in reporting.demo.apply_override…` (runs after the other writers in the same procedure) — [S2](sample-trace.md#step-a92b7a4a25e85778)
+- **Conditional write** in `reporting.demo.apply_overrides`: `reporting.demo.output.result_value` is written only when `IF @apply_override = 1` — [S2](sample-trace.md#step-a92b7a4a25e85778)
 
 ## Which rows?
 

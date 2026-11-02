@@ -1,0 +1,9 @@
+{"schema_version": "column-lineage-assertions/1.0",
+ "assertions": [
+  {"id": "A1", "target": "demo.dbo.Tgt.v",
+   "writer": {"path": "tgt.sql", "line": 12},
+   "resolves": ["dynamic_sql"],
+   "reason": "the dynamic UPDATE always sets v from Src.x (owner confirmed)",
+   "asserted_by": "data owner", "origin": "person", "review": "reviewed",
+   "alternatives": [{"inputs": ["src_db.dbo.Src.x"], "expression": "s.x", "operation": "direct"}]}
+ ]}

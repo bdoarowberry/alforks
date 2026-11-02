@@ -85,11 +85,11 @@ flowchart RL
 
 4 families, 4 value routes. A family groups routes with the same source family, value rule, stopping reason and evidence status; alternatives with different logic, confidence or stopping reason are separate families. Ends are where the trace stopped, not confirmed origins.
 
-- <a id="fam-7ff0de8a8f"></a>**F1** `fam-7ff0de8a8f` — source staging.demo; value rule: CASE default; stops: requested boundary, not traced beyond; evidence: verified (proved from code); 1 route
-  - `staging.demo.source.input_b` — steps [S1](#step-a8a5acba10b98843), [S3](#step-9fa99888e121e84d) — branches `ELSE`
-- <a id="fam-c93c713b4c"></a>**F2** `fam-c93c713b4c` — source staging.demo; value rule: CASE branch; stops: requested boundary, not traced beyond; evidence: verified (proved from code); 1 route
+- <a id="fam-c93c713b4c"></a>**F1** `fam-c93c713b4c` — source staging.demo; value rule: CASE branch; stops: requested boundary, not traced beyond; evidence: verified (proved from code); 1 route
   - `staging.demo.source.input_a` — steps [S1](#step-a8a5acba10b98843), [S3](#step-9fa99888e121e84d) — branches `WHEN s.input_a IS NOT NULL THEN`
-- <a id="fam-fcaa68cfb4"></a>**F3** `fam-fcaa68cfb4` — source variables; value rule: UPDATE (run order not proved), IF branch; stops: open point: dynamic SQL; evidence: unresolved (not proved); 1 route
+- <a id="fam-7ff0de8a8f"></a>**F2** `fam-7ff0de8a8f` — source staging.demo; value rule: CASE default; stops: requested boundary, not traced beyond; evidence: verified (proved from code); 1 route
+  - `staging.demo.source.input_b` — steps [S1](#step-a8a5acba10b98843), [S3](#step-9fa99888e121e84d) — branches `ELSE`
+- <a id="fam-ac0ad92d7a"></a>**F3** `fam-ac0ad92d7a` — source variables; value rule: override (later UPDATE), IF branch; stops: open point: dynamic SQL; evidence: unresolved (not proved); 1 route
   - `@override_value (in reporting.demo.apply_overrides)` — steps [S2](#step-a92b7a4a25e85778) — branches `IF @apply_override = 1` — open points [dynamic_sql](#gap-2ff3f09fbe22902d)
 - <a id="fam-418ab2a211"></a>**F4** `fam-418ab2a211` — source staging.demo; value rule: decides between values; stops: requested boundary, not traced beyond; evidence: verified (proved from code); 1 route
   - `staging.demo.source.input_a` — steps [S1](#step-a8a5acba10b98843), [S3](#step-9fa99888e121e84d) — branches `WHEN s.input_a IS NOT NULL`

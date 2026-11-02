@@ -14,6 +14,9 @@
       ],
       "reason": "The configuration table chooses one of two sources; every possible branch is listed.",
       "asserted_by": "data owner (role)",
+      "origin": "person",
+      "review": "reviewed",
+      "reviewed_by": "data platform lead (role)",
       "alternatives": [
         {
           "branch": "configuration selects source_x",
@@ -41,6 +44,8 @@
       ],
       "reason": "Loaded by an external process from the listed staging column (confirmed with its owner).",
       "asserted_by": "platform team (role)",
+      "origin": "ai_assisted",
+      "review": "unreviewed",
       "alternatives": [
         {
           "inputs": [

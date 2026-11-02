@@ -27,7 +27,7 @@ def test_preserve_and_restore_reads_earlier_content_of_the_target(tmp_path):
     assert end["reason"] == "prior_state"
     assert end["loop"]["earlier_state_of"] == target
     assert set(end["loop"]["loop_nodes"]) == {target, saved}
-    assert "1 step outside the loop" in end["detail"]
+    assert "1 step outside this read-back" in end["detail"]
     node = next(n for n in t.data["nodes"] if n["id"] == prior)
     assert node["display"] == "earlier content of demo.dbo.target.col_a" and node["earlier_state_of"] == target
     assert t.data["completeness"]["ends_by_meaning"]["earlier_content_traced"] == 1
@@ -69,7 +69,7 @@ def test_update_only_column_keeps_unmatched_rows_as_a_value_source(tmp_path):
     assert inputs(t.only_step_for(t.target_id), "value") == ["demo.dbo.flagsource.flag"]
     assert stop(t, prior)["reason"] == "source_without_writer"
     page = (tmp_path / "demo.dbo.flags.flag.overview.md").read_text(encoding="utf-8")
-    assert "rows not updated keep earlier content" in page and "Who writes `demo.dbo.flags`" in page
+    assert "rows not updated keep earlier content" in page and "Who loads rows into `demo.dbo.flags`" in page
 
 
 def test_self_update_after_an_insert_ends_at_traced_earlier_content(tmp_path):

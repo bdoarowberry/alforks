@@ -28,6 +28,9 @@ JOB_REASON_TEXT = {
     "writers_overlap_in_chained_jobs": "a job started with sp_start_job runs alongside the rest of the job that "
                                        "started it",
     "call_on_the_way_is_conditional": "a call or write between the job step and the writer is conditional",
+    "entry_point_and_job_scripts_disagree": "the entry procedure's call sequence and the job scripts give different orders",
+    "asserted_writer_order_unknown": "a statement an assertion explains runs in another procedure and may overwrite; "
+                                     "its run order is not known",
     "step_subsystem_not_read": "the job has a CmdExec, PowerShell or other step whose effect is not read",
     "step_command_not_followed": "a job step's command writes data itself, branches, stops early or runs dynamic SQL",
     "asynchronous_package_execution": "a job step starts a package without waiting for it (SSISDB, not SYNCHRONIZED)",
@@ -128,14 +131,18 @@ class Tracer:
         return node, status, gaps
 
     # ------------------------------------------------------------ boundary
-    @staticmethod
-    def at_boundary(node: Node, boundary: Boundary) -> str | None:
+    def at_boundary(self, node: Node, boundary: Boundary) -> str | None:
         ref = node.object
         if ref is None or ref.kind not in ("table", "view"):
             return None
+        if ref.server:
+            return None   # an object on a linked server is not this environment's database of that name
         if ref.database and ref.database in {d.lower() for d in boundary.databases}:
             return f"database {ref.database}"
         names = [ref.key, f"{ref.schema}.{ref.name}", ref.name]
+        for syn_key, (target, _, _) in self.catalog.synonyms.items():
+            if self.catalog.canonical(target)[0].key == ref.key:
+                names += [syn_key, ".".join(split_name(syn_key)[-2:]), split_name(syn_key)[-1]]
         for pattern in boundary.objects:
             if any(fnmatch.fnmatchcase(n, pattern.lower()) for n in names):
                 return f"object pattern {pattern}"
@@ -174,6 +181,7 @@ class Tracer:
             asserted = self.asserted_for(node)
             if asserted:
                 steps, gaps, stops = self.apply_assertions(node, asserted, steps, gaps, stops, result)
+                gaps = self._assertion_order(node, asserted, steps, gaps)
             for gap in gaps:
                 result.add_gap(gap)
             for stop in stops:
@@ -235,8 +243,22 @@ class Tracer:
         self._explain_ends(result)
         for stop in result.stops:
             if stop.reason in ("source_without_writer", "external_file", "boundary"):
-                stop.declared_terminal = declared_terminal(self.terminals, stop.node)
+                stop.declared_terminal = self._declared(stop.node)
         return result
+
+    def _declared(self, node: Node) -> str | None:
+        """A declared terminal may be named by any synonym of the object as well as by its own name."""
+        reason = declared_terminal(self.terminals, node)
+        if reason or node.object is None or not self.terminals:
+            return reason
+        for syn_key, (target, _, _) in self.catalog.synonyms.items():
+            if self.catalog.canonical(target)[0].key != node.object.key:
+                continue
+            column, obj = f"{syn_key}.{node.name}".lower(), syn_key.lower()
+            for pattern, why in self.terminals:
+                if fnmatch.fnmatchcase(column, pattern) or fnmatch.fnmatchcase(obj, pattern):
+                    return why
+        return None
 
     # ------------------------------------------------------ earlier states
     def _creates_rows(self, ref: ObjectRef) -> bool:
@@ -248,6 +270,100 @@ class Tracer:
                 return True
         # Package data-flow destinations add rows (OLE DB commands only change them and are not listed).
         return self.packages is not None and ref.kind in ("table", "view") and self.packages.writes_object(ref)
+
+    def _issue_for_gap(self, gap: dict):
+        ids = {ev.get("statement_id") for ev in gap.get("evidence") or []}
+        for issue in self.catalog.issues:
+            if self.catalog.evidence(issue.unit, issue.statement).statement_id in ids:
+                return issue
+        return None
+
+    def _scope_literals(self, unit, scope: str) -> str:
+        """String-literal content of every statement in ``scope`` (dynamic SQL is built in literals)."""
+        parts = []
+        for other in unit.index.statements:
+            if other.scope != scope:
+                continue
+            masked = mask_noncode(other.text)
+            parts.append("".join(c if m == " " and c != " " else " " for c, m in zip(other.text, masked)))
+        return " ".join(parts).replace("'", " ")
+
+    def _hidden_statement_may_add_rows(self, gap: dict, ref: ObjectRef) -> bool:
+        """Whether the statement behind a resolved gap may insert rows into ``ref``: INSERT ... EXEC and
+        unparsed statements may; dynamic SQL may unless the literals that build it only UPDATE/DELETE."""
+        issue = self._issue_for_gap(gap)
+        if issue is None or issue.kind != "dynamic_sql":
+            return True
+        literals = self._scope_literals(issue.unit, issue.statement.scope)
+        name = re.escape(ref.name)
+        if re.search(rf"\b(?:INSERT\s+(?:INTO\s+)?|MERGE\s+(?:INTO\s+)?|INTO\s+)(?:\[?[\w$#]+\]?\s*\.\s*)*\[?{name}\]?(?![\w$#])",
+                     literals, re.I):
+            return True
+        if re.search(r"\b(?:INSERT|MERGE|SELECT\s+[^;]*\bINTO)\b", literals, re.I) and not re.search(
+                rf"\b(?:UPDATE|DELETE)\b[^;]*\b{name}\b", literals, re.I):
+            return True   # some insert whose target is not legible: do not claim no rows
+        return not re.search(r"\b(?:UPDATE|DELETE)\b", literals, re.I)
+
+    def _hidden_statement_may_overwrite(self, assertion) -> bool:
+        """Whether the dynamic statement an assertion explains may change existing rows (UPDATE/MERGE)."""
+        scope = self._assertion_scope(assertion)
+        if scope is None:
+            return True
+        unit, statement = scope
+        literals = self._scope_literals(unit, statement.scope)
+        return bool(re.search(r"\b(?:UPDATE|MERGE)\b", literals, re.I)) or not literals.strip()
+
+    def _assertion_scope(self, assertion):
+        """(unit, statement) the assertion's writer location names, or None."""
+        if not assertion.writer_path:
+            return None
+        want = assertion.writer_path.replace("\\", "/").lower().lstrip("./")
+        for unit in self.catalog.units:
+            rel = unit.rel_path.replace("\\", "/").lower()
+            if rel == want or rel.endswith("/" + want) or want.endswith("/" + rel):
+                if assertion.writer_line is None:
+                    return None
+                for statement in unit.index.statements:
+                    if statement.line <= assertion.writer_line <= statement.line + statement.text.count("\n"):
+                        return unit, statement
+        return None
+
+    def _assertion_order(self, node: Node, assertions: list, steps, gaps) -> list:
+        """D2: an asserted writer in another procedure than the SQL writers takes part in writer-order
+        reasoning. Its run order is unknown, so when either side may overwrite, the order is a gap;
+        with job scripts, it also gets a run context."""
+        sql = [s for s in steps if s.target.id == node.id and s.writer_kind not in ("asserted", "retained")
+               and getattr(s, "_scope", None)]
+        asserted_steps = [s for s in steps if s.target.id == node.id and s.writer_kind == "asserted"]
+        if not sql or not asserted_steps:
+            return gaps
+        if any(g.kind == "ambiguous_writer_order" and g.node is not None and g.node.id == node.id for g in gaps):
+            return gaps
+        sql_scopes = {s._scope for s in sql}
+        conflict = False
+        for assertion in assertions:
+            located = self._assertion_scope(assertion)
+            scope = located[1].scope if located else None
+            if self.jobs and scope:
+                shim = type("W", (), {})()
+                shim.statement = type("S", (), {"scope": scope})()
+                context = self._run_context(("sql", shim, None, None))
+                for step in asserted_steps:
+                    if step.run_context is None:
+                        step.run_context = context
+                        step.notes.append(self._run_context_note(context))
+            other = scope is None or scope not in sql_scopes
+            overwrite = any(s.writer_kind in UPDATING_STEPS for s in sql) or self._hidden_statement_may_overwrite(assertion)
+            conflict = conflict or (other and overwrite)
+        if conflict:
+            names = sorted({s.procedure or "a script" for s in sql} | {f"asserted mapping {a.id}" for a in assertions})
+            gaps.append(Gap("ambiguous_writer_order",
+                            f"{node.display} is written by SQL and by a statement an assertion explains "
+                            f"({', '.join(names)}); the asserted statement runs in another procedure and one side "
+                            "may overwrite existing rows, so which value survives depends on run order.",
+                            node, [e for s in sql + asserted_steps for e in s.evidence[:1]][:10],
+                            {"reason": "asserted_writer_order_unknown"}))
+        return gaps
 
     def _earlier_states(self, result: TraceResult) -> None:
         """Represent the value *before* a write wherever the trace reads it.
@@ -267,13 +383,22 @@ class Tracer:
             by_target.setdefault(step.target.id, []).append(step)
         open_objects = {g.node.object.key for g in result.gaps.values()
                         if g.kind in GAPS_THAT_MAY_ADD_ROWS and g.node is not None and g.node.object is not None}
+        # A gap an assertion explained still hides a statement: it may add rows unless its visible text
+        # (the string literals building the dynamic SQL) only updates or deletes.
+        for g in result.resolved_gaps:
+            node_id = g.get("node")
+            node = result.nodes.get(node_id) if node_id else None
+            if g.get("kind") in GAPS_THAT_MAY_ADD_ROWS and node is not None and node.object is not None \
+                    and self._hidden_statement_may_add_rows(g, node.object):
+                open_objects.add(node.object.key)
         creates: dict[str, bool] = {}
 
         def adds_rows(node: Node) -> bool:
             if node.kind not in (COLUMN, TEMP_COLUMN) or node.object is None:
                 return True   # a variable starts as NULL or its declared value; other writes are traced
             if node.id not in creates:
-                creates[node.id] = (any(s.writer_kind not in UPDATING_STEPS + ("retained",)
+                # An asserted mapping says what a value is, not that rows are created.
+                creates[node.id] = (any(s.writer_kind not in UPDATING_STEPS + ("retained", "asserted")
                                         for s in by_target.get(node.id, []))
                                     or node.object.key in open_objects or self._creates_rows(node.object))
             return creates[node.id]
@@ -290,8 +415,9 @@ class Tracer:
         for node_id in sorted(by_target):
             steps = by_target[node_id]
             node = steps[0].target
-            if node.kind not in (COLUMN, TEMP_COLUMN) or any(s.writer_kind not in UPDATING_STEPS for s in steps):
-                continue
+            if node.kind not in (COLUMN, TEMP_COLUMN) or any(s.writer_kind not in UPDATING_STEPS + ("asserted",)
+                                                              for s in steps):
+                continue   # a row-creating writer exists (an asserted mapping is not one)
             if adds_rows(node):
                 continue
             table = node.object.display
@@ -376,7 +502,7 @@ class Tracer:
                          else "the code does not prove which of them ran last before this read")
                 detail = (f"The {noun} of {later.display} before this write. The writes of {later.display} that "
                           f"could have produced it are shown on this page as candidate earlier writers "
-                          f"({_count_text(len(outside), 'step')} outside the loop); {which}.")
+                          f"({_count_text(len(outside), 'step')} outside this read-back); {which}.")
                 result.stops.append(Stop(prior, "prior_state", detail, loop=loop))
             else:
                 detail = (f"No statement in the selected sources adds rows to {later.object.display}; the updates "
@@ -464,6 +590,10 @@ class Tracer:
                     if source is None:
                         self.assertion_errors.append(f"{assertion.id}: input {spec.column!r} could not be resolved")
                         source = Node(UNKNOWN, spec.column)
+                    elif source.object is not None and source.object.kind in ("table", "view") \
+                            and not self.catalog.is_known(source.object):
+                        self.assertion_errors.append(f"{assertion.id}: input {spec.column!r} names an object with no "
+                                                     "definition or writer in the scanned files (check the spelling)")
                     inputs.append(Input(source, VALUE, spec.column, alt.branch, ASSERTED))
                 rows = []
                 for spec in alt.row_selection:
@@ -475,7 +605,8 @@ class Tracer:
                             " / ".join(s.column for s in alt.inputs), operation=alt.operation or "asserted",
                             inputs=inputs, row_selection=rows,
                             branch_context=[label + (f": {alt.branch}" if alt.branch else "")],
-                            mapping_method="assertion", status=ASSERTED, procedure=None, evidence=[evidence],
+                            mapping_method="assertion", status=ASSERTED,
+                            procedure=getattr(assertion.target, "procedure", None), evidence=[evidence],
                             order=assertion.line * 100 + i)
                 step.notes.append(f"Assertion {assertion.id}" + (f" by {assertion.asserted_by}" if assertion.asserted_by else "")
                                   + (f": {assertion.reason.rstrip('.')}" if assertion.reason else "") + ". Not proved from SQL.")
@@ -643,7 +774,17 @@ class Tracer:
         if overwrites and self.entry_points:
             ordered, why = self._call_order(writing)
             reason = "entry_point_does_not_settle"
-        if overwrites and not ordered and self.jobs:
+            if ordered and self.jobs:
+                entry_keys = dict(self._keys)
+                by_jobs, _, job_result = self._order_by_jobs(items)
+                if by_jobs:
+                    entry_order = sorted(range(len(items)), key=lambda m: [o for o, _ in entry_keys[id(items[m][1])]])
+                    job_order = sorted(range(len(items)), key=lambda m: [o for o, _ in job_result[1][m]])
+                    if entry_order != job_order:
+                        ordered, why, reason = False, None, "entry_point_and_job_scripts_disagree"
+                job_result = None
+                self._keys = entry_keys
+        if overwrites and not ordered and self.jobs and reason != "entry_point_and_job_scripts_disagree":
             ordered, job_why, job_result = self._order_by_jobs(items)
             reason = job_why or reason
         if overwrites and ordered and job_result is not None:
@@ -673,7 +814,7 @@ class Tracer:
                 if ref.kind in ("temp_table", "table_variable"):
                     gaps.append(Gap("missing_definition", f"No writer of {ref.display} was found before this read.", node))
                 elif schema_status == "missing" and not self.catalog.is_known(ref):
-                    if ref.kind in ("table", "view") and declared_terminal(self.terminals, node):
+                    if ref.kind in ("table", "view") and self._declared(node):
                         # The reviewer accepts this object as a terminal for the run: an end, not a gap.
                         stops.append(Stop(node, "source_without_writer", "No definition or writer of this object "
                                           "in the scanned files; declared as a terminal for this run."))

@@ -766,6 +766,9 @@ class Analyzer:
             kind = TEMP_COLUMN if ref.kind in ("temp_table", "table_variable") else COLUMN
             node = Node(kind, name, ref)
             note = None
+            if ref.database_source in ("default", "unified") and ref.kind in ("table", "view") and status == INFERRED:
+                note = (f"database {ref.database} assumed: the SQL names none, and it is the run's "
+                        + ("default database" if ref.database_source == "default" else "only database known for this name"))
             if source.columns is not None and name not in source.columns and source.reliable:
                 gap = ctx.gap("missing_definition", f"{ref.display} has no column {name} in its known schema.", node, column)
                 out.append(Binding(node, UNRESOLVED, gap))

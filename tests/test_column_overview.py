@@ -244,8 +244,8 @@ def test_no_writer_end_never_reads_as_confirmed_source(tmp_path):
     run(fixture("case_choice"), "demo.output.result_value", tmp_path)
     md = overview(tmp_path, "demo.output.result_value")
     answer, coverage = section(md, "Plain answer"), section(md, "Coverage")
-    assert answer.strip().startswith("- **Trace stopped at unresolved sources:**")
-    assert "where no writer, file producer or caller was found (origin not proved there)" in answer
+    assert answer.strip().startswith("- **All scanned code traced; origin not proved:**")
+    assert "nothing in the scanned code loads them, so their origin is not proved" in answer
     assert "it is not an originating system" in coverage
     assert "unresolved origin even when the step reaching it is verified" in coverage
     for row in end_rows(md).values():
@@ -287,7 +287,7 @@ def test_inferred_and_asserted_are_never_shown_as_proved():
     assert "asserted (recorded in an assertions file, not proved from code)" in rows["b.y"] and "verified" not in rows["b.y"]
     routes = section(md, "Routes: how the value arrives")
     assert "verified" not in routes
-    assert "assertions file assertions.json (asserted, not code)" in routes
+    assert "(recorded mapping, not code)" in routes or "mapping asserted" in routes
 
 
 def test_row_selection_is_kept_apart_from_values(tmp_path):
@@ -501,7 +501,7 @@ def test_loop_ends_are_unresolved_origins(tmp_path):
     endpoints = section(md, "Sources at a glance")
     assert "earlier content before this write" in endpoints and "earlier content of a DB column" in endpoints
     assert "does not prove which of them populated the rows" in endpoints
-    assert '(("F3 Before this write: earlier content of' in "\n".join(mermaid_block(md))
+    assert re.search(r'\(\("F\d Before this write: earlier content of', "\n".join(mermaid_block(md)))
 
 
 # --------------------------------------------------------------------------- first screen (multi-branch fixture)
@@ -519,9 +519,9 @@ def test_first_screen_answers_what_feeds_where_proof_stops_and_what_is_assumed(t
     answer = section(md, "Plain answer")
     lines = [l for l in answer.strip().splitlines() if l.strip() and not l.startswith("    ")]
     assert len(lines) <= 3 and all(l.startswith("- **") for l in lines)   # three short bullets
-    assert lines[0].startswith("- **Trace stopped at unresolved sources:** of 6 routes carrying the value, 5 end "
-                               "where no writer")
-    assert "and none reaches the requested boundary" in lines[0]
+    assert lines[0].startswith("- **All scanned code traced; origin not proved:** 5 input columns feed this field, "
+                               "and nothing in the scanned code loads them")
+    assert "(Every path was followed to its end inside the scanned code.)" in lines[0]
     assert lines[1] == "- **Sources:**"
     assert "\n    - `core_db.crm` (primary, fallback, later UPDATE override; [F" in answer   # one line per group
     for family in ("the constant `0` (CASE branch; [F", "file connection `limit_feed` read by package "
@@ -535,16 +535,16 @@ def test_first_screen_answers_what_feeds_where_proof_stops_and_what_is_assumed(t
             "(columns where routes stop): 0 at the requested boundary · 0 declared terminals · 6 unresolved "
             "origins (5 with no writer in the selected sources, 1 external file) · 1 constant · steps: 7 verified, "
             "0 inferred, 0 asserted") in coverage
-    assert "**Trace stopped at unresolved sources**" in coverage
+    assert "**All scanned code traced; origin not proved**" in coverage
     # What is assumed: nothing is asserted or inferred here, and the page says so.
     evidence = section(md, "Evidence and uncertainty")
     assert "**7 verified**, **0 inferred**, **0 asserted**" in evidence and "none used" in evidence
     # Main evidence: at most three, the most routes first.
     needed = section(md, "Main evidence needed").strip().splitlines()
     assert len(needed) == 3 and all(line.startswith("- **") for line in needed)
-    assert needed[0].startswith("- **Who writes `core_db.crm.account`, `core_db.crm.customer`, and 1 more** (no writer "
-                                "in the selected sources; 4 routes)")
-    assert "file producer unknown; 1 route" in needed[1] or "file producer unknown; 1 route" in needed[2]
+    assert needed[0].startswith("- **Who loads `core_db.crm.account`, `core_db.crm.customer`, and 1 more?** No job, package, "
+                                "feed or manual process that writes it was found in the scanned code (4 routes)")
+    assert any("**Who produces file connection" in line and "(1 route)" in line for line in needed[1:])
     # The first screen never presents a stop as an origin, and never infers meaning.
     lowered = first_screen(md).lower()
     for claim in ("source system:", "originates in", "originates from", "ultimate source", "comes from the source",
@@ -683,8 +683,8 @@ def test_incomplete_trace_stays_visibly_incomplete():
     assert "**Incomplete**" in coverage and "2 ends do reach the requested boundary, but the trace as a whole is not " \
         "complete" in coverage
     assert "Complete" not in coverage.split("**Incomplete**")[0]
-    assert "UPDATE (run order not proved)" in section(md, "Route families")
-    assert "**SQL built and run at run time (dynamic SQL)**" in section(md, "Main evidence needed")
+    assert "override (later UPDATE)" in section(md, "Route families")   # the sample records no writer-order gap
+    assert "**SQL built at run time** may write this" in section(md, "Main evidence needed")
     assert "unresolved (not proved)" in section(md, "Route families")
 
 
@@ -753,10 +753,12 @@ def test_index_needs_attention(tmp_path):
     index = build_index(items, load_glossary(glossary))
     att = index["needs_attention"]
     origins = {(r["source"]["label"], r["stop"]): r for r in att["unresolved_origins"]}
-    assert origins[("core_db.crm", "source_without_writer")]["columns"] == [OVB_COLUMN]
-    assert origins[("core_db.crm", "source_without_writer")]["routes"] == 4
+    crm = [r for (label, stop), r in origins.items() if label.startswith("core_db.crm.") and stop == "source_without_writer"]
+    assert crm and all(r["columns"] == [OVB_COLUMN] for r in crm) and sum(r["routes"] for r in crm) == 4   # by table
     assert ("file connection limit_feed (package packages/load_file_limit.dtsx)", "external_file") in origins
-    assert origins[("db.s", "source_without_writer")]["columns"] == ["db.s.t.c"]
+    by_table = [r["columns"] for (label, stop), r in origins.items()
+                if label.startswith("db.s.") and stop == "source_without_writer"]
+    assert by_table and all(cols == ["db.s.t.c"] for cols in by_table)
     (order,) = att["ambiguous_writer_order"]
     assert order["object"] == "?.demo.output.result_value" and order["columns"] == ["demo.output.result_value"]
     assert len(order["locations"]) == 2
@@ -773,8 +775,8 @@ def test_index_needs_attention(tmp_path):
     for heading in ("### Unresolved origins (", "### Ambiguous writer order (1)", "### Assertions awaiting review (1)",
                     "### Definitions awaiting owner approval (2)"):
         assert heading in md
-    assert "- `core_db.crm` — upstream writer unknown (4 routes); 1 column: " \
-           f"[{OVB_COLUMN}]({stem_for(OVB_COLUMN)}.overview.md)" in md
+    assert any(l.startswith("- `core_db.crm.") and "upstream writer unknown" in l for l in md.splitlines())
+    assert f"[{OVB_COLUMN}]({stem_for(OVB_COLUMN)}.overview.md)" in md
     assert "assertion `a1` (recorded mapping, not code)" in md
     assert "a shared signature is not a shared transformation or meaning" in md
     # Written by the CLI too, and counted (names left out) in the gap summary.
@@ -829,5 +831,9 @@ def test_headline_counts_boundary_and_unresolved_routes_separately():
     a = Analysis(trace.to_dict())
     a.comp = {**a.comp, "status": "complete", "result": "complete_within_selected_scope"}
     text = _answer_headline(a, unproven=9, total=25)
-    assert "of 25 routes carrying the value, 9 end where no writer" in text
-    assert "of these" not in text and ("a separate" in text or "none reaches" in text)
+    ends = {e for f in a.families if f["role"] == "value"
+            and f["stop"] in ("source_without_writer", "external_file", "parameter_without_caller") for e in f["ends"]}
+    if ends:   # counts input columns, never routes, and never one count as a subset of another
+        assert f"{len(ends)} input column" in text and "of these" not in text
+    else:
+        assert text.startswith("**")

@@ -329,7 +329,8 @@ def assertion_provenance_text(data: dict) -> str:
     made: dict[str, int] = {}
     review: dict[str, int] = {}
     for row in rows:
-        key = origin.get(row.get("origin"), "maker not recorded")
+        key = origin.get(row.get("origin")) or (f"recorded as made by {row['asserted_by']} (person or AI-assisted "
+                                                "not recorded)" if row.get("asserted_by") else "maker not recorded")
         made[key] = made.get(key, 0) + 1
         rkey = {"reviewed": "independently reviewed", "unreviewed": "not independently reviewed"}.get(
             row.get("review"), "review not recorded")

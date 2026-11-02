@@ -192,6 +192,8 @@ RULE_TAGS = {
     "override_unordered": ("UPDATE (run order not proved)",
                            "an UPDATE that may overwrite other writers (run order not proved)"),
     "update": ("UPDATE", "set by an UPDATE"),
+    "job_ordered": ("order from job script", "ordered by a SQL Agent job script (a static copy, not confirmed "
+                                             "against the live scheduler)"),
     "merge_update": ("MERGE when matched", "a MERGE update of matched rows"),
     "merge_insert": ("MERGE when not matched", "a MERGE insert of new rows"),
     "if": ("IF branch", "written only when an IF condition or package precondition holds"),
@@ -214,7 +216,7 @@ RULE_TAGS = {
                  "kept from the rows' earlier content (rows an UPDATE does not match)"),
     "conditional": ("conditional expression", "a conditional expression"),
     "conversion": ("type conversion", "a type conversion"),
-    "arithmetic": ("arithmetic", "arithmetic"),
+    "arithmetic": ("arithmetic (+ - * /)", "arithmetic (for text, + joins pieces together)"),
     "function": ("function", "a function"),
     "string": ("text manipulation", "text manipulation"),
     "window_calc": ("window calculation", "a window calculation"),
@@ -228,6 +230,8 @@ HEADLINE_ORDER = ("assertion", "override", "override_unordered", "merge_update",
                   "lookup_output", "error_output", "if", "else", "loop", "update", "aggregate")
 OP_TAG = {"cast": "conversion", "arithmetic": "arithmetic", "function": "function", "aggregate": "aggregate",
           "string": "string", "window": "window_calc", "subquery": "lookup", "expression": "calculation"}
+HIDDEN_WRITER_KINDS = ("dynamic_sql", "insert_exec", "parse_error", "unsupported_statement",
+                       "unsupported_package_step", "package_metadata")
 STOP_SHORT = {
     "boundary": "requested boundary, not traced beyond",
     "declared": "declared terminal, upstream not proved",
@@ -618,15 +622,18 @@ class Analysis:
             siblings = self.t.steps_by_target.get(step.get("target") or "", [])
             others = [s for s in siblings
                       if s.get("writer_kind") not in ("update", "merge_update", "assertion", "retained")]
+            unsettled = [g for g in self.t.gaps_by_node.get(step.get("target") or "", [])
+                         if g.get("kind") == "ambiguous_writer_order" and g.get("affects") != "row_selection"]
             if not others:
                 tags.append("update")
-            elif all(s.get("procedure") == step.get("procedure") and (s.get("order") or 0) < (step.get("order") or 0)
-                     for s in others):
-                tags.append("override")
-            else:
+            elif unsettled:
                 tags.append("override_unordered")
+            else:
+                tags.append("override")
         elif kind in ("merge_update", "merge_insert", "retained"):
             tags.append(kind)
+        if any(n.startswith("From the step order of SQL Agent job") for n in step.get("notes") or []):
+            tags.append("job_ordered")
         for label in step.get("branch_context") or []:
             tags.append(_context_tag(label))
         if (step.get("procedure") or "").startswith("package "):
@@ -720,6 +727,7 @@ class Analysis:
             fam["ends"].add(end)
             fam["route_count"] += len(seqs)
             fam["route_count_is_lower_bound"] = fam["route_count_is_lower_bound"] or value["cut"]
+        self._hidden_writer_families(families)
         out = []
         for fam in families.values():
             fam["ends"] = sorted(fam["ends"], key=lambda n: (t.display(n).lower(), n))
@@ -727,12 +735,47 @@ class Analysis:
             fam["role"] = "condition" if any(tg in ("condition", "window") for tg in fam["value_rule"]) else "value"
             fam["diagram_kind"] = self._diagram_kind(fam)
             out.append(fam)
-        out.sort(key=lambda f: (f["role"] != "value", -f["route_count"],
-                                END_ORDER.index(f["stop"]) if f["stop"] in END_ORDER else len(END_ORDER),
-                                f["source"]["label"].lower(), f["id"]))
+        # Stable across runs: by source, then rule, then stop (never by route count, which changes).
+        out.sort(key=lambda f: (f["role"] != "value", f["source"]["kind"] in ("unknown", "constant"),
+                                f["source"]["label"].lower(), f["value_rule_text"].lower(), f["stop"], f["id"]))
         for index, fam in enumerate(out, 1):
             fam["label"] = f"F{index}"
         return out
+
+    def _hidden_writer_families(self, families: dict) -> None:
+        """A statement that may write a column on the value path but whose effect is not traced (dynamic
+        SQL, INSERT ... EXEC, an unparsed statement, an unsupported package step) is a possible writer
+        the diagram must show, even when every traced route ends elsewhere."""
+        t = self.t
+        for node_id in sorted(self.value_nodes):
+            if not t.steps_by_target.get(node_id):
+                continue   # an end: the walk already made a family for its gaps
+            gaps = list(t.gaps_by_node.get(node_id, []))
+            if node_id == t.target_id:
+                gaps += t.gaps_by_node.get(None, [])
+            for gap in gaps:
+                kind = gap.get("kind")
+                if kind not in HIDDEN_WRITER_KINDS or gap.get("affects") == "row_selection":
+                    continue
+                where = re.search(r"\b(?:in|passes \S+ to) (\S+?)[,;]? (?:names|writes|appears|which)", gap.get("message") or "")
+                place = where.group(1) if where else None
+                pseudo = f"unknown_writer:{gap['id']}"
+                display = (f"possible writer of {t.display(node_id)} not traced: {GAP_SHORT.get(kind, kind.replace('_', ' '))}"
+                           + (f" in {place}" if place else ""))
+                t.nodes[pseudo] = {"id": pseudo, "kind": "unknown_writer", "name": display, "display": display,
+                                   "object": None, "scope": None}
+                t.gaps_by_node.setdefault(pseudo, []).append(gap)
+                stop = f"gap:{kind}"
+                families[(pseudo, (), stop, "unresolved")] = {
+                    "id": _hash_list("fam", ["unknown_writer", gap["id"], stop]),
+                    "source": {"kind": "unknown", "key": "unknown_writer",
+                               "label": "possible writers whose effect is not traced (SQL built at run time, rows "
+                                        "copied from another procedure, unparsed or unmapped statements)"},
+                    "value_rule": [], "value_rule_text": "mapping unknown", "headline": "unknown",
+                    "stop": stop, "stop_text": stop_short(stop), "status": "unresolved",
+                    "route_count": 1, "route_count_is_lower_bound": False, "ends": {pseudo},
+                    "members": [{"end": pseudo, "object_sequences": [[]], "steps": [], "gaps": [gap["id"]],
+                                 "branches": []}]}
 
     def _step_order(self, step_id: str) -> tuple[int, str]:
         label = self.t.label.get(step_id, "")
@@ -830,7 +873,11 @@ def writer_entry(step: dict, t: _Trace | None = None) -> tuple[str, str] | None:
     ev = (step.get("evidence") or [{}])[0] or {}
     where = "/".join(p for p in (ev.get("root"), ev.get("path")) if p) or "?"
     if step.get("mapping_method") == "assertion" or ev.get("role") == "assertion":
-        return f"assertion:{ev.get('path') or '?'}", f"assertions file {ev.get('path') or '?'} (asserted, not code)"
+        found = re.match(r"Assertion (\S+)", (step.get("notes") or [""])[0])
+        ident = found.group(1) if found else Path(ev.get("path") or "?").name
+        proc = step.get("procedure")
+        return f"assertion:{ident.lower()}", (f"procedure {_norm_name(proc)} (mapping asserted, {ident}; not proved from code)"
+                                              if proc else f"assertion {ident} (recorded mapping, not code)")
     proc = step.get("procedure")
     if proc and proc.startswith("package "):
         package = proc[len("package "):].split(", task ", 1)[0]
@@ -1101,7 +1148,7 @@ def _result_head(a: Analysis) -> str:
             "complete_to_declared_boundary": "Traced to terminals declared for this run (their upstream is not "
                                              "proved)",
             "complete_to_requested_depth": "Traced to the depth limit set for this run (some routes were cut)",
-            "complete_within_selected_scope": "Complete only within the selected sources"}.get(
+            "complete_within_selected_scope": "All scanned code traced; origin not proved"}.get(
         comp.get("result"), "Traced")
 
 
@@ -1114,6 +1161,18 @@ def _no_route_sentence(a: Analysis) -> str:
     return "No writer of this field could be established in the selected sources; its value is not traced."
 
 
+UNPROVEN_STOPS = ("source_without_writer", "external_file", "parameter_without_caller")
+SOURCE_STOPS = UNPROVEN_STOPS + ("boundary", "declared", "constant", "max_depth")
+CALC_TAGS = {"arithmetic", "string", "calculation", "function", "conversion", "aggregate", "window_calc"}
+RESULT_LABEL = {
+    "reached_requested_boundary": "traced to the requested boundary",
+    "complete_to_declared_boundary": "traced to declared terminals (upstream not proved)",
+    "complete_to_requested_depth": "cut at the depth limit",
+    "complete_within_selected_scope": "all scanned code traced; origin not proved",
+    "incomplete": "not fully traced",
+}
+
+
 def _answer_headline(a: Analysis, unproven: int, total: int) -> str:
     """The first words a reader sees: where proof stands, never "complete" alone when origins are unproven."""
     comp = a.comp
@@ -1121,13 +1180,19 @@ def _answer_headline(a: Analysis, unproven: int, total: int) -> str:
     if comp.get("status") != "complete":
         return f"**{_result_head(a)}.**"
     if comp.get("result") == "complete_within_selected_scope" and unproven:
-        # Separate counts of the same routes, never one as a subset of the other.
-        where = ("none reaches the requested boundary" if not boundary else
-                 f"a separate {boundary} {'reaches' if boundary == 1 else 'reach'} the requested boundary")
-        return (f"**Trace stopped at unresolved sources:** of {_plural(total, 'route')} carrying the value, "
-                f"{unproven} {'ends' if unproven == 1 else 'end'} where no writer, file producer or caller was "
-                f"found (origin not proved there) and {where}. "
-                "(Technically complete within the selected sources: no open point inside them.)")
+        # Count input columns (distinct ends), not routes: one scheme on the first screen.
+        value_fams = [f for f in a.families if f["role"] == "value"]
+        unproven_ends = {e for f in value_fams if f["stop"] in UNPROVEN_STOPS for e in f["ends"]}
+        boundary_ends = {e for f in value_fams if f["stop"] == "boundary" for e in f["ends"]}
+        n = len(unproven_ends)
+        if not n:
+            return f"**{_result_head(a)}.**"
+        return (f"**All scanned code traced; origin not proved:** {_plural(n, 'input column')} "
+                f"{'feeds' if n == 1 else 'feed'} this field, and nothing in the scanned code loads "
+                f"{'it' if n == 1 else 'them'}, so {'its' if n == 1 else 'their'} origin is not proved"
+                + (f"; {_plural(len(boundary_ends), 'other input')} {'reaches' if len(boundary_ends) == 1 else 'reach'} "
+                   "the requested boundary" if boundary_ends else "")
+                + ". (Every path was followed to its end inside the scanned code.)")
     return f"**{_result_head(a)}.**"
 
 
@@ -1135,8 +1200,13 @@ def _section_answer(a: Analysis, detailed: str = "") -> list[str]:
     if not a.families:
         return [_no_route_sentence(a)]
     value_fams = [f for f in a.families if f["role"] == "value"]
+    # Sources are where the value comes from: ends at a boundary, a declared terminal, an object with no
+    # writer, a file, a parameter or a constant copied in. Open points, earlier content and constants used
+    # inside calculations are not sources; they are reported under Also / Value rules.
+    source_fams = [f for f in value_fams if f["stop"] in SOURCE_STOPS
+                   and not (f["source"]["kind"] == "constant" and CALC_TAGS & set(f["value_rule"]))]
     groups: dict[str, dict] = {}
-    for fam in value_fams:
+    for fam in source_fams:
         group = groups.setdefault(fam["source"]["key"], {"source": fam["source"], "routes": 0, "headlines": [],
                                                          "fams": []})
         group["routes"] += fam["route_count"]
@@ -1181,7 +1251,8 @@ def _section_answer(a: Analysis, detailed: str = "") -> list[str]:
         stops.insert(0, f"{_plural(unproven, 'route')} {'ends' if unproven == 1 else 'end'} where no writer, file "
                         "producer or caller was found, so the origin is not proved there")
     out = [f"- {_answer_headline(a, unproven, total)}" + (f" Also: {_and_list(stops, 5)}." if stops else ""),
-           "- **Sources:**" + ("".join(f"\n    - {n}" for n in names) if names else " no value source (conditions only)")]
+           "- **Sources:**" + ("".join(f"\n    - {n}" for n in names) if names
+                              else " none established (every route ends at an open point or at earlier content)")]
     rules = _answer_rules(a)
     if rules:
         out.append(f"- **Value rules:** {'; '.join(rules)} — details under What changes the value.")
@@ -1210,6 +1281,11 @@ def _answer_rules(a: Analysis) -> list[str]:
         out.append("package transformations on file or package routes")
     if {"aggregate", "window_calc"} & tags:
         out.append("aggregation over rows")
+    calc_consts = sorted({_code((a.t.nodes.get(n) or {}).get("name") or n, CONSTANT_LIMIT) for f in a.families
+                          if f["role"] == "value" and f["source"]["kind"] == "constant"
+                          and CALC_TAGS & set(f["value_rule"]) for n in f["ends"]})
+    if calc_consts:
+        out.append(f"constants used inside calculations ({_limited(calc_consts, 3)}), not sources")
     return out[:5]
 
 
@@ -1295,9 +1371,9 @@ def _section_coverage(a: Analysis, detailed: str) -> list[str]:
             "complete_to_declared_boundary": "**Complete to terminals declared for this run** — how they are "
                                              "populated upstream is not proved",
             "complete_to_requested_depth": "**Cut at the requested depth** on some routes — not traced further",
-            "complete_within_selected_scope": "**Trace stopped at unresolved sources** — technically complete "
-                                              "within the selected sources (every route ends at a stop), but the "
-                                              "unresolved origins below are not proved"}.get(
+            "complete_within_selected_scope": "**All scanned code traced; origin not proved** — every route ends "
+                                              "at a stop inside the scanned code, but the unresolved origins below "
+                                              "are not proved"}.get(
             comp.get("result"), _text(comp.get("result") or "complete"))
     statuses = comp.get("steps_by_status") or {}
     step_text = ", ".join(f"{statuses.get(s, 0)} {s}" for s in ("verified", "inferred", "asserted"))
@@ -1350,6 +1426,62 @@ def _run_context_line(a: Analysis) -> str | None:
 
 # --------------------------------------------------------------------------- 4. main evidence needed
 
+ORDER_REASON_TEXT = {
+    "no_job_scripts_or_entry_point": "no job definitions were given to this run",
+    "entry_point_does_not_settle": "the call sequence from the entry procedure does not settle it",
+    "package_and_sql_writers": "a package and SQL code both write it",
+}
+INSERT_EXEC_REASON_TEXT = {
+    "executes_a_string_not_a_named_procedure": "the called procedure's name is built at run time",
+    "callee_has_no_definition": "the called procedure is not in the scanned code",
+    "callee_has_several_definitions": "the called procedure has several definitions",
+    "callee_runs_other_procedures_or_dynamic_sql": "the called procedure runs other procedures or SQL built at run time",
+    "callee_has_unanalysed_statements": "the called procedure has statements that could not be read",
+    "callee_may_return_other_rows": "the called procedure may return rows from more than one statement",
+    "callee_has_no_result_statement": "the called procedure returns no rows that could be found",
+    "callee_has_several_result_statements": "the called procedure returns several result sets",
+    "no_column_list_and_no_target_order": "the target's column order is not known",
+}
+
+
+def _owner_request(a: Analysis, kind: str, items: list[dict]) -> str:
+    """An evidence request phrased for the owner of the data or the code, not the tool operator."""
+    from .tracer import JOB_REASON_TEXT
+    detail = items[0].get("detail") or {}
+    reason = detail.get("reason")
+    if kind == "ambiguous_writer_order":
+        names = re.search(r"\(([^)]*)\)", items[0].get("message") or "")
+        who = f"**Which of {_text(names.group(1))} runs last?**" if names else "**Which writer runs last?**"
+        why = ORDER_REASON_TEXT.get(reason) or JOB_REASON_TEXT.get(reason) or (
+            _text(reason.replace("_", " ")) if reason else "the code alone does not say")
+        return f"{who} {why[0].upper() + why[1:]}. Needed from the job owner: the intended step order, or a recent run history"
+    if kind == "ambiguous_column":
+        cands = detail.get("candidates") or []
+        if cands:
+            return (f"**Which table does the column come from — {_and_list([_code(c) for c in cands], 3)}?** The SQL "
+                    "does not say; the table definitions, or the developer, will")
+        return "**Which table does the column come from?** The SQL does not say; the table definitions, or the developer, will"
+    if kind == "insert_exec":
+        why = INSERT_EXEC_REASON_TEXT.get(reason, "the mapping from its output to this column is not settled")
+        return f"**Rows copied from another procedure's output:** {why}. Ask the developer which output feeds this column"
+    if kind == "dynamic_sql":
+        return ("**SQL built at run time** may write this: an example of the SQL it actually runs, or a confirmed "
+                "mapping from its owner (recorded as an assertion)")
+    if kind == "missing_definition":
+        return ("**Definition and loader of the object:** neither was found in the scanned code. Needed: where it is "
+                "defined and what loads it, or confirmation that it is a system of record so the trace can stop there")
+    if kind == "external_object":
+        hint = (" The linked server may be this server; if so, confirm it and the object can be treated as local."
+                if reason == "linked_server_to_a_scanned_database_name" else "")
+        return f"**Object on a linked server:** its definition and what loads it.{hint}"
+    if kind == "ambiguous_object":
+        return "**Which database holds this object?** The code names it without one, and more than one is possible"
+    if kind == "ambiguous_package_copy":
+        return "**Which copy of the package is deployed?** Several copies were scanned; deployment records settle it"
+    return (f"**{_sentence(GAP_TEXT.get(kind, kind))[:-1]}**: "
+            f"{_text(NEXT_EVIDENCE.get(kind, 'manual review of the cited statement'))}")
+
+
 def _evidence_candidates(a: Analysis, detailed: str) -> list[tuple[int, int, str]]:
     """(routes affected, priority, bullet) for every evidence request."""
     t = a.t
@@ -1362,33 +1494,36 @@ def _evidence_candidates(a: Analysis, detailed: str) -> list[tuple[int, int, str
         ids = {g["id"] for g in items}
         routes = sum(len(m["object_sequences"]) for f in a.families for m in f["members"] if ids & set(m["gaps"]))
         first = items[0]
-        cands.append((routes, 0, f"**{_sentence(GAP_TEXT.get(kind, kind))[:-1]}** ({_plural(len(items), 'place')}, "
-                                 f"{_plural(routes, 'route')} affected): "
-                                 f"{_text(NEXT_EVIDENCE.get(kind, 'manual review of the cited statement'))} — "
-                                 f"[details]({detailed}#{_anchor(first['id'])})"))
-    groups: dict[tuple[str, str], list[dict]] = {}
+        cands.append((routes, 0, f"{_owner_request(a, kind, items)} ({_plural(len(items), 'place')}, "
+                                 f"{_plural(routes, 'route')} affected) — [details]({detailed}#{_anchor(first['id'])})"))
+    groups: dict[tuple, list[dict]] = {}
     for fam in a.families:
         stop = fam["stop"]
         if stop in ("source_without_writer", "external_file", "parameter_without_caller", "max_depth"):
-            groups.setdefault((stop, fam["source"]["key"]), []).append(fam)
-    for (stop, _), fams in groups.items():
+            earlier = all(a.t.kind(n) == "prior_state" for n in fam["ends"])
+            groups.setdefault((stop, fam["source"]["key"], earlier), []).append(fam)
+    for (stop, _, _), fams in groups.items():
         routes = sum(f["route_count"] for f in fams)
         objects = sorted({_object_text(a, n) for f in fams for n in f["ends"]}, key=str.lower)
         names = _limited(objects, 2)
         link = ", ".join(_fam_link(f, detailed) for f in fams[:3]) + (", …" if len(fams) > 3 else "")
-        if stop == "source_without_writer":
-            text = (f"**Who writes {names}** (no writer in the selected sources; {_plural(routes, 'route')}): the "
-                    "procedure, package, job or feed that loads it — add it to the sources, or declare it as a "
-                    f"terminal — {link}")
+        earlier = all(a.t.kind(n) == "prior_state" for f in fams for n in f["ends"])
+        if stop == "source_without_writer" and earlier:
+            text = (f"**Who loads rows into {names}?** The scanned code only updates rows that already exist; "
+                    f"whatever inserts them was not found ({_plural(routes, 'route')}) — {link}")
+        elif stop == "source_without_writer":
+            text = (f"**Who loads {names}?** No job, package, feed or manual process that writes it was found in "
+                    f"the scanned code ({_plural(routes, 'route')}). Needed: that process, or confirmation that it "
+                    f"is a system of record so the trace can stop there — {link}")
         elif stop == "external_file":
-            text = (f"**Who produces {names}** (file producer unknown; {_plural(routes, 'route')}): the system or job "
-                    f"that writes the file, or declare it as a terminal — {link}")
+            text = (f"**Who produces {names}?** The system or job that writes it, or confirmation that the "
+                    f"file is the agreed source ({_plural(routes, 'route')}) — {link}")
         elif stop == "parameter_without_caller":
-            text = (f"**Callers of {names}** (parameter without caller; {_plural(routes, 'route')}): the code or job "
-                    f"that calls the procedure with this parameter — {link}")
+            text = (f"**Who calls the procedure with {names}?** No caller was found in the scanned code "
+                    f"({_plural(routes, 'route')}) — {link}")
         elif stop == "max_depth":
-            text = (f"**Trace beyond {names}** (depth limit; {_plural(routes, 'route')}): rerun with a larger "
-                    f"--max-depth — {link}")
+            text = (f"**Beyond {names}:** the trace was cut at the depth limit set for this run; a deeper run would "
+                    f"continue it ({_plural(routes, 'route')}) — {link}")
         else:
             text = f"**The loop at {names}** ({_plural(routes, 'route')}): manual review of the cycle — {link}"
         cands.append((routes, 1, text))
@@ -1431,6 +1566,10 @@ def _diagram_node_label(a: Analysis, fam: dict) -> str:
         later = [a.t.display((a.t.nodes.get(n) or {}).get("earlier_state_of") or n) for n in ends]
         what = _truncate("earlier content of " + ", ".join(later[:3])
                          + (f" and {len(later) - 3} more" if len(later) > 3 else ""), DIAGRAM_NAME_LIMIT)
+    elif len(ends) == 1 and a.t.kind(ends[0]) == "prior_state" and fam["stop"] == "source_without_writer":
+        later = (a.t.nodes.get(ends[0]) or {}).get("earlier_state_of") or ends[0]
+        table = ((a.t.nodes.get(later) or {}).get("object") or {}).get("name") or a.t.display(later)
+        what = _truncate(f"rows already in {table} before the update (loader unknown)", DIAGRAM_NAME_LIMIT)
     elif len(ends) == 1:
         what = _truncate(a.t.display(ends[0]), DIAGRAM_NAME_LIMIT)
     else:
@@ -1545,6 +1684,7 @@ def _endpoint_cells(a: Analysis, node_id: str, node: dict | None = None) -> tupl
         return "DB column", (_code(server + db) if db else "unknown"), _code(obj.get("schema") or "?"), \
             _code(obj.get("name") or "?"), _code(name)
     label = {"parameter": "procedure parameter", "variable": "variable",
+             "unknown_writer": "possible writer, not traced",
              "package_variable": "package parameter" if name.startswith("$") or "::$" in node_id
              else "package variable"}.get(kind, _text(kind or "value"))
     return label, "—", "—", _code(_truncate(t.display(node_id), NAME_LIMIT)), "—"
@@ -1649,11 +1789,18 @@ def _section_changes(a: Analysis, detailed: str) -> list[str]:
                 f"{_input_names(a, [i for _, i in args], 4)}, in that order — {ref}")
         tags = a.step_tags.get(sid, [])
         if "override" in tags or "override_unordered" in tags:
-            when = ("runs after the other writers in the same procedure" if "override" in tags
-                    else "run order relative to the other writers is not proved")
+            when = ("run order relative to the other writers is not proved" if "override_unordered" in tags
+                    else "runs after the other writers according to the job script (a static copy, not confirmed "
+                         "against the live scheduler)" if "job_ordered" in tags
+                    else "runs after the other writers in the same procedure")
             kinds.setdefault("override", []).append(
                 f"**Override** by UPDATE in {writer}: replaces {target} for the rows it matches with "
                 f"{_input_names(a, [i for i in inputs if (i.get('role') or 'value') == 'value'], 2)} ({when}) — {ref}")
+        conditions = [b for b in step.get("branch_context") or [] if _context_tag(b) in ("if", "else", "loop", "catch")]
+        if conditions:
+            kinds.setdefault("conditional", []).append(
+                f"**Conditional write** in {writer}: {target} is written only when "
+                f"{_and_list([_code(_truncate(b, LABEL_LIMIT)) for b in conditions], 2)} — {ref}")
         if step.get("writer_kind") in ("merge_update", "merge_insert"):
             what = "updates matched rows" if step["writer_kind"] == "merge_update" else "inserts rows not matched"
             kinds.setdefault("merge", []).append(f"**MERGE** in {writer} {what} of {target} — {ref}")
@@ -1667,7 +1814,7 @@ def _section_changes(a: Analysis, detailed: str) -> list[str]:
         elif op in ("cast", "arithmetic", "function", "string", "expression", "subquery") and not case_values and not args:
             other.setdefault(OPERATION_TEXT.get(op, op), []).append(sid)
     out: list[str] = []
-    for kind in ("case", "fallback", "override", "merge", "aggregate", "package"):
+    for kind in ("case", "fallback", "override", "merge", "aggregate", "package", "conditional"):
         items = kinds.get(kind, [])
         out += [f"- {item}" for item in items[:MAX_PER_CHANGE]]
         if len(items) > MAX_PER_CHANGE:
@@ -1680,8 +1827,8 @@ def _section_changes(a: Analysis, detailed: str) -> list[str]:
         hidden = len(out) - (MAX_CHANGES - 1)
         out = out[:MAX_CHANGES - 1] + [f"- and {hidden} more lines — see the [detailed steps]({detailed}#detailed-steps)"]
     if not out:
-        return ["No CASE choice, fallback, override, merge, aggregation or package transformation on the value routes: "
-                "values are copied or renamed."]
+        return ["No CASE choice, fallback, override, merge, aggregation, package transformation or conditional write "
+                "on the traced routes: values are copied or renamed."]
     return out
 
 
@@ -1709,8 +1856,8 @@ def _section_rows(a: Analysis, detailed: str) -> list[str]:
                 item["gaps"] += 1
     rows = sum((a.comp.get("row_selection_gaps_by_kind") or {}).values())
     if not by_object:
-        return ["No row-selection conditions were recorded on the value routes: every row of the sources shown "
-                "above can contribute."]
+        return ["No filters or joins were found on the traced routes. This says nothing about code that was not "
+                "traced (open points above)."]
     out = [f"These conditions decide **which rows** are included; they do not compute the value. "
            f"{_plural(total, 'condition')} on {_plural(len(by_object), 'object')}"
            + (f"; {_plural(rows, 'row-selection open point')} (not value gaps)" if rows else "") + ":", ""]
@@ -2063,18 +2210,24 @@ def build_index(items: list[dict], glossary: list[dict] | None = None) -> dict:
             entry["routes"] += fam["route_count"]
             if _is_unresolved(fam["stop"].split(":")[0]) or fam["stop"] == "declared":
                 kind = "gap" if fam["stop"].startswith("gap:") else fam["stop"]
-                group = unresolved.setdefault((fam["source"]["key"], kind), {
-                    "source": fam["source"], "stop": kind, "stop_text": stop_short(kind) if kind != "gap"
-                    else "open point", "columns": set(), "routes": 0})
-                group["columns"].add(requested)
-                group["routes"] += fam["route_count"]
+                for end in fam["ends"]:
+                    entry_obj = a.object_entry(end)
+                    key, label = entry_obj if entry_obj else (fam["source"]["key"], fam["source"]["label"])
+                    group = unresolved.setdefault((key, kind), {
+                        "source": {**fam["source"], "key": key, "label": label}, "stop": kind,
+                        "stop_text": stop_short(kind) if kind != "gap" else "open point", "columns": set(),
+                        "routes": 0})
+                    group["columns"].add(requested)
+                    group["routes"] += fam["route_count"]
         for gap in a.t.sorted_gaps():
             if gap.get("kind") != "ambiguous_writer_order" or gap.get("affects") == "row_selection":
                 continue
             where = a.t.display(gap.get("node")) if gap.get("node") else "procedure or statement level"
+            writers_here = sorted({_writer_label(s) for s in a.t.steps_by_target.get(gap.get("node") or "", [])
+                                   if _writer_label(s) and s.get("writer_kind") not in ("retained",)})
             entry = writer_order.setdefault(where.lower(), {
                 "object": where, "locations": sorted({a.t.location(ev) for ev in gap.get("evidence") or []}),
-                "columns": set()})
+                "writers": writers_here, "reason": (gap.get("detail") or {}).get("reason"), "columns": set()})
             entry["columns"].add(requested)
         for assertion in data.get("assertions_used") or []:
             assertions.setdefault(assertion, set()).add(requested)
@@ -2110,7 +2263,7 @@ def build_index(items: list[dict], glossary: list[dict] | None = None) -> dict:
         return sorted(rows, key=lambda r: (-len(r["columns"]), -r.get("routes", 0), json.dumps(r, sort_keys=True, default=str)))
     attention = {
         "note": "What to look at first, by the number of columns affected. Unresolved origins are ends with no "
-                "writer in the selected sources, external files, parameters without callers, depth cuts, loops "
+                "writer in the selected sources, external files, parameters without callers, depth cuts "
                 "and open points (declared terminals are listed too: their upstream is not proved). Assertions "
                 "are recorded mappings awaiting independent review (unless the assertions file marks them reviewed), not code. Definitions are awaiting owner approval when "
                 "the glossary has no approved entry.",
@@ -2163,7 +2316,7 @@ def _render_attention(index: dict, member) -> list[str]:
         return f"{_plural(len(names), 'column')}: " + _limited([member(c) for c in names], 5)
 
     rows = att.get("unresolved_origins") or []
-    out.append(f"### Unresolved origins ({_plural(len(rows), 'source family', 'source families')})")
+    out.append(f"### Unresolved origins ({_plural(len(rows), 'table or source', 'tables and sources')})")
     out.append("")
     if rows:
         for row in rows[:INDEX_MAX_ATTENTION]:
@@ -2178,8 +2331,11 @@ def _render_attention(index: dict, member) -> list[str]:
     out += ["", f"### Ambiguous writer order ({len(rows)})", ""]
     if rows:
         for row in rows[:INDEX_MAX_ATTENTION]:
-            where = ", ".join(_code(loc) for loc in row["locations"][:3])
-            out.append(f"- {_code(row['object'])} (writers at {where or '—'}); {columns(row)}")
+            writers = _and_list([_code(w) for w in row.get("writers") or []], 3) if row.get("writers") else \
+                ", ".join(_code(loc) for loc in row["locations"][:3]) or "—"
+            reason = (row.get("reason") or "").replace("_", " ")
+            out.append(f"- {_code(row['object'])}: {writers}" + (f" ({_text(reason)})" if reason else "")
+                       + f"; {columns(row)}")
         if len(rows) > INDEX_MAX_ATTENTION:
             out.append(f"- and {len(rows) - INDEX_MAX_ATTENTION} more — see routes-index.json")
     else:
@@ -2247,7 +2403,8 @@ def render_index(index: dict) -> str:
             "|---|---|---|---|---|---|---|"]
     for row in index["columns"]:
         out.append("| " + " | ".join(_cell(c) for c in (
-            member(row["column"]), _text(row["result"]), _text(row.get("definition_status", "missing")),
+            member(row["column"]), _text(RESULT_LABEL.get(row["result"], row["result"])),
+            _text(row.get("definition_status", "missing")),
             f"{_code(row['source_signature'])} ({row['terminal_sources']})",
             f"{_code(row['writer_signature'])} ({row['writers']})", str(len(row["route_signatures"])),
             str(len(row.get("route_families") or [])))) + " |")

@@ -1,0 +1,8 @@
+{"schema_version": "column-lineage-assertions/1.0",
+ "assertions": [
+  {"id": "A1", "target": "demo.dbo.Tgt.v",
+   "writer": {"path": "procs.sql", "line": 14},
+   "reason": "w_two is only ever called with @col = 'y'",
+   "asserted_by": "data owner",
+   "alternatives": [{"inputs": ["demo.dbo.B.y"], "expression": "b.y", "operation": "direct"}]}
+ ]}
