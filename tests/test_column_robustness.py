@@ -104,4 +104,4 @@ def test_double_cr_line_endings_keep_line_numbers_and_step_ids(tmp_path):
     a = trace(tmp_path / "crlf", "demo.dbo.T.v", tmp_path / "out_a", *DB)
     b = trace(tmp_path / "crcrlf", "demo.dbo.T.v", tmp_path / "out_b", *DB)
     assert [s["id"] for s in a.steps] == [s["id"] for s in b.steps]
-    assert a.only_step_for(a.target_id)["evidence"][0]["start_line"] == 6
+    assert a.only_step_for(a.target_id)["evidence"][0]["start_line"] == 7   # the expression line, not doubled
