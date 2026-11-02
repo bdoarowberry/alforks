@@ -356,8 +356,53 @@ GAP_REASON_PATTERNS = {
 }
 
 
+# Why a dynamic SQL text could not be evaluated (the evaluator's free-text reasons -> anonymous category).
+DYNAMIC_UNKNOWN_PATTERNS = [
+    (r"assigned from a query", "built_from_a_table_or_metadata_read"),
+    (r"a parameter of .* with no caller", "parameter_without_caller"),
+    (r"not set inside the evaluated SQL|variables inside dynamic SQL belong", "variable_scoping_across_dynamic_sql"),
+    (r"assigned inside a loop", "built_inside_a_loop"),
+    (r"system function, known only at runtime", "runtime_system_function"),
+    (r"EXEC @variable", "procedure_name_held_in_a_variable"),
+    (r"sp_executesql is called without", "sp_executesql_statement_not_readable"),
+    (r"more than \d+ alternatives|too long to evaluate", "too_many_alternatives"),
+    (r"control flow", "control_flow_not_evaluated"),
+    (r"could not be parsed|could not be split|no statement was recognised", "evaluated_text_not_parsed"),
+    (r"not built from literals|not evaluated|needs text", "built_from_an_expression_not_evaluated"),
+    (r"nested", "nested_dynamic_sql"),
+    (r"OUTPUT \.\.\. INTO", "output_into_in_evaluated_sql"),
+    (r"could not be followed", "control_flow_not_evaluated"),
+    (r"runs elsewhere or as another user", "exec_at_linked_server_or_as_user"),
+    (r"depends on itself", "value_depends_on_itself"),
+    (r"call chain is deeper", "call_chain_too_deep"),
+    (r"assigned by .* at ", "assigned_by_a_statement_form_not_evaluated"),
+    (r"could not be enumerated", "no_value_enumerated"),
+    (r"which is not analysed", "evaluated_statement_form_not_analysed"),
+]
+DYNAMIC_SITE_PATTERNS = [
+    (r"^A procedure on this path executes dynamic SQL", "procedure_on_path_builds_target_at_runtime"),
+    (r"passes .* to .*, which builds and runs dynamic SQL", "object_name_passed_to_a_dynamic_procedure"),
+    (r"names .* as a write target", "dynamic_sql_names_this_object_as_target"),
+]
+
+
+def dynamic_reason(gap: dict) -> str:
+    detail = gap.get("detail") or {}
+    message = gap.get("message") or ""
+    site = next((r for p, r in DYNAMIC_SITE_PATTERNS if re.search(p, message)), "other_site")
+    if detail.get("evaluation") == "open":
+        why = "evaluated_but_callers_outside_scan_may_pass_other_texts"
+    else:
+        pieces = list(detail.get("unknown_pieces") or [])
+        why = next((r for piece in pieces for p, r in DYNAMIC_UNKNOWN_PATTERNS if re.search(p, piece, re.I)),
+                   "not_evaluated" if not pieces else "other_unknown")
+    return f"{site}/{why}"
+
+
 def gap_reason(gap: dict) -> str | None:
     detail = gap.get("detail") or {}
+    if gap.get("kind") == "dynamic_sql":
+        return dynamic_reason(gap)
     if detail.get("reason"):
         return str(detail["reason"])
     for pattern, reason in GAP_REASON_PATTERNS.get(gap.get("kind"), []):

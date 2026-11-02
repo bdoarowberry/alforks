@@ -537,7 +537,8 @@ class Tracer:
                             f"{issue.statement.procedure or 'a procedure'}, which builds and runs dynamic SQL; "
                             "it may write this object.", node,
                             [self.catalog.evidence(call.unit, call.statement, role="call"),
-                             self.catalog.evidence(issue.unit, issue.statement, role="dynamic_sql")]))
+                             self.catalog.evidence(issue.unit, issue.statement, role="dynamic_sql")],
+                            self.dynamic_detail(issue)))
         for issue in issues:
             if self.catalog.dead_dynamic(issue) or self.catalog.dynamic_resolved(issue):
                 continue
@@ -567,7 +568,15 @@ class Tracer:
                                     node, [self.catalog.evidence(writer.unit, writer.statement, role="writer")],
                                     {"candidates": dbs}))
         if ref.server:
-            gaps.append(Gap("external_object", f"{ref.display} is on linked server {ref.server}; it is not in the scanned files.", node))
+            scanned = {db for dbs in self.catalog.known_databases.values() for db in dbs if db}
+            scanned |= {norm(self.catalog.default_database)} if self.catalog.default_database else set()
+            scanned |= {db for _, db in self.catalog.database_map}
+            same_name = bool(ref.database) and norm(ref.database) in scanned
+            gaps.append(Gap("external_object", f"{ref.display} is on linked server {ref.server}; it is not in the scanned "
+                            "files." + (f" A database named {ref.database} is in the scan: if {ref.server} is this "
+                                        "server, name it with --local-server." if same_name else ""), node, [],
+                            {"reason": "linked_server_to_a_scanned_database_name" if same_name
+                             else "linked_server_to_a_database_not_in_scan"}))
         return gaps
 
     def dynamic_detail(self, issue) -> dict:

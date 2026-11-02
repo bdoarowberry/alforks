@@ -506,3 +506,19 @@ Diagnostics for the 54 "writer not run by any job script" traces:
   `packages_named_in_steps`;
 - writer-order gaps record `writers` and `writers_in_job_scripts`;
 - gap-summary adds `writer_order_gaps_by_writers_in_job_scripts` (none / some / all).
+
+## While waiting for job definitions and history
+
+- Anonymous reasons for the two biggest evidence gaps, in `gap-summary.json` →
+  `value_gap_traces_by_reason`:
+  - `dynamic_sql`: `<where on the path>/<why not evaluated>`, e.g.
+    `dynamic_sql_names_this_object_as_target/built_from_a_table_or_metadata_read`,
+    `procedure_on_path_builds_target_at_runtime/parameter_without_caller`. The "why" categories come
+    from the evaluator's reasons (table or metadata read, parameter without caller, variable scoping,
+    loop, system function, procedure name in a variable, too many alternatives, control flow, …). They
+    say which traces an assertion could settle and which could be evaluated with more scanned callers.
+  - `external_object`: `linked_server_to_a_scanned_database_name` (then `--local-server` would close it;
+    the page says so) or `linked_server_to_a_database_not_in_scan`.
+- Reviews 9–12 (whole-system interactions, robustness, business-reader pages, docs vs behaviour) and
+  an extension of the ground-truth corpus to the newer features were run as parallel agents; findings
+  are recorded below as they are fixed.
