@@ -1553,8 +1553,11 @@ def _validation_requests(a: Analysis, detailed: str) -> list[str]:
     options = (a.data.get("scan") or {}).get("options") or {}
     servers = options.get("local_servers") or []
     if servers:
-        out.append(f"**Confirm that linked server {_and_list([_code(x) for x in servers], 3)} is this server**: the "
-                   "run treated it as local (--local-server), so four-part names through it were read as local tables")
+        plural = len(servers) > 1
+        out.append(f"**Confirm that linked server{'s' if plural else ''} {_and_list([_code(x) for x in servers], 3)} "
+                   f"{'are' if plural else 'is'} this server**: the run treated {'them' if plural else 'it'} as local "
+                   "(--local-server), so four-part names through "
+                   f"{'them' if plural else 'it'} were read as local tables")
     if comp.get("result") == "complete_to_declared_boundary":
         out.append("**Declared terminals** were accepted for this run; how they are populated upstream is not proved")
     return out

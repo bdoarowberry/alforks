@@ -609,6 +609,8 @@ runs byte-identical.
   further source definition is needed, then lists what is still to confirm before the routes count as
   verified (asserted mappings and their review state, the production identity of boundary objects, a
   linked server treated as local by `--local-server`, declared terminals).
-- Open: 1,270 step ids changed between builds 2829077 and c67a066 with no writer change; not reproduced
-  on CRLF fixtures. Candidates: overlapping-root dedupe (ask for `scan.duplicate_root_files`) or
-  changed file_errors (a deep statement no longer taking a file down).
+- (fixed) 1,270 step ids changed between builds 2829077 and c67a066 with no writer change. Cause: the
+  CR normalisation turned the stray CR of `\r\r\n` line endings (a file converted twice, common on
+  Windows) into a line break, renumbering every line and so every step id (ids hash the evidence line).
+  Now only files with no LF at all are normalised. Test: `test_double_cr_line_endings_keep_line_numbers_and_step_ids`.
+  Step ids on the estate should return to their 2829077 values.

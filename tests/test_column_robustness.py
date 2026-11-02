@@ -90,3 +90,18 @@ def test_one_large_file_is_not_quadratic(tmp_path):
     started = time.monotonic()
     assert run_cli(cli_args(sql, "demo.dbo.T.v", tmp_path / "out", *DB, "--no-overview", "--jobs", "1")) == 0
     assert time.monotonic() - started < 20
+
+
+def test_double_cr_line_endings_keep_line_numbers_and_step_ids(tmp_path):
+    """\\r\\r\\n endings (a file converted twice) are one line break: line numbers, and so step ids, must not
+    change against the same file with \\r\\n endings."""
+    text = ("CREATE TABLE dbo.S (v int);\nCREATE TABLE dbo.T (v int);\nGO\n"
+            "CREATE PROCEDURE dbo.load AS -- loader\nBEGIN\n    INSERT INTO dbo.T (v) -- target\n    SELECT v FROM dbo.S;\nEND\nGO\n")
+    for name, ending in (("crlf", b"\r\n"), ("crcrlf", b"\r\r\n")):
+        sql = tmp_path / name
+        sql.mkdir()
+        (sql / "t.sql").write_bytes(text.encode("utf-8").replace(b"\n", ending))
+    a = trace(tmp_path / "crlf", "demo.dbo.T.v", tmp_path / "out_a", *DB)
+    b = trace(tmp_path / "crcrlf", "demo.dbo.T.v", tmp_path / "out_b", *DB)
+    assert [s["id"] for s in a.steps] == [s["id"] for s in b.steps]
+    assert a.only_step_for(a.target_id)["evidence"][0]["start_line"] == 6

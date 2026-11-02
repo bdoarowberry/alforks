@@ -15,9 +15,11 @@ DEFAULT_EXCLUDES = (".git", ".venv", ".pytest_cache", ".pytest-run-*", "node_mod
 
 
 def _normalise_newlines(text: str) -> str:
-    """A lone CR (old Mac / some tools) ends a line like LF: otherwise one ``--`` comment would hide the
-    rest of the file, and every line number would be 1."""
-    return re.sub(r"\r(?!\n)", "\n", text) if "\r" in text else text
+    """A file whose lines end in CR alone (old Mac / some tools) is read as if they ended in LF: otherwise
+    one ``--`` comment would hide the rest of the file, and every line number would be 1. Files that
+    contain LF are left as they are: in ``\\r\\r\\n`` endings (a file converted twice) the stray CR is
+    whitespace, and turning it into a line break would renumber every line and so every step id."""
+    return text.replace("\r", "\n") if "\r" in text and "\n" not in text else text
 
 
 def decode_source(data: bytes) -> tuple[str, str]:
