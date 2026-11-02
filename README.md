@@ -35,13 +35,15 @@ The useful options:
 | `--column X` | Target column; repeat for several. 2–4 part object names; brackets allowed. |
 | `--columns-file FILE` | Target columns, one per line (`#` comments allowed). All are traced in one run and share the parsing. |
 | `--source-root DIR ...` | Files or folders to scan (`.sql .tsql .ddl .prc .proc`). |
+| `--output DIR` | Where the traces and run files are written (default `column-lineage-output`). |
 | `--database-map PATH=DB ...` | Files under `PATH` (relative to a source root, or absolute) belong to database `DB`. Use this when a repository has one folder per database and the code uses two-part names. |
 | `--default-database DB` | Database for two-part names with no other context. |
 | `--default-schema S` | Schema for one-part names (default `dbo`). |
 | `--stop-at-database DB ...` | Stop when the trace reaches a column in one of these databases. |
-| `--stop-at-object GLOB ...` | Stop at matching objects (`db.schema.name`, case-insensitive). |
+| `--stop-at-object GLOB ...` | Stop at matching tables or views. The glob is matched (case-insensitive) against `db.schema.name`, `schema.name` and the bare name. |
 | `--entry-point PROCEDURE ...` | The procedure(s) the run starts from. When writers in several procedures conflict, the call sequence from here orders them (each writer reached by one call path, unconditionally, or in the two arms of one IF/ELSE); the order is noted on the steps instead of an `ambiguous_writer_order` gap. Writers not called from it keep the gap. |
-| `--declared-terminals FILE` | Objects or columns the reviewer accepts as terminal sources for this run (one glob per line, `# reason` optional). Stops there keep their reason and are labelled; the result can be `complete_to_declared_boundary`. Upstream population is not proved. |
+| `--job-scripts PATH ...` | SQL Agent job scripts (files, or folders of `.sql`) as SSMS writes them ("Script Job as"). The step order of one enabled job orders the writers it runs, including package steps and jobs chained with `sp_start_job`; each writer step records which job runs it (`run_context`). Inferred: a script is a static copy, not proof of the deployed job. Writers in independently scheduled jobs stay unordered. |
+| `--declared-terminals FILE` | Objects or columns the reviewer accepts as terminal sources for this run: one glob per line with an optional `# reason`, or JSON `{"terminals": [{"pattern": ..., "reason": ...}]}`. Stops there keep their reason and are labelled; the result can be `complete_to_declared_boundary`. Upstream population is not proved. |
 | `--max-depth N` | Stop after N mapping steps. |
 | `--trace-row-selection` | Also trace filter and join columns upstream (larger output). |
 | `--gap-summary` | Also write `gap-summary.json`, a summary with no names in it, safe to share. |
@@ -49,10 +51,13 @@ The useful options:
 | `--no-overview` | Do not write the `<column>.overview.md` pages. |
 | `--local-server NAME ...` | Linked-server names whose four-part references mean the databases being scanned. Add that database's SQL as another `--source-root`, so its objects are traced instead of reported as external. |
 | `--assertions FILE ...` | Human-asserted mappings for steps SQL cannot prove (see below). |
-| `--jobs N` | Parser worker processes (default: CPUs, at most 8; `1` = none). |
+| `--jobs N` | Parser worker processes (default: CPUs, at most 8; `1` = none). Workers are only started when at least 20 files are to be parsed; smaller runs parse in the main process. |
 | `--fail-on-incomplete` | Exit 3 if any trace is incomplete. |
 | `--include` / `--exclude GLOB ...` | Filter files. |
+| `--include-dated-snapshots` | Also scan files whose name carries a date-like token (`_20240131`, `-2024-01-31`, ...). They are skipped by default as historical copies; the count is in `scan.skipped_dated_snapshots`. |
 | `--verbose` | Print timings and a per-trace summary. |
+| `--no-progress` | Do not print progress lines to stderr. |
+| `--progress-interval SECONDS` | Seconds between progress lines (default 15). |
 
 Database context for a two-part name, first match wins: an explicit three-part name, a
 preceding `USE db` in the same file, `--database-map`, `--default-database`, otherwise
@@ -136,14 +141,21 @@ top of the page, or `completeness.status` in the JSON.
   - `verified`: bound from explicit SQL.
   - `inferred`: bound by a stated rule, such as positional schema order, a default
     schema or database, or a #temp table created by the caller.
+  - `asserted`: stated in an assertions file, not proved from SQL (see below).
   - `partial`, `ambiguous`, `unresolved`: weaker; see the gaps.
 - **Stops** end a path without a gap:
   - `boundary`: the boundary you asked for.
   - `source_without_writer`: nothing in the scanned files writes it.
+  - `external_file`: a flat-file column read by an SSIS package.
+  - `prior_state`: the earlier content of a column or variable that a write reads back; the
+    writers that produced it are traced on the page.
   - `constant`, `parameter_without_caller`, `max_depth`.
-- **Gaps** are where proof ends: dynamic SQL, parse failures, `INSERT ... EXEC`, missing
-  definitions, ambiguous names or writers, `*` or positional inserts without a known
-  schema, user functions, linked servers.
+- **Gaps** are where proof ends: dynamic SQL, parse failures, missing definitions, ambiguous
+  names or writers, `*` or positional inserts without a known schema, user functions that
+  cannot be summarised or inlined, linked servers. `INSERT ... EXEC proc` is mapped by position
+  from the callee's result set when that is settled (one definition of the callee, exactly one
+  statement returning rows, no nested EXEC or dynamic SQL in it); otherwise it is an
+  `insert_exec` gap.
 - **Dynamic SQL built only from literals** is evaluated: when every possible text of the executed
   string can be enumerated from the code (literals, `+`/`CONCAT`, `QUOTENAME`, `REPLACE`, `CHAR`,
   `CAST`; variables assigned those, also under IF/ELSE; procedure parameters from their callers or
@@ -167,9 +179,10 @@ description in `src/column_lineage/assertions.py`.
   row-selection columns, a branch label, an expression and an operation.
 - **Tracing:** the tracer continues through every alternative. Those steps get the status
   `asserted` and cite the assertions file as their evidence.
-- **Gaps:** gaps on the target that the assertion explains (by default dynamic SQL, unparsed
-  statements, external objects and missing definitions; narrow it with `resolves` and
-  `writer: {path, line}`) move to `resolved_gaps`, labelled with the assertion id. Nothing is
+- **Gaps:** gaps on the target that the assertion explains move to `resolved_gaps`, labelled
+  with the assertion id. By default these kinds: `dynamic_sql`, `insert_exec`, `parse_error`,
+  `unsupported_statement`, `external_object`, `missing_definition`, `opaque_function`,
+  `table_valued_function`; narrow it with `resolves` and `writer: {path, line}`. Nothing is
   deleted.
 - **Completeness:** a complete result says it relies on N asserted steps. Unused or unresolvable
   assertions are listed in `scan-diagnostics.json`.
@@ -189,7 +202,7 @@ description in `src/column_lineage/assertions.py`.
 - **Privacy:** an assertions file names real objects. It belongs with the source and must not
   be shared outside it.
 
-### Declared terminals and scalar functions
+### Declared terminals and user functions
 
 - `--declared-terminals` records a source-boundary decision for a run, e.g. `demo.stage.*  # loaded by an
   external feed`. It does not stop the trace (use `--stop-at-object` for that) and never hides
@@ -198,6 +211,12 @@ description in `src/column_lineage/assertions.py`.
 - A scalar user function whose definition is scanned, reads no tables and calls only such functions is
   summarised: its result depends on the arguments its body uses (step status `inferred`, with a note
   citing the definition). Otherwise the call is an `opaque_function` gap saying why.
+- An inline table-valued function (`RETURNS TABLE AS RETURN (SELECT ...)`) called in FROM is read as a
+  derived table: its RETURN query with the call's arguments in place of the parameters. This needs
+  exactly one definition in the caller's database, positional arguments, and argument columns
+  qualified by a caller alias. Otherwise (several definitions, a definition in another database, a
+  multi-statement function or none scanned, an unqualified argument column) the call is a
+  `table_valued_function` gap saying why.
 
 ### Comparing with known lineage
 
@@ -276,13 +295,21 @@ scope and excluded (counts only). Details: `docs/column-lineage-design.md`, "SSI
 ### Handing results back
 
 If you can't share the source or the traces, run with `--gap-summary` and share only
-`gap-summary.json`. It holds:
+`gap-summary.json`. It includes:
 
-- gap counts by kind;
-- parse failures by statement keyword and error class;
+- scan counts (files, statements parsed or fallen back, repaired, encodings);
+- statement issues by kind, dynamic SQL evaluation outcomes, unparsed statements by keyword and
+  parse-error class;
 - anonymized samples of unparsed SQL (identifiers become `ID1`, `ID2`, …, strings `'?'`,
   numbers `0`);
-- per-trace statistics.
+- `totals`: `outcomes` and `results` (completeness status and result per trace),
+  `value_path_ends_by_meaning`, `declared_terminal_ends`, `assertions` (use, origin and review, as
+  counts), `no_writer_stops` (writer-search categories), `earlier_content`,
+  `traces_blocked_by_gap_kind`, `value_gap_traces_by_reason`,
+  `wildcard_traces_by_unexpanded_star_reason`, `writer_steps_by_job_context`,
+  `writer_order_gaps_by_writers_in_job_scripts`, gaps and distinct gap statements by kind, and
+  `statements_blocking_most_traces` (counts only);
+- per-trace statistics (`traces`) and route-index counts (`route_index`).
 
 Check the file before sharing it.
 

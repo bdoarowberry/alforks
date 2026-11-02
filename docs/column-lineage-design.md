@@ -20,7 +20,8 @@ python -m column_lineage --column <object>.<column> [--column ...]
                          --source-root <dir-or-file> [...]
                          [--output <dir>]                  default ./column-lineage-output
                          [--stop-at-database <db> ...]     stop when a column in this database is reached
-                         [--stop-at-object <glob> ...]     stop at matching objects (fnmatch on db.schema.name, case-insensitive)
+                         [--stop-at-object <glob> ...]     stop at matching tables/views (fnmatch on db.schema.name,
+                                                           schema.name or the bare name, case-insensitive)
                          [--max-depth <n>]                 stop after n mapping steps from the target
                          [--default-database <db>]         database for two-part names with no other context
                          [--database-map <path-prefix>=<db> ...]  files under this path (relative to a source root,
@@ -32,12 +33,19 @@ python -m column_lineage --column <object>.<column> [--column ...]
                          [--fail-on-incomplete]            exit 3 when any requested trace is incomplete
                          [--business-glossary <file>]      business definitions for the overview pages
                          [--no-overview]                   do not write <stem>.overview.md
-                         [--no-progress] [--verbose]
+                         [--jobs <n>] [--no-progress] [--progress-interval <s>] [--verbose]
 ```
+
+This block shows the core options. `--assertions`, `--declared-terminals` (text or JSON
+`{"terminals": [{"pattern", "reason"}]}`), `--entry-point`, `--job-scripts`, `--local-server`,
+`--include-dated-snapshots` and the SSIS options (`--package-root` and friends, see "SSIS
+packages") are described in the README, which has the full list.
 
 `<object>` may have two, three or four parts (`schema.table`, `db.schema.table`,
 `server.db.schema.table`). Bracketed identifiers are accepted. The target object may
-be a table, view or `#temp` table (use `--column "#t.col"` only with a single file root).
+be a table, view or `#temp` table (`--column "#t.col"` resolves when exactly one scope, a
+procedure or batch in the scanned files, writes a `#temp` of that name; otherwise the target is
+unresolved and the message says how many scopes write it).
 
 Outputs per requested column, in `--output`:
 
@@ -94,17 +102,44 @@ value of this expression. Writers are:
 | `merge_update`, `merge_insert` | `MERGE` WHEN clauses |
 | `view` | `CREATE [OR ALTER] VIEW` |
 | `cte`, `derived` | a CTE or derived-table column inside one statement |
-| `variable_assignment` | `SET @v = ...`, `SELECT @v = ...`, `DECLARE @v = ...` |
+| `variable_assignment` | `SET @v = ...`, `SELECT @v = ...`, `DECLARE @v = ...` (the catalog records a DECLARE initialiser as an assignment) |
 | `parameter_binding` | `EXEC proc @p = expr` / positional argument |
+| `parameter_default` | a procedure parameter's declared default, for callers that omit it |
+| `insert_omitted` | a column left out of an `INSERT` column list: its declared default, or NULL |
+| `insert_exec` | `INSERT ... EXEC proc`, mapped by position from the callee's single result-set `SELECT` (see below) |
+| `computed_column` | a computed column's definition in `CREATE TABLE` |
+| `retained` | rows a filtered `UPDATE` does not match keep their earlier content (input: the `prior_state` node; `inferred`) |
+| `asserted` | a mapping stated in an assertions file (status `asserted`) |
 
 `mapping_method` records how the target column was matched to its expression:
 `target_list`, `positional_schema` (INSERT without a column list, using the declared
 ordered schema minus identity/computed/rowversion columns), `projection_alias`
 (SELECT INTO / view / CTE by output name), `view_column_list`, `set_clause`,
-`wildcard_schema` (a `*` expanded from a reliable ordered schema), `assignment`, `argument`.
+`wildcard_schema` (a `*` expanded from a reliable ordered schema), `select_into` and `view`
+(output name of a `SELECT ... INTO` or view projection), `assignment`, `argument`,
+`parameter_default`, `omitted_from_insert`, `column_definition`, `result_set_position`
+(`INSERT ... EXEC`), `rows_not_updated` (`retained` steps) and `assertion`.
 
 Positional and wildcard mappings require a reliable ordered schema. Without one the
 step is not produced and a `positional_without_schema` / `wildcard_without_schema` gap is.
+
+`INSERT ... EXEC proc` is mapped only when the callee's result set is settled: one definition
+of the callee, exactly one statement in it returning rows, and no nested `EXEC` or dynamic SQL
+there (their result sets would be captured too). The target column is then matched by position
+to that `SELECT` (writer kind `insert_exec`, method `result_set_position`), and the evidence
+cites both the call and the callee's statement. Otherwise the statement is an `insert_exec` gap
+whose detail names the callee and the reason.
+
+An inline table-valued function (`RETURNS TABLE AS RETURN (SELECT ...)`) in a `FROM` clause is
+inlined as a derived table: its RETURN query with the call's arguments substituted for the
+parameters, the argument columns bound to the caller's sources under private aliases the body
+cannot capture. This needs exactly one definition in the caller's database, positional
+arguments, and argument columns qualified by a caller alias. Otherwise the call is a
+`table_valued_function` gap whose detail says why (`several_inline_definitions`,
+`inline_definition_in_another_database`, `called_in_another_database`,
+`no_inline_definition_multi_statement_or_not_scanned`, `unqualified_column_in_argument`).
+Scalar functions are summarised when their scanned body reads no tables (otherwise
+`opaque_function`).
 
 ### Inputs and roles
 
@@ -125,7 +160,9 @@ Each column, variable, parameter or literal referenced by the value expression i
 
 `RowSelection` items are separate from inputs: `filter` (WHERE), `join_key` (column
 equality in ON/USING/MERGE ON), `join_predicate` (other ON predicates), `group_by`,
-`having`, `merge_condition`. Row selection is recorded for the statement level at which
+`having`, `merge_condition`, `top_order` (the ORDER BY of a `TOP n` query, which decides
+which rows survive). A `qualify` role is defined in the model and labelled by the renderers
+but is never produced by the analyzer (T-SQL has no QUALIFY). Row selection is recorded for the statement level at which
 it occurs (a CTE's WHERE belongs to the CTE step). Row-selection columns are not traced
 upstream unless `--trace-row-selection` is set.
 
@@ -144,25 +181,33 @@ upstream unless `--trace-row-selection` is set.
 
 - `verified` — every value input is bound to a unique identity from explicit SQL.
 - `inferred` — bound using a stated rule: positional schema, default schema/database,
-  caller-created temp table, unknown-database unification.
+  caller-created temp table, unknown-database unification, evaluated dynamic SQL, a
+  function summary, a job-script order.
+- `asserted` — stated in an assertions file (`--assertions`); never proved from SQL and
+  always reported separately (`relies_on_assertions`).
 - `partial` — some inputs bound, some are gaps.
 - `ambiguous` — several candidate bindings or writers, none provable.
 - `unresolved` — nothing could be bound.
 
 ## Stops and gaps
 
-A path ends at a `Stop` (`boundary`, `source_without_writer`, `constant`, the SSIS stops below,
-`parameter_without_caller`, `max_depth`) or at a `Gap`. Gap kinds are listed in
+A path ends at a `Stop` (`boundary`, `source_without_writer`, `constant`,
+`parameter_without_caller`, `max_depth`, `prior_state` (the earlier content a write reads back,
+see `Node` below), `external_file` (the SSIS stop below)) or at a `Gap`. Gap kinds are listed in
 `model.GAP_KINDS`. Never infer a mapping from similar names or from a table-level
 dependency.
 
-`completeness.status` is `complete` only if every value path ends at a stop and there
-are no gaps. A `source_without_writer` stop means "no writer exists in the selected
+`completeness.status` is `complete` only if every value path ends at a stop, the worst
+value-path step status is `verified`, `inferred` or `asserted`, and there are no gaps that
+affect the value or its context (`gaps[].affects` is `value` or `context`). Row-selection gaps
+(`affects: row_selection`) are counted in `row_selection_gaps_by_kind` and
+`row_selection_status` and do not block completeness. A `source_without_writer` stop means "no writer exists in the selected
 scanned sources", not "this is the ultimate source-system field".
 
 `completeness.result` keeps the meanings apart:
 
-- `reached_requested_boundary`: complete, and every value path ends at the requested boundary or a constant;
+- `reached_requested_boundary`: complete, at least one value path ends at the requested boundary, and
+  every other end is a constant or a `prior_state` node (an earlier content whose writers are traced);
 - `complete_to_requested_depth`: complete, but some paths were cut by `--max-depth`;
 - `complete_to_declared_boundary`: complete, and every other end (no writer in the selected sources,
   external file) is a terminal declared with `--declared-terminals`; parameters and depth cuts are never
@@ -170,6 +215,9 @@ scanned sources", not "this is the ultimate source-system field".
 - `complete_within_selected_scope`: complete, but some paths end at objects with no writer in
   the selected sources (other sources, such as packages or feeds, may write them);
 - `incomplete`: open value-path or context gaps (for example an unsupported package step).
+
+The checks are applied in this order: incomplete, then `max_depth` stops, then declared
+terminals, then the boundary, otherwise `complete_within_selected_scope`.
 
 For readers (overview pages, route index) the ends are named by what they prove: an end at the
 requested **boundary** or at a **declared terminal** is where the run was asked to stop, never an
@@ -180,7 +228,8 @@ branches reach the boundary.
 
 `completeness.ends_by_meaning` counts value-path ends by meaning (`reached_requested_boundary`,
 `no_writer_in_selected_scope`, `constant`, `parameter_without_caller`, `max_depth`,
-`unsupported_package_step`). Asserted steps stay `asserted` and `relies_on_assertions` is
+`external_file_source`, `earlier_content_traced`, and the value or context gaps
+`unsupported_package_step` and `package_runtime_value`). Asserted steps stay `asserted` and `relies_on_assertions` is
 reported separately.
 
 Every `source_without_writer` stop on a table or view carries `writer_search`: statements in
@@ -231,22 +280,41 @@ After loading, every `dynamic_sql` statement issue (other than dead dynamic SQL)
 
 ## JSON shape (`column-lineage/1.0`)
 
+Field names below are taken from a real trace; the values are invented.
+
 ```
 {
   "schema_version": "column-lineage/1.0",
-  "requested": "demo.output.result_value",
+  "requested": "demo.dbo.target.col_a",
   "target": Node, "target_status": "verified", "target_gaps": [gap-id],
   "boundary": {"databases": [], "objects": [], "max_depth": null},
-  "scan": {"roots": [...], "files": n, "statements": n, "parsed": n, "fallback": n, "source_revision": str|null},
-  "completeness": {"status": "complete|incomplete", "overall_step_status": ..., "steps_by_status": {},
-                   "gaps_by_kind": {}, "stops_by_reason": {}, "note": ...},
+  "scan": {"roots": [...], "files": 3, "statements": 12, "parsed": 12, "fallback": 0,
+           "ignored_non_lineage": 0, "repaired": 0, "create_tables": {...}, "skipped_dated_snapshots": 0,
+           "file_encodings": {"utf-8": 3}, "files_without_statements": 0, "statement_issues": {...},
+           "file_errors": [], "source_revision": str|null, "options": {...}, "assertions": {...},
+           "entry_points": [...], "declared_terminals": [...], "packages": {...} (with --package-root)},
+  "completeness": {"status": "complete|incomplete", "result": "reached_requested_boundary|...",
+                   "ends_by_meaning": {"no_writer_in_selected_scope": 1, "earlier_content_traced": 1},
+                   "declared_terminal_ends": 0, "overall_step_status": "inferred",
+                   "steps_by_status": {"inferred": 2}, "gaps_by_kind": {},
+                   "value_gaps_by_kind": {}, "context_gaps_by_kind": {}, "row_selection_gaps_by_kind": {},
+                   "row_selection_status": "complete|incomplete",
+                   "asserted_steps": 0, "relies_on_assertions": false, "gaps_resolved_by_assertions": 0,
+                   "stops_by_reason": {"prior_state": 1, "source_without_writer": 1}, "note": "..."},
   "nodes": [Node...],
   "steps": [{"id", "target", "writer_kind", "procedure", "expression", "operation", "mapping_method",
              "status", "branch_context": [], "inputs": [Input...], "row_selection": [RowSelection...],
-             "evidence": [Evidence...], "gaps": [gap-id], "notes": [], "order"}],
-  "stops": [{"node", "reason", "detail"}],
-  "gaps": [{"id", "kind", "message", "node", "evidence": [...], "detail": {}}],
+             "evidence": [Evidence...], "gaps": [gap-id], "notes": [], "order",
+             "run_context": {...} (only with --job-scripts: which jobs run this writer)}],
+  "stops": [{"node", "reason", "detail",
+             "writer_search": [...] (source_without_writer stops on tables and views),
+             "declared_terminal": "reason" (the declared reason, when a --declared-terminals glob matches),
+             "loop": {"earlier_state_of", "read_by_steps", "loop_nodes"} (earlier-content stops)}],
+  "gaps": [{"id", "kind", "message", "node", "evidence": [...], "detail": {}, "affects": "value|row_selection|context"}],
   "cycles": [[node-id...]],
+  "resolved_gaps": [{...gap fields..., "resolved_by": assertion-id}],
+  "assertions_used": [assertion-id...],
+  "assertion_provenance": [{"id", "asserted_by", "origin", "review", "reviewed_by", "source", ...}],
   "route_families": {"schema_version": "column-lineage-route-families/1.0", "note": ...,
                      "families": [{"id": "fam-<hash>", "label": "F1", "source": {"kind", "key", "label"},
                                    "role": "value|condition", "value_rule": [tag...], "value_rule_text",
@@ -273,10 +341,26 @@ Output is deterministic: lists are sorted and ids are content hashes.
 
 ## Gap summary (`gap-summary.json`)
 
-For handing results back without sharing source: counts of gaps by kind, parse
-fallbacks by statement keyword and error class, and up to N anonymized samples of
-unsupported statements in which identifiers become `ID1, ID2, ...`, string literals
-become `'?'` and numbers become `0`. It contains no object, column, path or file names.
+For handing results back without sharing source. It contains no object, column, path or
+file names. It includes:
+
+- `scan`: file and statement counts (parsed, fallback, ignored, repaired, encodings, CREATE
+  TABLE handling);
+- `statement_issues_by_kind`, `dynamic_sql_evaluation`, `unparsed_statements_by_keyword`,
+  `parse_error_classes`;
+- `unparsed_samples`: up to N anonymized statements in which identifiers become `ID1, ID2, ...`,
+  string literals `'?'` and numbers `0`;
+- `totals`: `traces`, `outcomes` and `results` (completeness status and result),
+  `value_path_ends_by_meaning`, `declared_terminal_ends`, `assertions` (used, by origin and
+  review, traces relying on unreviewed ones), `no_writer_stops` (writer-search categories),
+  `earlier_content`, `traces_blocked_by_gap_kind`, `wildcard_traces_by_unexpanded_star_reason`,
+  `value_gap_traces_by_reason`, `writer_steps_by_job_context`,
+  `writer_order_gaps_by_writers_in_job_scripts`, `gaps_by_kind`,
+  `distinct_gap_statements_by_kind`, `statements_blocking_most_traces` (counts only);
+- `traces`: one entry per trace with its completeness counts, steps by status and writer kind,
+  stops, gaps and package counts;
+- `packages` (with `--package-root`): packages found, in scope, excluded, unreadable.
+
 `route_index` adds counts only: columns, terminal-source, writer and route signatures, route
 families, the sizes of the largest groups and the number of entries in each "needs attention" list.
 

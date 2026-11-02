@@ -2,13 +2,15 @@
 
 ## Where it stands
 
-- Engine: `src/column_lineage/` (catalog, control, analyzer, tracer, cli, render_markdown, gap_summary).
-- Contract: `docs/column-lineage-design.md`. Usage: `README.md`.
-- Tests: 97 passing (`python -m pytest -p no:cacheprovider`), including:
-  - 46 acceptance and messy-pattern tests;
-  - 20 renderer tests;
-  - 24 regressions from an adversarial semantics review (`fixtures/column/review/`);
-  - 7 corpus-generator tests.
+- Engine: `src/column_lineage/`: catalog, control, analyzer, tracer, dynamic_eval, assertions, jobs,
+  compare, cli, render_markdown, render_overview, gap_summary, and the SSIS adapter (ssis, ssis_xml,
+  ssis_expression).
+- Contract: `docs/column-lineage-design.md`. Usage: `README.md`. Handover: `docs/HANDOVER.md`.
+  What it cannot settle: `docs/column-lineage-limitations.md`.
+- Tests: 394 passing (`PYTHONPATH=src python -m pytest -q -p no:cacheprovider`): acceptance and
+  messy-pattern tests, renderer and overview tests, regressions from adversarial reviews 4 to 8
+  (`tests/test_column_review*.py`, fixtures under `fixtures/column/review*/`), SSIS adapter tests,
+  gap-shape, earlier-state, dynamic SQL, assertion, job-script and corpus-generator tests.
 - Synthetic ~3,000-object corpus (`tools/generate_corpus.py --objects 3000 --seed 42`), 20 known chains:
   - precision 1.0, static recall 0.975;
   - about 20 s per run, most of it parsing.
@@ -227,18 +229,14 @@
 
 - Robustness review: a reviewer was checking encodings, huge files, deep nesting and symlink
   loops, but its results were not collected. Rerun it.
-- Performance: parsing dominates. Options:
-  - parallel parse (`--jobs`);
+- Performance: parsing dominates. The parallel parse (`--jobs`, worker processes from 20 files) is
+  done. Still open:
   - a pickle cache (about 2.4x on small files);
   - a cheaper `mask_noncode` in `table_lineage/index.py`, which runs 4–5 times per statement.
-- Renderer suggestions not yet done:
-  - a structured pairing between a CASE condition and the value it selects;
-  - a per-step scope field;
-  - gap-to-step links.
-- `docs/column-lineage-limitations.md`: referenced from the README but not written yet.
-- Handback package for the tester LLM:
-  - how to run;
-  - how to send back `gap-summary.json`.
+- Renderer: a per-step scope field (steps carry `procedure` but no separate scope). Done since this
+  list was written: CASE condition/value pairing (input branch labels `WHEN ... THEN` / `ELSE`),
+  gap-to-step links on the detailed page, `docs/column-lineage-limitations.md`, and the handback
+  package (`docs/HANDOVER.md`, sections 1 and 5).
 
 ## After the tester's review of overview v2
 

@@ -54,7 +54,7 @@ awaiting approval), `scan-diagnostics.json` (scan, statement issues, assertion u
 
 | Result | Meaning |
 |---|---|
-| `reached_requested_boundary` | Complete, and every value path ends at the requested boundary or a constant. |
+| `reached_requested_boundary` | Complete; at least one value path reaches the requested boundary, and every other end is a constant or an earlier-content node whose writers are traced on the page. |
 | `complete_to_declared_boundary` | Complete; the other ends are terminals the reviewer declared for this run. How those are populated upstream is **not** proved. |
 | `complete_within_selected_scope` | Complete within the scanned sources; some paths end at objects with no writer there, files, constants or parameters. **Not** proof of the originating system. |
 | `complete_to_requested_depth` | Complete up to `--max-depth`; some paths were cut. |
@@ -103,7 +103,7 @@ pages, assertions, targets, expected lineage, package XML or connection details.
 
 - Tests: `PYTHONPATH=src python -m pytest -q -p no:cacheprovider`. Every real-data defect has an invented
   regression fixture under `fixtures/column/`.
-- Synthetic scale check: `python tools/generate_corpus.py --objects 3000 --seed 42 --output corpus`, then
+- Synthetic scale check: `python tools/generate_corpus.py --objects 3000 --seed 42 --out corpus`, then
   `python tools/perf.py --corpus corpus --tool column` (precision should stay 1.0).
-- Before trusting a new feature, run an adversarial review on invented fixtures: the five reviews so far
-  each found real false "complete" results.
+- Before trusting a new feature, run an adversarial review on invented fixtures: the eight adversarial
+  reviews to date (and the four under way as this is written) each found real false "complete" results.
