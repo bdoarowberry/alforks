@@ -105,5 +105,5 @@ pages, assertions, targets, expected lineage, package XML or connection details.
   regression fixture under `fixtures/column/`.
 - Synthetic scale check: `python tools/generate_corpus.py --objects 3000 --seed 42 --out corpus`, then
   `python tools/perf.py --corpus corpus --tool column` (precision should stay 1.0).
-- Before trusting a new feature, run an adversarial review on invented fixtures: the eight adversarial
-  reviews to date (and the four under way as this is written) each found real false "complete" results.
+- Before trusting a new feature, run an adversarial review on invented fixtures: the nine adversarial
+  reviews to date each found real false "complete" results.
