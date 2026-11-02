@@ -27,6 +27,23 @@ JOB_REASON_TEXT = {
     "job_runs_procedures_not_in_scan": "the job runs procedures that are not in the scanned files",
     "writers_overlap_in_chained_jobs": "a job started with sp_start_job runs alongside the rest of the job that "
                                        "started it",
+    "call_on_the_way_is_conditional": "a call or write between the job step and the writer is conditional",
+    "step_subsystem_not_read": "the job has a CmdExec, PowerShell or other step whose effect is not read",
+    "step_command_not_followed": "a job step's command writes data itself, branches, stops early or runs dynamic SQL",
+    "asynchronous_package_execution": "a job step starts a package without waiting for it (SSISDB, not SYNCHRONIZED)",
+    "job_start_not_followed": "a job step starts a job at a named step, or a job whose name is not read",
+    "job_step_loop": "the job's steps loop",
+    "job_has_failure_branches": "the job continues to other steps when a step fails",
+    "job_start_cycle": "jobs start each other in a cycle",
+    "job_defined_more_than_once": "the job is defined in more than one script",
+    "job_deleted_in_scripts": "a script deletes the job",
+    "job_step_deleted_in_scripts": "a script deletes a job step (later steps are renumbered)",
+    "job_step_update_not_followed": "a script updates a job step that is not found",
+    "job_arguments_not_read": "a job script argument could not be read",
+    "schedule_updated_in_scripts": "a script updates a schedule",
+    "package_name_matches_several_copies": "the package name matches several package copies",
+    "package_project_not_matched": "the job runs a package of another project",
+    "ssis_step_package_not_read": "an SSIS job step names no package that could be read",
     "same_job_step_order_not_settled": "within one step, a call or write on the way is conditional",
 }
 UPDATING_STEPS = ("update", "merge_update")      # steps that change rows that already exist
@@ -633,7 +650,8 @@ class Tracer:
                             + (f" The job scripts do not settle it ({JOB_REASON_TEXT.get(reason, reason)})."
                                if self.jobs else ""),
                             node, [self.catalog.evidence(w.unit, w.statement, role="writer") for w, _ in writing][:10],
-                            {"reason": reason}))
+                            {"reason": reason, **({"writers": len(items), "writers_in_job_scripts": sum(
+                                1 for i in items if self._placements(i, success_only=False))} if self.jobs else {})}))
         elif len({id(w.statement) for w, _ in writing}) > 1:
             first = min(w.statement.start for w, _ in writing)
             for writer, step in writing:
@@ -690,22 +708,35 @@ class Tracer:
         return found
 
     # -------------------------------------------------------- job order
+    def _resolve_step_procedure(self, name: str, database: str | None) -> tuple[str, str | None]:
+        """(status, scope): status is resolved, system (msdb/master, an unresolved sp_/xp_; no lineage),
+        other_database (no definition in the step's database, but one of that name elsewhere: counted,
+        never used) or unresolved."""
+        parts = [norm(p) for p in split_name(name)][-3:]
+        parts = [None] * (3 - len(parts)) + parts
+        db = parts[0] or norm(database)
+        procs = self.catalog.procs_for(ObjectRef(parts[2], parts[1] or self.catalog.default_schema, db, None,
+                                                 "procedure"))
+        if len(procs) == 1:
+            return "resolved", procs[0].scope
+        if procs:
+            return "several_definitions", None
+        if (db or "") in ("msdb", "master") and (parts[2] or "").startswith(("sp_", "xp_", "sys")):
+            return "system", None
+        if (parts[2] or "").startswith(("sp_", "xp_")) and not parts[0]:
+            return "system", None
+        elsewhere = self.catalog.procs_for(ObjectRef(parts[2], parts[1] or self.catalog.default_schema, None, None,
+                                                     "procedure"))
+        return ("other_database" if elsewhere else "unresolved"), None
+
     def _step_scopes(self, step) -> list[tuple[str, str | None]]:
-        """(name, procedure scope or None) for each procedure a job step runs. System procedures (msdb,
-        master, an unresolved sp_*) are left out: they write no lineage."""
         out = []
-        for name in step.procedures():
-            parts = [norm(p) for p in split_name(name)][-3:]
-            parts = [None] * (3 - len(parts)) + parts
-            ref = ObjectRef(parts[2], parts[1] or self.catalog.default_schema, parts[0] or norm(step.database),
-                            None, "procedure")
-            procs = self.catalog.procs_for(ref)
-            if len(procs) == 1:
-                out.append((name, procs[0].scope))
-            elif not procs and ((parts[0] or "") in ("msdb", "master") or (parts[2] or "").startswith(("sp_", "xp_"))):
+        for _, kind, name, database, _ in step.actions():
+            if kind != "proc":
                 continue
-            else:
-                out.append((name, None))
+            status, scope = self._resolve_step_procedure(name, database)
+            if status != "system":
+                out.append((name, scope))
         return out
 
     def _reach(self, scope: str) -> set[str]:
@@ -723,18 +754,65 @@ class Tracer:
             cache[scope] = seen
         return cache[scope]
 
+    def _package_copies(self, stem: str) -> list:
+        if self.packages is None:
+            return []
+        return [p for p in self.packages.packages if p.path.stem.lower() == stem]
+
+    def _package_entries(self, stem: str, step, seen=()) -> list[dict]:
+        """The package a step runs and the child packages its Execute Package tasks run (same place)."""
+        copies = self._package_copies(stem)
+        problem = None
+        if len(copies) > 1:
+            problem = "package_name_matches_several_copies"
+        project = step.package_project()
+        if copies and project and not any(project.lower() in [part.lower() for part in Path(c.rel).parts[:-1]]
+                                          or len(Path(c.rel).parts) == 1 for c in copies):
+            problem = problem or "package_project_not_matched"
+        out = [{"package": stem, "problem": problem, "via_parent": bool(seen)}]
+        for copy in copies:
+            for _, ref, _ in copy.data.child_packages:
+                if ref:
+                    child = re.split(r"[\\/]", ref.strip())[-1].lower()
+                    child = child[:-5] if child.endswith(".dtsx") else child
+                    if child and child not in seen and child != stem:
+                        out.extend(self._package_entries(child, step, seen + (stem,)))
+        return out
+
     def _job_index(self) -> list[dict]:
         """One entry per procedure or package a job step runs, with the step's place in the run: its
         path [(job, position)] from the scheduled job down through jobs started with sp_start_job. A job
-        started by exactly one step and with no enabled schedule of its own is part of that chain."""
+        started by exactly one step and with no enabled schedule of its own is part of that chain. Steps
+        on failure paths are indexed for run context only (on_success_path False)."""
         cached = self.__dict__.get("_jobs_index")
         if cached is not None:
             return cached
+        by_name = {}
+        for job in self.jobs:
+            by_name.setdefault(job.name.lower(), []).append(job)
         starters: dict[str, list] = {}
         for job in self.jobs:
             for position, step in enumerate(job.sequence()):
                 for name in step.started_jobs():
                     starters.setdefault(name.lower(), []).append((job, position))
+        # A job that (transitively) starts itself never settles.
+        for job in self.jobs:
+            frontier, seen = [job], set()
+            while frontier:
+                current = frontier.pop()
+                for step in current.steps:
+                    for name in step.started_jobs():
+                        for started in by_name.get(name.lower(), []):
+                            if started is job and "job_start_cycle" not in job.problems:
+                                job.problems.append("job_start_cycle")
+                            if id(started) not in seen:
+                                seen.add(id(started))
+                                frontier.append(started)
+        for job in self.jobs:
+            for step in job.reachable():
+                reason = step.opaque_reason()
+                if reason and reason not in job.problems:
+                    job.problems.append(reason)
 
         def path_of(job, seen=()):
             found = starters.get(job.name.lower(), [])
@@ -747,31 +825,70 @@ class Tracer:
         entries = []
         for job in self.jobs:
             prefix, root = path_of(job)
-            for position, step in enumerate(job.sequence()):
-                base = {"job": job, "root": root, "path": prefix + [(job.name, position)], "step": step}
-                for sub, (name, scope) in enumerate(self._step_scopes(step)):
-                    entries.append({**base, "sub": sub, "scope": scope, "package": None,
-                                    "reach": self._reach(scope) if scope else set()})
-                for package in step.packages():
-                    entries.append({**base, "sub": 0, "scope": None, "package": package, "reach": set()})
+            success = job.sequence()
+            positions = {id(st): i for i, st in enumerate(success)}
+            for step in job.reachable():
+                on_path = id(step) in positions
+                position = positions.get(id(step), 10 ** 6 + step.step_id)
+                base = {"job": job, "root": root, "path": prefix + [(job.name, position)], "step": step,
+                        "on_success_path": on_path}
+                sub = 0
+                for _, kind, name, database, _ in step.actions():
+                    if kind == "proc":
+                        status, scope = self._resolve_step_procedure(name, database)
+                        if status == "system":
+                            continue
+                        entries.append({**base, "sub": sub, "scope": scope, "package": None, "problem": None,
+                                        "reach": self._reach(scope) if scope else set(), "resolution": status})
+                        sub += 1
+                    elif kind == "package":
+                        for entry in self._package_entries(name, step):
+                            entries.append({**base, "sub": sub, "scope": None, "reach": set(), **entry})
+                        sub += 1
         self._jobs_index = entries
         return entries
 
-    def _placements(self, item) -> list[dict]:
+    def job_diagnostics(self) -> dict:
+        """Anonymous counts: how job-step procedures resolved and why jobs cannot order writers."""
+        index = self._job_index()
+        resolution = {}
+        for job in self.jobs:
+            for step in job.steps:
+                for _, kind, name, database, _ in step.actions():
+                    if kind == "proc":
+                        status, _ = self._resolve_step_procedure(name, database)
+                        resolution[status] = resolution.get(status, 0) + 1
+        problems = {}
+        for job in self.jobs:
+            for problem in job.problems:
+                problems[problem] = problems.get(problem, 0) + 1
+        reached = set()
+        for entry in index:
+            reached |= entry["reach"]
+        return {"step_procedures": dict(sorted(resolution.items())),
+                "jobs_by_problem": dict(sorted(problems.items())),
+                "procedures_reached_from_job_steps": len(reached),
+                "packages_named_in_steps": len({e["package"] for e in index if e["package"]})}
+
+    def _placements(self, item, success_only: bool = True) -> list[dict]:
         kind, writer, _, package = item
+        entries = [e for e in self._job_index() if e["on_success_path"] or not success_only]
         if kind == "sql":
-            return [e for e in self._job_index() if e["scope"] and writer.statement.scope in e["reach"]]
-        return [e for e in self._job_index() if e["package"] == package]
+            return [e for e in entries if e["scope"] and writer.statement.scope in e["reach"]]
+        return [e for e in entries if e["package"] == package]
 
     def _run_context(self, item) -> dict:
         """Which jobs in the scripts run this writer (context for the pages; not an order)."""
-        found = self._placements(item)
+        found = self._placements(item, success_only=False)
         if not found:
             return {"status": "not_in_job_scripts"}
         enabled = [e for e in found if e["root"].enabled]
-        jobs = [{"job": e["root"].name, **({"started_job": e["job"].name} if e["job"] is not e["root"] else {}),
-                 "step": e["step"].step_id, "step_name": e["step"].name, "schedule": e["root"].schedule_text()}
-                for e in (enabled or found)[:5]]
+        jobs = []
+        for e in (enabled or found)[:5]:
+            via = [name for name, _ in e["path"][1:]] if len(e["path"]) > 1 else []
+            jobs.append({"job": e["root"].name, **({"through": via} if via else {}), "step": e["step"].step_id,
+                         "step_name": e["step"].name, "schedule": e["root"].schedule_text(),
+                         **({"only_on_failure": True} if not e["on_success_path"] else {})})
         return {"status": "run_by_enabled_job" if enabled else "only_disabled_jobs", "jobs": jobs}
 
     @staticmethod
@@ -781,19 +898,31 @@ class Tracer:
                     "caller, or be a copy that is not deployed.")
         jobs = []
         for j in context["jobs"]:
-            text = f"job {j['job']}" + (f" (through {j['started_job']}, which it starts)" if j.get("started_job") else "")
+            text = f"job {j['job']}" + (f" (through {', '.join(j['through'])}, which it starts)" if j.get("through") else "")
             text += f", step {j['step']}" + (f" {j['step_name']}" if j["step_name"] else "")
+            if j.get("only_on_failure"):
+                text += " (only when an earlier step fails)"
             if j["schedule"]:
                 text += f", scheduled {j['schedule']}"
             jobs.append(text)
         lead = "Run by " if context["status"] == "run_by_enabled_job" else "Run only by disabled "
         return lead + "; ".join(jobs) + " (from the job scripts: a static copy, not confirmed as the deployed jobs)."
 
+    def _unconditional_from(self, entry: str, writer) -> bool:
+        """Whether ``writer`` always runs once its job step's procedure ``entry`` runs: one call path, and
+        no call or write on it inside IF / ELSE / WHILE / CATCH."""
+        paths = self._call_paths(writer.statement.scope, entries=[entry])
+        if len(paths) != 1:
+            return False
+        _, calls = paths[0]
+        controls = [tuple(controls_of(c.unit, c.statement)) for c in calls] + [tuple(writer.controls)]
+        return not any(x for c in controls for x in c if not x.startswith("TRY"))
+
     def _order_by_jobs(self, items):
         """(ordered, reason, (placements, keys)): whether the job scripts order every pair of writers.
         ``items`` are ("sql", writer, step, None) or ("package", None, step, package name). Writers in
-        different scheduled jobs, run more than once, run after an asynchronous sp_start_job alongside
-        the started job, or run by a job with unresolved steps stay unordered."""
+        different scheduled jobs, run more than once, run conditionally, run after an asynchronous start
+        alongside the started job, or run by a job that is not fully understood stay unordered."""
         chosen = []
         for item in items:
             found = self._placements(item)
@@ -804,12 +933,20 @@ class Tracer:
             if len(found) > 1 or (item[0] == "sql" and
                                   len(self._call_paths(item[1].statement.scope, entries=[found[0]["scope"]])) > 1):
                 return False, "writer_reached_by_several_steps_or_paths", None
+            if found[0].get("problem"):
+                return False, found[0]["problem"], None
+            if item[0] == "sql" and not self._unconditional_from(found[0]["scope"], item[1]):
+                return False, "call_on_the_way_is_conditional", None
             chosen.append(found[0])
         if any(not e["root"].enabled for e in chosen):
             return False, "writer_only_in_disabled_job", None
         root = chosen[0]["root"]
         if any(e["root"] is not root for e in chosen):
             return False, "writers_in_different_jobs", None
+        involved = {id(root)} | {id(e["job"]) for e in self._job_index() if e["root"] is root}
+        for job in self.jobs:
+            if id(job) in involved and job.problems:
+                return False, job.problems[0], None
         if any(e["root"] is root and e["package"] is None and e["scope"] is None for e in self._job_index()):
             return False, "job_runs_procedures_not_in_scan", None
         for i in range(len(chosen)):
@@ -817,9 +954,6 @@ class Tracer:
                 relation = _path_relation(chosen[i]["path"], chosen[j]["path"])
                 if relation is None:
                     return False, "writers_overlap_in_chained_jobs", None
-                if relation == 0 and chosen[i]["sub"] != chosen[j]["sub"] and re.search(
-                        r"\b(?:IF|WHILE|GOTO|CATCH)\b", mask_noncode(chosen[i]["step"].command), re.I):
-                    return False, "same_job_step_order_not_settled", None
         keys: dict[int, list] = {}
         groups: dict[tuple, list[int]] = {}
         for index, e in enumerate(chosen):

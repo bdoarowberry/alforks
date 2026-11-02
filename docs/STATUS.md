@@ -477,3 +477,32 @@ Eight high-severity findings, all fixed. Each test fails on the code before the 
   line. gap-summary: `writer_steps_by_job_context`.
 - System procedures in job steps (msdb, master, unresolved `sp_*` / `xp_*`) are ignored.
 - Tests: `tests/test_column_jobs.py` (11).
+
+### Adversarial review 8 of job ordering (tests/test_column_review8.py; 14 cases failed before)
+
+Ordering is now refused unless the job's whole run is understood. Each reason is recorded:
+- **Steps the tool cannot follow:** CmdExec / PowerShell steps; T-SQL commands with inline writes,
+  IF / WHILE / RETURN / THROW / TRY, dynamic EXEC or `EXEC @proc`.
+- **Job flow:** step loops; failure branches (`on_fail_action` 3/4, kept for run context only);
+  asynchronous SSISDB starts (not SYNCHRONIZED); `sp_start_job` at a named step; cycles of
+  `sp_start_job`.
+- **Scripts changing the job:** jobs defined twice, deleted, or with deleted steps; arguments that
+  could not be read (no crash on `@step_id = @n`).
+- **Packages:** names matching several package copies, or another project's package.
+- **Calls:** a conditional call or write between the job step and the writer.
+
+The reader now:
+- applies `sp_update_jobstep`, and `sp_update_job` from any file (job names are global);
+- attaches shared schedules by name;
+- ignores commented-out `sp_start_job` and SSISDB calls;
+- follows `USE` inside a step command, and runs a step without `@database_name` in master;
+- orders procedures and packages in one command by their position;
+- reads child packages run by a parent package's Execute Package task;
+- reads arguments containing function calls and string concatenation.
+
+Diagnostics for the 54 "writer not run by any job script" traces:
+- `scan.job_scripts` adds `step_procedures` (resolved / other_database / unresolved /
+  several_definitions), `jobs_by_problem`, `procedures_reached_from_job_steps` and
+  `packages_named_in_steps`;
+- writer-order gaps record `writers` and `writers_in_job_scripts`;
+- gap-summary adds `writer_order_gaps_by_writers_in_job_scripts` (none / some / all).

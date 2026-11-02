@@ -289,6 +289,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.job_scripts:
             from .jobs import parse_job_scripts
             tracer.jobs, scan["job_scripts"] = parse_job_scripts(args.job_scripts)
+            scan["job_scripts"].update(tracer.job_diagnostics())
         scan["declared_terminals"] = len(terminals)
         output = Path(args.output)
         output.mkdir(parents=True, exist_ok=True)

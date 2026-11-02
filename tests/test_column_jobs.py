@@ -118,3 +118,12 @@ def test_package_step_and_sql_fix_in_one_job_are_ordered(tmp_path):
     assert package["run_context"]["status"] == "run_by_enabled_job"
     fix = next(s for s in t.steps_for(t.target_id) if s["writer_kind"] == "update")
     assert any("after package load_stage" in n for n in fix["notes"]) and fix["status"] == "inferred"
+
+
+def test_scan_reports_how_job_step_procedures_resolved(tmp_path):
+    t = trace(ROOT / "sql", "demo.dbo.Target.col_c", tmp_path, *JOBS)
+    jobs = t.data["scan"]["job_scripts"]
+    assert jobs["step_procedures"] == {"resolved": 9}   # two steps only run sp_start_job
+    assert jobs["procedures_reached_from_job_steps"] >= 9
+    gap = writer_gaps(t)[0]
+    assert gap["detail"]["writers"] == 2 and gap["detail"]["writers_in_job_scripts"] == 2
