@@ -213,6 +213,9 @@ def _totals(traces: list[dict]) -> dict:
     gap_reasons: dict[str, Counter] = {}   # gap kind -> reason -> traces (value-path and context gaps)
     run_context: dict[str, str] = {}       # step id -> job-script run status (each writing step once)
     in_jobs: Counter = Counter()            # writer-order gaps: are their writers run by the job scripts?
+    assertion_traces: dict[str, set[int]] = {}   # assertion id -> traces using it
+    assertion_state: dict[str, tuple[str, str]] = {}   # assertion id -> (review, origin)
+    traces_on_unreviewed = 0
     earlier = {"traces_with_earlier_content": 0, "loops_cut_traced": 0, "update_only_untraced": 0,
                "rows_not_updated_steps": 0, "traces_with_remaining_cycles": 0, "remaining_cycles": 0}
     for data in traces:
@@ -250,6 +253,11 @@ def _totals(traces: list[dict]) -> dict:
         reasons_here = {r for g in data.get("gaps", []) if g["kind"] == "wildcard_without_schema"
                         and g.get("affects") != "row_selection" for r in (g.get("detail") or {}).get("unexpanded_star", [])}
         star_reasons.update(reasons_here)
+        for index, prov in enumerate(data.get("assertion_provenance") or []):
+            assertion_traces.setdefault(prov["id"], set()).add(id(data))
+            assertion_state[prov["id"]] = (prov.get("review") or "not recorded", prov.get("origin") or "not recorded")
+        if any((p.get("review") or "not recorded") != "reviewed" for p in data.get("assertion_provenance") or []):
+            traces_on_unreviewed += 1
         for g in data.get("gaps", []):
             detail = g.get("detail") or {}
             if g["kind"] == "ambiguous_writer_order" and "writers_in_job_scripts" in detail:
@@ -283,6 +291,16 @@ def _totals(traces: list[dict]) -> dict:
         "results": dict(sorted(results.items())),
         "value_path_ends_by_meaning": dict(sorted(ends.items())),
         "declared_terminal_ends": declared_ends,
+        "assertions": {
+            "used": len(assertion_traces),
+            "by_review": dict(sorted(Counter(r for r, _ in assertion_state.values()).items())),
+            "by_origin": dict(sorted(Counter(o for _, o in assertion_state.values()).items())),
+            "traces_relying_on_unreviewed": traces_on_unreviewed,
+            "traces_per_assertion": sorted((len(t) for t in assertion_traces.values()), reverse=True)[:20],
+            "note": "Counts only: how many distinct assertions the traces use, their review state and origin, "
+                    "how many traces rest on at least one unreviewed assertion, and (descending) how many "
+                    "traces each assertion supports, so review can start with the ones that carry most weight.",
+        },
         "no_writer_stops": {"stops": no_writer["stops"], "distinct_objects": len(no_writer["distinct_objects"]),
                             "with_unused_writer_candidates": no_writer["with_unused_writer_candidates"],
                             "unused_writer_candidates_by_category": dict(sorted(near.items()))},

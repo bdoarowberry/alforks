@@ -30,3 +30,15 @@ def test_linked_server_reason_says_whether_the_database_is_scanned(tmp_path):
     assert reasons["external_object"] == {"linked_server_to_a_scanned_database_name": 1}
     page = (tmp_path / "b" / "demo.output.result_value.lineage.md").read_text(encoding="utf-8")
     assert "--local-server" in page
+
+
+def test_assertion_use_is_summarised_as_counts(tmp_path):
+    root = FIXTURES / "review" / "assert_dynamic"
+    assert run_cli(cli_args(root, "demo.output.result_value", tmp_path, *DB, "--gap-summary",
+                            "--assertions", str(root / "assertions.json"))) in (0, 3)
+    totals = json.loads((tmp_path / "gap-summary.json").read_text(encoding="utf-8"))["totals"]
+    block = totals["assertions"]
+    assert block["used"] >= 1 and sum(block["by_review"].values()) == block["used"]
+    assert block["traces_per_assertion"][0] == 1
+    assert block["traces_relying_on_unreviewed"] == (1 if block["by_review"].get("reviewed", 0) < block["used"] else 0)
+    assert "demo" not in json.dumps(block).lower()
