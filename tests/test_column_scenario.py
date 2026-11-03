@@ -66,8 +66,12 @@ def test_reuse_reads_the_existing_result_and_does_not_claim_its_origin(tmp_path)
     assert "reads the existing rows instead: sql/publish.sql:14 (SELECT value_col FROM dbo.saved_result;)" in stop["detail"]
     assert "How those rows were populated is not determined by this scenario" in stop["detail"]
     assert t.data["completeness"]["ends_by_meaning"] == {"existing_content_not_written_in_scenario": 1}
-    overview, _ = pages(tmp_path)
+    assert t.data["completeness"]["result"] == "not_written_in_scenario"      # never "complete_within_selected_scope"
+    overview, detailed = pages(tmp_path)
     assert "**Not written in this scenario.**" in overview
+    assert "- **Status:** not written in this scenario; existing rows' origin not determined —" in overview
+    assert "> **Result: Not written in this scenario — under the assumed values the invocation only reads rows" in detailed
+    assert "complete_within_selected_scope" not in overview
     excluded = t.data["scan"]["scenario"]["procedures"][0]["excluded_statements"]
     assert len(excluded) == 2 and all("after the RETURN at line 15" in x["reason"] for x in excluded)
 

@@ -308,7 +308,10 @@ def _result_text(t: _Trace) -> tuple[str, int]:
                                                 "--max-depth and are not traced further",
                  "complete_within_selected_scope": "Complete within the selected sources — paths end at objects with "
                                                    "no writer in them, files, constants or parameters, not at a "
-                                                   "proven origin"}.get(comp.get("result"), "Complete")
+                                                   "proven origin",
+                 "not_written_in_scenario": "Not written in this scenario — under the assumed values the invocation "
+                                            "only reads rows that existed before; where they came from is not "
+                                            "determined (no lineage is claimed)"}.get(comp.get("result"), "Complete")
         return label + (f" ({'; '.join(qualifiers)})" if qualifiers else ""), n_gaps
     if n_gaps:
         n_context = sum((comp.get("context_gaps_by_kind") or {}).values())

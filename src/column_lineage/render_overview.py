@@ -1167,7 +1167,8 @@ def _result_head(a: Analysis) -> str:
             "complete_to_declared_boundary": "Traced to terminals declared for this run (their upstream is not "
                                              "proved)",
             "complete_to_requested_depth": "Traced to the depth limit set for this run (some routes were cut)",
-            "complete_within_selected_scope": "All scanned code traced; origin not proved"}.get(
+            "complete_within_selected_scope": "All scanned code traced; origin not proved",
+            "not_written_in_scenario": "Not written in this scenario; the existing rows' origin is not determined"}.get(
         comp.get("result"), "Traced")
 
 
@@ -1192,6 +1193,7 @@ RESULT_LABEL = {
     "complete_to_declared_boundary": "traced to declared terminals (upstream not proved)",
     "complete_to_requested_depth": "cut at the depth limit",
     "complete_within_selected_scope": "all scanned code traced; origin not proved",
+    "not_written_in_scenario": "not written in this scenario; existing rows' origin not determined",
     "incomplete": "not fully traced",
 }
 
@@ -1507,7 +1509,8 @@ def _scenario_flag(a: Analysis) -> list[str]:
 def _section_coverage(a: Analysis, detailed: str) -> list[str]:
     comp, t = a.comp, a.t
     if not a.families:
-        return [f"- **Status:** {_text(comp.get('result') or comp.get('status') or 'unknown')} — {_no_route_sentence(a)}",
+        result = comp.get("result") or comp.get("status") or "unknown"
+        return [f"- **Status:** {_text(RESULT_LABEL.get(result, result))} — {_no_route_sentence(a)}",
                 "- A requested boundary or declared terminal is where this run stopped; it is not an originating "
                 "system."]
     counts = _end_kinds(a)
@@ -1537,7 +1540,9 @@ def _section_coverage(a: Analysis, detailed: str) -> list[str]:
             "complete_to_requested_depth": "**Cut at the requested depth** on some routes — not traced further",
             "complete_within_selected_scope": "**All scanned code traced; origin not proved** — every route ends "
                                               "at a stop inside the scanned code, but the unresolved origins below "
-                                              "are not proved"}.get(
+                                              "are not proved",
+            "not_written_in_scenario": "**Not written in this scenario** — the invocation only reads rows that "
+                                       "existed before; their origin is not determined"}.get(
             comp.get("result"), _text(comp.get("result") or "complete"))
     statuses = comp.get("steps_by_status") or {}
     step_text = ", ".join(f"{statuses.get(s, 0)} {s}" for s in ("verified", "inferred", "asserted"))

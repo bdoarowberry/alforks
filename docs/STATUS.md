@@ -666,7 +666,9 @@ variants. Calls, reads and invocation membership now require the walk to have re
 Rerun (08e39ab): 1 definition, 91 reached / 12 excluded / 0 neither, still 7 calls and 27 reads after
 the RETURN. Cause (tester's diagnosis): the RETURN sits in a TRY whose CATCH re-throws, and THROW was
 treated as falling through, so the statements after the TRY/CATCH looked reached. THROW now ends the
-path like RETURN.
+path like RETURN. Verified by the tester: 0 calls and 1 read after the RETURN; regular and interim
+runs unchanged. Their remaining point: reuse traces were labelled `complete_within_selected_scope`;
+the result is now `not_written_in_scenario` when the target itself is not written.
 
 ## T-SQL construct probe and sqlleaf comparison (tests/test_column_tsql_constructs.py)
 

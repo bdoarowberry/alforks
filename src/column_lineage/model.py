@@ -427,6 +427,9 @@ class TraceResult:
         undeclared = [s for s in ends_needing_proof if s.declared_terminal is None]
         if not complete:
             result = "incomplete"
+        elif any(s.reason == "scenario_not_written" and s.node.id == self.target.id for s in self.stops):
+            # --scenario: this invocation does not write the field; it only reads rows that existed before.
+            result = "not_written_in_scenario"
         elif any(s.reason == "max_depth" for s in self.stops):
             result = "complete_to_requested_depth"
         elif declared and not undeclared:
@@ -452,7 +455,9 @@ class TraceResult:
                         "other end is a terminal declared for this run; their original stop reasons are kept and "
                         "upstream population beyond them is not proved), or complete_within_selected_scope when "
                         "some paths end at objects with no writer in the selected sources (not proof that they "
-                        "are ultimate sources). Where a write reads the value its column or variable already had, that read ends at "
+                        "are ultimate sources), or not_written_in_scenario when, under --scenario, the invocation does not write the "
+                        "field at all (it reads rows that existed before; their origin is not determined). "
+                        "Where a write reads the value its column or variable already had, that read ends at "
                         "an 'earlier content' node (stop prior_state): the value before that write, with its candidate "
                         "earlier writers traced (which of them populated the rows is not proved). "
                         "Row-selection gaps (filters and joins that could not be fully resolved) are "

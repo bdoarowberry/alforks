@@ -252,7 +252,9 @@ WHILE, BEGIN...END, TRY/CATCH, RETURN), with an environment of the supplied valu
 - When every writer of an object is excluded, `_expand_column` stops with `scenario_not_written`
   (meaning `existing_content_not_written_in_scenario`), whose detail lists the excluded writers and the
   reachable statements of the procedure that read the object, and says that how its rows were
-  populated is not determined. It counts as an end needing proof (never a boundary).
+  populated is not determined. It counts as an end needing proof (never a boundary). When the target
+  itself stops there (and nothing else is open), `completeness.result` is `not_written_in_scenario`, never
+  `complete_within_selected_scope`: no lineage is claimed for the existing rows.
 - JSON: `scan.scenario` = `{note, procedures: [{procedure, definition, values, excluded_statements:
   [{path, line, statement, what, reason, writes}], uncertain_conditions,
   parameters_changed_in_procedure, calls, notes}]}`; also in `scan-diagnostics.json`.
