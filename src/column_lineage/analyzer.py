@@ -339,6 +339,14 @@ class Analyzer:
         alias_node = node.args.get("alias") if isinstance(node, exp.Expression) else None
         alias = norm(alias_node.name) if isinstance(alias_node, exp.TableAlias) and alias_node.name else None
         alias_columns = [norm(ident_text(c)) for c in alias_node.columns] if isinstance(alias_node, exp.TableAlias) and alias_node.columns else None
+        if isinstance(node, exp.Table) and node.args.get("pivots"):
+            pivot = node.args["pivots"][0]
+            what = "UNPIVOT" if pivot.args.get("unpivot") else "PIVOT"
+            n = Node(UNKNOWN, node.sql(dialect="tsql", comments=False)[:200])
+            gap = ctx.gap("unsupported_statement", f"{what} over {table_parts(node)[3]}: its output columns are not "
+                          "traced.", n, node, {"reason": "pivot_or_unpivot_not_traced"})
+            return Source(alias or (pivot.alias or "pivot").lower(), "opaque", gap=gap,
+                          names=tuple({norm(alias or ""), norm(pivot.alias or "")} - {""}))
         if isinstance(node, exp.Table):
             server, database, schema, name = table_parts(node)
             if isinstance(node.this, (exp.Func, exp.Anonymous)) or (
@@ -388,6 +396,16 @@ class Analyzer:
             # CROSS APPLY fn(args) AS x without a subquery: the same as FROM fn(args) AS x.
             table = exp.Table(this=node.this, alias=node.args.get("alias"))
             return self.source_for(table, scope)
+        if isinstance(node, exp.Lateral) and isinstance(node.this, exp.Subquery) and \
+                isinstance(node.this.this, exp.Values):
+            alias_node = node.args.get("alias") or node.this.args.get("alias")
+            name = norm(alias_node.name) if isinstance(alias_node, exp.TableAlias) and alias_node.name else \
+                f"values{len(scope.sources) + 1}"
+            cols = [norm(ident_text(c)) for c in alias_node.columns] if isinstance(alias_node, exp.TableAlias) \
+                and alias_node.columns else None
+            local = Local("values", name, node.this.this, cols, {}, scope,
+                          ObjectRef(name, kind="derived", scope=ctx.local_scope(node)))
+            return Source(name, "local", columns=cols, reliable=bool(cols), local=local, names=(name,))
         if isinstance(node, (exp.Subquery, exp.Lateral)):
             inner = node.this
             if isinstance(inner, exp.Subquery):
@@ -816,7 +834,7 @@ class Analyzer:
                     if position is None or position >= len(row.expressions):
                         continue
                     value = row.expressions[position]
-                    step = self.make_step(node, "derived", value, Scope(ctx, {}), ctx, "column_alias_list",
+                    step = self.make_step(node, "derived", value, Scope(ctx, {}, local.parent), ctx, "column_alias_list",
                                           [f"VALUES row {i} of {len(rows)}"] if len(rows) > 1 else [])
                     ctx.steps.append(step)
             else:
@@ -942,6 +960,11 @@ class Analyzer:
         self.walk(value, VALUE, None, scope, ctx, inputs, extra_rows, True)
         notes, inferred = list(dict.fromkeys(ctx.step_notes[notes_before:])), ctx.step_inferred
         inputs = dedupe_inputs(inputs)
+        if not inputs and not any(isinstance(n, (exp.Column, exp.Subquery, exp.Select)) for n in value.walk()):
+            # CAST(NULL AS int), CONVERT(date, '19000101', 112), GETDATE(), ERROR_MESSAGE(): no column is read;
+            # the expression itself is the end (a constant or a value the server supplies at run time).
+            text = value.sql(dialect="tsql", comments=False)
+            inputs = [Input(Node(CONSTANT, text), VALUE, text, None, VERIFIED, None, "no column is read")]
         operation = classify(value, target.name)
         step = Step(target=target, writer_kind=writer_kind, expression=value.sql(dialect="tsql", comments=False),
                     operation=operation, inputs=inputs, row_selection=extra_rows,
@@ -980,7 +1003,47 @@ class Analyzer:
             if role == VALUE and const_ok:
                 out.append(Input(Node(CONSTANT, e.sql(dialect="tsql", comments=False)), VALUE, e.sql(dialect="tsql", comments=False), branch))
             return
+        if isinstance(e, exp.Var) and e.name.upper() == "DEFAULT" and role == VALUE and const_ok:
+            out.append(Input(Node(CONSTANT, "DEFAULT"), VALUE, "DEFAULT", branch, VERIFIED, None,
+                             "the column's default (see the column definition)"))
+            return
         if isinstance(e, exp.DataType) or isinstance(e, exp.Var):
+            return
+        if isinstance(e, exp.NextValueFor):
+            # A sequence: a system-generated value, not a column of any source.
+            name = e.this.sql(dialect="tsql", comments=False)
+            if role == VALUE:
+                out.append(Input(Node(CONSTANT, f"NEXT VALUE FOR {name}"), VALUE, e.sql(dialect="tsql", comments=False),
+                                 branch, VERIFIED, None, "generated by a sequence"))
+            return
+        if isinstance(e, exp.Anonymous) and str(e.this).upper() == "IDENTITY":
+            # SELECT IDENTITY(type, seed, increment) AS c INTO ...: generated, not read from a source.
+            if role == VALUE:
+                out.append(Input(Node(CONSTANT, "IDENTITY"), VALUE, e.sql(dialect="tsql", comments=False), branch,
+                                 VERIFIED, None, "generated identity value"))
+            return
+        if isinstance(e, exp.Anonymous) and str(e.this).upper() == "CHOOSE" and e.expressions:
+            index, *choices = e.expressions
+            label = index.sql(dialect="tsql", comments=False)
+            self.walk(index, CONDITION, join_branch(branch, f"CHOOSE {label}"), scope, ctx, out, rows, False)
+            for i, choice in enumerate(choices, 1):
+                self.walk(choice, role, join_branch(branch, f"CHOOSE {label} = {i}"), scope, ctx, out, rows, True)
+            if role == VALUE:
+                out.append(Input(Node(CONSTANT, "NULL"), VALUE, "NULL", join_branch(branch, f"CHOOSE {label} out of range"),
+                                 VERIFIED, None, "CHOOSE returns NULL when the index is out of range"))
+            return
+        if isinstance(e, (exp.Lag, exp.Lead)):
+            self.walk(e.this, role, branch, scope, ctx, out, rows, const_ok)
+            offset = e.args.get("offset")
+            if offset is not None:
+                self.walk(offset, WINDOW, join_branch(branch, "offset"), scope, ctx, out, rows, False)
+            default = e.args.get("default")
+            fallback = join_branch(branch, f"{type(e).__name__.upper()} default (no row at the offset)")
+            if default is not None:
+                self.walk(default, role, fallback, scope, ctx, out, rows, True)
+            elif role == VALUE:
+                out.append(Input(Node(CONSTANT, "NULL"), VALUE, "NULL", fallback, VERIFIED, None,
+                                 "implicit default NULL: no row at the offset"))
             return
         if isinstance(e, exp.Parameter):
             name = restore_variable(e.sql(dialect="tsql", comments=False)).lower()
@@ -1467,7 +1530,23 @@ class Analyzer:
                         ctx.gap("column_count_mismatch", "VALUES row does not cover the target column.", target, row)
                         continue
                     row_context = context + ([f"VALUES row {j} of {len(rows)}"] if len(rows) > 1 else [])
-                    ctx.steps.append(self.make_step(target, "insert_values", row.expressions[position], Scope(ctx, ctes),
+                    value = row.expressions[position]
+                    if isinstance(value, exp.Var) and value.name.upper() == "DEFAULT" and target.object is not None:
+                        columns, status, _ = self.catalog.schema_for(target.object)
+                        info = next((c for c in columns or [] if c.name == target.name), None)
+                        if info is None:
+                            ctx.gap("missing_definition", f"VALUES gives DEFAULT for {target.name}, but no definition "
+                                    f"of {target.object.display} declares it.", target, row)
+                            continue
+                        default = info.default or self.catalog.column_defaults.get(target.object.key, {}).get(info.name)
+                        value = parse_expression(default) if default else exp.Null()
+                        step = self.make_step(target, "insert_values", value or exp.Null(), Scope(ctx, ctes), ctx,
+                                              method, row_context)
+                        step.notes.append(f"VALUES gives DEFAULT: the column's declared default "
+                                          f"{default if default else '(none, so NULL)'}.")
+                        ctx.steps.append(step)
+                        continue
+                    ctx.steps.append(self.make_step(target, "insert_values", value, Scope(ctx, ctes),
                                                     ctx, method, row_context))
                 continue
             if not isinstance(select, exp.Select):
@@ -1579,6 +1658,12 @@ class Analyzer:
         info = next((c for c in columns or [] if c.name == column), None)
         if info is not None and (info.identity or info.computed or info.rowversion):
             return  # generated values are explained by the column definition, not by this INSERT
+        if info is None and status != "declared" and column not in self.object_certain(writer.ref):
+            # No definition lists the column and no statement names it: it may not exist (a phantom bound
+            # from a keyword, a PIVOT output, ...). Never complete such a column from "default or NULL".
+            ctx.gap("missing_definition", f"{writer.ref.display} has no known column {column}: no definition lists "
+                    "it and no statement in the scan names it.", target, tree.this)
+            return
         if info is not None and info.default:
             value = parse_expression(info.default) or exp.Null()
             what = f"its default {info.default}"

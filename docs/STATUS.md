@@ -614,3 +614,27 @@ runs byte-identical.
   Windows) into a line break, renumbering every line and so every step id (ids hash the evidence line).
   Now only files with no LF at all are normalised. Test: `test_double_cr_line_endings_keep_line_numbers_and_step_ids`.
   Step ids on the estate should return to their 2829077 values.
+
+## T-SQL construct probe and sqlleaf comparison (tests/test_column_tsql_constructs.py)
+
+Fixed (each was a false complete, a wrong binding or an unexplained end):
+- PIVOT / UNPIVOT outputs were bound as phantom columns of the source; now an `unsupported_statement` gap.
+- `IDENTITY(int,1,1)` in SELECT INTO bound `int` as a column; `NEXT VALUE FOR seq` bound the sequence as a
+  column. Both are now generated-value ends.
+- Safety net: an INSERT that omits a column no definition lists and no statement names no longer
+  completes it as "default or NULL"; it is a `missing_definition` gap.
+- A cursor over a UNION read only the first branch; every branch now feeds the FETCH variables.
+- MERGE (or other DML) nested in `INSERT ... SELECT FROM (MERGE ... OUTPUT ...)` registered only the outer
+  target; now a gap on every table involved.
+- `VALUES (DEFAULT, ...)` now gives the declared default; CHOOSE keeps its choices (index as a condition,
+  NULL when out of range); `LAG/LEAD` keep their default; literal-only expressions (`CAST(NULL AS int)`,
+  `GETDATE()`, `CONVERT(date, '19000101', 112)`) record a constant end.
+- `CROSS APPLY (VALUES (a,'x'),(b,'y')) AS v(val, name)` (the unpivot idiom) is traced.
+- Dynamic SQL evaluation: `CONCAT_WS` was evaluated as `CONCAT` (wrong table name, so a wrong source);
+  `ISNULL(@v, ...)` ignored truncation to `@v`'s type. Both fixed (ISNULL with an unknown type is now
+  "not evaluated").
+
+Ideas from the sqlleaf comparison, not yet done (sound versions only): bind `sp_executesql @params` to
+their arguments (likely the most common dynamic-SQL blocker); inline a scalar UDF whose body is one
+`RETURN (SELECT ...)`; substitute `DEFAULT` arguments of inline TVFs; show which function wraps each input
+on the pages; per-route ids diffed between runs; one whole-run graph export.

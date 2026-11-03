@@ -315,8 +315,35 @@ class Evaluator:
         args = lambda *nodes: [self.eval(n, unit, point, scope, depth + 1, env) for n in nodes]  # noqa: E731
         if isinstance(node, (exp.Add, exp.DPipe)):
             return self.combine(self.collect(args, node.this, node.expression), concat_plus, sql_text(node))
+        if isinstance(node, exp.ConcatWs):
+            # CONCAT_WS(sep, a, b, ...): the separator goes between the non-NULL pieces. (A subclass of
+            # Concat in SQLGlot, so it must be tested first.)
+            def concat_ws(vs):
+                sep, pieces = vs[0], [v for v in vs[1:] if v is not None]
+                if sep is None:
+                    return None
+                if any(not isinstance(v, str) for v in [sep] + pieces):
+                    raise Unknown("CONCAT_WS over a number is not evaluated")
+                return sep.join(pieces)
+            return self.combine(self.collect(args, *node.expressions), concat_ws, sql_text(node))
         if isinstance(node, exp.Concat):
             return self.combine(self.collect(args, *node.expressions), concat_function, sql_text(node))
+        if isinstance(node, exp.Coalesce) and node.args.get("is_null"):
+            # ISNULL(a, b) returns a's type: the replacement is cut to a's declared length. Only a variable
+            # with a known declared length is evaluated; anything else is not.
+            first = node.this
+            from .catalog import restore_variable
+            name = restore_variable(sql_text(first)).lower() if isinstance(first, exp.Parameter) else None
+            declared = self.declared_types(scope, unit).get(name) if name else None
+            kind, length = type_length(declared) if declared is not None else ("unknown", None)
+            if kind != "string" or (length is None and not (isinstance(declared, exp.DataType)
+                                                             and "MAX" in sql_text(declared).upper())):
+                raise Unknown(f"{shorten(sql_text(node))}: ISNULL takes the first argument's type, which is not known")
+
+            def isnull(vs):
+                value = vs[0] if vs[0] is not None else vs[1]
+                return value[:length] if isinstance(value, str) and length is not None else value
+            return self.combine(self.collect(args, node.this, *node.expressions), isnull, sql_text(node))
         if isinstance(node, exp.Coalesce):
             return self.combine(self.collect(args, node.this, *node.expressions),
                                 lambda vs: next((v for v in vs if v is not None), None), sql_text(node))

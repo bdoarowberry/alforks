@@ -885,18 +885,26 @@ class Catalog:
                                                                       f"FETCH at line {line} from a cursor whose query was not analysed"))
                 continue
             _, statement, select = declared[-1]
-            first = select
-            while isinstance(first, (exp.Union, exp.Except, exp.Intersect)):
-                first = first.this
-            items = first.expressions if isinstance(first, exp.Select) else []
-            for i, name in enumerate(names):
-                value = items[i] if i < len(items) else None
-                value = value.this if isinstance(value, exp.Alias) else value
-                holder = replace(statement, scope=scope, procedure=procedure)
-                self.assignments[(scope, name)].append(Assignment(
-                    name, scope, holder if value is not None else fetch_statement, unit, value,
-                    first if isinstance(first, exp.Select) else None, "fetch",
-                    f"FETCH at line {line} from cursor {match.group('cursor')} (column {i + 1} of its query)"))
+            # Every branch of a UNION supplies rows: one assignment per branch, matched by position.
+            parts, pending = [], [select]
+            while pending:
+                node = pending.pop(0)
+                if isinstance(node, (exp.Union, exp.Except, exp.Intersect)):
+                    pending[:0] = [node.this, node.expression] if isinstance(node, exp.Union) else [node.this]
+                else:
+                    parts.append(node)
+            for number, part in enumerate(parts, 1):
+                items = part.expressions if isinstance(part, exp.Select) else []
+                which = f" (branch {number} of {len(parts)})" if len(parts) > 1 else ""
+                for i, name in enumerate(names):
+                    value = items[i] if i < len(items) else None
+                    value = value.this if isinstance(value, exp.Alias) else value
+                    holder = replace(statement, scope=scope, procedure=procedure)
+                    self.assignments[(scope, name)].append(Assignment(
+                        name, scope, holder if value is not None else fetch_statement, unit, value,
+                        part if isinstance(part, exp.Select) else None, "fetch",
+                        f"FETCH at line {line} from cursor {match.group('cursor')} (column {i + 1} of its query"
+                        f"{which})"))
 
     def _alter_views(self, unit: Unit) -> None:
         """ALTER VIEW defines a view like CREATE VIEW; the indexer keeps only its SELECT."""
@@ -1098,6 +1106,22 @@ class Catalog:
                         "table; its columns correspond by position and are not mapped.")
             return
         self._alter_default(unit, statement)
+        if isinstance(tree, exp.Expression):
+            nested = [n for n in tree.find_all(exp.Merge, exp.Insert, exp.Update, exp.Delete)
+                      if n is not tree and n.find_ancestor(exp.Subquery) is not None]
+            if nested:
+                # Composable DML (INSERT ... SELECT FROM (MERGE ... OUTPUT ...) AS m): neither the inner
+                # write nor the OUTPUT rows are mapped; say so for every table involved.
+                names = []
+                for node in [tree] + nested:
+                    target = node.this
+                    if isinstance(target, exp.Schema):
+                        target = target.this
+                    if isinstance(target, exp.Table):
+                        names.append(self.ref_from_table(target, unit, statement).name)
+                self._issue("unsupported_statement", unit, statement, tuple(dict.fromkeys(names)),
+                            "A write nested inside another statement (composable DML with OUTPUT) is not mapped.")
+                return
         returning = tree.args.get("returning") if isinstance(tree, exp.Expression) else None
         into = returning.args.get("into") if isinstance(returning, exp.Expression) else None
         if into is not None:
