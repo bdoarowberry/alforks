@@ -261,3 +261,14 @@ def test_several_definitions_are_named_and_each_is_walked(tmp_path):
     assert calls == {"scenario_copies/a/publish.sql": [], "scenario_copies/b/publish_old.sql": ["demo.dbo.c_build"]}
     overview = (tmp_path / "demo.dbo.c_saved.value_col.overview.md").read_text(encoding="utf-8")
     assert "**`demo.dbo.c_publish` has 2 definitions**" in overview
+
+
+def test_a_catch_that_rethrows_ends_the_path(tmp_path):
+    """Tester trial shape: TRY returns, CATCH re-throws; the calls after the TRY/CATCH cannot run."""
+    t = run(tmp_path / "t", "demo.dbo.u_report.value_col", "dbo.u_publish_try @reuse=1")
+    proc = scenario_block(t)
+    assert proc["calls"] == [] and [(r["display"], r["line"]) for r in proc["reads"]] == [("demo.dbo.u_saved", 31)]
+    calls = [x for x in proc["excluded_statements"] if x["what"].startswith("calls ")]
+    assert len(calls) == 2 and all("CATCH block, which ends with the THROW at line 36" in x["reason"] for x in calls)
+    t = run(tmp_path / "r", "demo.dbo.u_report.value_col", "dbo.u_publish_raise @reuse=1")
+    assert [c["procedure"] for c in scenario_block(t)["calls"]] == ["demo.dbo.u_build_result"]   # RAISERROR continues

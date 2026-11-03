@@ -599,8 +599,10 @@ class _Walker:
                 else:
                     env = dict(env)
                     self.unknown(env, names, f"may be changed at line {self.line(item.start)}")
-            if item.word == "RETURN":
-                self.after_return = (f"after the RETURN at line {self.line(item.start)}"
+            if item.word in ("RETURN", "THROW"):
+                # THROW always transfers control: to an enclosing CATCH (walked as reachable) or out of the
+                # batch. RAISERROR does not (outside TRY most severities continue), so it falls through.
+                self.after_return = (f"after the {item.word} at line {self.line(item.start)}"
                                      + (f", reached because {self.context[-1]}" if self.context else ""))
                 return False, env
             return True, env
@@ -626,7 +628,12 @@ class _Walker:
             if item.catch is None:
                 return alive_try, env_try
             catch_changed = self.assigned_in(item.catch, catch_env)
+            ended_try = self.after_return
             alive_catch, env_catch = self.walk(item.catch, catch_env)
+            if not alive_try and not alive_catch:
+                ended_catch = self.after_return.replace("after the ", "", 1)
+                self.after_return = (f"{ended_try}; an error before it goes to the CATCH block, which ends with the "
+                                     f"{ended_catch}")
             if changed or catch_changed:
                 for name in changed | catch_changed:
                     self.r.changed.setdefault(name, "changed inside a TRY/CATCH block")

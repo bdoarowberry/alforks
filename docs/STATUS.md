@@ -663,6 +663,10 @@ reuse 2 (11, 0); no excluded statement could run. Open: in reuse, 7 calls and 27
 certain RETURN were still listed as the invocation's. Not reproduced on the invented shape or five
 variants. Calls, reads and invocation membership now require the walk to have reached the statement;
 `statements.neither_lines` and a several-definitions line on the pages show the remaining causes.
+Rerun (08e39ab): 1 definition, 91 reached / 12 excluded / 0 neither, still 7 calls and 27 reads after
+the RETURN. Cause (tester's diagnosis): the RETURN sits in a TRY whose CATCH re-throws, and THROW was
+treated as falling through, so the statements after the TRY/CATCH looked reached. THROW now ends the
+path like RETURN.
 
 ## T-SQL construct probe and sqlleaf comparison (tests/test_column_tsql_constructs.py)
 

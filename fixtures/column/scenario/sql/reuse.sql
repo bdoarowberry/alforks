@@ -22,3 +22,38 @@ BEGIN
   EXEC dbo.u_build_result;
 END
 GO
+-- The TRY returns and the CATCH re-throws: nothing after the TRY/CATCH runs.
+CREATE PROCEDURE dbo.u_publish_try @reuse bit AS
+BEGIN
+  BEGIN TRY
+    IF @reuse = 1
+    BEGIN
+      SELECT value_col FROM dbo.u_saved;
+      RETURN;
+    END
+  END TRY
+  BEGIN CATCH
+    THROW;
+  END CATCH;
+
+  SELECT value_col FROM dbo.u_stage;
+  EXEC dbo.u_build_stage;
+  EXEC dbo.u_build_result;
+END
+GO
+-- RAISERROR does not end the procedure: what follows it can still run.
+CREATE PROCEDURE dbo.u_publish_raise @reuse bit AS
+BEGIN
+  BEGIN TRY
+    IF @reuse = 1
+    BEGIN
+      SELECT value_col FROM dbo.u_saved;
+      RETURN;
+    END
+  END TRY
+  BEGIN CATCH
+    RAISERROR('failed', 10, 1);
+  END CATCH;
+  EXEC dbo.u_build_result;
+END
+GO

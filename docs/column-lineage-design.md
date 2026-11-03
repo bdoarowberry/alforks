@@ -235,8 +235,10 @@ WHILE, BEGIN...END, TRY/CATCH, RETURN), with an environment of the supplied valu
   NULL, a plain decimal or exponent number is a number (`-0` is 0), any other word is a string.
   Anything undecided keeps both arms (`uncertain_conditions`). Two scenarios for one procedure are
   refused.
-- A settled IF excludes the other arm; statements after a RETURN that every allowed path reaches are
-  excluded. A WHILE whose condition is false excludes its body; otherwise the body is kept.
+- A settled IF excludes the other arm; statements after a RETURN or THROW that every allowed path
+  reaches are excluded. THROW always transfers control (to an enclosing CATCH, which is walked as
+  reachable, or out of the batch); RAISERROR falls through (outside TRY most severities continue). A
+  TRY/CATCH whose TRY path and CATCH both end (e.g. RETURN in the TRY, THROW in the CATCH) ends the path. A WHILE whose condition is false excludes its body; otherwise the body is kept.
 - Assignments: `SET @p = <settled value>` on a reachable path updates the environment; any other
   possible assignment (SELECT, UPDATE SET, FETCH INTO, OUTPUT argument, `EXEC @p =`, a statement that
   could not be parsed) makes the parameter unknown from there on. Parameters assigned anywhere in a
