@@ -44,6 +44,7 @@ The useful options:
 | `--entry-point PROCEDURE ...` | The procedure(s) the run starts from. When writers in several procedures conflict, the call sequence from here orders them (each writer reached by one call path, unconditionally, or in the two arms of one IF/ELSE); the order is noted on the steps instead of an `ambiguous_writer_order` gap. Writers not called from it keep the gap. |
 | `--job-scripts PATH ...` | SQL Agent job scripts (files, or folders of `.sql`) as SSMS writes them ("Script Job as"). The step order of one enabled job orders the writers it runs, including package steps and jobs chained with `sp_start_job`; each writer step records which job runs it (`run_context`). Inferred: a script is a static copy, not proof of the deployed job. Writers in independently scheduled jobs stay unordered. |
 | `--declared-terminals FILE` | Objects or columns the reviewer accepts as terminal sources for this run: one glob per line with an optional `# reason`, or JSON `{"terminals": [{"pattern": ..., "reason": ...}]}`. Stops there keep their reason and are labelled; the result can be `complete_to_declared_boundary`. Upstream population is not proved. |
+| `--scenario "PROC @p=v ..."` | Trace one execution scenario: assumed values for some of a procedure's parameters (repeatable, one procedure each; `@p=0`, `@p='EU'`, `@p=NULL`). Branches the values make unreachable *in that procedure* (an IF arm they settle, statements after a RETURN they make certain) are excluded and listed with the reason; everything uncertain is kept. Pages state the values as assumptions, not evidence of what ran. Without it every statically possible branch is traced. See "Scenario runs". |
 | `--max-depth N` | Stop after N mapping steps. |
 | `--trace-row-selection` | Also trace filter and join columns upstream (larger output). |
 | `--gap-summary` | Also write `gap-summary.json`, a summary with no names in it, safe to share. |
@@ -203,6 +204,30 @@ description in `src/column_lineage/assertions.py`.
      from the other writers stay open.
 - **Privacy:** an assertions file names real objects. It belongs with the source and must not
   be shared outside it.
+
+### Scenario runs
+
+`--scenario "dbo.publish_data @mode=0 @rebuild=1"` traces one execution scenario. Use a separate
+`--output` folder: pages have the same names as the unconstrained run's.
+
+- In the named procedure, an `IF`/`ELSE` whose condition the values settle keeps only the arm that runs,
+  and statements after a `RETURN` the values make certain are excluded. Writers, statement issues,
+  variable assignments and procedure calls there are left out and listed (`scan.scenario` in the JSON,
+  the "Scenario (assumed values)" section of both pages) with the condition that excludes them.
+- Nothing uncertain is dropped: a condition that reads anything but literals and the supplied
+  parameters (columns, `EXISTS`, functions, other variables) keeps both arms; a parameter assigned in
+  the procedure (`SET`, `SELECT @p =`, `FETCH INTO`, an `OUTPUT` argument, `EXEC @p =`, an unparsed
+  statement) is unknown from there on, unless a `SET` to a value the scenario settles; one assigned in
+  a loop or `TRY`/`CATCH` is unknown throughout it; a procedure with `GOTO` is not constrained.
+  Parameters the scenario does not name are unknown (declared defaults are not assumed). SQL `NULL`
+  follows T-SQL: a comparison with NULL is not true, so the `ELSE` arm runs.
+- Values are not carried into called procedures, and procedures that write the tables the scenario
+  procedure reads keep all their writers; the page lists them as separate upstream writers and says
+  that their run order relative to the scenario procedure needs job or run evidence (or quotes the
+  `--job-scripts` context). No call between them is invented.
+- When the values exclude every writer of a table (e.g. `@rebuild=0` returns the saved result), the
+  trace stops with `scenario_not_written`, names the statement that reads the existing rows, and says
+  that how they were populated is not determined by the scenario.
 
 ### Declared terminals and user functions
 

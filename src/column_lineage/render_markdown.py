@@ -56,6 +56,8 @@ STOP_LABEL = {
     "max_depth": "maximum depth reached",
     "external_file": "external file read by an SSIS package",
     "prior_state": "earlier content before this write (candidate earlier writers are shown on this page)",
+    "scenario_not_written": "not written in this scenario: the invocation reads existing rows (how they were "
+                            "populated is not determined by the scenario)",
 }
 
 SECTION_TITLES = (
@@ -340,6 +342,83 @@ def assertion_provenance_text(data: dict) -> str:
     return f"{records} assertion record{'' if records == 1 else 's'}: {fmt(made)}; {fmt(review)}"
 
 
+def _short_proc(name: str | None) -> str:
+    parts = [p for p in re.split(r"\.", (name or "").lower()) if p]
+    return ".".join(parts[-2:])
+
+
+def scenario_lines(data: dict, detailed: str = "", limit: int | None = None) -> list[str]:
+    """The scenario of the run (--scenario) as assumptions: values, statements they exclude on this trace's
+    objects, branches kept because uncertain, and upstream writers outside the scenario procedure."""
+    block = (data.get("scan") or {}).get("scenario")
+    if not block:
+        return []
+    procs = block.get("procedures") or []
+    values = "; ".join(f"{_code(p['procedure'])} with " + ", ".join(f"{_code(k + ' = ' + str(v))}"
+                                                                     for k, v in p["values"].items())
+                       for p in procs)
+    out = [f"**Scenario-specific result — assumed values, not evidence of what ran in production.** This run "
+           f"traced one execution scenario: {values}. Only what these values allow is shown; the unconstrained run "
+           "(without `--scenario`) shows every statically possible branch.", ""]
+    objects = {(n.get("object") or {}).get("key") for n in data.get("nodes") or []} - {None}
+    names = {_short_proc(p["procedure"]) for p in procs}
+    excluded = [x for p in procs for x in p.get("excluded_statements") or []]
+    relevant = [x for x in excluded if set(x.get("writes") or []) & objects]
+    if relevant:
+        shown = relevant[:limit] if limit else relevant
+        out.append(f"- **Excluded by these values** ({_plural(len(relevant), 'statement')} writing objects on "
+                   "this trace):")
+        out += [f"    - {_code(x['path'] + ':' + str(x['line']))} {_code(x['statement'], 120)} — {_text(x['reason'])}"
+                for x in shown]
+        if len(relevant) > len(shown):
+            out.append(f"    - and {len(relevant) - len(shown)} more — see the [detailed page]({detailed}#scenario)")
+    else:
+        out.append("- **Excluded by these values:** no statement writing an object on this trace.")
+    others = len(excluded) - len(relevant)
+    if others:
+        out.append(f"- {_plural(others, 'other excluded statement')} of the scenario procedure "
+                   f"{'does' if others == 1 else 'do'} not touch this trace (listed in `scan-diagnostics.json`).")
+    kept = [u for p in procs for u in p.get("uncertain_conditions") or []]
+    changed = [f"{_code(k)} {_text(v)}" for p in procs for k, v in (p.get("parameters_changed_in_procedure") or {}).items()]
+    if kept or changed:
+        out.append("- **Kept because uncertain** (never dropped):")
+        out += [f"    - {_text(u)}" for u in kept[:limit] if u] + \
+               [f"    - parameter {c}; later conditions on it keep both arms" for c in changed]
+    for p in procs:
+        for note in p.get("notes") or []:
+            out.append(f"- {_text(note)}")
+    # Writers in other procedures feeding what the scenario procedure reads: not connected by a call.
+    by_target: dict[str, list[dict]] = {}
+    for step in data.get("steps") or []:
+        by_target.setdefault(step.get("target"), []).append(step)
+    calls = {_short_proc(c["procedure"]): c for p in procs for c in p.get("calls") or []}
+    upstream: dict[tuple, list[dict]] = {}
+    for step in data.get("steps") or []:
+        if _short_proc(step.get("procedure")) not in names:
+            continue
+        for inp in step.get("inputs") or []:
+            for writer in by_target.get(inp.get("node"), []):
+                proc = writer.get("procedure")
+                if proc and _short_proc(proc) not in names:
+                    obj = inp["node"].rsplit(".", 1)[0]
+                    upstream.setdefault((obj, proc), []).append(writer)
+    if upstream:
+        out.append("- **Upstream writers outside the scenario procedure** (kept as separate writers):")
+        for (obj, proc), steps in sorted(upstream.items()):
+            call = calls.get(_short_proc(proc))
+            if call:
+                order = f"called by the scenario procedure at line {call['line']}"
+            else:
+                order = ("a separate procedure the scenario procedure does not call; whether it runs before the "
+                         "scenario procedure needs job or run evidence")
+            context = next((s.get("run_context") for s in steps if s.get("run_context")), None)
+            if context:
+                jobs = ", ".join(_code(j["job"]) for j in (context.get("jobs") or [])[:3])
+                order += (f" (job scripts: {_text(context.get('status'))}" + (f" — {jobs}" if jobs else "") + ")")
+            out.append(f"    - {_code(obj)} is written by {_code(proc)}: {order}.")
+    return out
+
+
 def _section_identity(t: _Trace, json_name: str | None) -> list[str]:
     data = t.data
     comp = data.get("completeness") or {}
@@ -362,6 +441,9 @@ def _section_identity(t: _Trace, json_name: str | None) -> list[str]:
                "is where this trace ended. It is not a claim that those columns are ultimate "
                "source-system fields.")
     out.append("")
+    scenario = scenario_lines(data)
+    if scenario:
+        out += ['<a id="scenario"></a>', "", "### Scenario (assumed values)", ""] + scenario + [""]
 
     target_kind = t.target.get("kind")
     rows = [

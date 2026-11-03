@@ -620,6 +620,15 @@ runs byte-identical.
   Now only files with no LF at all are normalised. Test: `test_double_cr_line_endings_keep_line_numbers_and_step_ids`.
   Step ids on the estate should return to their 2829077 values.
 
+## Scenario runs (`--scenario`, tests/test_column_scenario.py)
+
+Optional per-procedure parameter values exclude the branches they make unreachable in that procedure
+(IF arms, statements after a certain RETURN), listed with the reason; uncertain branches are kept; a
+table whose writers are all excluded stops with `scenario_not_written` (existing rows read; their
+origin not determined). Pages state the values as assumptions and list upstream writers in other
+procedures whose run order needs job or run evidence. Without `--scenario` nothing changes (corpus:
+48/48 traces identical). Invented acceptance case: `fixtures/column/scenario/sql/publish.sql`.
+
 ## T-SQL construct probe and sqlleaf comparison (tests/test_column_tsql_constructs.py)
 
 Fixed (each was a false complete, a wrong binding or an unexplained end):

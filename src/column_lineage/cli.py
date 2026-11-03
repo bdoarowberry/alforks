@@ -42,6 +42,12 @@ def build_parser() -> argparse.ArgumentParser:
                         help="Linked-server name(s) whose four-part references mean the same databases as the "
                              "scanned files (add the remote database's SQL as another --source-root)")
     parser.add_argument("--trace-row-selection", action="store_true")
+    parser.add_argument("--scenario", action="append", default=[], metavar="'PROC @p=v ...'",
+                        help="Trace one execution scenario: assumed values for a procedure's parameters, e.g. "
+                             "--scenario \"dbo.publish_data @mode=0 @rebuild=1\" (repeatable, one procedure each). "
+                             "Branches the values make unreachable in that procedure are excluded and listed; "
+                             "uncertain branches are kept. The values are assumptions for this analysis, not "
+                             "evidence of what ran. Without it every statically possible branch is traced.")
     parser.add_argument("--include", nargs="+", action="extend", default=[])
     parser.add_argument("--exclude", nargs="+", action="extend", default=[])
     parser.add_argument("--include-dated-snapshots", action="store_true")
@@ -306,7 +312,16 @@ def main(argv: list[str] | None = None) -> int:
             scan["packages"] = {"roots": [labels[r] for r in package_roots],
                                 **packages.scan_info(args.package_include, args.package_exclude)}
         boundary = Boundary(tuple(d.lower() for d in args.stop_at_database), tuple(args.stop_at_object), args.max_depth)
+        applied = None
+        if args.scenario:
+            from .scenario import ScenarioError, apply as apply_scenarios, parse_scenario
+            try:
+                applied = apply_scenarios(catalog, [parse_scenario(text) for text in args.scenario])
+            except ScenarioError as exc:
+                parser.error(str(exc))
+            scan["scenario"] = applied.to_dict()
         tracer = Tracer(catalog, trace_row_selection=args.trace_row_selection, assertions=asserted, packages=packages)
+        tracer.scenario = applied
         scan["assertions"] = len(asserted)
         tracer.terminals = terminals
         for name in args.entry_point:

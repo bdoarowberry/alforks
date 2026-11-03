@@ -31,6 +31,10 @@ contract is `column-lineage-design.md`; how to read a result is in `HANDOVER.md`
   earlier-content node (stop `prior_state`) and traces the candidate writers; which of them filled
   the rows in question is not proved.
 
+- **Scenario runs** (`--scenario`) settle only conditions over literals and the supplied parameters of
+  the named procedure; other conditions keep both arms, values are not carried into called
+  procedures, and the values themselves are assumptions, not evidence of what ran.
+
 ## Outside the scanned files
 
 - **No writer in the selected sources** (stop `source_without_writer`). The loader may be a package,

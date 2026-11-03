@@ -67,6 +67,7 @@ class Tracer:
         self.packages = packages   # optional ssis.PackageCatalog: package destinations as writers
         self.terminals: list[tuple[str, str]] = []   # (glob, reason) from --declared-terminals
         self.entry_points: list[str] = []            # procedure scopes the run starts from (--entry-point)
+        self.scenario = None                         # scenario.ScenarioSet (--scenario), or None
         self.jobs: list = []                         # SQL Agent jobs read from --job-scripts
         self._keys: dict = {}
         self.analyzer = analyzer or Analyzer(catalog)
@@ -807,6 +808,12 @@ class Tracer:
             for writer, step in writing:
                 if writer.statement.start > first and step.writer_kind in ("update", "merge_update"):
                     step.notes.append("Runs after earlier writers in the same scope and overwrites the rows it matches.")
+        excluded = (self.scenario.removed_writers.get(ref.key) if self.scenario is not None else None) or []
+        if not writing and not writers and excluded:
+            # The scenario's values make every writer of this object unreachable in that procedure: this
+            # invocation does not write it. Its rows come from before the invocation.
+            stops.append(self._scenario_not_written(node, ref, excluded))
+            return steps, gaps, stops, cycles
         if not writing:
             columns, schema_status, _ = self.catalog.schema_for(ref)
             declared = {c.name: c for c in columns} if columns else {}
@@ -837,6 +844,22 @@ class Tracer:
             if stop.reason == "source_without_writer" and ref.kind in ("table", "view"):
                 self._explain_no_writer(stop, ref, column, writers)
         return steps, gaps, stops, cycles
+
+    def _scenario_not_written(self, node: Node, ref, excluded) -> Stop:
+        from .scenario import reads_of
+        names = sorted({r.name for r in self.scenario.results if any(w.statement.scope == r.scope
+                                                                        for w, _ in excluded)})
+        lines = [f"{w.unit.root_label}/{w.unit.rel_path}:{w.statement.line} ({reason})" for w, reason in excluded[:4]]
+        reads = reads_of(self.catalog, self.scenario, ref)
+        detail = (f"Under the scenario, {', '.join(names)} does not write {ref.display}: its "
+                  f"{len(excluded)} writer statement(s) are excluded — {'; '.join(lines)}.")
+        if reads:
+            detail += (" It reads the existing rows instead: " + "; ".join(
+                f"{r['path']}:{r['line']} ({r['statement']})" for r in reads[:3]) + ".")
+        detail += (" How those rows were populated is not determined by this scenario; the unconstrained run "
+                   "(without --scenario) shows the writers that can produce them.")
+        stop = Stop(node, "scenario_not_written", detail)
+        return stop
 
     # ------------------------------------------------------- call order
     def _call_paths(self, scope: str, limit: int = 3, entries: list[str] | None = None) -> list[tuple[str, list]]:

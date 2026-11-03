@@ -55,7 +55,7 @@ from pathlib import Path
 import re
 import sys
 
-from .render_markdown import (via_text, NEXT_EVIDENCE, SECTION_ANCHORS, _anchor, _cell, _code, _link_target, _one_line,
+from .render_markdown import (via_text, scenario_lines, NEXT_EVIDENCE, SECTION_ANCHORS, _anchor, _cell, _code, _link_target, _one_line,
                               _plural, _status_rank, _text, _Trace, _truncate, assertion_provenance_text)
 
 INDEX_SCHEMA = "column-lineage-routes/1.0"
@@ -1006,6 +1006,9 @@ def _end_text(a: Analysis, node_id: str, kind: str) -> str:
         return "depth limit of the run reached — not traced further"
     if kind == "constant":
         return "constant value"
+    if kind == "scenario_not_written":
+        return ("not written in this scenario: the scenario's values exclude every writer, and the invocation reads "
+                "the existing rows; how those rows were populated is not determined by the scenario (see Scenario)")
     if kind == "gap":
         kinds = sorted({g.get("kind") or "gap" for g in t.gaps_by_node.get(node_id, [])})
         return "open point: " + "; ".join(_text(GAP_TEXT.get(k, k)) for k in kinds) + " — not proved"
@@ -1170,6 +1173,10 @@ def _result_head(a: Analysis) -> str:
 
 def _no_route_sentence(a: Analysis) -> str:
     t = a.t
+    stop = (t.stops_by_node.get(t.target_id) or [{}])[0]
+    if stop.get("reason") == "scenario_not_written":
+        return ("**Not written in this scenario.** " + _text(stop.get("detail") or "")
+                + " The values are assumptions for this run (see Scenario).")
     if t.stops_by_node.get(t.target_id):
         kind = a.end_kind(t.target_id)
         return (f"No step leads into this field in the selected sources: it is itself an end point "
@@ -1284,6 +1291,8 @@ COLUMN_END = {
     "max_depth": (2, "**Cut at the depth limit**"),
     "source_without_writer": (3, "**Unresolved origin** — no writer in the scanned sources"),
     "external_file": (3, "**Unresolved origin** — external file, its producer not found"),
+    "scenario_not_written": (3, "**Not written in this scenario** — existing rows are read; their origin is not "
+                                "determined"),
     "cycle": (4, "**Unresolved** — loop"),
     "gap": (4, "**Unresolved** — open point"),
     "open": (4, "**Unresolved** — open point"),
@@ -1478,6 +1487,14 @@ def _answer_changes(a: Analysis) -> list[str]:
 
 
 # --------------------------------------------------------------------------- 3. coverage
+
+def _scenario_flag(a: Analysis) -> list[str]:
+    block = (a.data.get("scan") or {}).get("scenario")
+    if not block:
+        return []
+    return ["- **Scenario-specific result:** the counts below cover only the branches the assumed parameter values "
+            "allow (see Scenario); the unconstrained run can include more routes."]
+
 
 def _section_coverage(a: Analysis, detailed: str) -> list[str]:
     comp, t = a.comp, a.t
@@ -2308,8 +2325,9 @@ def render_overview(data: dict, json_name: str | None = None, glossary: list[dic
     out = [f"# Column overview: {_code(a.t.display(a.t.target_id))}", ""]
     sections = (
         ("Field and definition", _section_field(a, entry, others)),
+        *((("Scenario (assumed values)", scenario_lines(a.data, detailed, 5)),) if scenario_lines(a.data) else ()),
         ("Plain answer", _section_answer(a, detailed)),
-        ("Coverage", _section_coverage(a, detailed)),
+        ("Coverage", _scenario_flag(a) + _section_coverage(a, detailed)),
         ("Main evidence needed", _section_evidence_needed(a, detailed)),
         ("Route families", _section_families(a, detailed)),
         ("Sources at a glance", _section_sources(a, detailed)),

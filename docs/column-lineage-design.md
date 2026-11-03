@@ -204,6 +204,41 @@ upstream unless `--trace-row-selection` is set.
 - For `#temp` tables, only writers in the same scope that precede the reading statement
   (or that are in an enclosing loop) are used.
 
+### Scenario runs (`scenario.py`, `--scenario`)
+
+A scenario assumes values for some parameters of one procedure. After loading (and dynamic-SQL
+evaluation), each definition of the procedure is walked once over its control structure (IF/ELSE,
+WHILE, BEGIN...END, TRY/CATCH, RETURN), with an environment of the supplied values:
+
+- An IF condition is evaluated over literals and the environment with T-SQL three-valued logic
+  (comparisons, IS [NOT] NULL, NOT, AND, OR, IN, BETWEEN; NULL is not true, so ELSE runs). Values are
+  converted to the declared parameter type (bit: non-zero is 1, `'TRUE'`/`'FALSE'`; numbers; strings
+  compared with trailing spaces ignored, and a case-only difference left undecided because the
+  collation is unknown). Anything else is undecided and keeps both arms (`uncertain_conditions`).
+- A settled IF excludes the other arm; statements after a RETURN that every allowed path reaches are
+  excluded. A WHILE whose condition is false excludes its body; otherwise the body is kept.
+- Assignments: `SET @p = <settled value>` on a reachable path updates the environment; any other
+  possible assignment (SELECT, UPDATE SET, FETCH INTO, OUTPUT argument, `EXEC @p =`, a statement that
+  could not be parsed) makes the parameter unknown from there on. Parameters assigned anywhere in a
+  loop body or a TRY/CATCH are unknown throughout it; arms of an undecided IF merge to unknown where
+  they differ. A procedure with GOTO is not constrained (`notes`).
+- Removed from the catalog for the run, with the reason: writers, statement issues, variable
+  assignments and procedure calls whose statement lies in an excluded span (an evaluated dynamic SQL
+  writer is placed at its EXEC). Called procedures are not constrained.
+- When every writer of an object is excluded, `_expand_column` stops with `scenario_not_written`
+  (meaning `existing_content_not_written_in_scenario`), whose detail lists the excluded writers and the
+  reachable statements of the procedure that read the object, and says that how its rows were
+  populated is not determined. It counts as an end needing proof (never a boundary).
+- JSON: `scan.scenario` = `{note, procedures: [{procedure, definition, values, excluded_statements:
+  [{path, line, statement, what, reason, writes}], uncertain_conditions,
+  parameters_changed_in_procedure, calls, notes}]}`; also in `scan-diagnostics.json`.
+- Pages: both carry a "Scenario (assumed values)" section (values as assumptions; statements writing
+  objects on this trace that the values exclude; branches kept as uncertain; writers in other
+  procedures of the objects the scenario procedure reads, each "called by the scenario procedure at
+  line N" or "a separate procedure ...; whether it runs before the scenario procedure needs job or run
+  evidence", with the `--job-scripts` run context when known). The overview's Coverage starts with
+  "Scenario-specific result".
+
 ## Status
 
 - `verified` — every value input is bound to a unique identity from explicit SQL.

@@ -288,7 +288,8 @@ class Stop:
     """Where a value path ends without a gap."""
     node: Node
     reason: str                    # boundary, source_without_writer, constant, parameter_without_caller, max_depth,
-                                   # external_file (SSIS), prior_state (earlier content whose sources are traced)
+                                   # external_file (SSIS), prior_state (earlier content whose sources are traced),
+                                   # scenario_not_written (--scenario makes every writer unreachable)
     detail: str | None = None
     writer_search: list[dict] | None = None   # source_without_writer: same-named writes not used, with why
     declared_terminal: str | None = None      # accepted as a terminal by the run's --declared-terminals (reason)
@@ -491,6 +492,7 @@ END_MEANING = {
     "max_depth": "max_depth",
     "external_file": "external_file_source",
     "prior_state": "earlier_content_traced",
+    "scenario_not_written": "existing_content_not_written_in_scenario",
 }
 
 
