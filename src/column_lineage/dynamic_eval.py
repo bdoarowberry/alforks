@@ -192,6 +192,8 @@ class Evaluator:
     # ---------------------------------------------------------------- entry
     def evaluate(self, issue) -> Evaluation:
         self._open = []
+        self._sp_call = None
+        self._bindings = {}
         unit, statement = issue.unit, issue.statement
         try:
             expr = self.executed_expression(statement.text)
@@ -199,6 +201,8 @@ class Evaluator:
             alts = self.relative_to(alts, unit, statement)
             if not alts:
                 raise Unknown("no value of the executed SQL could be enumerated")
+            if self._sp_call is not None:
+                self._bindings = self.sp_bindings(unit, statement)
             alternatives = self.alternatives(alts, issue, None, 0)
         except Unknown as exc:
             return Evaluation("unknown", unknown=exc.reasons, open=list(dict.fromkeys(self._open)))
@@ -237,10 +241,85 @@ class Evaluator:
                 first = named.get("@stmt")
             if first is None:
                 raise Unknown("sp_executesql is called without a statement argument that could be read")
+            rest = [e for e in tree.expressions if e is not first]
+            named = {sql_text(e.this).lower(): e.expression for e in rest
+                     if isinstance(e, exp.EQ) and isinstance(e.this, exp.Parameter)}
+            positional = [e for e in rest if not (isinstance(e, exp.EQ) and isinstance(e.this, exp.Parameter))]
+            params = named.pop("@params", None)
+            if params is None and positional:
+                params = positional.pop(0)
+            if params is not None or named or positional:
+                self._sp_call = (params, positional, named)
             return first
         if EXEC_VARIABLE.match(masked):
             raise Unknown("EXEC @variable runs the procedure whose name the variable holds; not evaluated")
         raise Unknown("this form of dynamic SQL is not evaluated")
+
+    def sp_bindings(self, unit, statement) -> dict[str, exp.Expression]:
+        """sp_executesql @stmt, @params, @p1 = v1, ...: each declared parameter is bound to its argument, so
+        the evaluated text reads the caller's value (a literal, or the caller's variable or parameter, which
+        the trace then follows). OUTPUT parameters, a parameter list that is not one known text, and a
+        declared parameter without an argument stay unevaluated."""
+        params, positional, named = self._sp_call
+        if params is None:
+            raise Unknown("sp_executesql passes arguments but its parameter list could not be read")
+        texts = self.eval(params, unit, statement, statement.scope, 0, None)
+        if len(texts) != 1 or not isinstance(texts[0].value, str):
+            raise Unknown("sp_executesql's parameter list is not one known text")
+        declared, depth, current = [], 0, ""
+        for ch in texts[0].value:
+            depth += {"(": 1, ")": -1}.get(ch, 0)
+            if ch == "," and depth == 0:
+                declared.append(current)
+                current = ""
+            else:
+                current += ch
+        declared.append(current)
+        bindings: dict[str, exp.Expression] = {}
+        for index, item in enumerate(d.strip() for d in declared):
+            if not item:
+                continue
+            match = re.match(r"(@[\w$#@]+)\s+(.*)$", item, re.S)
+            if not match:
+                raise Unknown(f"sp_executesql parameter {shorten(item, 40)!r} could not be read")
+            name, rest = match.group(1).lower(), match.group(2)
+            if re.search(r"\b(?:OUTPUT|OUT)\b", rest, re.I):
+                raise Unknown(f"sp_executesql parameter {name} is OUTPUT; values written back are not traced")
+            value = named.get(name, positional[index] if index < len(positional) else None)
+            if value is None and re.search(r"=", rest):
+                default = rest.split("=", 1)[1].strip()
+                try:
+                    value = self.parse_expression(default)
+                except Unknown:
+                    value = None
+            if value is None:
+                raise Unknown(f"sp_executesql parameter {name} has no argument that could be read")
+            if isinstance(value, exp.Alias) and str(value.alias).upper() in ("OUTPUT", "OUT"):
+                raise Unknown(f"sp_executesql argument for {name} is passed OUTPUT; values written back are not traced")
+            bindings[name] = value
+        return bindings
+
+    def bind_parameters(self, sql: str) -> str:
+        """The evaluated text with each bound sp_executesql parameter replaced by its argument (code only:
+        never inside string literals or comments of the evaluated text)."""
+        if not self._bindings:
+            return sql
+        masked = mask_noncode(sql)
+        out, last = [], 0
+        for match in re.finditer(r"(?<![\w@$#])@[\w$#@]+", masked):
+            replacement = self._bindings.get(match.group().lower())
+            if replacement is None:
+                continue
+            out.append(sql[last:match.start()])
+            out.append(sql_text(replacement))
+            last = match.end()
+        out.append(sql[last:])
+        return "".join(out)
+
+    def bound_variables(self) -> set[str]:
+        """Caller variables and parameters the bound arguments read: these belong to the caller's scope."""
+        return {sql_text(p).lower() for value in self._bindings.values() for p in value.find_all(exp.Parameter)} | \
+            {sql_text(value).lower() for value in self._bindings.values() if isinstance(value, exp.Parameter)}
 
     @staticmethod
     def parse_select(text: str) -> exp.Select:
@@ -683,6 +762,8 @@ class Evaluator:
         from .catalog import DYNAMIC, merge_split_inserts, non_lineage
         if not sql.strip():
             return []
+        if nesting == 0:
+            sql = self.bind_parameters(sql)
         masked = mask_noncode(sql)
         control = CONTROL_WORDS.search(masked)
         if control:
@@ -758,8 +839,9 @@ class Evaluator:
                 if isinstance(eq, exp.EQ) and isinstance(eq.this, exp.Parameter):
                     env[sql_text(eq.this).lower()] = self.eval(eq.expression, None, None, None, 0, env)
             return []
+        allowed = self.bound_variables() if getattr(self, "_bindings", None) else set()
         variables = sorted({sql_text(p).lower() for p in tree.find_all(exp.Parameter)
-                            if not sql_text(p).startswith("@@") and not is_argument_name(p)})
+                            if not sql_text(p).startswith("@@") and not is_argument_name(p)} - allowed)
         if variables:
             raise Unknown(f"the evaluated SQL reads {', '.join(variables)}; variables inside dynamic SQL belong to its "
                           "own batch (or to sp_executesql parameters) and are not traced")

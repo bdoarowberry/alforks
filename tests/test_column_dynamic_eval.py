@@ -200,11 +200,12 @@ def test_nested_exec_inside_the_string(tmp_path):
     assert t.complete
 
 
-def test_variable_read_inside_the_string_keeps_the_gap_and_truncation_applies(tmp_path):
+def test_sp_executesql_parameter_binds_to_its_argument_and_truncation_applies(tmp_path):
+    # @delta inside the string is the sp_executesql parameter bound by @delta = @offset.
     t = trace(dyn("batch_variable"), "demo.output.result_value", tmp_path / "a")
-    detail = t.gaps("dynamic_sql")[0]["detail"]
-    assert any("@delta" in p for p in detail["unknown_pieces"])
-    assert not t.complete
+    assert not t.gaps("dynamic_sql")
+    reads = inputs(t.only_step_for(t.target_id), "value")
+    assert any(r.endswith("::@offset") for r in reads) and "?.demo.source.input_a" in reads
     # DECLARE @table varchar(6) = 'source_b' keeps 'source': the string reads demo.source.
     t = trace(dyn("batch_variable"), "demo.output2.result_value", tmp_path / "b")
     step = t.only_step_for(t.target_id)
