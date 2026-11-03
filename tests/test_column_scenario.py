@@ -46,8 +46,9 @@ def test_regular_mode_with_rebuild_builds_from_the_regular_stage(tmp_path):
     assert "assumed values, not evidence of what ran in production" in scenario
     assert "`demo.dbo.publish_data` with `@mode = 0`, `@rebuild = 1`" in scenario
     assert "interim_stage" in scenario and "unconstrained run" in scenario
-    assert ("`demo.dbo.regular_stage` is written by `dbo.load_regular_stage`: a separate procedure the scenario "
-            "procedure does not call; whether it runs before the scenario procedure needs job or run evidence") in scenario
+    assert "**Writers on this trace run by this invocation:** `dbo.publish_data` (the scenario's entry procedure)" in scenario
+    assert ("**Writers on this trace not run by this invocation:** `dbo.load_regular_stage`. They may have written the "
+            "rows earlier or separately; whether, when and in what order they ran needs job or run evidence") in scenario
     assert "**Scenario-specific result:**" in overview[overview.index("## Coverage"):]
     assert '<a id="scenario"></a>' in detailed and "### Scenario (assumed values)" in detailed
 
@@ -198,3 +199,41 @@ def test_a_merged_return_and_insert_still_lines_up(tmp_path):
     [proc] = t.data["scan"]["scenario"]["procedures"]
     assert proc["applied"] and not proc["excluded_statements"]
     assert "parse_error" in t.gap_kinds
+
+
+# Tester trial shape (invocation.sql): the entry procedure only calls loaders, inside TRY/CATCH.
+INV = "demo.dbo.i_report.value_col"
+
+
+def scenario_block(t):
+    [proc] = t.data["scan"]["scenario"]["procedures"]
+    return proc
+
+
+def test_try_body_runs_in_order_so_an_early_test_is_decided(tmp_path):
+    t = run(tmp_path, INV, "dbo.i_publish @mode=0 @refresh=1")
+    proc = scenario_block(t)
+    assert not proc["uncertain_conditions"] and not proc["parameters_changed_in_procedure"]
+    assert [c["procedure"] for c in proc["calls"]] == ["demo.dbo.i_load_regular"]
+    assert proc["called_only_from_excluded_branches"] == ["demo.dbo.i_load_interim"]
+    overview, _ = pages(tmp_path, INV)
+    assert "`dbo.i_load_regular` (called at line 39)" in overview
+    assert "`dbo.i_load_interim` (called only from an excluded branch)" in overview
+    assert "**Scenario applied, nothing excluded on this trace:**" in overview
+
+
+def test_a_later_reassignment_keeps_only_the_later_test_uncertain(tmp_path):
+    proc = scenario_block(run(tmp_path, INV, "dbo.i_publish @mode=1 @refresh=1"))
+    assert [u.split("'")[1] for u in proc["uncertain_conditions"]] == ["IF @as_of = @period_end", "IF @mode = 1"]
+    assert "line 36" in proc["uncertain_conditions"][1]
+
+
+def test_reuse_excludes_every_later_call_and_says_the_rows_origin_is_open(tmp_path):
+    t = run(tmp_path, INV, "dbo.i_publish @mode=0 @refresh=0")      # also excludes an assignment (@msg)
+    proc = scenario_block(t)
+    assert proc["calls"] == [] and len(proc["excluded_statements"]) == 5
+    assert any(x["what"] == "assigns @msg" for x in proc["excluded_statements"])
+    overview, _ = pages(tmp_path, INV)
+    assert ("**This invocation writes no object on this trace** under these values. It reads the existing rows of "
+            "`demo.dbo.i_saved` (line 32); where those rows came from is not determined for this invocation") in overview
+    assert "may have written the rows earlier or separately" in overview

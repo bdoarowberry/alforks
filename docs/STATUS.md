@@ -648,6 +648,16 @@ would have dropped the INSERT's parse_error gap). Sweep: 1142 corpus procedures 
 procedure now line up (GOTO procedures excepted, by design). A scenario that cannot be applied now says
 so on both pages (`applied: false`).
 
+Tester trial of 5060ed2 (three scenarios, 178 targets; 0 traces changed, as expected for this estate):
+an excluded variable assignment crashed (`Assignment.name`; fixed); a parameter assigned anywhere in a
+TRY was unknown from the TRY's start, keeping an early decidable test uncertain (the TRY body now runs
+in order; only the CATCH sees possible changes); the pages did not separate writers run by the
+invocation from separate writers, and claimed "only what these values allow is shown" when nothing on
+the trace was excluded. Pages now list writers on the trace run by the invocation (call graph from
+reachable lines) and those not run by it, say when nothing is excluded on the trace, and, for an
+invocation that only reads existing rows, say that their origin is not determined. Fixture
+`invocation.sql`.
+
 ## T-SQL construct probe and sqlleaf comparison (tests/test_column_tsql_constructs.py)
 
 Fixed (each was a false complete, a wrong binding or an unexplained end):

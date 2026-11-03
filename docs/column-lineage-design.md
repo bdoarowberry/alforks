@@ -240,8 +240,10 @@ WHILE, BEGIN...END, TRY/CATCH, RETURN), with an environment of the supplied valu
 - Assignments: `SET @p = <settled value>` on a reachable path updates the environment; any other
   possible assignment (SELECT, UPDATE SET, FETCH INTO, OUTPUT argument, `EXEC @p =`, a statement that
   could not be parsed) makes the parameter unknown from there on. Parameters assigned anywhere in a
-  loop body or a TRY/CATCH are unknown throughout it; arms of an undecided IF merge to unknown where
-  they differ. A procedure with GOTO is not constrained (`notes`).
+  loop body are unknown throughout it. A TRY body runs in order with the current values; its CATCH sees
+  every parameter a reachable TRY statement may assign as unknown (an error can stop the TRY anywhere),
+  and after the construct the two paths merge. Arms of an undecided IF merge to unknown where they
+  differ. A procedure with GOTO is not constrained (`notes`).
 - Removed from the catalog for the run, with the reason: writers, statement issues, variable
   assignments and procedure calls whose statement lies in an excluded span (an evaluated dynamic SQL
   writer is placed at its EXEC). Called procedures are not constrained.
@@ -252,12 +254,19 @@ WHILE, BEGIN...END, TRY/CATCH, RETURN), with an environment of the supplied valu
 - JSON: `scan.scenario` = `{note, procedures: [{procedure, definition, values, excluded_statements:
   [{path, line, statement, what, reason, writes}], uncertain_conditions,
   parameters_changed_in_procedure, calls, notes}]}`; also in `scan-diagnostics.json`.
-- Pages: both carry a "Scenario (assumed values)" section (values as assumptions; statements writing
-  objects on this trace that the values exclude; branches kept as uncertain; writers in other
-  procedures of the objects the scenario procedure reads, each "called by the scenario procedure at
-  line N" or "a separate procedure ...; whether it runs before the scenario procedure needs job or run
-  evidence", with the `--job-scripts` run context when known). The overview's Coverage starts with
-  "Scenario-specific result".
+- Invocation: `invocation` lists the procedures this invocation can run (the scenario procedure and,
+  transitively, what it calls on lines that can run; callees are unconstrained), with how each is
+  reached; `called_only_from_excluded_branches` and `reads` (objects read by statements that can run)
+  are recorded too.
+- Pages: both carry a "Scenario (assumed values)" section: the values as assumptions; whether the
+  values exclude anything writing an object on this trace (if not, "its routes are the same as in the
+  unconstrained run"); the excluded statements; branches kept as uncertain; the writers on this trace
+  run by this invocation (with how they are reached) and those not run by it ("called only from an
+  excluded branch" where so) — "they may have written the rows earlier or separately; whether, when
+  and in what order they ran needs job or run evidence". When the invocation writes nothing on the
+  trace, the page says so and names the existing rows it reads, whose origin is not determined for
+  this invocation. The overview's Coverage starts with "Scenario-specific result", or "Scenario applied,
+  nothing excluded on this trace", or "Scenario not applied".
 
 ## Status
 

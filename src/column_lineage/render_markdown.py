@@ -363,18 +363,21 @@ def scenario_lines(data: dict, detailed: str = "", limit: int | None = None) -> 
         return [f"**Scenario requested but not applied — this is the unconstrained all-path result.** The assumed "
                 f"values ({values}) could not be applied, so no branch was excluded and every statically possible "
                 f"branch is shown: {why}", ""]
+    objects = {(n.get("object") or {}).get("key") for n in data.get("nodes") or []} - {None}
+    excluded = [x for p in procs for x in p.get("excluded_statements") or []]
+    relevant = [x for x in excluded if set(x.get("writes") or []) & objects]
+    stops = [s for s in data.get("stops") or [] if s.get("reason") == "scenario_not_written"]
+    effect = ("Branches these values exclude are left out (listed below)." if relevant or stops else
+              "These values exclude no writer of an object on this trace, so its routes are the same as in the "
+              "unconstrained run.")
     out = [f"**Scenario-specific result — assumed values, not evidence of what ran in production.** This run "
-           f"traced one execution scenario: {values}. Only what these values allow is shown; the unconstrained run "
-           "(without `--scenario`) shows every statically possible branch.", ""]
+           f"traced one execution scenario: {values}. {effect} The unconstrained run (without `--scenario`) shows "
+           "every statically possible branch.", ""]
     for p in procs:
         if not p.get("applied", True):
             out.append(f"- **Not applied to {_code(p['procedure'])}:** "
                        + ("; ".join(_text(n) for n in p.get("notes") or []) or "its control flow could not be followed")
                        + " Its branches are all kept.")
-    objects = {(n.get("object") or {}).get("key") for n in data.get("nodes") or []} - {None}
-    names = {_short_proc(p["procedure"]) for p in procs}
-    excluded = [x for p in procs for x in p.get("excluded_statements") or []]
-    relevant = [x for x in excluded if set(x.get("writes") or []) & objects]
     if relevant:
         shown = relevant[:limit] if limit else relevant
         out.append(f"- **Excluded by these values** ({_plural(len(relevant), 'statement')} writing objects on "
@@ -383,50 +386,42 @@ def scenario_lines(data: dict, detailed: str = "", limit: int | None = None) -> 
                 for x in shown]
         if len(relevant) > len(shown):
             out.append(f"    - and {len(relevant) - len(shown)} more — see the [detailed page]({detailed}#scenario)")
-    else:
-        out.append("- **Excluded by these values:** no statement writing an object on this trace.")
     others = len(excluded) - len(relevant)
     if others:
         out.append(f"- {_plural(others, 'other excluded statement')} of the scenario procedure "
-                   f"{'does' if others == 1 else 'do'} not touch this trace (listed in `scan-diagnostics.json`).")
+                   f"{'does' if others == 1 else 'do'} not write an object on this trace (listed in "
+                   "`scan-diagnostics.json`).")
     kept = [u for p in procs for u in p.get("uncertain_conditions") or []]
     changed = [f"{_code(k)} {_text(v)}" for p in procs for k, v in (p.get("parameters_changed_in_procedure") or {}).items()]
     if kept or changed:
         out.append("- **Kept because uncertain** (never dropped):")
-        out += [f"    - {_text(u)}" for u in kept[:limit] if u] + \
+        out += [f"    - {_text(u)}" for u in (kept[:limit] if limit else kept) if u] + \
                [f"    - parameter {c}; later conditions on it keep both arms" for c in changed]
     for p in procs:
         for note in p.get("notes") or []:
-            out.append(f"- {_text(note)}")
-    # Writers in other procedures feeding what the scenario procedure reads: not connected by a call.
-    by_target: dict[str, list[dict]] = {}
-    for step in data.get("steps") or []:
-        by_target.setdefault(step.get("target"), []).append(step)
-    calls = {_short_proc(c["procedure"]): c for p in procs for c in p.get("calls") or []}
-    upstream: dict[tuple, list[dict]] = {}
-    for step in data.get("steps") or []:
-        if _short_proc(step.get("procedure")) not in names:
-            continue
-        for inp in step.get("inputs") or []:
-            for writer in by_target.get(inp.get("node"), []):
-                proc = writer.get("procedure")
-                if proc and _short_proc(proc) not in names:
-                    obj = inp["node"].rsplit(".", 1)[0]
-                    upstream.setdefault((obj, proc), []).append(writer)
-    if upstream:
-        out.append("- **Upstream writers outside the scenario procedure** (kept as separate writers):")
-        for (obj, proc), steps in sorted(upstream.items()):
-            call = calls.get(_short_proc(proc))
-            if call:
-                order = f"called by the scenario procedure at line {call['line']}"
-            else:
-                order = ("a separate procedure the scenario procedure does not call; whether it runs before the "
-                         "scenario procedure needs job or run evidence")
-            context = next((s.get("run_context") for s in steps if s.get("run_context")), None)
-            if context:
-                jobs = ", ".join(_code(j["job"]) for j in (context.get("jobs") or [])[:3])
-                order += (f" (job scripts: {_text(context.get('status'))}" + (f" — {jobs}" if jobs else "") + ")")
-            out.append(f"    - {_code(obj)} is written by {_code(proc)}: {order}.")
+            if p.get("applied", True):
+                out.append(f"- {_text(note)}")
+    # Which writers on this trace this invocation runs, and which run separately.
+    invocation = {_short_proc(i["procedure"]): i["how"] for p in procs for i in p.get("invocation") or []}
+    excluded_callees = {_short_proc(c) for p in procs for c in p.get("called_only_from_excluded_branches") or []}
+    writers = sorted({s.get("procedure") for s in data.get("steps") or [] if s.get("procedure")}, key=str.lower)
+    inside = [w for w in writers if _short_proc(w) in invocation]
+    outside = [w for w in writers if _short_proc(w) not in invocation]
+    if inside:
+        out.append("- **Writers on this trace run by this invocation:** " + ", ".join(
+            f"{_code(w)} ({_text(invocation[_short_proc(w)])})" for w in inside) + ".")
+    elif writers:
+        read = [r for p in procs for r in p.get("reads") or [] if r["object"] in objects]
+        out.append("- **This invocation writes no object on this trace** under these values."
+                   + (" It reads the existing rows of " + ", ".join(
+                       f"{_code(r['display'])} (line {r['line']})" for r in read[:3])
+                      + "; where those rows came from is not determined for this invocation — the writers below "
+                        "are candidates, not proof." if read else ""))
+    if outside:
+        out.append("- **Writers on this trace not run by this invocation:** " + ", ".join(
+            _code(w) + (" (called only from an excluded branch)" if _short_proc(w) in excluded_callees else "")
+            for w in outside) + ". They may have written the rows earlier or separately; whether, when and in "
+            "what order they ran needs job or run evidence.")
     return out
 
 

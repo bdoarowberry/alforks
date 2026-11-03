@@ -1494,6 +1494,12 @@ def _scenario_flag(a: Analysis) -> list[str]:
         return []
     if not any(p.get("applied", True) for p in block.get("procedures") or []):
         return ["- **Scenario not applied:** the counts below are the unconstrained all-path result (see Scenario)."]
+    objects = {(n.get("object") or {}).get("key") for n in a.data.get("nodes") or []} - {None}
+    touched = any(set(x.get("writes") or []) & objects for p in block.get("procedures") or []
+                  for x in p.get("excluded_statements") or [])
+    if not touched and not any(s.get("reason") == "scenario_not_written" for s in a.data.get("stops") or []):
+        return ["- **Scenario applied, nothing excluded on this trace:** the counts below equal the unconstrained "
+                "run's (see Scenario for which writers this invocation runs)."]
     return ["- **Scenario-specific result:** the counts below cover only the branches the assumed parameter values "
             "allow (see Scenario); the unconstrained run can include more routes."]
 

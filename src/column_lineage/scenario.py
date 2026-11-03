@@ -605,12 +605,25 @@ class _Walker:
                 alive, env = self.walk(child, env)
             return alive, env
         if isinstance(item, TryCatch):
-            changed = self.assigned_in(item, env)
-            inner = dict(env)
-            self.unknown(inner, changed, "changed inside a TRY/CATCH block")
-            alive_try, _ = self.walk(item.body, dict(inner))
-            alive_catch, _ = self.walk(item.catch, dict(inner)) if item.catch is not None else (False, inner)
-            return alive_try or alive_catch, inner
+            # The TRY body runs in order with the current values. An error can stop it after any statement,
+            # so the CATCH sees, for each parameter the TRY may assign, any value it had on the way: unknown.
+            reached = len(self.r.reachable)
+            alive_try, env_try = self.walk(item.body, dict(env))
+            catch_env = dict(env)
+            changed = set()
+            for start, end in self.r.reachable[reached:]:     # assignments that can run, not excluded ones
+                changed |= self.assigned(start, end, env)
+            for name in changed:
+                catch_env[name] = UNKNOWN
+            if item.catch is None:
+                return alive_try, env_try
+            catch_changed = self.assigned_in(item.catch, catch_env)
+            alive_catch, env_catch = self.walk(item.catch, catch_env)
+            if changed or catch_changed:
+                for name in changed | catch_changed:
+                    self.r.changed.setdefault(name, "changed inside a TRY/CATCH block")
+            return alive_try or alive_catch, self.merge(env_try if alive_try else None,
+                                                         env_catch if alive_catch else None, env)
         if isinstance(item, If):
             label = f"{'WHILE' if item.loop else 'IF'} {_collapse(item.condition, 120)}"
             at = self.line(item.start)
@@ -773,6 +786,9 @@ class ScenarioSet:
         self.removed_writers: dict[str, list] = {}       # object key -> writers excluded
         self.removed: list[dict] = []                    # every excluded statement, for the pages
         self.calls: dict[str, list[dict]] = {}           # scope -> procedures it calls on reachable lines
+        self.invocation: dict[str, list[dict]] = {}      # scope -> procedures this invocation can run
+        self.excluded_callees: dict[str, list[str]] = {} # scope -> procedures called only from excluded lines
+        self.reads: dict[str, list[dict]] = {}           # scope -> objects read by statements that can run
 
     def excluded(self, unit, statement) -> str | None:
         result = self.by_scope.get(statement.scope)
@@ -793,6 +809,9 @@ class ScenarioSet:
                 "uncertain_conditions": list(dict.fromkeys(r.uncertain)),
                 "parameters_changed_in_procedure": dict(r.changed),
                 "calls": list(self.calls.get(r.scope, [])),
+                "invocation": list(self.invocation.get(r.scope, [])),
+                "called_only_from_excluded_branches": list(self.excluded_callees.get(r.scope, [])),
+                "reads": list(self.reads.get(r.scope, [])),
                 "notes": list(r.notes)} for r in self.results],
         }
 
@@ -863,7 +882,7 @@ def apply(catalog, scenarios: list[Scenario]) -> ScenarioSet:
                 kept.append(assignment)
             elif id(assignment.statement) not in seen:
                 seen.add(id(assignment.statement))
-                describe(assignment.unit, assignment.statement, reason, f"assigns {assignment.name}")
+                describe(assignment.unit, assignment.statement, reason, f"assigns {assignment.variable}")
         catalog.assignments[key] = kept
     for key, calls in list(catalog.calls_by_callee.items()):
         kept = []
@@ -881,7 +900,59 @@ def apply(catalog, scenarios: list[Scenario]) -> ScenarioSet:
                 applied.calls.setdefault(call.statement.scope, []).append(
                     {"procedure": call.callee.display, "line": call.statement.line})
     applied.removed.sort(key=lambda x: (x["path"], x["line"]))
+    # The procedures this invocation can run: the scenario procedure and, transitively, what it calls on
+    # lines that can run (callees are not constrained, so all their calls count).
+    by_caller: dict[str, list] = {}
+    for calls in catalog.calls_by_callee.values():
+        for call in calls:
+            by_caller.setdefault(call.statement.scope, []).append(call)
+    for result in applied.results:
+        found = [{"procedure": result.name, "how": "the scenario's entry procedure"}]
+        seen_scopes, frontier = {result.scope}, [result.scope]
+        while frontier:
+            scope = frontier.pop(0)
+            for call in sorted(by_caller.get(scope, []), key=lambda c: c.statement.start):
+                for proc in catalog.procs_for(call.callee):
+                    if proc.scope in seen_scopes:
+                        continue
+                    seen_scopes.add(proc.scope)
+                    frontier.append(proc.scope)
+                    caller = catalog.proc_by_scope.get(scope)
+                    found.append({"procedure": proc.ref.display,
+                                  "how": f"called at line {call.statement.line}"
+                                         + (f" by {caller.ref.display}" if caller and scope != result.scope else "")})
+        applied.invocation[result.scope] = found
+        applied.reads[result.scope] = reads_in(catalog, result)
+        names = {f["procedure"] for f in found}
+        applied.excluded_callees[result.scope] = sorted({
+            x["what"].split(" ", 2)[1] for x in applied.removed
+            if x["procedure_scope"] == result.scope and x["what"].startswith("calls ")} - names)
     return applied
+
+
+def reads_in(catalog, result: ProcedureScenario) -> list[dict]:
+    """Objects read (not written) by statements of the scenario procedure that can run: {object, line}."""
+    out, seen = [], set()
+    unit = result.unit
+    for statement in unit.index.statements:
+        if statement.scope != result.scope or result.excluded(statement.start, statement) is not None:
+            continue
+        tree = statement.tree
+        if not isinstance(tree, (exp.Select, exp.Union, exp.Insert, exp.Update, exp.Merge, exp.Delete)):
+            continue
+        target = tree.this if isinstance(tree, (exp.Insert, exp.Update, exp.Merge, exp.Delete)) else tree.args.get("into")
+        target = target.this if isinstance(target, (exp.Schema, exp.Into)) else target
+        for table in tree.find_all(exp.Table):
+            if table is target:
+                continue
+            try:
+                ref = catalog.canonical(catalog.ref_from_table(table, unit, statement))[0]
+            except Exception:   # noqa: BLE001 - a name that cannot be resolved is left out
+                continue
+            if (ref.key, statement.line) not in seen:
+                seen.add((ref.key, statement.line))
+                out.append({"object": ref.key, "display": ref.display, "line": statement.line})
+    return out
 
 
 def reads_of(catalog, applied: ScenarioSet, ref) -> list[dict]:
