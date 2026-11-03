@@ -686,6 +686,8 @@ class _TreeBuilder:
             last = index == len(shown) - 1 and not extra
             role = inp.get("role") or "value"
             tag = role if not inp.get("branch") else f"{role} · {_truncate(inp['branch'], LABEL_LIMIT)}"
+            if via_text(inp):
+                tag += f" · {_truncate(via_text(inp), LABEL_LIMIT)}"
             head = f"[{tag}] "
             status = inp.get("status") or "verified"
             marks = [f"({status})"] if status != "verified" else []
@@ -697,6 +699,12 @@ class _TreeBuilder:
         if extra:
             self.emit(f"{child_prefix}└─ … {_plural(extra, 'more input')} (see {t.label[step['id']]} "
                       "in Detailed steps)")
+
+
+def via_text(inp: dict) -> str | None:
+    """'via ISNULL > dbo.fn_rate' for an input passed through functions; None when read directly."""
+    chains = [c or "directly" for c in inp.get("via") or []]
+    return ("via " + "; ".join(chains)) if chains else None
 
 
 def _mermaid(t: _Trace) -> list[str]:
@@ -886,7 +894,8 @@ def _section_steps(t: _Trace) -> list[str]:
                 out.append("| " + " | ".join(_cell(c) for c in (
                     str(index), name, _text(inp.get("role") or "value"),
                     _code(inp.get("branch"), LABEL_LIMIT * 2) if inp.get("branch") else "—",
-                    _code(inp.get("expression"), LABEL_LIMIT * 2), status)) + " |")
+                    _code(inp.get("expression"), LABEL_LIMIT * 2) + (
+                        f" {_text(via_text(inp))}" if via_text(inp) else ""), status)) + " |")
         else:
             out.append("*No inputs recorded for this step.*")
     return out

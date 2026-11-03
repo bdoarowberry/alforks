@@ -196,10 +196,16 @@ class Input:
     status: str = VERIFIED
     gap: str | None = None         # gap id when this input could not be bound
     note: str | None = None
+    # Functions the input passes through, outermost first, one chain per distinct use
+    # (e.g. ["ISNULL > dbo.fn_rate"]); "" stands for a use outside any function. Empty: read directly.
+    via: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
-        return {"node": self.node.id, "role": self.role, "expression": self.expression, "branch": self.branch,
-                "status": self.status, "gap": self.gap, "note": self.note}
+        out = {"node": self.node.id, "role": self.role, "expression": self.expression, "branch": self.branch,
+               "status": self.status, "gap": self.gap, "note": self.note}
+        if self.via:
+            out["via"] = list(self.via)
+        return out
 
 
 @dataclass

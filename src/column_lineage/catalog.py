@@ -1975,6 +1975,56 @@ class InlineFunction:
     unit: "Unit"
     line: int
     database: str | None
+    defaults: dict[str, exp.Expression | None] = field(default_factory=dict)   # declared "= value" per parameter
+
+
+@dataclass
+class ScalarQueryFunction:
+    """A scalar user function whose whole body is one RETURN of an expression that reads tables,
+    e.g. RETURN (SELECT t.name FROM dbo.lookup t WHERE t.code = @code)."""
+    schema: str
+    name: str
+    params: list[str]
+    defaults: dict[str, exp.Expression | None]
+    expression: exp.Expression
+    unit: "Unit"
+    line: int
+    database: str | None
+    returns: str
+    body_hash: str
+    table_parameter: bool          # a READONLY (table-valued) parameter: not inlined
+
+
+def function_parameters(unit: "Unit", start: int, end: int) -> list[tuple[str, exp.Expression | None, bool, bool]]:
+    """(name, declared default, has a default, READONLY) for each parameter declared in
+    unit.text[start:end], the text between a function header's parentheses. A default that does not
+    parse is recorded as present but unknown (None)."""
+    masked, out = unit.masked, []
+    pieces, depth, begin = [], 0, start
+    for i in range(start, end):
+        ch = masked[i]
+        depth += {"(": 1, ")": -1}.get(ch, 0)
+        if ch == "," and depth == 0:
+            pieces.append((begin, i))
+            begin = i + 1
+    pieces.append((begin, end))
+    for a, b in pieces:
+        head = re.match(r"\s*(@[\w$#@]+)", masked[a:b])
+        if head is None:
+            continue
+        name = head.group(1).lower()
+        readonly = re.search(r"\bREADONLY\s*$", masked[a:b], re.I) is not None
+        eq = re.search(r"=", masked[a:b])
+        default, has_default = None, eq is not None
+        if eq is not None:
+            text = unit.text[a + eq.end():b]
+            text = re.sub(r"\s+(?:READONLY|OUTPUT|OUT)\s*$", "", text, flags=re.I).strip()
+            try:
+                default = sqlglot.parse_one(text, read="tsql", error_level=ErrorLevel.RAISE) if text else None
+            except (SqlglotError, ValueError):
+                default = None
+        out.append((name, default, has_default, readonly))
+    return out
 
 
 def inline_functions(catalog: "Catalog") -> dict[tuple[str, str], list[InlineFunction]]:
@@ -1991,7 +2041,8 @@ def inline_functions(catalog: "Catalog") -> dict[tuple[str, str], list[InlineFun
             while close < len(masked) and depth:
                 depth += {"(": 1, ")": -1}.get(masked[close], 0)
                 close += 1
-            params = [p.lower() for p in re.findall(r"@[\w$#@]+", masked[match.end():close - 1])]
+            declared = function_parameters(unit, match.end(), close - 1)
+            params = [p[0] for p in declared]
             head = re.compile(r"\s*RETURNS\s+TABLE\b(?:\s+WITH\s+\w+(?:\s*,\s*\w+)*)?\s+AS\s+RETURN\b", re.I)
             returns = head.match(masked, close)
             if returns is None:
@@ -2012,8 +2063,73 @@ def inline_functions(catalog: "Catalog") -> dict[tuple[str, str], list[InlineFun
                 continue
             database, _ = unit.database_at(match.start(), catalog.default_database)
             found[key].append(InlineFunction(key[0], key[1], params, query, unit,
-                                             unit.text.count("\n", 0, match.start()) + 1, database))
+                                             unit.text.count("\n", 0, match.start()) + 1, database,
+                                             {p[0]: p[1] for p in declared if p[2]}))
     catalog._inline_functions = found
+    return found
+
+
+SCALAR_RETURNS = re.compile(r"\s*RETURNS\s+(?P<type>[\w\[\]]+(?:\s*\(\s*[\w\s,]*\))?)\s+"
+                            r"(?:WITH\s+[\w\s,=]*?)?\bAS\b", re.I)
+
+
+def scalar_query_functions(catalog: "Catalog") -> dict[tuple[str, str], list[ScalarQueryFunction]]:
+    """Scalar functions whose body is exactly [BEGIN] RETURN <expression> [;] [END], where the
+    expression contains a query. Any other body (DECLARE, IF, several statements) is not listed."""
+    cached = getattr(catalog, "_scalar_query_functions", None)
+    if cached is not None:
+        return cached
+    found: dict[tuple[str, str], list[ScalarQueryFunction]] = defaultdict(list)
+    for unit in catalog.units:
+        masked = unit.masked
+        for match in FUNCTION_HEADER.finditer(masked):
+            parts = split_name(match.group("name"))
+            key = (norm(parts[-2]) if len(parts) > 1 and parts[-2] else catalog.default_schema, norm(parts[-1]))
+            close, depth = match.end(), 1
+            while close < len(masked) and depth:
+                depth += {"(": 1, ")": -1}.get(masked[close], 0)
+                close += 1
+            returns = SCALAR_RETURNS.match(masked, close)
+            if returns is None or returns.group("type").upper() == "TABLE":
+                continue
+            end = len(masked)
+            for boundary in (GO.search(masked, returns.end()), FUNCTION_HEADER.search(masked, returns.end()),
+                             DEFINITION.search(masked, returns.end())):
+                if boundary is not None:
+                    end = min(end, boundary.start())
+            a, b = returns.end(), end
+            while a < b and masked[a].isspace():
+                a += 1
+            while b > a and (masked[b - 1].isspace() or masked[b - 1] == ";"):
+                b -= 1
+            wrapped = re.match(r"BEGIN\b", masked[a:b], re.I)
+            if wrapped:
+                if not re.search(r"\bEND$", masked[a:b], re.I):
+                    continue
+                a, b = a + wrapped.end(), b - 3
+                while b > a and (masked[b - 1].isspace() or masked[b - 1] == ";"):
+                    b -= 1
+            body = masked[a:b].strip()
+            head = re.match(r"RETURN\b", body, re.I)
+            if head is None or ";" in body or re.search(r"\b(?:BEGIN|DECLARE|SET|IF|WHILE|RETURN)\b",
+                                                         body[head.end():], re.I | re.S):
+                continue
+            offset = a + (len(masked[a:b]) - len(masked[a:b].lstrip())) + head.end()
+            text = unit.text[offset:b].strip()
+            try:
+                expression = sqlglot.parse_one(text, read="tsql", error_level=ErrorLevel.RAISE)
+            except (SqlglotError, ValueError):
+                continue
+            if expression is None or not any(isinstance(n, (exp.Select, exp.Subquery)) for n in expression.walk()):
+                continue   # reads no table: the function summary already covers it
+            declared = function_parameters(unit, match.end(), close - 1)
+            database, _ = unit.database_at(match.start(), catalog.default_database)
+            found[key].append(ScalarQueryFunction(
+                key[0], key[1], [p[0] for p in declared], {p[0]: p[1] for p in declared if p[2]}, expression, unit,
+                unit.line_at(match.start()), database, returns.group("type"),
+                hashlib.sha1(re.sub(r"\s+", " ", text).strip().lower().encode()).hexdigest(),
+                any(p[3] for p in declared)))
+    catalog._scalar_query_functions = found
     return found
 
 

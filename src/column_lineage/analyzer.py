@@ -19,7 +19,7 @@ from sqlglot import exp
 
 from table_lineage.index import Statement
 
-from .catalog import inline_functions, controls_of, restore_variable, Catalog, ColumnInfo, Unit, Writer, ident_text, norm, statement_id, table_parts, update_target, function_summary, split_name
+from .catalog import inline_functions, scalar_query_functions, controls_of, restore_variable, Catalog, ColumnInfo, Unit, Writer, ident_text, norm, statement_id, table_parts, update_target, function_summary, split_name
 from .model import (
     TOP_ORDER, AMBIGUOUS, COLUMN, CONDITION, CONSTANT, FILTER, GROUP_BY, HAVING, INFERRED, JOIN_KEY, JOIN_PREDICATE,
     LOCAL_COLUMN, MERGE_CONDITION, PARAMETER, PARTIAL, TEMP_COLUMN, UNKNOWN, UNRESOLVED, VALUE, VARIABLE,
@@ -130,6 +130,9 @@ class Ctx:
         self.in_row_selection = False
         self.step_notes: list[str] = []     # notes the expression walk adds to the step being built
         self.step_inferred = False          # the walk relied on a summary (e.g. of a user function)
+        self.step_evidence: list[Evidence] = []   # definitions the walk read (inlined user functions)
+        # Inlined scalar functions being walked: parameter name -> (argument, caller scope, function).
+        self.inline_frames: list[dict[str, tuple]] = []
         self.star_reasons: set[str] = set()  # why a * seen in this statement could not be expanded
 
     def position(self, node) -> int:
@@ -304,6 +307,7 @@ class Analyzer:
         self._result_sets: dict[int, tuple] = {}
         self._inlined: dict[int, object] = {}   # id(query) -> InlineFunction it was read from
         self._inline_why: str | None = None     # why the last inline_tvf call did not inline
+        self._scalar_active: set[tuple[str, str]] = set()   # scalar functions being inlined (no recursion)
         self._read_names: dict[str, set[str]] | None = None
         self._local_memo: dict[tuple, tuple] = {}   # (what, id(query)) -> (query, result); query kept alive
         self._object_columns_active: set[str] = set()
@@ -957,8 +961,10 @@ class Analyzer:
         extra_rows: list[RowSelection] = []
         gaps_before = {g.id for g in ctx.gaps}
         notes_before, ctx.step_inferred = len(ctx.step_notes), False
+        evidence_before = len(ctx.step_evidence)
         self.walk(value, VALUE, None, scope, ctx, inputs, extra_rows, True)
         notes, inferred = list(dict.fromkeys(ctx.step_notes[notes_before:])), ctx.step_inferred
+        definitions = list(dict.fromkeys(ctx.step_evidence[evidence_before:]))
         inputs = dedupe_inputs(inputs)
         if not inputs and not any(isinstance(n, (exp.Column, exp.Subquery, exp.Select)) for n in value.walk()):
             # CAST(NULL AS int), CONVERT(date, '19000101', 112), GETDATE(), ERROR_MESSAGE(): no column is read;
@@ -981,14 +987,40 @@ class Analyzer:
         if inferred:
             step.status = worst(step.status, INFERRED)
         step.notes.extend(notes)
+        step.evidence.extend(definitions)
         return step
 
     # ============================================================ expressions
     def walk(self, e, role, branch, scope: Scope, ctx: Ctx, out: list[Input], rows: list[RowSelection],
              const_ok: bool) -> None:
+        """Walk one expression. Records, on each input found inside a function call, the chain of
+        functions it is passed through ("via"); resolves the parameters of an inlined scalar function
+        to the call's arguments, read in the caller's scope."""
         if e is None or not isinstance(e, exp.Expression):
             return
         e = unparen(e)
+        if ctx.inline_frames and isinstance(e, (exp.Parameter, exp.Var)):
+            name = restore_variable(e.sql(dialect="tsql", comments=False)).lower()
+            frame = ctx.inline_frames[-1]
+            if name in frame:
+                argument, caller_scope, _ = frame[name]
+                ctx.inline_frames.pop()   # the argument is caller text: the caller's own names apply
+                try:
+                    self.walk(argument, role, branch, caller_scope, ctx, out, rows, const_ok)
+                finally:
+                    ctx.inline_frames.append(frame)
+                return
+        via = function_label(e)
+        if via is None:
+            self._walk(e, role, branch, scope, ctx, out, rows, const_ok)
+            return
+        first = len(out)
+        self._walk(e, role, branch, scope, ctx, out, rows, const_ok)
+        for item in out[first:]:
+            item.via = [via + (" > " + chain if chain else "") for chain in (item.via or [""])]
+
+    def _walk(self, e, role, branch, scope: Scope, ctx: Ctx, out: list[Input], rows: list[RowSelection],
+              const_ok: bool) -> None:
         if isinstance(e, exp.Column):
             if isinstance(e.this, exp.Star):
                 return
@@ -1114,11 +1146,16 @@ class Analyzer:
             schema = qualifier[-1]
             database = qualifier[-2] if len(qualifier) > 1 and qualifier[-2] else None
             summary = function_summary(self.catalog, schema, e.expression.name, database=database)
+            if isinstance(summary, str) and self.inline_scalar(e, fname, schema, database, args, role, branch,
+                                                               scope, ctx, out, rows, const_ok):
+                return
             if isinstance(summary, str):
                 ctx.gap("opaque_function", f"User function {fname} is applied; its body is not traced ({summary}), "
                         "so other inputs it reads are not shown.", None, e)
                 for arg in args:
-                    self.walk(arg, role, branch, scope, ctx, out, rows, False)
+                    if not ((isinstance(arg, exp.Var) or (isinstance(arg, exp.Column) and not arg.table))
+                            and arg.name.upper() == "DEFAULT"):   # the parameter's default: not a column
+                        self.walk(arg, role, branch, scope, ctx, out, rows, False)
                 return
             # A scalar function that reads no tables: its result depends only on the arguments its body uses.
             used = [p for p, u in zip(summary.params, summary.used) if u]
@@ -1265,6 +1302,58 @@ class Analyzer:
                                   "which ones is not determined.")
         return ctx.steps, ctx.gaps, ctx.cycles
 
+    # ------------------------------------------------------------ inlined scalar functions
+    def inline_scalar(self, call, fname, schema, database, args, role, branch, scope: Scope, ctx: Ctx, out, rows,
+                      const_ok) -> bool:
+        """A call of a scalar function whose body is one RETURN of an expression that reads tables:
+        walk that expression in place of the call. The body is isolated from the caller (its names
+        never see the caller's sources); each parameter stands for the call's argument, which is read
+        in the caller's scope. Only for one definition in the caller's database, no table-valued
+        parameter, no derived table or CTE in the body, and no recursion. Returns False when not inlined."""
+        current = norm(ctx.unit.database_at(ctx.statement.start, self.catalog.default_database)[0])
+        if database and norm(database) != current:
+            return False
+        key = (norm(schema) or self.catalog.default_schema, norm(call.expression.name))
+        defs = [d for d in scalar_query_functions(self.catalog).get(key, []) if norm(d.database) == current]
+        if not defs or len({d.body_hash for d in defs}) != 1 or key in self._scalar_active:
+            return False
+        definition = defs[0]
+        if definition.table_parameter or len(args) != len(definition.params):
+            return False
+        if any(isinstance(n, (exp.CTE, exp.With, exp.Lateral)) or (isinstance(n, exp.Subquery) and isinstance(
+                n.parent, (exp.From, exp.Join))) for n in definition.expression.walk()):
+            return False   # derived sources are expanded and remembered elsewhere; keep the body opaque
+        isolated = Scope(ctx, {}, None)
+        frame: dict[str, tuple] = {}
+        for param, arg in zip(definition.params, args):
+            if (isinstance(arg, exp.Var) or (isinstance(arg, exp.Column) and not arg.table)) and \
+                    arg.name.upper() == "DEFAULT":
+                if definition.defaults.get(param) is None:
+                    return False   # no declared default, or one that could not be read
+                frame[param] = (definition.defaults[param], isolated, fname)
+            else:
+                frame[param] = (arg, scope, fname)
+        body = definition.expression.copy()
+        for n in body.walk():
+            n.meta.pop("start", None)   # positions are in the function's file, not the caller's statement
+            n.meta.pop("end", None)
+        self._scalar_active.add(key)
+        ctx.inline_frames.append(frame)
+        try:
+            self.walk(body, role, join_branch(branch, fname), isolated, ctx, out, rows, const_ok)
+        finally:
+            ctx.inline_frames.pop()
+            self._scalar_active.discard(key)
+        where = f"{definition.unit.root_label}/{definition.unit.rel_path}:{definition.line}"
+        ctx.step_notes.append(f"{fname} is read from its definition at {where}: its body is one RETURN, traced "
+                              f"with the call's arguments in place of its parameters; the result is returned "
+                              f"as {definition.returns}.")
+        ctx.step_inferred = True
+        ctx.step_evidence.append(Evidence(definition.unit.rel_path, definition.line, definition.line,
+                                          f"scalar function {definition.schema}.{definition.name}",
+                                          "function_definition", None, definition.unit.root_label))
+        return True
+
     # ------------------------------------------------------------ inline table-valued functions
     def inline_tvf(self, node, func, schema, scope: Scope, name: str, alias_columns):
         """A call of an inline table-valued function, read as a derived table: its RETURN query with the
@@ -1288,11 +1377,16 @@ class Analyzer:
             return None
         definition = defs[0]
         args = [a.copy() for a in func.expressions]
-        if len(args) != len(definition.params) or any(
-                (isinstance(a, exp.Var) or (isinstance(a, exp.Column) and not a.table)) and a.name.upper() == "DEFAULT"
-                for a in args):
+        if len(args) != len(definition.params):
             self._inline_why = "argument_count_or_default"
             return None
+        for i, (param, arg) in enumerate(zip(definition.params, args)):
+            if (isinstance(arg, exp.Var) or (isinstance(arg, exp.Column) and not arg.table)) and \
+                    arg.name.upper() == "DEFAULT":
+                if definition.defaults.get(param) is None:
+                    self._inline_why = "argument_count_or_default"
+                    return None   # no declared default, or one that could not be read
+                args[i] = definition.defaults[param].copy()
         arg_scope = Scope(ctx, {}, None)
         arg_scope.qualified_only = True
         private: dict[str, str] = {}
@@ -1315,6 +1409,9 @@ class Analyzer:
                 column.set("table", exp.to_identifier(alias))
         mapping = dict(zip(definition.params, args))
         query = definition.query.copy()
+        for n in query.walk():
+            n.meta.pop("start", None)   # positions are in the function's file, not the caller's statement
+            n.meta.pop("end", None)
 
         def substitute(n):
             if isinstance(n, (exp.Parameter, exp.Var)):
@@ -1956,6 +2053,32 @@ def local_ctes_from(select: exp.Expression, scope: Scope | None, inherited: dict
     return ctes
 
 
+_FUNCTION_NAMES: dict[type, str | None] = {}
+
+
+def function_label(e: exp.Expression) -> str | None:
+    """The T-SQL name of the function call ``e`` (e.g. "ISNULL", "DATEADD", "dbo.fn_rate"), or None
+    when ``e`` is not a function call or is a CASE/IIF (whose branches are labelled already)."""
+    if isinstance(e, exp.Dot):
+        if isinstance(e.expression, (exp.Anonymous, exp.Func)):
+            return f"{e.this.sql(dialect='tsql', comments=False)}.{e.expression.name}"
+        return None
+    if not isinstance(e, exp.Func) or isinstance(e, (exp.Case, exp.If)):
+        return None
+    if isinstance(e, exp.Anonymous):
+        return str(e.this).upper()
+    if isinstance(e, exp.Coalesce):
+        return "ISNULL" if e.args.get("is_null") else "COALESCE"
+    kind = type(e)
+    if kind not in _FUNCTION_NAMES:
+        try:
+            head = re.match(r"\s*([A-Za-z_][\w]*)\s*\(", e.sql(dialect="tsql", comments=False))
+        except Exception:   # noqa: BLE001 - a rendering failure only loses the label
+            head = None
+        _FUNCTION_NAMES[kind] = head.group(1).upper() if head else None
+    return _FUNCTION_NAMES[kind]
+
+
 def classify(value: exp.Expression, target_name: str) -> str:
     e = unparen(value)
     if isinstance(e, exp.Column):
@@ -1970,7 +2093,18 @@ def classify(value: exp.Expression, target_name: str) -> str:
     if isinstance(e, (exp.DPipe, exp.Concat)):
         return "string"
     if isinstance(e, (exp.Add, exp.Sub, exp.Mul, exp.Div, exp.Mod, exp.Neg)):
-        if any(isinstance(n, exp.Literal) and n.is_string for n in e.walk()):
+        # 'a' + x is string concatenation in T-SQL; a string literal inside a CASE or a function
+        # operand says nothing about the operator.
+        operands, stack = [], [e]
+        while stack:
+            n = unparen(stack.pop())
+            if isinstance(n, (exp.Add, exp.Sub, exp.Mul, exp.Div, exp.Mod)):
+                stack += [n.this, n.expression]
+            elif isinstance(n, exp.Neg):
+                stack.append(n.this)
+            else:
+                operands.append(n)
+        if any(isinstance(n, exp.Literal) and n.is_string for n in operands):
             return "string"
         return "arithmetic"
     if isinstance(e, exp.Window):
@@ -1994,4 +2128,10 @@ def dedupe_inputs(inputs: list[Input]) -> list[Input]:
         key = (item.node.id, item.role, item.branch)
         if key not in seen:
             seen[key] = item
+        elif item.via or seen[key].via:
+            kept = seen[key]
+            kept.via = list(dict.fromkeys((kept.via or [""]) + (item.via or [""])))
+    for item in seen.values():
+        if item.via == [""]:
+            item.via = []
     return list(seen.values())

@@ -21,8 +21,9 @@ def test_function_calling_a_pure_function_is_pure(tmp_path):
     assert "opaque_function" not in t.gap_kinds
 
 
-def test_function_reading_a_table_stays_opaque(tmp_path):
+def test_function_returning_one_query_is_read_from_its_body(tmp_path):
+    """RETURN (SELECT ...) is inlined (fixtures/column/scalar_udf_inline/ covers the limits)."""
     t = trace(ROOT, "demo.demo.output.label", tmp_path, *DB)
-    [gap] = t.gaps("opaque_function")
-    assert "FROM" in gap["message"]
-    assert not t.complete
+    step = t.only_step_for(t.target_id)
+    assert inputs(step, "value") == ["demo.demo.labels.label"] and step["status"] == "inferred"
+    assert "opaque_function" not in t.gap_kinds

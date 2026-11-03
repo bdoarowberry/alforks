@@ -53,7 +53,7 @@ from pathlib import Path
 import re
 import sys
 
-from .render_markdown import (NEXT_EVIDENCE, SECTION_ANCHORS, _anchor, _cell, _code, _link_target, _one_line,
+from .render_markdown import (via_text, NEXT_EVIDENCE, SECTION_ANCHORS, _anchor, _cell, _code, _link_target, _one_line,
                               _plural, _status_rank, _text, _Trace, _truncate, assertion_provenance_text)
 
 INDEX_SCHEMA = "column-lineage-routes/1.0"
@@ -378,6 +378,11 @@ def _context_tag(label: str) -> str | None:
     return "branch"
 
 
+def _via_labels(inp: dict) -> list[str]:
+    text = via_text(inp)
+    return [_truncate(text, LABEL_LIMIT)] if text else []
+
+
 def _input_tags(inp: dict) -> list[str]:
     """Rule tags of one input: its role and the CASE / COALESCE branch it sits in."""
     role = inp.get("role") or "value"
@@ -578,7 +583,8 @@ class Analysis:
                 continue
             for inp in inputs:
                 child = self._routes_from(inp.get("node") or "?", stack)
-                in_labels = labels + ([_truncate(inp["branch"], LABEL_LIMIT)] if inp.get("branch") else [])
+                in_labels = labels + ([_truncate(inp["branch"], LABEL_LIMIT)] if inp.get("branch") else []) \
+                    + _via_labels(inp)
                 for seq, sub in child.items():
                     key = own + seq[1:] if own and seq[:1] == own else own + seq
                     result.setdefault(key, _Agg()).merge(
@@ -686,7 +692,8 @@ class Analysis:
                 continue
             for inp in inputs:
                 in_tags = ctx + _input_tags(inp)
-                in_labels = labels + ([_truncate(inp["branch"], LABEL_LIMIT)] if inp.get("branch") else [])
+                in_labels = labels + ([_truncate(inp["branch"], LABEL_LIMIT)] if inp.get("branch") else []) \
+                    + _via_labels(inp)
                 in_gaps = step_gaps | ({inp["gap"]} if inp.get("gap") else set())
                 in_status = _worst(status, inp.get("status"))
                 for (end, stop, tags, sub_status, sub_open), sub in self._family_walk(inp.get("node") or "?",
