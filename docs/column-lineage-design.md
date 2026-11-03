@@ -254,7 +254,9 @@ WHILE, BEGIN...END, TRY/CATCH, RETURN), with an environment of the supplied valu
   reachable statements of the procedure that read the object, and says that how its rows were
   populated is not determined. It counts as an end needing proof (never a boundary). When the target
   itself stops there (and nothing else is open), `completeness.result` is `not_written_in_scenario`, never
-  `complete_within_selected_scope`: no lineage is claimed for the existing rows.
+  `complete_within_selected_scope`: no lineage is claimed for the existing rows. The overview's "Main
+  evidence needed" then asks where the existing rows came from (evidence from the run that populated
+  them) and never says that no further source definition is needed.
 - JSON: `scan.scenario` = `{note, procedures: [{procedure, definition, values, excluded_statements:
   [{path, line, statement, what, reason, writes}], uncertain_conditions,
   parameters_changed_in_procedure, calls, notes}]}`; also in `scan-diagnostics.json`.

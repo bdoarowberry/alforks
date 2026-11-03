@@ -1729,9 +1729,29 @@ def _validation_requests(a: Analysis, detailed: str) -> list[str]:
     return out
 
 
+def _scenario_requests(a: Analysis) -> list[str]:
+    """Columns the scenario's invocation does not write: their existing rows' origin needs run evidence."""
+    nodes = sorted({s["node"] for s in a.t.stops if s.get("reason") == "scenario_not_written"})
+    if not nodes:
+        return []
+    names = _limited([_code(a.t.display(n)) for n in nodes], 3)
+    return [f"**Where did the existing rows of {names} come from?** Under the assumed values this invocation only "
+            "reads them, so no route to their origin was followed. Needed: evidence from the run that populated "
+            "them (job or run history); the unconstrained run (without `--scenario`) lists the candidate writers."]
+
+
 def _section_evidence_needed(a: Analysis, detailed: str) -> list[str]:
     cands = _evidence_candidates(a, detailed)
     validation = _validation_requests(a, detailed)
+    scenario = _scenario_requests(a)
+    if scenario:
+        out = [f"- {text}" for text in scenario] + [f"- {text}" for _, _, text in cands[:MAX_EVIDENCE - 1]]
+        if len(cands) > MAX_EVIDENCE - 1:
+            out += ["", f"And {_plural(len(cands) - MAX_EVIDENCE + 1, 'more request')} — see "
+                        f"[gaps and next evidence]({detailed}#gaps)."]
+        if validation:
+            out += ["", "Also to confirm:"] + [f"- {v}" for v in validation]
+        return out
     if not cands:
         out = ["No further source definition is needed: every route ends at the requested boundary, a declared "
                "terminal or a constant."]

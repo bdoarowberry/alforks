@@ -72,6 +72,11 @@ def test_reuse_reads_the_existing_result_and_does_not_claim_its_origin(tmp_path)
     assert "- **Status:** not written in this scenario; existing rows' origin not determined —" in overview
     assert "> **Result: Not written in this scenario — under the assumed values the invocation only reads rows" in detailed
     assert "complete_within_selected_scope" not in overview
+    evidence = overview[overview.index("## Main evidence needed"):]
+    evidence = evidence[:evidence.index("\n## ", 5)]
+    assert "No further source definition is needed" not in evidence
+    assert ("**Where did the existing rows of `demo.dbo.saved_result.value_col` come from?** Under the assumed "
+            "values this invocation only reads them") in evidence and "evidence from the run that populated them" in evidence
     excluded = t.data["scan"]["scenario"]["procedures"][0]["excluded_statements"]
     assert len(excluded) == 2 and all("after the RETURN at line 15" in x["reason"] for x in excluded)
 
