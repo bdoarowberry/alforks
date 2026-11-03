@@ -1976,6 +1976,7 @@ class InlineFunction:
     line: int
     database: str | None
     defaults: dict[str, exp.Expression | None] = field(default_factory=dict)   # declared "= value" per parameter
+    source: str = ""               # the text ``query`` was parsed from
 
 
 @dataclass
@@ -1993,6 +1994,7 @@ class ScalarQueryFunction:
     returns: str
     body_hash: str
     table_parameter: bool          # a READONLY (table-valued) parameter: not inlined
+    source: str = ""               # the text ``expression`` was parsed from
 
 
 def function_parameters(unit: "Unit", start: int, end: int) -> list[tuple[str, exp.Expression | None, bool, bool]]:
@@ -2064,13 +2066,43 @@ def inline_functions(catalog: "Catalog") -> dict[tuple[str, str], list[InlineFun
             database, _ = unit.database_at(match.start(), catalog.default_database)
             found[key].append(InlineFunction(key[0], key[1], params, query, unit,
                                              unit.text.count("\n", 0, match.start()) + 1, database,
-                                             {p[0]: p[1] for p in declared if p[2]}))
+                                             {p[0]: p[1] for p in declared if p[2]}, body))
     catalog._inline_functions = found
     return found
 
 
 SCALAR_RETURNS = re.compile(r"\s*RETURNS\s+(?P<type>[\w\[\]]+(?:\s*\(\s*[\w\s,]*\))?)\s+"
                             r"(?:WITH\s+[\w\s,=]*?)?\bAS\b", re.I)
+
+
+def function_variants(catalog: "Catalog") -> dict[tuple[str, str], dict[str | None, set[str]]]:
+    """Per function (schema, name) and database: the distinct definition texts scanned (header,
+    parameters, defaults and body, whitespace and case folded). Inlining needs exactly one."""
+    cached = getattr(catalog, "_function_variants", None)
+    if cached is not None:
+        return cached
+    found: dict[tuple[str, str], dict[str | None, set[str]]] = defaultdict(lambda: defaultdict(set))
+    for unit in catalog.units:
+        masked = unit.masked
+        for match in FUNCTION_HEADER.finditer(masked):
+            parts = split_name(match.group("name"))
+            key = (norm(parts[-2]) if len(parts) > 1 and parts[-2] else catalog.default_schema, norm(parts[-1]))
+            end = len(masked)
+            for boundary in (GO.search(masked, match.end()), FUNCTION_HEADER.search(masked, match.end()),
+                             DEFINITION.search(masked, match.end())):
+                if boundary is not None:
+                    end = min(end, boundary.start())
+            name_at = match.start("name")
+            text = re.sub(r"\s+", " ", unit.text[name_at:end]).strip().rstrip(";").strip().lower()
+            database = norm(unit.database_at(match.start(), catalog.default_database)[0])
+            found[key][database].add(hashlib.sha1(text.encode()).hexdigest())
+    catalog._function_variants = found
+    return found
+
+
+def single_definition(catalog: "Catalog", key: tuple[str, str], database: str | None) -> bool:
+    """One definition text of the function in that database (copies of the same text count once)."""
+    return len(function_variants(catalog).get(key, {}).get(norm(database), set())) == 1
 
 
 def scalar_query_functions(catalog: "Catalog") -> dict[tuple[str, str], list[ScalarQueryFunction]]:
@@ -2128,7 +2160,7 @@ def scalar_query_functions(catalog: "Catalog") -> dict[tuple[str, str], list[Sca
                 key[0], key[1], [p[0] for p in declared], {p[0]: p[1] for p in declared if p[2]}, expression, unit,
                 unit.line_at(match.start()), database, returns.group("type"),
                 hashlib.sha1(re.sub(r"\s+", " ", text).strip().lower().encode()).hexdigest(),
-                any(p[3] for p in declared)))
+                any(p[3] for p in declared), text))
     catalog._scalar_query_functions = found
     return found
 

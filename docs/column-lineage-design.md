@@ -148,10 +148,17 @@ call: the body in an isolated scope (its names never bind to the caller's source
 parameter standing for the call's argument, which is read in the caller's own scope (so
 unqualified and correlated arguments bind as the caller's SQL does). Row selection in the body
 is recorded on the caller's step (`scalar subquery: ...`), the step is `inferred`, and its
-evidence adds the function definition. This needs one definition (identical copies count as
-one) in the caller's database, a call not qualified with another database, no table-valued
+evidence adds the function definition. This needs one definition text (header, parameters,
+defaults and body; identical copies count as one, and a later `ALTER` to any other body counts as
+a second) in the caller's database, a call not qualified with another database, no table-valued
 (`READONLY`) parameter, no derived table, CTE or APPLY in the body, and no recursion; a `DEFAULT`
-argument needs a declared default. Anything else is an `opaque_function` gap.
+argument needs a declared default. At most 64 bodies are inlined per statement analysis (bodies
+that call functions several times grow exponentially). Anything else is an `opaque_function` gap.
+The same one-definition-text rule applies to inline table-valued functions.
+
+Nodes of a copied function body are placed at `<call position>~<ordinal in the copy>` in derived
+node ids, and the function named in `CROSS APPLY fn(...) x` at the APPLY's position (it used to be
+`-1` for every such call, so two calls in one statement could share a node).
 
 ### Inputs and roles
 
@@ -171,7 +178,10 @@ Each column, variable, parameter or literal referenced by the value expression i
 `via` (JSON, omitted when empty) lists the functions an input passes through, outermost
 first, one chain per distinct use: `["ISNULL > UPPER > dbo.fn_x"]`; `""` stands for a use
 outside any function when the same input is also used inside one. CASE and IIF are not
-listed (their `branch` says where the input sits). It does not enter the step id.
+listed (their `branch` says where the input sits). It does not enter the step id. The name is the
+one written in the SQL where the parser records it; otherwise the T-SQL rendering, shown only when
+the source text calls a function of that name (the parser adds calls of its own, e.g. a CAST inside
+LEN).
 
 ### Row selection
 
@@ -281,11 +291,16 @@ After loading, every `dynamic_sql` statement issue (other than dead dynamic SQL)
   16 alternatives.
 - `EXEC sp_executesql @stmt, @params, <arguments>`: the parameter list (a literal or an evaluated
   variable, exactly one value) declares the parameters; each is bound to its argument, named
-  (`@p = expr`) or positional, or to the declared default when the argument is missing. Inside the
-  evaluated string the parameter names (as code, never inside its literals or comments) are replaced
-  by the argument expressions, so the statement reads the caller's columns, variables and
-  parameters. An `OUTPUT` parameter or argument, a parameter with neither argument nor default, or a
-  parameter list that cannot be read keeps the evaluation unknown.
+  (`@p = value`) or positional, or to the declared default when the argument is missing or `DEFAULT`.
+  An argument is a literal, a variable or an unquoted word (a string); anything else is refused. Inside
+  the evaluated string the parameter names (as code, never inside its literals or comments, never an
+  `EXEC proc @name =` argument name) are replaced by the argument, space-padded, so the statement
+  reads the caller's value. Refused (unknown): an `OUTPUT` parameter or argument, a parameter with
+  neither argument nor default, a parameter list that cannot be read, a parameter assigned in the
+  batch (DECLARE, SET, `SELECT @p =`, INTO, OUTPUT) or used in an unparsed or nested dynamic
+  statement, and a batch that names a caller variable an argument passes (its own variable of that
+  name would be confused with the caller's). Caller variables are accepted only in the top-level
+  batch, never in nested `EXEC (...)`.
 - Each string is split and parsed like a file. It is refused (unknown) if it reads a variable other
   than a bound sp_executesql parameter (variables belong to the dynamic batch), contains control flow (IF, WHILE, ...),
   a statement the indexer does not recognise (USE, CREATE PROCEDURE, GRANT, ...), or one that is not

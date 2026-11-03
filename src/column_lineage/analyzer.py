@@ -19,7 +19,7 @@ from sqlglot import exp
 
 from table_lineage.index import Statement
 
-from .catalog import inline_functions, scalar_query_functions, controls_of, restore_variable, Catalog, ColumnInfo, Unit, Writer, ident_text, norm, statement_id, table_parts, update_target, function_summary, split_name
+from .catalog import inline_functions, scalar_query_functions, single_definition, controls_of, restore_variable, Catalog, ColumnInfo, Unit, Writer, ident_text, norm, statement_id, table_parts, update_target, function_summary, split_name
 from .model import (
     TOP_ORDER, AMBIGUOUS, COLUMN, CONDITION, CONSTANT, FILTER, GROUP_BY, HAVING, INFERRED, JOIN_KEY, JOIN_PREDICATE,
     LOCAL_COLUMN, MERGE_CONDITION, PARAMETER, PARTIAL, TEMP_COLUMN, UNKNOWN, UNRESOLVED, VALUE, VARIABLE,
@@ -124,6 +124,7 @@ class Ctx:
         self.local_active: set[tuple[str, str]] = set()
         self.cycles: list[list[str]] = []
         self._positions: dict[int, int] | None = None
+        self._copied: dict[int, tuple] = {}
         # While analysing row-selection clauses, bind columns without expanding CTE/derived
         # sources: row-selection columns are recorded, not traced (unless --trace-row-selection).
         self.no_expand = False
@@ -133,14 +134,34 @@ class Ctx:
         self.step_evidence: list[Evidence] = []   # definitions the walk read (inlined user functions)
         # Inlined scalar functions being walked: parameter name -> (argument, caller scope, function).
         self.inline_frames: list[dict[str, tuple]] = []
+        self.inline_count = 0   # scalar function bodies inlined for this statement
         self.star_reasons: set[str] = set()  # why a * seen in this statement could not be expanded
 
-    def position(self, node) -> int:
-        """Stable ordinal of an AST node within its statement, so reused aliases stay distinct."""
+    def position(self, node) -> int | str:
+        """Stable ordinal of an AST node within its statement, so reused aliases stay distinct. A node of
+        a function body copied in for a call is placed as "<call position>~<ordinal in the copy>", the
+        same in every analysis of the statement."""
         if self._positions is None:
             tree = self.statement.tree
             self._positions = {id(n): i for i, n in enumerate(tree.walk())} if tree is not None else {}
-        return self._positions.get(id(node), -1)
+        found = self._positions.get(id(node))
+        if found is not None:
+            return found
+        copied = self._copied.get(id(node))
+        return copied[1] if copied is not None else -1
+
+    def register_copy(self, root: exp.Expression, call, source: str) -> None:
+        """Place the nodes of ``root``, a function body parsed from ``source`` and copied in for ``call``.
+        Their parse positions refer to ``source``: the name of each function call is kept from there,
+        and the positions are dropped so evidence cites the caller's statement."""
+        origin = self.position(call)
+        for i, n in enumerate(root.walk()):
+            self._copied[id(n)] = (n, f"{origin}~{i}", source)   # the node is kept so its id is not reused
+            start, end = n.meta.pop("start", None), n.meta.pop("end", None)
+            if isinstance(start, int) and isinstance(end, int):
+                word = written_call(source, start, end)
+                if word:
+                    n.meta["written_name"] = word
 
     def local_scope(self, node) -> str:
         return f"{self.stmt_id}@{self.position(node)}"
@@ -399,6 +420,7 @@ class Analyzer:
                 isinstance(node.this, exp.Dot) and isinstance(node.this.expression, (exp.Func, exp.Anonymous)))):
             # CROSS APPLY fn(args) AS x without a subquery: the same as FROM fn(args) AS x.
             table = exp.Table(this=node.this, alias=node.args.get("alias"))
+            ctx._copied[id(table)] = (table, ctx.position(node), ctx.statement.text)   # placed where the APPLY is
             return self.source_for(table, scope)
         if isinstance(node, exp.Lateral) and isinstance(node.this, exp.Subquery) and \
                 isinstance(node.this.this, exp.Values):
@@ -960,11 +982,22 @@ class Analyzer:
         inputs: list[Input] = []
         extra_rows: list[RowSelection] = []
         gaps_before = {g.id for g in ctx.gaps}
+        # A step can be built while another one's expression is walked (a CTE column): keep the
+        # enclosing step's notes, evidence and inferred flag apart from this one's.
+        outer_inferred = ctx.step_inferred
         notes_before, ctx.step_inferred = len(ctx.step_notes), False
         evidence_before = len(ctx.step_evidence)
-        self.walk(value, VALUE, None, scope, ctx, inputs, extra_rows, True)
-        notes, inferred = list(dict.fromkeys(ctx.step_notes[notes_before:])), ctx.step_inferred
-        definitions = list(dict.fromkeys(ctx.step_evidence[evidence_before:]))
+        try:
+            self.walk(value, VALUE, None, scope, ctx, inputs, extra_rows, True)
+            notes, inferred = list(dict.fromkeys(ctx.step_notes[notes_before:])), ctx.step_inferred
+            definitions = list(dict.fromkeys(ctx.step_evidence[evidence_before:]))
+        finally:
+            del ctx.step_notes[notes_before:]
+            del ctx.step_evidence[evidence_before:]
+            ctx.step_inferred = outer_inferred
+        seen_rows = set()
+        extra_rows = [r for r in extra_rows if not ((r.node.id, r.role, r.expression, r.status, r.gap) in seen_rows
+                                                    or seen_rows.add((r.node.id, r.role, r.expression, r.status, r.gap)))]
         inputs = dedupe_inputs(inputs)
         if not inputs and not any(isinstance(n, (exp.Column, exp.Subquery, exp.Select)) for n in value.walk()):
             # CAST(NULL AS int), CONVERT(date, '19000101', 112), GETDATE(), ERROR_MESSAGE(): no column is read;
@@ -1010,14 +1043,16 @@ class Analyzer:
                 finally:
                     ctx.inline_frames.append(frame)
                 return
-        via = function_label(e)
-        if via is None:
+        if not is_function_call(e):
             self._walk(e, role, branch, scope, ctx, out, rows, const_ok)
             return
         first = len(out)
         self._walk(e, role, branch, scope, ctx, out, rows, const_ok)
-        for item in out[first:]:
-            item.via = [via + (" > " + chain if chain else "") for chain in (item.via or [""])]
+        if len(out) > first:
+            via = function_label(e, ctx)
+            if via:
+                for item in out[first:]:
+                    item.via = [via + (" > " + chain if chain else "") for chain in (item.via or [""])]
 
     def _walk(self, e, role, branch, scope: Scope, ctx: Ctx, out: list[Input], rows: list[RowSelection],
               const_ok: bool) -> None:
@@ -1315,11 +1350,14 @@ class Analyzer:
             return False
         key = (norm(schema) or self.catalog.default_schema, norm(call.expression.name))
         defs = [d for d in scalar_query_functions(self.catalog).get(key, []) if norm(d.database) == current]
-        if not defs or len({d.body_hash for d in defs}) != 1 or key in self._scalar_active:
-            return False
+        if not defs or not single_definition(self.catalog, key, current) or key in self._scalar_active:
+            return False   # another definition (an ALTER, a copy with other parameters) may be the deployed one
         definition = defs[0]
         if definition.table_parameter or len(args) != len(definition.params):
             return False
+        if ctx.inline_count >= INLINE_BUDGET:
+            return False   # bodies calling functions several times grow exponentially: stay opaque
+        ctx.inline_count += 1
         if any(isinstance(n, (exp.CTE, exp.With, exp.Lateral)) or (isinstance(n, exp.Subquery) and isinstance(
                 n.parent, (exp.From, exp.Join))) for n in definition.expression.walk()):
             return False   # derived sources are expanded and remembered elsewhere; keep the body opaque
@@ -1334,9 +1372,7 @@ class Analyzer:
             else:
                 frame[param] = (arg, scope, fname)
         body = definition.expression.copy()
-        for n in body.walk():
-            n.meta.pop("start", None)   # positions are in the function's file, not the caller's statement
-            n.meta.pop("end", None)
+        ctx.register_copy(body, call, definition.source)
         self._scalar_active.add(key)
         ctx.inline_frames.append(frame)
         try:
@@ -1375,6 +1411,9 @@ class Analyzer:
                                 "inline_definition_in_another_database" if every else
                                 "no_inline_definition_multi_statement_or_not_scanned")
             return None
+        if not single_definition(self.catalog, (norm(schema) or self.catalog.default_schema, fname), current):
+            self._inline_why = "several_inline_definitions"
+            return None   # e.g. a later ALTER into a multi-statement function
         definition = defs[0]
         args = [a.copy() for a in func.expressions]
         if len(args) != len(definition.params):
@@ -1409,9 +1448,6 @@ class Analyzer:
                 column.set("table", exp.to_identifier(alias))
         mapping = dict(zip(definition.params, args))
         query = definition.query.copy()
-        for n in query.walk():
-            n.meta.pop("start", None)   # positions are in the function's file, not the caller's statement
-            n.meta.pop("end", None)
 
         def substitute(n):
             if isinstance(n, (exp.Parameter, exp.Var)):
@@ -1420,7 +1456,10 @@ class Analyzer:
                     return mapping[text].copy()
             return n
 
-        query = query.transform(substitute)
+        # The body's own nodes take their names from the definition; the arguments put in place keep
+        # the caller's positions.
+        ctx.register_copy(query, node, definition.source)
+        query = query.transform(substitute, copy=False)
         local = Local("derived", name, query, alias_columns, statement_ctes(query, ctx), arg_scope,
                       ObjectRef(name, kind="derived", scope=ctx.local_scope(node)))
         self._inlined[id(query)] = definition
@@ -2053,30 +2092,76 @@ def local_ctes_from(select: exp.Expression, scope: Scope | None, inherited: dict
     return ctes
 
 
-_FUNCTION_NAMES: dict[type, str | None] = {}
+INLINE_BUDGET = 64   # scalar function bodies inlined per statement analysis
 
 
-def function_label(e: exp.Expression) -> str | None:
-    """The T-SQL name of the function call ``e`` (e.g. "ISNULL", "DATEADD", "dbo.fn_rate"), or None
-    when ``e`` is not a function call or is a CASE/IIF (whose branches are labelled already)."""
+def is_function_call(e: exp.Expression) -> bool:
+    """A function call whose inputs get a "via" label (CASE and IIF branches are labelled already)."""
     if isinstance(e, exp.Dot):
-        if isinstance(e.expression, (exp.Anonymous, exp.Func)):
-            return f"{e.this.sql(dialect='tsql', comments=False)}.{e.expression.name}"
-        return None
-    if not isinstance(e, exp.Func) or isinstance(e, (exp.Case, exp.If)):
-        return None
+        return isinstance(e.expression, (exp.Anonymous, exp.Func))
+    return isinstance(e, exp.Func) and not isinstance(e, (exp.Case, exp.If))
+
+
+def function_label(e: exp.Expression, ctx: "Ctx | None" = None) -> str | None:
+    """The T-SQL name of the function call ``e`` (e.g. "ISNULL", "DATEADD", "dbo.fn_rate"): the name as
+    written in the statement where the parser recorded it, else the T-SQL rendering of the call (which
+    may name an equivalent function, e.g. FORMAT for DATENAME)."""
+    if isinstance(e, exp.Dot):
+        return f"{e.this.sql(dialect='tsql', comments=False)}.{e.expression.name}"
     if isinstance(e, exp.Anonymous):
         return str(e.this).upper()
+    if e.meta.get("written_name"):
+        return e.meta["written_name"]
+    if ctx is None:
+        return None
+    copied = ctx._copied.get(id(e))
+    source = copied[2] if copied is not None else ctx.statement.text
+    start, end = e.meta.get("start"), e.meta.get("end")
+    if copied is None and isinstance(start, int) and isinstance(end, int) and \
+            (f"{ctx.unit.root_label}/{ctx.unit.rel_path}", ctx.statement.start) not in ctx.catalog.rewritten:
+        word = written_call(source, start, end)
+        if word:
+            return word
     if isinstance(e, exp.Coalesce):
-        return "ISNULL" if e.args.get("is_null") else "COALESCE"
-    kind = type(e)
-    if kind not in _FUNCTION_NAMES:
+        name = "ISNULL" if e.args.get("is_null") else "COALESCE"
+    else:
         try:
-            head = re.match(r"\s*([A-Za-z_][\w]*)\s*\(", e.sql(dialect="tsql", comments=False))
+            head = re.match(r"\s*([A-Za-z_]\w*)\s*\(", e.sql(dialect="tsql", comments=False))
         except Exception:   # noqa: BLE001 - a rendering failure only loses the label
-            head = None
-        _FUNCTION_NAMES[kind] = head.group(1).upper() if head else None
-    return _FUNCTION_NAMES[kind]
+            return None
+        name = head.group(1).upper() if head else None
+    # The parser adds calls of its own (a CAST inside LEN, a date conversion inside EOMONTH): a name
+    # is shown only when the source text calls it.
+    if name and re.search(rf"(?<![\w.@$#]){name}\s*\(", source, re.I):
+        return name
+    return None
+
+
+def written_call(text: str, start: int, end: int) -> str | None:
+    """The function name at text[start:end + 1] when it is a word followed by "(", upper-cased."""
+    word = text[start:end + 1]
+    if re.fullmatch(r"[A-Za-z_]\w*", word) and text[end + 1:end + 40].lstrip().startswith("("):
+        return word.upper()
+    return None
+
+
+def yields_string(e: exp.Expression) -> bool:
+    """The expression can evaluate to a string literal it contains: the literal itself, or one of the
+    results of ISNULL/COALESCE/NULLIF, CASE (THEN/ELSE, not WHEN), IIF, or a string function."""
+    e = unparen(e)
+    if isinstance(e, exp.Literal):
+        return e.is_string
+    if isinstance(e, (exp.Coalesce, exp.Nullif)):
+        return any(yields_string(a) for a in [e.this, *(e.expressions or []), e.args.get("expression")]
+                   if isinstance(a, exp.Expression))
+    if isinstance(e, exp.Case):
+        return any(yields_string(i.args.get("true")) for i in e.args.get("ifs") or [] if i.args.get("true")) or \
+            (e.args.get("default") is not None and yields_string(e.args["default"]))
+    if isinstance(e, exp.If):
+        return any(yields_string(e.args[k]) for k in ("true", "false") if e.args.get(k) is not None)
+    if isinstance(e, (exp.Add, exp.Sub, exp.Mul, exp.Div, exp.Mod)):
+        return yields_string(e.this) or yields_string(e.expression)
+    return isinstance(e, (exp.Concat, exp.DPipe, exp.Upper, exp.Lower, exp.Substring, exp.Trim, exp.Left, exp.Right))
 
 
 def classify(value: exp.Expression, target_name: str) -> str:
@@ -2104,7 +2189,7 @@ def classify(value: exp.Expression, target_name: str) -> str:
                 stack.append(n.this)
             else:
                 operands.append(n)
-        if any(isinstance(n, exp.Literal) and n.is_string for n in operands):
+        if any(yields_string(n) for n in operands):
             return "string"
         return "arithmetic"
     if isinstance(e, exp.Window):

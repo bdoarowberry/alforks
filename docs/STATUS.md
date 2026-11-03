@@ -646,6 +646,25 @@ Ideas from the sqlleaf comparison, done (commits edd5956, 3e2aadc; tests `test_c
 - Inputs carry `via` (the function chain), shown on the detailed and overview pages.
 - `classify()`: arithmetic containing a CASE with a string literal is no longer labelled "string".
 
+Adversarial review of these rules (15 confirmed defects, all fixed; regression tests in the two test
+files fail on 3e2aadc):
+- sp_executesql: `EXEC p @id = @id` had its argument name rewritten (false constant); a parameter
+  reassigned in the batch, a batch variable named like the caller's, and nested `EXEC (...)` reading
+  the caller's variable were false completes; an unquoted word became a column; `s.a-@p` with `-1`
+  became a `--` comment; `@p = DEFAULT` was a column. All refused or handled as described in the design.
+- Scalar inlining: a stale definition was inlined when an ALTER (or a copy with other parameter
+  order or defaults) differed; now one definition text is required (also for inline TVFs). Two inline
+  TVF calls in one statement (or in inlined bodies) shared a derived node id (`@-1`), so one call's
+  inputs were lost (also before these commits); nodes are now placed by call position. A nested CTE
+  step reset the enclosing step's `inferred` flag and leaked its notes and evidence; inlining had no
+  budget (exponential) and duplicated row selections.
+- `via` was cached per parser class (TRY_CONVERT/CONVERT, LTRIM/RTRIM mixed up); now the written name.
+  `classify()` labelled `ISNULL(a,'') + ISNULL(b,'')` arithmetic; now "string" when an operand can
+  yield a string literal.
+- Step ids: across 719 fixture traces only the new fixtures, one APPLY trace and one function with
+  two definitions changed; on the corpus one step (a derived node under CROSS APPLY, `@-1` → its
+  position). On the estate, step ids of derived nodes under `CROSS APPLY fn(...)` will change once.
+
 Expected effect on the estate: only traces whose blockers are `dynamic_sql` through `sp_executesql`
 with a parameter list, or `opaque_function` for single-RETURN lookups, can move; step ids of other
 traces are unchanged (corpus check: 48/48 traces with identical ids). Not yet done: per-route ids

@@ -286,6 +286,11 @@ class Evaluator:
             if re.search(r"\b(?:OUTPUT|OUT)\b", rest, re.I):
                 raise Unknown(f"sp_executesql parameter {name} is OUTPUT; values written back are not traced")
             value = named.get(name, positional[index] if index < len(positional) else None)
+            if isinstance(value, exp.Alias) and str(value.alias).upper() in ("OUTPUT", "OUT"):
+                raise Unknown(f"sp_executesql argument for {name} is passed OUTPUT; values written back are not traced")
+            if (isinstance(value, exp.Var) or (isinstance(value, exp.Column) and not value.table)) and \
+                    value.name.upper() == "DEFAULT":
+                value = None   # the declared default, below
             if value is None and re.search(r"=", rest):
                 default = rest.split("=", 1)[1].strip()
                 try:
@@ -294,24 +299,72 @@ class Evaluator:
                     value = None
             if value is None:
                 raise Unknown(f"sp_executesql parameter {name} has no argument that could be read")
-            if isinstance(value, exp.Alias) and str(value.alias).upper() in ("OUTPUT", "OUT"):
-                raise Unknown(f"sp_executesql argument for {name} is passed OUTPUT; values written back are not traced")
+            if isinstance(value, exp.Var) or (isinstance(value, exp.Column) and not value.table):
+                # SQL Server accepts an unquoted word as a string argument (@p = abc).
+                value = exp.Literal.string(value.name)
+            atomic = (exp.Literal, exp.Null, exp.Parameter)
+            if not (isinstance(value, atomic) or (isinstance(value, exp.Neg) and isinstance(value.this, exp.Literal))):
+                # A procedure argument is a constant or a variable; anything else was not read correctly.
+                raise Unknown(f"sp_executesql argument for {name} ({shorten(sql_text(value), 40)}) is not a constant "
+                              "or a variable")
             bindings[name] = value
         return bindings
 
-    def bind_parameters(self, sql: str) -> str:
+    def bind_parameters(self, sql: str, issue) -> str:
         """The evaluated text with each bound sp_executesql parameter replaced by its argument (code only:
-        never inside string literals or comments of the evaluated text)."""
+        never inside string literals or comments, never an EXEC argument name). Refused (Unknown) when
+        the batch assigns a parameter, uses one in a statement that is not parsed or in nested dynamic
+        SQL, or names a caller variable an argument reads (the batch's own variable of that name would
+        be confused with the caller's)."""
+        from .catalog import DYNAMIC
         if not self._bindings:
             return sql
         masked = mask_noncode(sql)
+        token = re.compile(r"(?<![\w@$#])@[\w$#@]+")
+        names = {m.group().lower() for m in token.finditer(masked)}
+        clash = sorted((self.bound_variables() - set(self._bindings)) & names)
+        if clash:
+            raise Unknown(f"the evaluated SQL uses {', '.join(clash)}, which an sp_executesql argument passes from the "
+                          "caller; which variable each use means is not settled")
+        index = SourceIndex()
+        try:
+            index.add(SourceFile(issue.unit.root / "<dynamic>", sql), include_ddl=True)
+        except Exception as exc:  # noqa: BLE001
+            raise Unknown(f"the evaluated SQL could not be split into statements ({type(exc).__name__})") from None
+        argument_names: set[int] = set()   # offsets of EXEC argument names: never replaced
+        for st in index.statements:
+            used = {m.group().lower() for m in token.finditer(masked, st.start, st.end)} & set(self._bindings)
+            if not used:
+                continue
+            tree = st.tree if st.parse_status == "parsed" else None
+            text = masked[st.start:st.end]
+            if tree is None or isinstance(tree, exp.Command) or DYNAMIC.match(st.text):
+                raise Unknown(f"sp_executesql parameter {sorted(used)[0]} is used in a statement that is not analysed")
+            for p in tree.find_all(exp.Parameter):
+                name = sql_text(p).lower()
+                if name not in used:
+                    continue
+                parent = p.parent
+                if isinstance(parent, exp.DeclareItem) or (
+                        isinstance(parent, exp.EQ) and parent.this is p and not isinstance(parent.parent, exp.Execute)
+                        and isinstance(parent.parent, (exp.Select, exp.Update, exp.SetItem, exp.Set, exp.Merge))):
+                    raise Unknown(f"sp_executesql parameter {name} is assigned inside the evaluated SQL; its value "
+                                  "there is not the argument")
+            for name in used:
+                if re.search(rf"(?<![\w@$#]){re.escape(name)}\s+OUT(?:PUT)?\b|\bINTO\s+{re.escape(name)}(?![\w$#@])",
+                             text, re.I):
+                    raise Unknown(f"sp_executesql parameter {name} is written inside the evaluated SQL")
+            if isinstance(tree, exp.Execute):
+                for m in token.finditer(masked, st.start, st.end):
+                    if re.match(r"\s*=", masked[m.end():]):
+                        argument_names.add(m.start())
         out, last = [], 0
-        for match in re.finditer(r"(?<![\w@$#])@[\w$#@]+", masked):
+        for match in token.finditer(masked):
             replacement = self._bindings.get(match.group().lower())
-            if replacement is None:
+            if replacement is None or match.start() in argument_names:
                 continue
             out.append(sql[last:match.start()])
-            out.append(sql_text(replacement))
+            out.append(f" {sql_text(replacement)} ")   # spaced: "s.a-@p" with -1 must not become "s.a--1"
             last = match.end()
         out.append(sql[last:])
         return "".join(out)
@@ -763,7 +816,7 @@ class Evaluator:
         if not sql.strip():
             return []
         if nesting == 0:
-            sql = self.bind_parameters(sql)
+            sql = self.bind_parameters(sql, issue)
         masked = mask_noncode(sql)
         control = CONTROL_WORDS.search(masked)
         if control:
@@ -799,12 +852,12 @@ class Evaluator:
                 repaired = self.repair(issue, st)
                 if all(p.parse_status == "parsed" for p in repaired):
                     for piece in repaired:
-                        out.extend(self.piece(piece.text, piece.tree, env))
+                        out.extend(self.piece(piece.text, piece.tree, env, nesting))
                     continue
                 if non_lineage(text) or MAINTENANCE.match(mask_noncode(text)):
                     continue
                 raise Unknown(f"a statement in the evaluated SQL could not be parsed: {shorten(' '.join(text.split()))}")
-            out.extend(self.piece(text, tree, env))
+            out.extend(self.piece(text, tree, env, nesting))
         return out
 
     def repair(self, issue, statement) -> list[Statement]:
@@ -821,7 +874,7 @@ class Evaluator:
             if outputs:
                 raise Unknown("the evaluated SQL has an OUTPUT ... INTO clause, which is not analysed")
 
-    def piece(self, text: str, tree, env) -> list[tuple[str, exp.Expression]]:
+    def piece(self, text: str, tree, env, nesting: int = 0) -> list[tuple[str, exp.Expression]]:
         if isinstance(tree, exp.Declare):
             for item in tree.expressions:
                 if not isinstance(item, exp.DeclareItem):
@@ -839,7 +892,9 @@ class Evaluator:
                 if isinstance(eq, exp.EQ) and isinstance(eq.this, exp.Parameter):
                     env[sql_text(eq.this).lower()] = self.eval(eq.expression, None, None, None, 0, env)
             return []
-        allowed = self.bound_variables() if getattr(self, "_bindings", None) else set()
+        # The caller's variables an sp_executesql argument put into the top-level batch (not into nested
+        # dynamic SQL, which runs in a batch of its own).
+        allowed = self.bound_variables() if getattr(self, "_bindings", None) and nesting == 0 else set()
         variables = sorted({sql_text(p).lower() for p in tree.find_all(exp.Parameter)
                             if not sql_text(p).startswith("@@") and not is_argument_name(p)} - allowed)
         if variables:
