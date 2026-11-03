@@ -381,7 +381,7 @@ Eight high-severity findings, all fixed. Each test fails on the code before the 
   closes an older false complete.
 - **Low.**
   - The single-source binding fallback is not used in row-selection clauses (an ORDER BY alias).
-  - A DEFAULT argument blocks inlining.
+  - A DEFAULT argument blocks inlining. (fixed: the declared default is used)
   - `SELECT IDENTITY(...) INTO` blocks the copied column order.
 
 ## After the a1bbf08 run (80 / 4 / 94; wildcard still 39 traces)
@@ -634,7 +634,19 @@ Fixed (each was a false complete, a wrong binding or an unexplained end):
   `ISNULL(@v, ...)` ignored truncation to `@v`'s type. Both fixed (ISNULL with an unknown type is now
   "not evaluated").
 
-Ideas from the sqlleaf comparison, not yet done (sound versions only): bind `sp_executesql @params` to
-their arguments (likely the most common dynamic-SQL blocker); inline a scalar UDF whose body is one
-`RETURN (SELECT ...)`; substitute `DEFAULT` arguments of inline TVFs; show which function wraps each input
-on the pages; per-route ids diffed between runs; one whole-run graph export.
+Ideas from the sqlleaf comparison, done (commits edd5956, 3e2aadc; tests `test_column_sp_executesql.py`,
+`test_column_scalar_udf_inline.py`):
+- `sp_executesql @sql, N'@p type', @p = arg`: parameters bound to their arguments (named, positional,
+  parameter list literal or in a variable). OUTPUT parameters, a missing argument without a default
+  and an unreadable list keep the `dynamic_sql` gap.
+- A scalar UDF whose body is one `RETURN` of an expression reading tables is read from that body,
+  isolated from the caller, with arguments read in the caller's scope. Other bodies stay opaque.
+- `DEFAULT` arguments of scalar and inline table-valued functions use the declared default. An
+  opaque call no longer reads `DEFAULT` as a column (a false `missing_definition`).
+- Inputs carry `via` (the function chain), shown on the detailed and overview pages.
+- `classify()`: arithmetic containing a CASE with a string literal is no longer labelled "string".
+
+Expected effect on the estate: only traces whose blockers are `dynamic_sql` through `sp_executesql`
+with a parameter list, or `opaque_function` for single-RETURN lookups, can move; step ids of other
+traces are unchanged (corpus check: 48/48 traces with identical ids). Not yet done: per-route ids
+diffed between runs; one whole-run graph export; FORMATMESSAGE; WHILE-loop unrolling.

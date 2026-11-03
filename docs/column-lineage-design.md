@@ -138,8 +138,20 @@ arguments, and argument columns qualified by a caller alias. Otherwise the call 
 `table_valued_function` gap whose detail says why (`several_inline_definitions`,
 `inline_definition_in_another_database`, `called_in_another_database`,
 `no_inline_definition_multi_statement_or_not_scanned`, `unqualified_column_in_argument`).
-Scalar functions are summarised when their scanned body reads no tables (otherwise
-`opaque_function`).
+A `DEFAULT` argument takes the parameter's declared default; with none (or one that does not
+parse) the call is not inlined (`argument_count_or_default`).
+
+Scalar functions are summarised when their scanned body reads no tables. A scalar function
+whose body is exactly `[BEGIN] RETURN <expression> [;] [END]`, where the expression reads tables
+(`RETURN (SELECT r.name FROM dbo.region r WHERE r.code = @code)`), is walked in place of the
+call: the body in an isolated scope (its names never bind to the caller's sources), each
+parameter standing for the call's argument, which is read in the caller's own scope (so
+unqualified and correlated arguments bind as the caller's SQL does). Row selection in the body
+is recorded on the caller's step (`scalar subquery: ...`), the step is `inferred`, and its
+evidence adds the function definition. This needs one definition (identical copies count as
+one) in the caller's database, a call not qualified with another database, no table-valued
+(`READONLY`) parameter, no derived table, CTE or APPLY in the body, and no recursion; a `DEFAULT`
+argument needs a declared default. Anything else is an `opaque_function` gap.
 
 ### Inputs and roles
 
@@ -155,6 +167,11 @@ Each column, variable, parameter or literal referenced by the value expression i
 `WHEN <predicate> THEN` / `ELSE` for CASE results, `COALESCE argument <n>` /
 `ISNULL argument <n>` for precedence. A CASE without ELSE records the implicit
 `ELSE NULL` as a `constant:NULL` value input.
+
+`via` (JSON, omitted when empty) lists the functions an input passes through, outermost
+first, one chain per distinct use: `["ISNULL > UPPER > dbo.fn_x"]`; `""` stands for a use
+outside any function when the same input is also used inside one. CASE and IIF are not
+listed (their `branch` says where the input sits). It does not enter the step id.
 
 ### Row selection
 
@@ -262,8 +279,15 @@ After loading, every `dynamic_sql` statement issue (other than dead dynamic SQL)
   assignment in a WHILE loop; an unparsed statement that may assign the variable; control flow that
   could not be followed; a non-literal argument; a parameter with no caller and no default; more than
   16 alternatives.
-- Each string is split and parsed like a file. It is refused (unknown) if it reads a variable (they
-  belong to the dynamic batch or to sp_executesql parameters), contains control flow (IF, WHILE, ...),
+- `EXEC sp_executesql @stmt, @params, <arguments>`: the parameter list (a literal or an evaluated
+  variable, exactly one value) declares the parameters; each is bound to its argument, named
+  (`@p = expr`) or positional, or to the declared default when the argument is missing. Inside the
+  evaluated string the parameter names (as code, never inside its literals or comments) are replaced
+  by the argument expressions, so the statement reads the caller's columns, variables and
+  parameters. An `OUTPUT` parameter or argument, a parameter with neither argument nor default, or a
+  parameter list that cannot be read keeps the evaluation unknown.
+- Each string is split and parsed like a file. It is refused (unknown) if it reads a variable other
+  than a bound sp_executesql parameter (variables belong to the dynamic batch), contains control flow (IF, WHILE, ...),
   a statement the indexer does not recognise (USE, CREATE PROCEDURE, GRANT, ...), or one that is not
   a DML/SELECT INTO/CREATE TABLE/VIEW/EXEC procedure statement. DECLARE/SET of literals inside it feed
   a nested `EXEC`, which is evaluated recursively.

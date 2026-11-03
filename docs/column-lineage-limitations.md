@@ -55,10 +55,15 @@ contract is `column-lineage-design.md`; how to read a result is in `HANDOVER.md`
 - **`INSERT ... EXEC`** (`insert_exec`) when the callee's result set is not settled: several
   definitions of the callee, more than one statement returning rows, or a nested EXEC or dynamic SQL
   inside it. A single result-set SELECT is mapped by position.
-- **User functions**. A scalar function is summarised only when its scanned body reads no tables
-  (`opaque_function` otherwise). An inline table-valued function is inlined only when it has one
+- **User functions**. A scalar function is summarised when its scanned body reads no tables, and
+  inlined when its whole body is one `RETURN` of an expression that reads tables; any other scalar
+  body that reads tables (DECLARE, IF, several statements, a derived table or CTE in the RETURN
+  query), several different definitions, a table-valued parameter or recursion leaves an
+  `opaque_function` gap. An inline table-valued function is inlined only when it has one
   definition in the caller's database, positional arguments and alias-qualified argument columns
-  (`table_valued_function` otherwise). Multi-statement functions are never followed.
+  (`table_valued_function` otherwise). `DEFAULT` arguments need a declared default. Multi-statement
+  functions are never followed. Implicit conversion to a parameter's or the return type (e.g.
+  truncation to `varchar(10)`) is noted, not modelled.
 - **Names that cannot be bound** (`ambiguous_column`, `ambiguous_object`, `unresolved_alias`,
   `column_count_mismatch`): a column that several sources could supply, a two-part name that several
   databases define, an alias with no source, or an INSERT whose column and value counts differ.

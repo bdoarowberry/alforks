@@ -210,11 +210,16 @@ description in `src/column_lineage/assertions.py`.
   declared terminal is populated upstream is not proved.
 - A scalar user function whose definition is scanned, reads no tables and calls only such functions is
   summarised: its result depends on the arguments its body uses (step status `inferred`, with a note
-  citing the definition). Otherwise the call is an `opaque_function` gap saying why.
+  citing the definition). A scalar function whose whole body is one `RETURN` of an expression that
+  reads tables (`RETURN (SELECT ... WHERE k = @p)`) is read from that body, isolated from the caller,
+  with the call's arguments for its parameters (step `inferred`, the definition cited). Otherwise the
+  call is an `opaque_function` gap saying why.
+- Each input lists the functions it passes through (`via`, e.g. `ISNULL > UPPER > dbo.fn_x`); the
+  pages show it next to the input.
 - An inline table-valued function (`RETURNS TABLE AS RETURN (SELECT ...)`) called in FROM is read as a
   derived table: its RETURN query with the call's arguments in place of the parameters. This needs
   exactly one definition in the caller's database, positional arguments, and argument columns
-  qualified by a caller alias. Otherwise (several definitions, a definition in another database, a
+  qualified by a caller alias (`DEFAULT` takes the declared default). Otherwise (several definitions, a definition in another database, a
   multi-statement function or none scanned, an unqualified argument column) the call is a
   `table_valued_function` gap saying why.
 
