@@ -809,11 +809,20 @@ class Tracer:
                 if writer.statement.start > first and step.writer_kind in ("update", "merge_update"):
                     step.notes.append("Runs after earlier writers in the same scope and overwrites the rows it matches.")
         excluded = (self.scenario.removed_writers.get(ref.key) if self.scenario is not None else None) or []
-        if not writing and not writers and excluded:
-            # The scenario's values make every writer of this object unreachable in that procedure: this
+        if not writing and excluded:
+            # The scenario's values make every writer of this column unreachable in that procedure: this
             # invocation does not write it. Its rows come from before the invocation.
-            stops.append(self._scenario_not_written(node, ref, excluded))
-            return steps, gaps, stops, cycles
+            column_writers = []
+            for writer, reason in excluded:
+                try:
+                    found, _, _ = self.analyzer.writer_steps(writer, column, node)
+                except Exception:  # noqa: BLE001 - an excluded writer that cannot be analysed still counts
+                    found = [Step(node, writer.kind, "", "", [])]
+                if any(s.target.id == node.id for s in found):
+                    column_writers.append((writer, reason))
+            if column_writers:
+                stops.append(self._scenario_not_written(node, ref, column_writers))
+                return steps, gaps, stops, cycles
         if not writing:
             columns, schema_status, _ = self.catalog.schema_for(ref)
             declared = {c.name: c for c in columns} if columns else {}
@@ -851,15 +860,19 @@ class Tracer:
                                                                         for w, _ in excluded)})
         lines = [f"{w.unit.root_label}/{w.unit.rel_path}:{w.statement.line} ({reason})" for w, reason in excluded[:4]]
         reads = reads_of(self.catalog, self.scenario, ref)
-        detail = (f"Under the scenario, {', '.join(names)} does not write {ref.display}: its "
+        detail = (f"Under the scenario, {', '.join(names)} does not write {node.display}: its "
                   f"{len(excluded)} writer statement(s) are excluded — {'; '.join(lines)}.")
+        if ref.kind in ("temp_table", "table_variable"):
+            detail += (f" {ref.name} is local to the procedure and no remaining statement of this scenario writes "
+                       "this column, so it holds no value from this procedure when read (rows could only come "
+                       "from code the scan does not show).")
+            return Stop(node, "scenario_not_written", detail)
         if reads:
             detail += (" It reads the existing rows instead: " + "; ".join(
                 f"{r['path']}:{r['line']} ({r['statement']})" for r in reads[:3]) + ".")
         detail += (" How those rows were populated is not determined by this scenario; the unconstrained run "
                    "(without --scenario) shows the writers that can produce them.")
-        stop = Stop(node, "scenario_not_written", detail)
-        return stop
+        return Stop(node, "scenario_not_written", detail)
 
     # ------------------------------------------------------- call order
     def _call_paths(self, scope: str, limit: int = 3, entries: list[str] | None = None) -> list[tuple[str, list]]:

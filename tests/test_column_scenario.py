@@ -124,3 +124,38 @@ def test_a_call_in_an_excluded_branch_no_longer_binds_the_callee_parameter(tmp_p
 def test_bad_scenarios_are_refused(tmp_path, capsys, scenario, message):
     assert run_cli(cli_args(ROOT, TARGET, tmp_path, *DB, "--scenario", scenario)) == 2
     assert message in capsys.readouterr().err
+
+
+# Adversarial review cases (fixtures/column/scenario/sql/review.sql): each excluded a statement that runs.
+@pytest.mark.parametrize("column, scenario, expected", [
+    ("r_print", "dbo.r_p_print @dbg=0", ["demo.dbo.r_src_a.v"]),               # PRINT ... END on one line
+    ("r_else", "dbo.r_p_else @dbg=0", ["demo.dbo.r_src_a.v"]),                 # PRINT ... ELSE on one line
+    ("r_case", "dbo.r_p_case @p=0", ["demo.dbo.r_src_a.v"]),                   # CASE ... END over two lines
+    ("r_loop", "dbo.r_p_loop @p=0", ["demo.dbo.r_src_a.v"]),                   # WHILE after RETURN; @p set in the loop
+    ("r_dialog", "dbo.r_p_dialog @p=0", ["demo.dbo.r_src_a.v"]),               # BEGIN DIALOG is no block
+    ("r_trunc", "dbo.r_p_trunc @code=ABCD", ["demo.dbo.r_src_b.v"]),           # varchar(3): 'ABC' <> 'ABCD'
+    ("r_int", "dbo.r_p_int @n=1.7", ["demo.dbo.r_src_a.v"]),                   # int: 1.7 is 1
+    ("r_setbit", "dbo.r_p_setbit @b=0", ["demo.dbo.r_src_a.v"]),               # SET @b = 5 makes it 1
+    ("r_accent", "dbo.r_p_accent @w=é", ["demo.dbo.r_src_a.v", "demo.dbo.r_src_b.v"]),   # collation unknown
+    ("r_null", "dbo.r_p_null @p=NULL", ["demo.dbo.r_src_a.v", "demo.dbo.r_src_b.v"]),   # ANSI_NULLS not seen
+    ("r_word", "dbo.r_p_word @w=inf", ["demo.dbo.r_src_a.v"]),                 # a word, not a number
+    ("r_dyn", "dbo.r_p_dyn @p=0", ["demo.dbo.r_src_b.v"]),                     # evaluated dynamic SQL filtered too
+])
+def test_review_cases_keep_what_runs(tmp_path, column, scenario, expected):
+    t = run(tmp_path, f"demo.dbo.{column}.v", scenario)
+    assert reads(t) == expected
+
+
+def test_a_column_whose_only_writer_is_excluded_is_not_written(tmp_path):
+    t = run(tmp_path, "demo.dbo.r_cols.v", "dbo.r_p_cols @p=0")       # another statement still writes column w
+    assert [s["reason"] for s in t.data["stops"]] == ["scenario_not_written"]
+
+
+@pytest.mark.parametrize("scenarios, message", [
+    (["dbo.r_p_int @n=nan"], "cannot convert"),
+    (["dbo.r_p_int @n=0", "dbo.r_p_int @n=1"], "is given twice"),
+])
+def test_review_inputs_are_refused(tmp_path, capsys, scenarios, message):
+    extra = [x for s in scenarios for x in ("--scenario", s)]
+    assert run_cli(cli_args(ROOT, "demo.dbo.r_int.v", tmp_path, *DB, *extra)) == 2
+    assert message in capsys.readouterr().err

@@ -29,7 +29,7 @@ from sqlglot.errors import ErrorLevel, SqlglotError
 
 from table_lineage.index import DEFINITION, GO, mask_noncode
 
-from .control import _collapse, _Parser, header_end
+from .control import STATEMENT_START, _collapse, _Parser, header_end
 
 UNKNOWN = object()          # a value or truth that cannot be settled
 NULL = None                 # SQL NULL
@@ -71,10 +71,13 @@ def literal_value(raw: str):
         return NULL
     if len(raw) >= 2 and raw[0] == raw[-1] == "'" or (raw[:2].upper() == "N'" and raw.endswith("'")):
         return raw[raw.index("'") + 1:-1].replace("''", "'")
-    try:
-        return Decimal(raw)
-    except InvalidOperation:
-        return raw
+    if NUMBER.fullmatch(raw):
+        value = Decimal(raw)
+        return Decimal(0) if value == 0 else value      # -0 is 0 in T-SQL
+    return raw
+
+
+NUMBER = re.compile(r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?")
 
 
 # ------------------------------------------------------------------------------------------- structure
@@ -92,6 +95,7 @@ class If:
     then: object
     other: object | None
     loop: bool = False
+    span: tuple[int, int] = (0, 0)       # the condition's text
 
 
 @dataclass
@@ -106,8 +110,63 @@ class TryCatch:
     catch: Block | None
 
 
+STRUCTURAL_BEGIN = ("TRAN", "TRANSACTION", "DISTRIBUTED", "DIALOG", "CONVERSATION")
+OBJECT_WORDS = {"TABLE", "VIEW", "PROCEDURE", "PROC", "FUNCTION", "INDEX", "TRIGGER", "SCHEMA", "DATABASE",
+                "SEQUENCE", "TYPE", "SYNONYM", "STATISTICS", "USER", "ROLE", "COLUMN", "CONSTRAINT", "DEFAULT"}
+STATEMENT_WORDS = STATEMENT_START | {"ELSE", "END", "GOTO", "BREAK", "CONTINUE", "RETURN", "WHILE", "IF"}
+
+
 class _Tree(_Parser):
-    """The control structure of one procedure body (IF/ELSE, WHILE, BEGIN...END, TRY/CATCH)."""
+    """The control structure of one procedure body (IF/ELSE, WHILE, BEGIN...END, TRY/CATCH).
+
+    A statement ends at the first of: the start of the next indexed statement, a top-level ';', a
+    statement keyword outside parentheses and CASE...END, and (for a statement the index does not know,
+    such as PRINT or TRUNCATE) a line end outside parentheses and CASE. Splitting a statement in two is
+    harmless here; letting one swallow an END, ELSE or WHILE would misplace the statements after it."""
+
+    def __init__(self, text, masked, ends, starts):
+        super().__init__(text, masked, ends)
+        self.starts = starts          # offsets where indexed statements begin
+
+    def simple_end(self, i: int, end: int) -> int:
+        known = self.ends.get(i)
+        indexed = known is not None and known > i
+        limit = min(known, end) if indexed else end
+        first = self.word_at(i)
+        j = first[1] if first else i + 1
+        depth = case = 0
+        previous = first[0] if first else None
+        while j < limit:
+            char = self.masked[j]
+            if char == "(":
+                depth += 1
+            elif char == ")":
+                depth = max(0, depth - 1)
+            elif char == ";" and depth == 0:
+                return j + 1
+            elif char == "\n" and not indexed and depth == 0 and case == 0:
+                return j + 1
+            elif j in self.starts and j > i:
+                return j
+            elif char.isalpha() or char == "_":
+                word = self.word_at(j)
+                if word:
+                    name, after = word
+                    if name == "CASE":
+                        case += 1
+                    elif name == "END" and case:
+                        case -= 1
+                    elif depth == 0 and not case and j > i and (
+                            name in ("IF", "WHILE", "ELSE", "END", "BEGIN", "RETURN", "GOTO", "BREAK", "CONTINUE")
+                            or (not indexed and name in STATEMENT_WORDS)) and \
+                            not (name == "IF" and previous in OBJECT_WORDS) and \
+                            not (name == "END" and previous == "BEGIN"):
+                        return j
+                    previous = name
+                    j = after
+                    continue
+            j += 1
+        return limit
 
     def node(self, i: int, end: int):
         self.steps += 1
@@ -130,11 +189,11 @@ class _Tree(_Parser):
                 nxt = self.word_at(j)
                 if nxt and nxt[0] == "ELSE":
                     other, body_end = self.node(nxt[1], end)
-            return If(i, self.text[after:cond_end], then, other, name == "WHILE"), body_end
+            return If(i, self.text[after:cond_end], then, other, name == "WHILE", (after, cond_end)), body_end
         if name == "BEGIN":
             j = self.skip_ws(after, end)
             nxt = self.word_at(j)
-            if nxt and nxt[0] in ("TRAN", "TRANSACTION", "DISTRIBUTED"):
+            if nxt and nxt[0] in STRUCTURAL_BEGIN:
                 e = self.simple_end(i, end)
                 return Stmt(i, e, "BEGIN"), e
             if nxt and nxt[0] == "TRY":
@@ -158,7 +217,8 @@ class _Tree(_Parser):
             if i >= end:
                 break
             word = self.word_at(i)
-            if word and word[0] == "END":
+            nxt_word = self.word_at(self.skip_ws(word[1], end)) if word and word[0] == "END" else None
+            if word and word[0] == "END" and not (nxt_word and nxt_word[0] == "CONVERSATION"):
                 after = word[1]
                 if kind:
                     nxt = self.word_at(self.skip_ws(after, end))
@@ -184,17 +244,24 @@ def _number(value):
     return UNKNOWN
 
 
-def _compare(op: str, left, right):
+ANSI = "\x00ansi_nulls"    # environment key: True when SET ANSI_NULLS ON is known to apply
+
+
+def _compare(op: str, left, right, ansi: bool = True):
     """Three-valued comparison: True, False, None (NULL) or UNKNOWN (cannot be settled)."""
     if left is UNKNOWN or right is UNKNOWN:
         return UNKNOWN
     if left is NULL or right is NULL:
+        if op in ("=", "<>") and not ansi:
+            return UNKNOWN            # with ANSI_NULLS OFF, = NULL and <> NULL compare as values
         return NULL
     if isinstance(left, str) and isinstance(right, str):
         a, b = left.rstrip(" "), right.rstrip(" ")
         if op in ("=", "<>"):
             if a == b:
                 return op == "="
+            if not (a.isascii() and b.isascii()):
+                return UNKNOWN        # accent, width or expansion rules of the collation are unknown
             if a.casefold() == b.casefold():
                 return UNKNOWN        # equal under a case-insensitive collation, not under a sensitive one
             return op == "<>"
@@ -247,7 +314,8 @@ def evaluate(node, env: dict):
     if isinstance(node, exp.Parameter):
         return env.get(node.sql(dialect="tsql").lower(), UNKNOWN)
     if type(node) in COMPARISONS:
-        return _compare(COMPARISONS[type(node)], evaluate(node.this, env), evaluate(node.expression, env))
+        return _compare(COMPARISONS[type(node)], evaluate(node.this, env), evaluate(node.expression, env),
+                        env.get(ANSI, False))
     if isinstance(node, exp.Is) and isinstance(node.expression, exp.Null):
         value = evaluate(node.this, env)
         return UNKNOWN if value is UNKNOWN else value is NULL
@@ -261,7 +329,7 @@ def evaluate(node, env: dict):
         left = evaluate(node.this, env)
         result = False
         for item in node.expressions:
-            result = _or(result, _compare("=", left, evaluate(item, env)))
+            result = _or(result, _compare("=", left, evaluate(item, env), env.get(ANSI, False)))
         return result
     if isinstance(node, exp.Between):
         value = evaluate(node.this, env)
@@ -285,11 +353,18 @@ def condition_truth(text: str, env: dict):
     return value is True
 
 
-def _coerce(value, declared: str | None):
-    """A supplied value converted as SQL Server converts it to the parameter's declared type."""
-    kind = (declared or "").lower()
-    if value is NULL or not kind:
+INTEGERS = {"tinyint": (0, 255), "smallint": (-2 ** 15, 2 ** 15 - 1), "int": (-2 ** 31, 2 ** 31 - 1),
+            "bigint": (-2 ** 63, 2 ** 63 - 1)}
+STRINGS = {"char", "varchar", "nchar", "nvarchar", "sysname"}
+
+
+def _coerce(value, declared: tuple | None):
+    """A value converted as SQL Server converts it to the declared type (base, length or precision, scale).
+    Raises ScenarioError when SQL Server would fail; returns UNKNOWN for types not compared exactly."""
+    from decimal import ROUND_DOWN, ROUND_HALF_UP
+    if value is NULL or value is UNKNOWN or not declared:
         return value
+    kind, size, scale = declared
     if kind == "bit":
         if isinstance(value, str):
             word = value.strip().upper()
@@ -300,20 +375,47 @@ def _coerce(value, declared: str | None):
                 raise ScenarioError(f"cannot convert {value!r} to bit")
             value = number
         return Decimal(1 if value != 0 else 0)
-    if kind in ("int", "bigint", "smallint", "tinyint", "decimal", "numeric", "money", "smallmoney", "float", "real"):
+    if kind in INTEGERS:
+        if isinstance(value, str):
+            if not re.fullmatch(r"\s*[+-]?\d+\s*", value):
+                raise ScenarioError(f"cannot convert {value!r} to {kind}")
+            number = Decimal(value.strip())
+        else:
+            number = value.to_integral_value(rounding=ROUND_DOWN)    # a decimal converted to int is truncated
+        low, high = INTEGERS[kind]
+        if not low <= number <= high:
+            raise ScenarioError(f"{value} is out of range for {kind}")
+        return Decimal(0) if number == 0 else number
+    if kind in ("decimal", "numeric", "money", "smallmoney"):
         number = _number(value)
         if number is UNKNOWN:
             raise ScenarioError(f"cannot convert {value!r} to {kind}")
-        return number
-    if kind in ("char", "varchar", "nchar", "nvarchar", "sysname"):
-        return value if isinstance(value, str) else format(value, "f")
-    return UNKNOWN      # dates and other types: compared only as unknown
+        places = 4 if kind in ("money", "smallmoney") else (scale or 0)
+        return number.quantize(Decimal(1).scaleb(-places), rounding=ROUND_HALF_UP)
+    if kind in STRINGS:
+        text = value if isinstance(value, str) else format(value, "f")
+        length = 128 if kind == "sysname" else size
+        return text[:length] if length else text
+    return UNKNOWN      # float, real, dates and other types: not compared exactly
 
 
-def declared_types(header: str) -> dict[str, str]:
+def declared_types(header: str) -> dict[str, tuple]:
+    """@param -> (type, length or precision, scale); a parameter's char/varchar without a length is 1 long,
+    (max) has no limit."""
     masked = mask_noncode(header)
-    return {m.group(1).lower(): m.group(2).lower() for m in
-            re.finditer(r"(@[\w$#@]+)\s+(?:AS\s+)?\[?([A-Za-z_]\w*)", masked)}
+    out = {}
+    for m in re.finditer(r"(@[\w$#@]+)\s+(?:AS\s+)?\[?([A-Za-z_]\w*)\]?\s*(?:\(\s*(\w+)\s*(?:,\s*(\d+)\s*)?\))?",
+                         masked):
+        kind = m.group(2).lower()
+        size = m.group(3)
+        if size is None:
+            size = 1 if kind in ("char", "varchar", "nchar", "nvarchar") else None
+        elif size.lower() == "max":
+            size = None
+        else:
+            size = int(size) if size.isdigit() else None
+        out[m.group(1).lower()] = (kind, size, int(m.group(4)) if m.group(4) else None)
+    return out
 
 
 # ------------------------------------------------------------------------------------------- the walk
@@ -361,6 +463,7 @@ class _Walker:
         self.text = text
         self.masked = masked
         self.statements = statements      # indexed statements of the body: start -> Statement
+        self.types: dict[str, tuple] = {}
         self.line_at = line_at
         self.context: list[str] = []      # decided conditions on the way to the current statement
         self.after_return = "after a RETURN that always runs"
@@ -373,6 +476,8 @@ class _Walker:
         out = set()
         text = self.masked[start:end]
         for name in env:
+            if name == ANSI:
+                continue
             p = re.escape(name)
             if not re.search(rf"(?<![\w$#@]){p}(?![\w$#@])", text, re.I):
                 continue
@@ -440,6 +545,11 @@ class _Walker:
                     if isinstance(eq, exp.EQ) and isinstance(eq.this, exp.Parameter):
                         value = evaluate(eq.expression, env)
                 name = next(iter(names))
+                if value is not UNKNOWN and len(names) == 1:
+                    try:
+                        value = _coerce(value, self.types.get(name))
+                    except ScenarioError:
+                        value = UNKNOWN          # the SET fails at run time: nothing is settled
                 if value is not UNKNOWN and len(names) == 1:
                     env = dict(env)
                     env[name] = value
@@ -526,7 +636,9 @@ class _Walker:
             return f"{', '.join(changed)} may have changed before it ({self.r.changed[changed[0]]})"
         if unset:
             return f"it depends on {', '.join(unset)}, which the scenario does not set"
-        return "it reads more than the scenario's parameters (columns, functions or other expressions)"
+        return ("the values do not settle it: it reads more than the supplied parameters (columns, functions, other "
+                "expressions), or the comparison depends on the collation, the ANSI_NULLS setting or a type the "
+                "scenario does not compare")
 
 
 def analyse(catalog, proc, scenario: Scenario) -> ProcedureScenario:
@@ -555,19 +667,53 @@ def analyse(catalog, proc, scenario: Scenario) -> ProcedureScenario:
     if re.search(r"\bGOTO\b", masked[body:limit], re.I):
         result.notes.append("The procedure uses GOTO, whose jumps are not followed: no statement is excluded.")
         return result
-    tree = _Tree(unit.text, masked, ends)
+    tree = _Tree(unit.text, masked, ends, set(statements))
     try:
         block, _ = tree.block(body, limit, None)
     except RecursionError:
         result.notes.append("The control flow could not be followed: no statement is excluded.")
         return result
+    # Sanity net: every indexed statement must begin one of the walked statements, and none may begin with
+    # a control keyword (the index merged it with the statement after it). Otherwise exclude nothing.
+    walked = {start for start, _ in _Walker(result, unit.text, masked, statements, unit.line_at).spans(block)}
+    conditions = []
+
+    def collect(item):
+        if isinstance(item, If):
+            conditions.append(item.span)
+            collect(item.then)
+            collect(item.other)
+        elif isinstance(item, Block):
+            for x in item.items:
+                collect(x)
+        elif isinstance(item, TryCatch):
+            collect(item.body)
+            collect(item.catch)
+    collect(block)
+    inside_condition = {s.start for s in statements.values() if any(a <= s.start < b for a, b in conditions)}
+    misplaced = [s for s in statements.values() if (s.start not in walked and s.start not in inside_condition) or (
+        (tree.word_at(s.start) or ("",))[0] in ("RETURN", "IF", "ELSE", "WHILE", "END", "BEGIN", "GOTO")
+        and isinstance(s.tree, (exp.Insert, exp.Update, exp.Merge, exp.Delete, exp.Select, exp.Execute)))]
+    if misplaced:
+        result.notes.append(f"The control flow around line {unit.line_at(misplaced[0].start)} could not be lined up "
+                            "with the statements: no statement is excluded.")
+        return result
+    settings = list(re.finditer(r"\bSET\s+ANSI_NULLS\s+(ON|OFF)\b", masked[:proc.start], re.I))
+    ansi = bool(settings) and settings[-1].group(1).upper() == "ON"
+    if not ansi and any(v is NULL for v in values.values()):
+        result.notes.append("SET ANSI_NULLS ON is not seen before the procedure, so = NULL and <> NULL comparisons "
+                            "are left undecided.")
     walker = _Walker(result, unit.text, masked, statements, unit.line_at)
-    walker.walk(block, {name: value for name, value in values.items()})
+    walker.types = types
+    env = {name: value for name, value in values.items()}
+    env[ANSI] = ansi
+    walker.walk(block, env)
     for name, value in values.items():
         if value is UNKNOWN:
             result.notes.append(f"{name}: the value {scenario.texts[name]} is not compared (its declared type is not "
                                 "handled); conditions on it keep both arms.")
-    calls = re.findall(r"\bEXEC(?:UTE)?\s+(?!@|\()([\w.\[\]]+)", masked[body:limit], re.I)
+    calls = [c for c in re.findall(r"\bEXEC(?:UTE)?\s+(?!@|\()([\w.\[\]]+)", masked[body:limit], re.I)
+             if not re.fullmatch(r"(?:\[?(?:sys|master)\]?\.)*\[?(?:dbo\]?\.\[?)?sp_\w+\]?", c, re.I)]
     if calls:
         result.notes.append("Scenario values are not carried into called procedures ("
                             + ", ".join(sorted({c.lower() for c in calls})[:5]) + "): their branches are all kept.")
@@ -609,7 +755,9 @@ class ScenarioSet:
 def apply(catalog, scenarios: list[Scenario]) -> ScenarioSet:
     """Analyse each scenario's procedure and remove what its values make unreachable from the catalog."""
     from .catalog import ObjectRef, split_name
+    catalog.evaluate_dynamic()      # its writers are placed at their EXEC, so they are filtered too
     results = []
+    seen_procs: dict[str, str] = {}
     for scenario in scenarios:
         parts = [p.lower() for p in split_name(scenario.procedure)]
         parts = [None] * (3 - len(parts[-3:])) + parts[-3:]
@@ -617,6 +765,10 @@ def apply(catalog, scenarios: list[Scenario]) -> ScenarioSet:
         if not procs:
             raise ScenarioError(f"--scenario: procedure {scenario.procedure} is not defined in the scanned files")
         for proc in procs:
+            if proc.scope in seen_procs:
+                raise ScenarioError(f"--scenario: {proc.ref.display} is given twice ({seen_procs[proc.scope]!r} and "
+                                    f"{scenario.procedure!r}); run each scenario separately")
+            seen_procs[proc.scope] = scenario.procedure
             unknown = sorted(set(scenario.values) - set(proc.params))
             if unknown:
                 raise ScenarioError(f"--scenario: {proc.ref.display} has no parameter {', '.join(unknown)} "
@@ -697,11 +849,15 @@ def reads_of(catalog, applied: ScenarioSet, ref) -> list[dict]:
             if statement.scope != result.scope or result.excluded(statement.start) is not None:
                 continue
             tree = statement.tree
-            if not isinstance(tree, exp.Expression) or isinstance(tree, (exp.Insert, exp.Update, exp.Merge, exp.Delete)):
-                continue
-            if isinstance(tree, exp.Select) and tree.args.get("into"):
-                continue
+            if not isinstance(tree, (exp.Select, exp.Union, exp.Insert, exp.Update, exp.Merge, exp.Delete)):
+                continue        # CREATE, DROP, TRUNCATE, EXEC ...: not a read of the rows
+            # The table a DML statement writes is its target, not a read (unless it also appears as a source).
+            target = tree.this if isinstance(tree, (exp.Insert, exp.Update, exp.Merge, exp.Delete)) else \
+                tree.args.get("into")
+            target = target.this if isinstance(target, (exp.Schema, exp.Into)) else target
             for table in tree.find_all(exp.Table):
+                if table is target:
+                    continue
                 try:
                     found = catalog.ref_from_table(table, unit, statement)
                 except Exception:   # noqa: BLE001 - a table name that cannot be resolved is not this object

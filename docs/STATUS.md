@@ -629,6 +629,16 @@ origin not determined). Pages state the values as assumptions and list upstream 
 procedures whose run order needs job or run evidence. Without `--scenario` nothing changes (corpus:
 48/48 traces identical). Invented acceptance case: `fixtures/column/scenario/sql/publish.sql`.
 
+Adversarial review of 2a7af58: 13 confirmed defects, all fixed (cases in `review.sql`; 13 of the new
+tests fail on 2a7af58). Five excluded statements that run: one-line `PRINT ... END` / `... ELSE`,
+`CASE ... END` over lines in an unindexed statement, a WHILE header swallowed by the statement before
+it, `BEGIN DIALOG` taken for a block (now own statement ends plus a sanity net); values not converted to
+the declared type (truncation, rounding, SET values); accent/width-insensitive equality decided;
+`ANSI_NULLS OFF` ignored; `inf`/`nan`/`1_0` read as numbers (and a crash); evaluated dynamic SQL in an
+excluded arm still traced (dynamic SQL is now evaluated before filtering); per-table instead of
+per-column `scenario_not_written`; CREATE TABLE counted as a read; two scenarios for one procedure
+merged silently.
+
 ## T-SQL construct probe and sqlleaf comparison (tests/test_column_tsql_constructs.py)
 
 Fixed (each was a false complete, a wrong binding or an unexplained end):

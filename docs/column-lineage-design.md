@@ -210,11 +210,26 @@ A scenario assumes values for some parameters of one procedure. After loading (a
 evaluation), each definition of the procedure is walked once over its control structure (IF/ELSE,
 WHILE, BEGIN...END, TRY/CATCH, RETURN), with an environment of the supplied values:
 
+- Structure: the walk has its own statement ends. A statement ends at the next indexed statement, a
+  top-level `;`, a control or statement keyword outside parentheses and CASE...END (not the `IF` of
+  `DROP TABLE IF EXISTS`), or, for a statement the index does not know (PRINT, TRUNCATE, THROW, ...),
+  a line end outside parentheses and CASE. Splitting is harmless; swallowing an END, ELSE or WHILE
+  would misplace what follows. `BEGIN TRAN/DISTRIBUTED/DIALOG/CONVERSATION` and `END CONVERSATION` are
+  statements, not blocks. Sanity net: if an indexed statement does not begin a walked statement
+  (outside IF/WHILE conditions), or an indexed DML statement begins with RETURN/IF/ELSE/WHILE/END/BEGIN
+  (the index merged it), nothing in that procedure is excluded (`notes`).
 - An IF condition is evaluated over literals and the environment with T-SQL three-valued logic
-  (comparisons, IS [NOT] NULL, NOT, AND, OR, IN, BETWEEN; NULL is not true, so ELSE runs). Values are
-  converted to the declared parameter type (bit: non-zero is 1, `'TRUE'`/`'FALSE'`; numbers; strings
-  compared with trailing spaces ignored, and a case-only difference left undecided because the
-  collation is unknown). Anything else is undecided and keeps both arms (`uncertain_conditions`).
+  (comparisons, IS [NOT] NULL, NOT, AND, OR, IN, BETWEEN; NULL is not true, so ELSE runs). `= NULL` and
+  `<> NULL` are decided only when `SET ANSI_NULLS ON` precedes the procedure in its file. Supplied and
+  SET values are converted to the declared type as SQL Server converts them: bit (non-zero is 1,
+  `'TRUE'`/`'FALSE'`), integers (decimals truncated; out of range or non-numeric text refused), decimal,
+  numeric and money (rounded to the scale), char/varchar/nchar/nvarchar/sysname (truncated to the
+  length; a parameter's `varchar` without length is 1 long); float, real, dates and other types are
+  not compared. Strings: trailing spaces ignored; a case-only difference, or any non-ASCII text that is
+  not identical, is undecided (collation unknown). Scenario values: quoted text is a string, `NULL` is
+  NULL, a plain decimal or exponent number is a number (`-0` is 0), any other word is a string.
+  Anything undecided keeps both arms (`uncertain_conditions`). Two scenarios for one procedure are
+  refused.
 - A settled IF excludes the other arm; statements after a RETURN that every allowed path reaches are
   excluded. A WHILE whose condition is false excludes its body; otherwise the body is kept.
 - Assignments: `SET @p = <settled value>` on a reachable path updates the environment; any other
