@@ -215,9 +215,14 @@ WHILE, BEGIN...END, TRY/CATCH, RETURN), with an environment of the supplied valu
   `DROP TABLE IF EXISTS`), or, for a statement the index does not know (PRINT, TRUNCATE, THROW, ...),
   a line end outside parentheses and CASE. Splitting is harmless; swallowing an END, ELSE or WHILE
   would misplace what follows. `BEGIN TRAN/DISTRIBUTED/DIALOG/CONVERSATION` and `END CONVERSATION` are
-  statements, not blocks. Sanity net: if an indexed statement does not begin a walked statement
-  (outside IF/WHILE conditions), or an indexed DML statement begins with RETURN/IF/ELSE/WHILE/END/BEGIN
-  (the index merged it), nothing in that procedure is excluded (`notes`).
+  statements, not blocks. Bracketed and double-quoted identifiers (`[End]`) are never keywords.
+  Statements are compared at their anchor: the first code character (the index may start a statement
+  at its line start, after indentation or a trailing comment's line break), or, when the index merged
+  a leading control keyword into a DML statement (`IF @p = 1 RETURN INSERT ...`), that statement's own
+  keyword (any DML keyword when the statement did not parse). Sanity net: if an indexed statement does
+  not begin a walked statement (outside IF/WHILE conditions and heads), nothing in that procedure is
+  excluded, `applied` is false, `notes` says which kind of statement did not line up, and both pages
+  say "Scenario requested but not applied — this is the unconstrained all-path result".
 - An IF condition is evaluated over literals and the environment with T-SQL three-valued logic
   (comparisons, IS [NOT] NULL, NOT, AND, OR, IN, BETWEEN; NULL is not true, so ELSE runs). `= NULL` and
   `<> NULL` are decided only when `SET ANSI_NULLS ON` precedes the procedure in its file. Supplied and

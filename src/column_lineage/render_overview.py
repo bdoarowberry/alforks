@@ -1492,6 +1492,8 @@ def _scenario_flag(a: Analysis) -> list[str]:
     block = (a.data.get("scan") or {}).get("scenario")
     if not block:
         return []
+    if not any(p.get("applied", True) for p in block.get("procedures") or []):
+        return ["- **Scenario not applied:** the counts below are the unconstrained all-path result (see Scenario)."]
     return ["- **Scenario-specific result:** the counts below cover only the branches the assumed parameter values "
             "allow (see Scenario); the unconstrained run can include more routes."]
 

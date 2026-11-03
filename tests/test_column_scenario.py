@@ -159,3 +159,42 @@ def test_review_inputs_are_refused(tmp_path, capsys, scenarios, message):
     extra = [x for s in scenarios for x in ("--scenario", s)]
     assert run_cli(cli_args(ROOT, "demo.dbo.r_int.v", tmp_path, *DB, *extra)) == 2
     assert message in capsys.readouterr().err
+
+
+def test_indented_calls_with_trailing_comments_line_up(tmp_path):
+    """Tester trial shape (try_calls.sql): the index starts each call after the first at its line start, the
+    walk at its first word; the scenario must still apply."""
+    t = run(tmp_path, "demo.dbo.t_result.v", "dbo.t_publish @mode=0 @rebuild=1")
+    assert reads(t) == ["demo.dbo.t_regular.v"]
+    [proc] = t.data["scan"]["scenario"]["procedures"]
+    assert proc["applied"] and not any("could not be lined up" in n for n in proc["notes"])
+    assert not proc["parameters_changed_in_procedure"]          # passing @mode to a call does not change it
+    assert len(proc["excluded_statements"]) == 1 and "t_interim" in proc["excluded_statements"][0]["statement"]
+
+
+def test_a_scenario_that_cannot_be_applied_says_so(tmp_path):
+    t = run(tmp_path, "demo.dbo.t_goto_out.v", "dbo.t_goto @mode=1")
+    [proc] = t.data["scan"]["scenario"]["procedures"]
+    assert proc["applied"] is False and reads(t) == ["demo.dbo.t_regular.v"]
+    overview, detailed = pages(tmp_path, "demo.dbo.t_goto_out.v")
+    for page in (overview, detailed):
+        assert "**Scenario requested but not applied — this is the unconstrained all-path result.**" in page
+        assert "Only what these values allow is shown" not in page
+    assert "- **Scenario not applied:** the counts below are the unconstrained all-path result" in overview
+    assert "**Scenario-specific result:**" not in overview
+
+
+def test_bracketed_keywords_and_indexed_while_line_up(tmp_path):
+    t = run(tmp_path, "demo.dbo.t_shapes.v", "dbo.t_align @p=1")
+    [proc] = t.data["scan"]["scenario"]["procedures"]
+    assert proc["applied"], proc["notes"]
+    assert "demo.dbo.t_interim.v" not in reads(t) and "demo.dbo.t_regular.v" in reads(t)
+
+
+def test_a_merged_return_and_insert_still_lines_up(tmp_path):
+    """IF @p = 1 RETURN INSERT ... on one line: the index merges the two (and cannot parse them; a parse_error
+    gap without a scenario too). The scenario still lines up and excludes nothing it cannot place."""
+    t = run(tmp_path, "demo.dbo.t_merged.v", "dbo.t_merge @p=0")
+    [proc] = t.data["scan"]["scenario"]["procedures"]
+    assert proc["applied"] and not proc["excluded_statements"]
+    assert "parse_error" in t.gap_kinds

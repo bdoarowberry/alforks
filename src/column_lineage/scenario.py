@@ -138,6 +138,10 @@ class _Tree(_Parser):
         previous = first[0] if first else None
         while j < limit:
             char = self.masked[j]
+            if char in "[\"":
+                close = self.masked.find("]" if char == "[" else '"', j + 1, limit)
+                j = close + 1 if close > j else limit       # [End], "Select": identifiers, not keywords
+                continue
             if char == "(":
                 depth += 1
             elif char == ")":
@@ -442,11 +446,41 @@ class ProcedureScenario:
     body: tuple[int, int] = (0, 0)
     reachable: list[tuple[int, int]] = field(default_factory=list)   # spans of statements that can run
 
-    def excluded(self, start: int) -> str | None:
+    applied: bool = True          # False when the scenario could not be applied (nothing is excluded)
+
+    def excluded(self, start: int, statement=None) -> str | None:
+        start = anchor(self.unit.masked, statement) if statement is not None else code_start(self.unit.masked, start)
         for item in self.exclusions:
             if item.start <= start < item.end:
                 return item.reason
         return None
+
+
+DML_WORDS = {exp.Insert: ("INSERT",), exp.Update: ("UPDATE",), exp.Merge: ("MERGE",), exp.Delete: ("DELETE",),
+             exp.Select: ("SELECT", "WITH"), exp.Union: ("SELECT", "WITH"), exp.Execute: ("EXEC", "EXECUTE")}
+CONTROL_WORDS = ("RETURN", "IF", "ELSE", "WHILE", "END", "BEGIN", "GOTO", "BREAK", "CONTINUE")
+
+
+def anchor(masked: str, statement) -> int:
+    """Where a statement's own code begins: its first code character, or, when the index merged a leading
+    control keyword into a DML statement (IF @p = 1 RETURN INSERT ...), the DML statement's own keyword."""
+    start = code_start(masked, statement.start)
+    first = re.match(r"[A-Za-z_]+", masked[start:start + 20])
+    words = DML_WORDS.get(type(statement.tree)) if statement.tree is not None and statement.parse_status == "parsed" \
+        else ("INSERT", "UPDATE", "MERGE", "DELETE", "SELECT", "WITH", "EXEC", "EXECUTE")   # unparsed: any of them
+    if first and first.group().upper() in CONTROL_WORDS and words:
+        found = re.compile(r"(?<![\w@#$.\[])(" + "|".join(words) + r")\b", re.I).search(masked, start, statement.end)
+        if found:
+            return found.start()
+    return start
+
+
+def code_start(masked: str, i: int) -> int:
+    """The first code character at or after ``i``: the index may start a statement at the beginning of its
+    line (indentation, or the line after a trailing comment), the walk at its first word."""
+    while i < len(masked) and masked[i].isspace():
+        i += 1
+    return i
 
 
 WRITE_PATTERNS = (
@@ -662,25 +696,29 @@ def analyse(catalog, proc, scenario: Scenario) -> ProcedureScenario:
             raise ScenarioError(f"--scenario {scenario.procedure}: {name}: {exc}") from None
     result = ProcedureScenario(proc.scope, unit, proc.ref.display, proc.line, values, dict(scenario.texts),
                                body=(body, limit))
-    statements = {s.start: s for s in unit.index.statements if body <= s.start < limit}
-    ends = {s.start: s.end for s in unit.index.statements}
+    statements = {anchor(masked, s): s for s in unit.index.statements if body <= s.start < limit}
+    ends = {anchor(masked, s): s.end for s in unit.index.statements}
     if re.search(r"\bGOTO\b", masked[body:limit], re.I):
         result.notes.append("The procedure uses GOTO, whose jumps are not followed: no statement is excluded.")
+        result.applied = False
         return result
     tree = _Tree(unit.text, masked, ends, set(statements))
     try:
         block, _ = tree.block(body, limit, None)
     except RecursionError:
         result.notes.append("The control flow could not be followed: no statement is excluded.")
+        result.applied = False
         return result
     # Sanity net: every indexed statement must begin one of the walked statements, and none may begin with
     # a control keyword (the index merged it with the statement after it). Otherwise exclude nothing.
     walked = {start for start, _ in _Walker(result, unit.text, masked, statements, unit.line_at).spans(block)}
     conditions = []
+    heads = set()          # IF / WHILE keywords: the index may record "WHILE @n < 2" as a statement
 
     def collect(item):
         if isinstance(item, If):
             conditions.append(item.span)
+            heads.add(item.start)
             collect(item.then)
             collect(item.other)
         elif isinstance(item, Block):
@@ -690,13 +728,19 @@ def analyse(catalog, proc, scenario: Scenario) -> ProcedureScenario:
             collect(item.body)
             collect(item.catch)
     collect(block)
-    inside_condition = {s.start for s in statements.values() if any(a <= s.start < b for a, b in conditions)}
-    misplaced = [s for s in statements.values() if (s.start not in walked and s.start not in inside_condition) or (
-        (tree.word_at(s.start) or ("",))[0] in ("RETURN", "IF", "ELSE", "WHILE", "END", "BEGIN", "GOTO")
-        and isinstance(s.tree, (exp.Insert, exp.Update, exp.Merge, exp.Delete, exp.Select, exp.Execute)))]
+    inside_condition = {start for start in statements if any(a <= start < b for a, b in conditions)}
+    misplaced = [start for start, s in statements.items()
+                 if (start not in walked and start not in inside_condition and start not in heads)
+                 or ((tree.word_at(start) or ("",))[0] in ("RETURN", "IF", "ELSE", "WHILE", "END", "BEGIN", "GOTO")
+                     and isinstance(s.tree, (exp.Insert, exp.Update, exp.Merge, exp.Delete, exp.Select, exp.Execute)))]
     if misplaced:
-        result.notes.append(f"The control flow around line {unit.line_at(misplaced[0].start)} could not be lined up "
-                            "with the statements: no statement is excluded.")
+        first = statements[misplaced[0]]
+        kind = type(first.tree).__name__ if first.tree is not None else first.parse_status
+        word = (tree.word_at(misplaced[0]) or ("?",))[0]
+        result.notes.append(f"The control flow around line {unit.line_at(misplaced[0])} could not be lined up "
+                            f"with the statements (an indexed {kind} statement starting with {word} does not begin "
+                            "a walked statement): no statement is excluded.")
+        result.applied = False
         return result
     settings = list(re.finditer(r"\bSET\s+ANSI_NULLS\s+(ON|OFF)\b", masked[:proc.start], re.I))
     ansi = bool(settings) and settings[-1].group(1).upper() == "ON"
@@ -734,7 +778,7 @@ class ScenarioSet:
         result = self.by_scope.get(statement.scope)
         if result is None or result.unit.path != unit.path:
             return None
-        return result.excluded(statement.start)
+        return result.excluded(statement.start, statement)
 
     def to_dict(self) -> dict:
         return {
@@ -743,6 +787,7 @@ class ScenarioSet:
                     "Run without --scenario for every statically possible branch.",
             "procedures": [{
                 "procedure": r.name, "definition": f"{r.unit.root_label}/{r.unit.rel_path}:{r.line}",
+                "applied": r.applied,
                 "values": dict(r.texts),
                 "excluded_statements": [x for x in self.removed if x["procedure_scope"] == r.scope],
                 "uncertain_conditions": list(dict.fromkeys(r.uncertain)),
@@ -846,7 +891,7 @@ def reads_of(catalog, applied: ScenarioSet, ref) -> list[dict]:
     for result in applied.results:
         unit = result.unit
         for statement in unit.index.statements:
-            if statement.scope != result.scope or result.excluded(statement.start) is not None:
+            if statement.scope != result.scope or result.excluded(statement.start, statement) is not None:
                 continue
             tree = statement.tree
             if not isinstance(tree, (exp.Select, exp.Union, exp.Insert, exp.Update, exp.Merge, exp.Delete)):

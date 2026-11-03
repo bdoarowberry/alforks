@@ -357,9 +357,20 @@ def scenario_lines(data: dict, detailed: str = "", limit: int | None = None) -> 
     values = "; ".join(f"{_code(p['procedure'])} with " + ", ".join(f"{_code(k + ' = ' + str(v))}"
                                                                      for k, v in p["values"].items())
                        for p in procs)
+    applied = [p for p in procs if p.get("applied", True)]
+    if not applied:
+        why = "; ".join(_text(n) for p in procs for n in p.get("notes") or []) or "see scan-diagnostics.json"
+        return [f"**Scenario requested but not applied — this is the unconstrained all-path result.** The assumed "
+                f"values ({values}) could not be applied, so no branch was excluded and every statically possible "
+                f"branch is shown: {why}", ""]
     out = [f"**Scenario-specific result — assumed values, not evidence of what ran in production.** This run "
            f"traced one execution scenario: {values}. Only what these values allow is shown; the unconstrained run "
            "(without `--scenario`) shows every statically possible branch.", ""]
+    for p in procs:
+        if not p.get("applied", True):
+            out.append(f"- **Not applied to {_code(p['procedure'])}:** "
+                       + ("; ".join(_text(n) for n in p.get("notes") or []) or "its control flow could not be followed")
+                       + " Its branches are all kept.")
     objects = {(n.get("object") or {}).get("key") for n in data.get("nodes") or []} - {None}
     names = {_short_proc(p["procedure"]) for p in procs}
     excluded = [x for p in procs for x in p.get("excluded_statements") or []]

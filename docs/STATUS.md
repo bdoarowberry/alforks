@@ -639,6 +639,15 @@ excluded arm still traced (dynamic SQL is now evaluated before filtering); per-t
 per-column `scenario_not_written`; CREATE TABLE counted as a read; two scenarios for one procedure
 merged silently.
 
+Tester trial of 028ee99 (178 targets, real entry procedure): the scenario did not engage (0 excluded,
+1 alignment note) and the overview still said "Only what these values allow is shown". Cause: after a
+call with a trailing comment and no semicolon, the index starts the next statement at its line start,
+the walk at its first word; exact offsets were compared. Fixed by comparing anchors; also a bracketed
+`[End]` inside CASE, a WHILE indexed as its own statement, and an unparsed `RETURN INSERT` merge (which
+would have dropped the INSERT's parse_error gap). Sweep: 1142 corpus procedures and every fixture
+procedure now line up (GOTO procedures excepted, by design). A scenario that cannot be applied now says
+so on both pages (`applied: false`).
+
 ## T-SQL construct probe and sqlleaf comparison (tests/test_column_tsql_constructs.py)
 
 Fixed (each was a false complete, a wrong binding or an unexplained end):
