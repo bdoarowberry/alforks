@@ -373,6 +373,14 @@ def scenario_lines(data: dict, detailed: str = "", limit: int | None = None) -> 
     out = [f"**Scenario-specific result — assumed values, not evidence of what ran in production.** This run "
            f"traced one execution scenario: {values}. {effect} The unconstrained run (without `--scenario`) shows "
            "every statically possible branch.", ""]
+    copies: dict[str, list[str]] = {}
+    for p in procs:
+        copies.setdefault(p["procedure"], []).append(p.get("definition") or "?")
+    for name, where in copies.items():
+        if len(where) > 1:
+            out.append(f"- **{_code(name)} has {len(where)} definitions** ({', '.join(_code(w) for w in where)}): the "
+                       "scenario is applied to each; which one is deployed is not known, so what any of them can "
+                       "run counts as run by this invocation.")
     for p in procs:
         if not p.get("applied", True):
             out.append(f"- **Not applied to {_code(p['procedure'])}:** "

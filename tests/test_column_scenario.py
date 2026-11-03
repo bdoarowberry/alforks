@@ -237,3 +237,27 @@ def test_reuse_excludes_every_later_call_and_says_the_rows_origin_is_open(tmp_pa
     assert ("**This invocation writes no object on this trace** under these values. It reads the existing rows of "
             "`demo.dbo.i_saved` (line 32); where those rows came from is not determined for this invocation") in overview
     assert "may have written the rows earlier or separately" in overview
+
+
+def test_reuse_lists_only_what_the_walk_reached(tmp_path):
+    """Tester trial shape (reuse.sql): calls and reads after a certain RETURN are not this invocation's."""
+    t = run(tmp_path, "demo.dbo.u_report.value_col", "dbo.u_publish @reuse=1")
+    proc = scenario_block(t)
+    assert proc["calls"] == [] and [i["procedure"] for i in proc["invocation"]] == ["demo.dbo.u_publish"]
+    assert [(r["display"], r["line"]) for r in proc["reads"]] == [("demo.dbo.u_saved", 16)]
+    assert proc["statements"] == {"reached": 2, "excluded": 3, "neither_lines": []}
+    assert not any("called procedures" in n for n in proc["notes"])
+    overview, _ = pages(tmp_path, "demo.dbo.u_report.value_col")
+    assert "`dbo.u_build_result` (called only from an excluded branch)" in overview
+    assert "u_stage` (line" not in overview
+
+
+def test_several_definitions_are_named_and_each_is_walked(tmp_path):
+    root = FIXTURES / "scenario_copies"
+    t = trace(root, "demo.dbo.c_saved.value_col", tmp_path, *DB, "--scenario", "dbo.c_publish @reuse=1")
+    procs = t.data["scan"]["scenario"]["procedures"]
+    assert len(procs) == 2
+    calls = {p["definition"].split(":")[0]: [c["procedure"] for c in p["calls"]] for p in procs}
+    assert calls == {"scenario_copies/a/publish.sql": [], "scenario_copies/b/publish_old.sql": ["demo.dbo.c_build"]}
+    overview = (tmp_path / "demo.dbo.c_saved.value_col.overview.md").read_text(encoding="utf-8")
+    assert "**`demo.dbo.c_publish` has 2 definitions**" in overview

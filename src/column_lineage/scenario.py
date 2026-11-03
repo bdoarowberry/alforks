@@ -448,6 +448,14 @@ class ProcedureScenario:
 
     applied: bool = True          # False when the scenario could not be applied (nothing is excluded)
 
+    def reached(self, statement) -> bool:
+        """The walk reached this statement on a path the values allow (positive evidence that it can run)."""
+        if not self.applied:
+            return False
+        start = anchor(self.unit.masked, statement)
+        return self.excluded(statement.start, statement) is None and \
+            any(a <= start < b for a, b in self.reachable)
+
     def excluded(self, start: int, statement=None) -> str | None:
         start = anchor(self.unit.masked, statement) if statement is not None else code_start(self.unit.masked, start)
         for item in self.exclusions:
@@ -769,11 +777,6 @@ def analyse(catalog, proc, scenario: Scenario) -> ProcedureScenario:
         if value is UNKNOWN:
             result.notes.append(f"{name}: the value {scenario.texts[name]} is not compared (its declared type is not "
                                 "handled); conditions on it keep both arms.")
-    calls = [c for c in re.findall(r"\bEXEC(?:UTE)?\s+(?!@|\()([\w.\[\]]+)", masked[body:limit], re.I)
-             if not re.fullmatch(r"(?:\[?(?:sys|master)\]?\.)*\[?(?:dbo\]?\.\[?)?sp_\w+\]?", c, re.I)]
-    if calls:
-        result.notes.append("Scenario values are not carried into called procedures ("
-                            + ", ".join(sorted({c.lower() for c in calls})[:5]) + "): their branches are all kept.")
     return result
 
 
@@ -789,6 +792,7 @@ class ScenarioSet:
         self.invocation: dict[str, list[dict]] = {}      # scope -> procedures this invocation can run
         self.excluded_callees: dict[str, list[str]] = {} # scope -> procedures called only from excluded lines
         self.reads: dict[str, list[dict]] = {}           # scope -> objects read by statements that can run
+        self.placement: dict[str, dict] = {}             # scope -> statements reached / excluded / neither
 
     def excluded(self, unit, statement) -> str | None:
         result = self.by_scope.get(statement.scope)
@@ -812,6 +816,7 @@ class ScenarioSet:
                 "invocation": list(self.invocation.get(r.scope, [])),
                 "called_only_from_excluded_branches": list(self.excluded_callees.get(r.scope, [])),
                 "reads": list(self.reads.get(r.scope, [])),
+                "statements": dict(self.placement.get(r.scope, {})),
                 "notes": list(r.notes)} for r in self.results],
         }
 
@@ -896,7 +901,8 @@ def apply(catalog, scenarios: list[Scenario]) -> ScenarioSet:
                          f"calls {call.callee.display} (its own writers are kept: it may run from elsewhere)")
         catalog.calls_by_callee[key] = kept
         for call in kept:
-            if call.statement.scope in applied.by_scope:
+            result = applied.by_scope.get(call.statement.scope)
+            if result is not None and result.unit.path == call.unit.path and result.reached(call.statement):
                 applied.calls.setdefault(call.statement.scope, []).append(
                     {"procedure": call.callee.display, "line": call.statement.line})
     applied.removed.sort(key=lambda x: (x["path"], x["line"]))
@@ -905,6 +911,9 @@ def apply(catalog, scenarios: list[Scenario]) -> ScenarioSet:
     by_caller: dict[str, list] = {}
     for calls in catalog.calls_by_callee.values():
         for call in calls:
+            owner = applied.by_scope.get(call.statement.scope)
+            if owner is not None and not owner.reached(call.statement):
+                continue        # a scenario procedure's call counts only where the walk reached it
             by_caller.setdefault(call.statement.scope, []).append(call)
     for result in applied.results:
         found = [{"procedure": result.name, "how": "the scenario's entry procedure"}]
@@ -921,8 +930,22 @@ def apply(catalog, scenarios: list[Scenario]) -> ScenarioSet:
                     found.append({"procedure": proc.ref.display,
                                   "how": f"called at line {call.statement.line}"
                                          + (f" by {caller.ref.display}" if caller and scope != result.scope else "")})
+        if not result.applied:
+            found = found[:1]
         applied.invocation[result.scope] = found
         applied.reads[result.scope] = reads_in(catalog, result)
+        callees = sorted({c["procedure"] for c in applied.calls.get(result.scope, [])})
+        if callees:
+            result.notes.append("Scenario values are not carried into called procedures ("
+                                + ", ".join(callees[:5]) + (", ..." if len(callees) > 5 else "")
+                                + "): their branches are all kept.")
+        body = [s for s in result.unit.index.statements
+                if s.scope == result.scope and result.body[0] <= s.start < result.body[1]]
+        unplaced = [s.line for s in body if result.excluded(s.start, s) is None and not result.reached(s)]
+        applied.placement[result.scope] = {
+            "reached": sum(1 for s in body if result.reached(s)),
+            "excluded": sum(1 for s in body if result.excluded(s.start, s) is not None),
+            "neither_lines": unplaced[:20]}
         names = {f["procedure"] for f in found}
         applied.excluded_callees[result.scope] = sorted({
             x["what"].split(" ", 2)[1] for x in applied.removed
@@ -935,7 +958,7 @@ def reads_in(catalog, result: ProcedureScenario) -> list[dict]:
     out, seen = [], set()
     unit = result.unit
     for statement in unit.index.statements:
-        if statement.scope != result.scope or result.excluded(statement.start, statement) is not None:
+        if statement.scope != result.scope or not result.reached(statement):
             continue
         tree = statement.tree
         if not isinstance(tree, (exp.Select, exp.Union, exp.Insert, exp.Update, exp.Merge, exp.Delete)):
@@ -962,7 +985,7 @@ def reads_of(catalog, applied: ScenarioSet, ref) -> list[dict]:
     for result in applied.results:
         unit = result.unit
         for statement in unit.index.statements:
-            if statement.scope != result.scope or result.excluded(statement.start, statement) is not None:
+            if statement.scope != result.scope or not result.reached(statement):
                 continue
             tree = statement.tree
             if not isinstance(tree, (exp.Select, exp.Union, exp.Insert, exp.Update, exp.Merge, exp.Delete)):

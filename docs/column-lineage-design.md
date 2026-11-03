@@ -257,7 +257,12 @@ WHILE, BEGIN...END, TRY/CATCH, RETURN), with an environment of the supplied valu
 - Invocation: `invocation` lists the procedures this invocation can run (the scenario procedure and,
   transitively, what it calls on lines that can run; callees are unconstrained), with how each is
   reached; `called_only_from_excluded_branches` and `reads` (objects read by statements that can run)
-  are recorded too.
+  are recorded too. "Can run" needs positive evidence: the walk reached the statement on a path the
+  values allow; not being excluded is not enough. `statements` counts the body's indexed statements
+  `reached` and `excluded`, and lists the lines of any that are neither (`neither_lines`: placed by
+  neither, so not claimed). The note on called procedures names only calls the walk reached. When a
+  procedure has several definitions, each is walked and the pages say so (which is deployed is not
+  known, so what any of them can run counts).
 - Pages: both carry a "Scenario (assumed values)" section: the values as assumptions; whether the
   values exclude anything writing an object on this trace (if not, "its routes are the same as in the
   unconstrained run"); the excluded statements; branches kept as uncertain; the writers on this trace

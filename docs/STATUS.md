@@ -658,6 +658,12 @@ reachable lines) and those not run by it, say when nothing is excluded on the tr
 invocation that only reads existing rows, say that their origin is not determined. Fixture
 `invocation.sql`.
 
+Tester trial of eaa8e45: regular 2/178 traces changed (11 excluded, 0 uncertain), interim 0 (3, 3),
+reuse 2 (11, 0); no excluded statement could run. Open: in reuse, 7 calls and 27 of 28 reads after a
+certain RETURN were still listed as the invocation's. Not reproduced on the invented shape or five
+variants. Calls, reads and invocation membership now require the walk to have reached the statement;
+`statements.neither_lines` and a several-definitions line on the pages show the remaining causes.
+
 ## T-SQL construct probe and sqlleaf comparison (tests/test_column_tsql_constructs.py)
 
 Fixed (each was a false complete, a wrong binding or an unexplained end):
