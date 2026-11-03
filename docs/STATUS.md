@@ -258,8 +258,11 @@
   browser); identifiers are no longer cut short in tables; the "more families" node is labelled as a
   summary, not a source.
 - Plain answer = four bullets: headline, source columns (full names, grouped by how routes end, with
-  route counts and mapping status; at most 8, then a link to the full list), source families with
-  family links (each named once), value rules.
+  route counts, last-step and whole-route status; about 8, unresolved columns kept first, then a link
+  to the full list), source families with family links (each named once), value rules. Tester check
+  of f62290a (3 pages, 35 columns): groups and route counts right; every column read "mapping
+  verified" although routes crossed asserted links, and 3 unresolved columns were hidden behind the
+  link; both fixed (test_column_overview_sources.py).
   A scope-complete trace with unproven origins leads with "Trace stopped at unresolved sources".
 
 ## Fixed: empty layout copies created false loops (real run: 153 of 178 traces)

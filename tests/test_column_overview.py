@@ -523,7 +523,7 @@ def test_first_screen_answers_what_feeds_where_proof_stops_and_what_is_assumed(t
                                "and nothing in the scanned code loads them")
     assert "(Every path was followed to its end inside the scanned code.)" in lines[0]
     assert lines[1] == "- **Source columns** (6 columns where value routes end; 6 unresolved):"
-    assert "\n        - `core_db.crm.customer.is_closed` — 1 route · mapping verified · decides between values only" in answer
+    assert "\n        - `core_db.crm.customer.is_closed` — 1 route · last step verified · whole route verified · decides between values only" in answer
     assert lines[2] == "- **Source families:**"
     assert "\n    - `core_db.crm` (primary, fallback, later UPDATE override; [F" in answer   # one line per group
     for family in ("the constant `0` (CASE branch; [F", "file connection `limit_feed` read by package "

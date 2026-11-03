@@ -69,7 +69,9 @@ MAX_LABELS = 3               # branch labels shown per route or end
 MAX_WRITERS = 3              # writers named per route
 MAX_ENDPOINTS = 8            # rows of other ends (constants, variables, open points) in the sources table
 MAX_SOURCE_ROWS = 20         # source-column rows of the sources table (all are on the detailed page)
-MAX_SOURCE_COLUMNS = 8       # source columns named in the plain answer (all are in the sources table)
+MAX_SOURCE_COLUMNS = 8       # source columns named in the plain answer (all are in the sources table) ...
+MAX_UNRESOLVED_COLUMNS = 10  # ... except that unresolved ones are kept, up to this many
+MIN_REACHED_COLUMNS = 2      # boundary / declared columns kept when unresolved ones fill the list
 MAX_ROW_OBJECTS = 4          # objects in "Which rows?"
 MAX_ROW_PREDICATES = 2       # conditions shown per object (the detailed page has all)
 MAX_OPEN = 3                 # open-point kinds shown
@@ -1297,10 +1299,13 @@ def source_columns(a: Analysis) -> list[dict]:
     ends first, then unresolved ones; most routes first."""
     t = a.t
     routes: Counter = Counter()
+    route_status: dict[str, Counter] = {}
     fams: dict[str, list[dict]] = {}
     for fam in a.families:
         for member in fam["members"]:
             routes[member["end"]] += len(member["object_sequences"])
+            # A family's status is the worst link on its routes (an asserted step anywhere on the way).
+            route_status.setdefault(member["end"], Counter())[fam["status"]] += len(member["object_sequences"])
             fams.setdefault(member["end"], [])
             if fam not in fams[member["end"]]:
                 fams[member["end"]].append(fam)
@@ -1320,12 +1325,42 @@ def source_columns(a: Analysis) -> list[dict]:
                 label = f"**Unresolved** — open point ({', '.join(_text(k) for k in kinds[:3])})"
         info = ends.get(node_id)
         statuses = info["statuses"] if info else sorted({f["status"] for f in node_fams}, key=_status_rank)
+        by_status = route_status.get(node_id, Counter())
         out.append({"node": node_id, "name": t.display(node_id), "kind": kind, "order": order, "label": label,
                     "routes": routes[node_id], "statuses": statuses,
+                    "route_statuses": sorted(by_status.items(), key=lambda kv: _status_rank(kv[0])),
                     "open_routes": any(f["status"] in ("partial", "ambiguous") for f in node_fams),
                     "condition_only": all(f["role"] == "condition" for f in node_fams)})
     out.sort(key=lambda c: (c["order"], c["label"], c["condition_only"], -c["routes"], c["name"].lower(), c["node"]))
     return out
+
+
+ROUTE_STATUS_WORDS = {"partial": "partial (open points on the way)", "ambiguous": "ambiguous (open points on the way)"}
+
+
+def last_step_text(c: dict) -> str:
+    """Status of the steps that read the column itself."""
+    return ", ".join(c["statuses"]) or "—"
+
+
+def whole_route_text(c: dict) -> str:
+    """Status of the whole route to the column: the worst link on the way, per route when they differ."""
+    items = c["route_statuses"]
+    if not items:
+        return "—"
+    if len(items) == 1:
+        return ROUTE_STATUS_WORDS.get(items[0][0], items[0][0])
+    return ", ".join(f"{n} {ROUTE_STATUS_WORDS.get(s, s)}" for s, n in items)
+
+
+def shortlist(columns: list[dict], cap: int) -> list[dict]:
+    """At most ``cap`` columns, but unresolved ones are kept (up to MAX_UNRESOLVED_COLUMNS, or ``cap`` when
+    larger) ahead of boundary and declared ones, which keep at least MIN_REACHED_COLUMNS places."""
+    unresolved = [c for c in columns if c["order"] >= 3][:max(cap, MAX_UNRESOLVED_COLUMNS)]
+    reached = [c for c in columns if c["order"] < 3]
+    room = max(cap - len(unresolved), MIN_REACHED_COLUMNS)
+    keep = {id(c) for c in reached[:room] + unresolved}
+    return [c for c in columns if id(c) in keep]
 
 
 def _answer_columns(a: Analysis, detailed: str) -> list[str]:
@@ -1340,19 +1375,20 @@ def _answer_columns(a: Analysis, detailed: str) -> list[str]:
     head = (f"- **Source columns** ({_plural(len(columns), 'column')} where value routes end"
             + "".join(f"; {p}" for p in parts if p) + "):")
     lines, label = [head], None
-    for c in columns[:MAX_SOURCE_COLUMNS]:
+    shown = shortlist(columns, MAX_SOURCE_COLUMNS)
+    for c in shown:
         if c["label"] != label:
             label = c["label"]
-            count = sum(1 for o in columns if o["label"] == label)
-            lines.append(f"    - {label} ({_plural(count, 'column')}):")
-        status = ", ".join(c["statuses"]) or "—"
-        text = f"        - {_code(c['name'], NAME_LIMIT)} — {_plural(c['routes'], 'route')} · mapping {status}"
-        if c["open_routes"]:
-            text += " · open points on the way"
+            group = [o for o in columns if o["label"] == label]
+            hidden = sum(1 for o in group if o not in shown)
+            lines.append(f"    - {label} ({_plural(len(group), 'column')}"
+                         + (f", {hidden} not listed here" if hidden else "") + "):")
+        text = (f"        - {_code(c['name'], NAME_LIMIT)} — {_plural(c['routes'], 'route')} · last step "
+                f"{last_step_text(c)} · whole route {whole_route_text(c)}")
         if c["condition_only"]:
             text += " · decides between values only"
         lines.append(text)
-    rest = columns[MAX_SOURCE_COLUMNS:]
+    rest = [c for c in columns if c not in shown]
     if rest:
         more = Counter("at the boundary or a declared terminal" if c["order"] <= 1 else "unresolved"
                        if c["order"] >= 3 else "other" for c in rest)
@@ -1853,10 +1889,13 @@ def _section_sources(a: Analysis, detailed: str) -> list[str]:
     for fam in a.families:
         for member in fam["members"]:
             routes[member["end"]] += len(member["object_sequences"])
-    named = [c["node"] for c in source_columns(a)]
+    columns = source_columns(a)
+    whole = {c["node"]: whole_route_text(c) for c in columns}
+    named = [c["node"] for c in columns]
+    listed = [c["node"] for c in shortlist(columns, MAX_SOURCE_ROWS)]
     others = [e for e in ends if e not in set(named)]
-    shown = named[:MAX_SOURCE_ROWS] + others[:MAX_ENDPOINTS]
-    hidden = named[MAX_SOURCE_ROWS:] + others[MAX_ENDPOINTS:]
+    shown = listed + others[:MAX_ENDPOINTS]
+    hidden = [n for n in named if n not in set(listed)] + others[MAX_ENDPOINTS:]
     out = ['<a id="sources-at-a-glance"></a>', "",
            "One row per end point: source columns first (requested boundary and declared terminals, then "
            "unresolved), then constants, variables and open points. Files, constants and variables are labelled "
@@ -1884,6 +1923,8 @@ def _section_sources(a: Analysis, detailed: str) -> list[str]:
         proof = ", ".join(STATUS_SHORT.get(s, s) for s in statuses) or "—"
         if steps:
             proof += " (" + _step_refs(a, steps, detailed, 2) + ")"
+        if node_id in whole:
+            proof += f"; whole route: {whole[node_id]}"
         family = ", ".join(_fam_link(f, detailed) for f in fams[:3]) + (", …" if len(fams) > 3 else "")
         out.append("| " + " | ".join(_cell(c) for c in cells + [str(routes.get(node_id, "—")), family, why, proof])
                    + " |")
@@ -2296,15 +2337,13 @@ def detailed_source_columns(a: Analysis) -> list[str]:
     out = ['<a id="source-columns"></a>', "", "### Source columns", "",
            "Every named column where value routes end, once however many routes reach it. A requested boundary "
            "or declared terminal is where the run stopped; an unresolved origin is where no writer, producer or "
-           "caller was found. Mapping status is that of the steps that read the column.", "",
-           "| Column | How its routes end | Routes | Mapping status | Role |", "|---|---|---|---|---|"]
+           "caller was found. *Last step* is the status of the steps that read the column; *whole route* is the "
+           "worst link on the way from the field (an asserted or inferred step anywhere on it counts).", "",
+           "| Column | How its routes end | Routes | Last step | Whole route | Role |", "|---|---|---|---|---|---|"]
     for c in columns:
         role = "decides between values only" if c["condition_only"] else "value"
-        status = ", ".join(c["statuses"]) or "—"
-        if c["open_routes"]:
-            status += " (open points on the way)"
-        out.append("| " + " | ".join(_cell(x) for x in (_code(c["name"]), c["label"], str(c["routes"]), status, role))
-                   + " |")
+        out.append("| " + " | ".join(_cell(x) for x in (_code(c["name"]), c["label"], str(c["routes"]),
+                                                         last_step_text(c), whole_route_text(c), role)) + " |")
     return out + [""]
 
 

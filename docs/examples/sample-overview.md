@@ -10,8 +10,8 @@
 - **Not fully traced (1 open point on the value routes, so sources may be missing).** Also: 1 route stops at an open point.
 - **Source columns** (2 columns where value routes end; 2 at the requested boundary or a declared terminal):
     - **Requested boundary reached** (2 columns):
-        - `staging.demo.source.input_a` — 2 routes · mapping verified
-        - `staging.demo.source.input_b` — 1 route · mapping verified
+        - `staging.demo.source.input_a` — 2 routes · last step verified · whole route verified
+        - `staging.demo.source.input_b` — 1 route · last step verified · whole route verified
 - **Source families:**
     - `staging.demo` (CASE branch, CASE default; [F1](sample-trace.md#fam-c93c713b4c), [F2](sample-trace.md#fam-7ff0de8a8f))
 - **Value rules:** a CASE/IIF choice picks between the alternatives; a later UPDATE overwrites the rows it matches — details under What changes the value.
@@ -61,8 +61,8 @@ One row per end point: source columns first (requested boundary and declared ter
 
 | Kind | Database | Schema | Table / source | Column | Routes | Family | Why it stops | Proof of the step reaching it |
 |---|---|---|---|---|---|---|---|---|
-| DB column | `staging` | `demo` | `source` | `input_a` | 2 | [F1](sample-trace.md#fam-c93c713b4c), [F4](sample-trace.md#fam-418ab2a211) | requested boundary reached (the run was asked to stop here; not traced beyond) (value, and decides between values) | verified (proved from code) ([S3](sample-trace.md#step-9fa99888e121e84d)) |
-| DB column | `staging` | `demo` | `source` | `input_b` | 1 | [F2](sample-trace.md#fam-7ff0de8a8f) | requested boundary reached (the run was asked to stop here; not traced beyond) | verified (proved from code) ([S3](sample-trace.md#step-9fa99888e121e84d)) |
+| DB column | `staging` | `demo` | `source` | `input_a` | 2 | [F1](sample-trace.md#fam-c93c713b4c), [F4](sample-trace.md#fam-418ab2a211) | requested boundary reached (the run was asked to stop here; not traced beyond) (value, and decides between values) | verified (proved from code) ([S3](sample-trace.md#step-9fa99888e121e84d)); whole route: verified |
+| DB column | `staging` | `demo` | `source` | `input_b` | 1 | [F2](sample-trace.md#fam-7ff0de8a8f) | requested boundary reached (the run was asked to stop here; not traced beyond) | verified (proved from code) ([S3](sample-trace.md#step-9fa99888e121e84d)); whole route: verified |
 | variable | — | — | `@override_value (in reporting.demo.apply_overrides)` | — | 1 | [F3](sample-trace.md#fam-ac0ad92d7a) | open point: SQL built and run at run time (dynamic SQL) — not proved | unresolved ([S2](sample-trace.md#step-a92b7a4a25e85778)) |
 
 ## What changes the value

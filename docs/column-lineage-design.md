@@ -438,11 +438,14 @@ field, where does proof stop, and what is assumed" (`docs/presentation-brief.md`
    column where value routes end by its full name (`db.schema.table.column`; file and package
    columns by connection or flow), once however many routes reach it, grouped by how its routes
    end (requested boundary reached, declared terminal, depth limit, unresolved origin with its
-   reason, open point), with the route count, the status of the steps that map it (verified,
-   inferred, asserted, …), "open points on the way" and "decides between values only" where they
-   apply. At most 8 are named, then a count with a link to the full list (the sources table when it
-   holds them all, else the detailed page's `#source-columns` table). Source families
-   (database.schema groups) follow.
+   reason, open point), with the route count, two statuses — *last step* (the steps that read the
+   column) and *whole route* (the worst link on the way from the field, from the route families, per
+   route when they differ: an asserted or inferred step anywhere upstream shows here; partial or
+   ambiguous when open points lie on the way) — and "decides between values only" where it applies.
+   About 8 are named; unresolved columns are kept first (up to 10) and boundary or declared ones fill
+   the rest (at least 2); each group says how many it does not list, and a link leads to the full list
+   (the sources table when it holds them all, else the detailed page's `#source-columns` table, which
+   has both statuses). Source families (database.schema groups) follow.
 3. **Coverage** — status (an incomplete trace says **Incomplete** even when some ends reach the
    boundary), value routes and families, ends at the requested boundary, declared terminals,
    unresolved origins by kind, constants, and verified / inferred / asserted step counts; a
@@ -461,7 +464,8 @@ field, where does proof stop, and what is assumed" (`docs/presentation-brief.md`
    order of the plain answer (up to 20), then constants, variables and open points (up to 8): kind
    (DB column, file column, constant, variable, parameter, temp table, package data flow) | database
    | schema | table / source | column | routes | families | why it stops | proof status of the step
-   reaching it (linked). Files and constants never appear in the database column. The detailed page
+   reaching it (linked), with the whole-route status for source columns. The same priority keeps
+   unresolved columns in the table when it is shortened. Files and constants never appear in the database column. The detailed page
    lists every source column under `#source-columns` before its route families.
 7. **What changes the value** — CASE/IIF choices, COALESCE/ISNULL fallbacks, overrides (UPDATE
    after other writers; in the same procedure after them, or with run order not proved), MERGE,

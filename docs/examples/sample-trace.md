@@ -83,12 +83,12 @@ flowchart RL
 
 ### Source columns
 
-Every named column where value routes end, once however many routes reach it. A requested boundary or declared terminal is where the run stopped; an unresolved origin is where no writer, producer or caller was found. Mapping status is that of the steps that read the column.
+Every named column where value routes end, once however many routes reach it. A requested boundary or declared terminal is where the run stopped; an unresolved origin is where no writer, producer or caller was found. *Last step* is the status of the steps that read the column; *whole route* is the worst link on the way from the field (an asserted or inferred step anywhere on it counts).
 
-| Column | How its routes end | Routes | Mapping status | Role |
-|---|---|---|---|---|
-| `staging.demo.source.input_a` | **Requested boundary reached** | 2 | verified | value |
-| `staging.demo.source.input_b` | **Requested boundary reached** | 1 | verified | value |
+| Column | How its routes end | Routes | Last step | Whole route | Role |
+|---|---|---|---|---|---|
+| `staging.demo.source.input_a` | **Requested boundary reached** | 2 | verified | verified | value |
+| `staging.demo.source.input_b` | **Requested boundary reached** | 1 | verified | verified | value |
 
 <a id="route-families"></a>
 

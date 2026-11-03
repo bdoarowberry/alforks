@@ -1,0 +1,16 @@
+{
+  "schema_version": "column-lineage-assertions/1.0",
+  "assertions": [
+    {
+      "id": "A1",
+      "target": "demo.dbo.target.col",
+      "procedure": "dbo.load_target",
+      "resolves": ["dynamic_sql"],
+      "reason": "Invented: the configured table is dbo.staging.",
+      "asserted_by": "invented owner (role)",
+      "origin": "ai_assisted",
+      "review": "unreviewed",
+      "alternatives": [{"inputs": ["demo.dbo.staging.col"]}]
+    }
+  ]
+}
