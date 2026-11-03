@@ -434,7 +434,15 @@ field, where does proof stop, and what is assumed" (`docs/presentation-brief.md`
    branch or default, later UPDATE override, UPDATE of unproved run order, MERGE, package mapping,
    direct), how many routes end without a proved origin, then the value rules that change the
    result (CASE choice and its condition columns and constants, COALESCE/ISNULL fallbacks, UPDATE
-   overrides, MERGE, package transformations, aggregation).
+   overrides, MERGE, package transformations, aggregation). A **Source columns** bullet names each
+   column where value routes end by its full name (`db.schema.table.column`; file and package
+   columns by connection or flow), once however many routes reach it, grouped by how its routes
+   end (requested boundary reached, declared terminal, depth limit, unresolved origin with its
+   reason, open point), with the route count, the status of the steps that map it (verified,
+   inferred, asserted, …), "open points on the way" and "decides between values only" where they
+   apply. At most 8 are named, then a count with a link to the full list (the sources table when it
+   holds them all, else the detailed page's `#source-columns` table). Source families
+   (database.schema groups) follow.
 3. **Coverage** — status (an incomplete trace says **Incomplete** even when some ends reach the
    boundary), value routes and families, ends at the requested boundary, declared terminals,
    unresolved origins by kind, constants, and verified / inferred / asserted step counts; a
@@ -449,10 +457,12 @@ field, where does proof stop, and what is assumed" (`docs/presentation-brief.md`
    `([ ])`, unresolved origin `{{ }}`, declared terminal `[[ ]]` ("not an origin"); condition
    families use dotted edges. Labels are quoted and Markdown/Mermaid-active characters become entity
    codes. A family table (linked to the detailed page's `#fam-…` anchors) follows.
-6. **Sources at a glance** — one row per end: kind (DB column, file column, constant, variable,
-   parameter, temp table, package data flow) | database | schema | table / source | column |
-   families | why it stops | proof status of the step reaching it (linked). Files and constants
-   never appear in the database column.
+6. **Sources at a glance** (`#sources-at-a-glance`) — one row per end, source columns first in the
+   order of the plain answer (up to 20), then constants, variables and open points (up to 8): kind
+   (DB column, file column, constant, variable, parameter, temp table, package data flow) | database
+   | schema | table / source | column | routes | families | why it stops | proof status of the step
+   reaching it (linked). Files and constants never appear in the database column. The detailed page
+   lists every source column under `#source-columns` before its route families.
 7. **What changes the value** — CASE/IIF choices, COALESCE/ISNULL fallbacks, overrides (UPDATE
    after other writers; in the same procedure after them, or with run order not proved), MERGE,
    aggregations and window calculations, package transformations; other calculations in one line.

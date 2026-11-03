@@ -257,7 +257,9 @@
 - Mermaid labels carry no entity codes (`#`, `|`, brackets render raw; checked with Mermaid 10 in a
   browser); identifiers are no longer cut short in tables; the "more families" node is labelled as a
   summary, not a source.
-- Plain answer = three bullets: headline, sources with family links (each named once), value rules.
+- Plain answer = four bullets: headline, source columns (full names, grouped by how routes end, with
+  route counts and mapping status; at most 8, then a link to the full list), source families with
+  family links (each named once), value rules.
   A scope-complete trace with unproven origins leads with "Trace stopped at unresolved sources".
 
 ## Fixed: empty layout copies created false loops (real run: 153 of 178 traces)

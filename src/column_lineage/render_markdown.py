@@ -946,7 +946,7 @@ NEXT_EVIDENCE = {
 
 def _where_proof_ends(t: _Trace, gaps: list[dict]) -> list[str]:
     """Every place a value path ends, each as its own bullet, with location and next evidence."""
-    out = ["### Where proof ends", ""]
+    out = ['<a id="where-proof-ends"></a>', "", "### Where proof ends", ""]
     consumers: dict[str, list[tuple[dict, dict]]] = {}
     for step in t.ordered:
         for inp in step.get("inputs") or []:

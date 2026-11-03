@@ -27,7 +27,7 @@ from column_lineage.render_overview import (  # noqa: E402
 )
 
 SAMPLE_OVERVIEW = ROOT / "docs" / "examples" / "sample-overview.md"
-MAX_LINES = 150
+MAX_LINES = 180   # the source-column list and up to 20 source-column table rows included
 
 
 def section(md: str, title: str) -> str:
@@ -518,17 +518,19 @@ def test_first_screen_answers_what_feeds_where_proof_stops_and_what_is_assumed(t
     # What feeds it: every source family, with the rules that change the value.
     answer = section(md, "Plain answer")
     lines = [l for l in answer.strip().splitlines() if l.strip() and not l.startswith("    ")]
-    assert len(lines) <= 3 and all(l.startswith("- **") for l in lines)   # three short bullets
+    assert len(lines) <= 4 and all(l.startswith("- **") for l in lines)   # four short bullets
     assert lines[0].startswith("- **All scanned code traced; origin not proved:** 5 input columns feed this field, "
                                "and nothing in the scanned code loads them")
     assert "(Every path was followed to its end inside the scanned code.)" in lines[0]
-    assert lines[1] == "- **Sources:**"
+    assert lines[1] == "- **Source columns** (6 columns where value routes end; 6 unresolved):"
+    assert "\n        - `core_db.crm.customer.is_closed` — 1 route · mapping verified · decides between values only" in answer
+    assert lines[2] == "- **Source families:**"
     assert "\n    - `core_db.crm` (primary, fallback, later UPDATE override; [F" in answer   # one line per group
     for family in ("the constant `0` (CASE branch; [F", "file connection `limit_feed` read by package "
                    "`load_file_limit.dtsx` (package mapping; [F", "`partner_db.stage` (direct; [F"):
         assert family in answer
-    assert "a COALESCE/ISNULL fallback" in lines[2] and "a later UPDATE overwrites the rows it matches" in lines[2]
-    assert "it can set `0`" in lines[2]
+    assert "a COALESCE/ISNULL fallback" in lines[3] and "a later UPDATE overwrites the rows it matches" in lines[3]
+    assert "it can set `0`" in lines[3]
     assert "core_db.crm.account" not in lines[2]                        # columns are named once, under Sources
     coverage = section(md, "Coverage")
     assert ("7 routes (6 carry the value, 1 decides between values) in 7 route families · distinct end points "
@@ -624,8 +626,9 @@ def test_sources_table_separates_databases_files_and_constants(tmp_path):
     assert file_row[:3] == ["file column", "—", "—"]
     assert rows[("—", "`0`")][:3] == ["constant", "—", "—"]
     for row in rows.values():
-        assert re.fullmatch(r"(\[F\d+\]\([^)]*#fam-[0-9a-f]{10}\)(, )?)+", row[5]), row[5]
-        assert "#step-" in row[7]
+        assert row[5].isdigit()                                     # routes reaching the end point
+        assert re.fullmatch(r"(\[F\d+\]\([^)]*#fam-[0-9a-f]{10}\)(, )?)+", row[6]), row[6]
+        assert "#step-" in row[8]
     # The database column never holds a file connection or a constant.
     assert all("file" not in r[1] and "constant" not in r[1] for r in rows.values())
 

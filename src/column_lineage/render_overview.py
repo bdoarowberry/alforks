@@ -10,11 +10,13 @@ Overview page (``<stem>.overview.md``), for a reader who does not read SQL. The 
 feeds this field, where does proof stop, and what is assumed":
 
 1. Field and definition (glossary definition with its approval status; never derived from names)
-2. Plain answer (one or two generated sentences: main source families and value rules)
+2. Plain answer (generated: headline, source columns by full name grouped by how routes end, with route counts
+   and mapping status, source families and value rules)
 3. Coverage (routes, families, boundary / declared / unresolved ends, step statuses)
 4. Main evidence needed (at most three requests, by routes affected)
 5. Route families (a small Mermaid diagram and a family table)
-6. Sources at a glance (database | schema | table | column per end; files and constants apart)
+6. Sources at a glance (database | schema | table | column | routes per end, source columns first; files and
+   constants apart)
 7. What changes the value (CASE, fallbacks, overrides, merges, aggregations, package transformations)
 8. Which rows? (row selection, kept apart from the value)
 9. Evidence and uncertainty
@@ -65,7 +67,9 @@ MAX_ROUTE_OBJECTS = 7        # objects shown per route before the middle is elid
 MAX_ROUTE_ENDS = 4           # ends named per route
 MAX_LABELS = 3               # branch labels shown per route or end
 MAX_WRITERS = 3              # writers named per route
-MAX_ENDPOINTS = 8            # rows of the sources table (all are on the detailed page)
+MAX_ENDPOINTS = 8            # rows of other ends (constants, variables, open points) in the sources table
+MAX_SOURCE_ROWS = 20         # source-column rows of the sources table (all are on the detailed page)
+MAX_SOURCE_COLUMNS = 8       # source columns named in the plain answer (all are in the sources table)
 MAX_ROW_OBJECTS = 4          # objects in "Which rows?"
 MAX_ROW_PREDICATES = 2       # conditions shown per object (the detailed page has all)
 MAX_OPEN = 3                 # open-point kinds shown
@@ -1260,13 +1264,102 @@ def _section_answer(a: Analysis, detailed: str = "") -> list[str]:
     if unproven and a.comp.get("result") != "complete_within_selected_scope":
         stops.insert(0, f"{_plural(unproven, 'route')} {'ends' if unproven == 1 else 'end'} where no writer, file "
                         "producer or caller was found, so the origin is not proved there")
-    out = [f"- {_answer_headline(a, unproven, total)}" + (f" Also: {_and_list(stops, 5)}." if stops else ""),
-           "- **Sources:**" + ("".join(f"\n    - {n}" for n in names) if names
-                              else " none established (every route ends at an open point or at earlier content)")]
+    out = [f"- {_answer_headline(a, unproven, total)}" + (f" Also: {_and_list(stops, 5)}." if stops else "")]
+    out += _answer_columns(a, detailed)
+    out.append("- **Source families:**" + ("".join(f"\n    - {n}" for n in names) if names
+                                         else " none established (every route ends at an open point or at earlier "
+                                              "content)"))
     rules = _answer_rules(a)
     if rules:
         out.append(f"- **Value rules:** {'; '.join(rules)} — details under What changes the value.")
     return out
+
+
+# How a route ends at a source column, for the plain answer: (order, label).
+COLUMN_END = {
+    "boundary": (0, "**Requested boundary reached**"),
+    "declared": (1, "**Declared terminal** — upstream not traced"),
+    "max_depth": (2, "**Cut at the depth limit**"),
+    "source_without_writer": (3, "**Unresolved origin** — no writer in the scanned sources"),
+    "external_file": (3, "**Unresolved origin** — external file, its producer not found"),
+    "cycle": (4, "**Unresolved** — loop"),
+    "gap": (4, "**Unresolved** — open point"),
+    "open": (4, "**Unresolved** — open point"),
+}
+NOT_COLUMN_KINDS = ("constant", "prior_state", "parameter", "variable", "package_variable", "unknown",
+                    "unknown_writer")
+
+
+def source_columns(a: Analysis) -> list[dict]:
+    """The value routes' end points that are named columns (database, temp table, file or package data flow
+    columns), one entry per column however many routes reach it: how the routes end there, how many, the
+    status of the steps that map it, and whether it only decides between values. Boundary and declared
+    ends first, then unresolved ones; most routes first."""
+    t = a.t
+    routes: Counter = Counter()
+    fams: dict[str, list[dict]] = {}
+    for fam in a.families:
+        for member in fam["members"]:
+            routes[member["end"]] += len(member["object_sequences"])
+            fams.setdefault(member["end"], [])
+            if fam not in fams[member["end"]]:
+                fams[member["end"]].append(fam)
+    ends = {e["node"]: e for e in a.ends}
+    out = []
+    for node_id, node_fams in fams.items():
+        node = t.nodes.get(node_id) or {}
+        if node.get("kind") in NOT_COLUMN_KINDS or not node.get("object"):
+            continue
+        kind = a.end_kind(node_id)
+        if {f["stop"] for f in node_fams} == {"cycle"}:
+            kind = "cycle"
+        order, label = COLUMN_END.get(kind, (4, f"**Unresolved** — {_text(kind)}"))
+        if kind in ("gap", "open"):
+            kinds = sorted({g.get("kind") for g in t.gaps_by_node.get(node_id, [])} - {None})
+            if kinds:
+                label = f"**Unresolved** — open point ({', '.join(_text(k) for k in kinds[:3])})"
+        info = ends.get(node_id)
+        statuses = info["statuses"] if info else sorted({f["status"] for f in node_fams}, key=_status_rank)
+        out.append({"node": node_id, "name": t.display(node_id), "kind": kind, "order": order, "label": label,
+                    "routes": routes[node_id], "statuses": statuses,
+                    "open_routes": any(f["status"] in ("partial", "ambiguous") for f in node_fams),
+                    "condition_only": all(f["role"] == "condition" for f in node_fams)})
+    out.sort(key=lambda c: (c["order"], c["label"], c["condition_only"], -c["routes"], c["name"].lower(), c["node"]))
+    return out
+
+
+def _answer_columns(a: Analysis, detailed: str) -> list[str]:
+    """Each source column by its full name, how its routes end there and the status of its mapping."""
+    columns = source_columns(a)
+    if not columns:
+        return []
+    reached = sum(1 for c in columns if c["order"] <= 1)
+    unresolved = sum(1 for c in columns if c["order"] >= 3)
+    parts = [f"{reached} at the requested boundary or a declared terminal" if reached else "",
+             f"{unresolved} unresolved" if unresolved else ""]
+    head = (f"- **Source columns** ({_plural(len(columns), 'column')} where value routes end"
+            + "".join(f"; {p}" for p in parts if p) + "):")
+    lines, label = [head], None
+    for c in columns[:MAX_SOURCE_COLUMNS]:
+        if c["label"] != label:
+            label = c["label"]
+            count = sum(1 for o in columns if o["label"] == label)
+            lines.append(f"    - {label} ({_plural(count, 'column')}):")
+        status = ", ".join(c["statuses"]) or "—"
+        text = f"        - {_code(c['name'], NAME_LIMIT)} — {_plural(c['routes'], 'route')} · mapping {status}"
+        if c["open_routes"]:
+            text += " · open points on the way"
+        if c["condition_only"]:
+            text += " · decides between values only"
+        lines.append(text)
+    rest = columns[MAX_SOURCE_COLUMNS:]
+    if rest:
+        more = Counter("at the boundary or a declared terminal" if c["order"] <= 1 else "unresolved"
+                       if c["order"] >= 3 else "other" for c in rest)
+        lines.append(f"    - and {len(rest)} more ({', '.join(f'{v} {k}' for k, v in sorted(more.items()))}) — "
+                     + ("[all source columns](#sources-at-a-glance)" if len(columns) <= MAX_SOURCE_ROWS
+                        else f"[all source columns]({detailed}#source-columns) (detailed page)"))
+    return lines
 
 
 def _answer_rules(a: Analysis) -> list[str]:
@@ -1756,11 +1849,22 @@ def _section_sources(a: Analysis, detailed: str) -> list[str]:
             return [_no_route_sentence(a)]
         return ["No end points were recorded."]
     by_node = {e["node"]: e for e in a.ends}
-    out = ["One row per end point. Files, constants and variables are labelled in the first column and never "
-           "shown as databases.", "",
-           "| Kind | Database | Schema | Table / source | Column | Family | Why it stops | Proof of the step reaching it |",
-           "|---|---|---|---|---|---|---|---|"]
-    for node_id in ends[:MAX_ENDPOINTS]:
+    routes: Counter = Counter()
+    for fam in a.families:
+        for member in fam["members"]:
+            routes[member["end"]] += len(member["object_sequences"])
+    named = [c["node"] for c in source_columns(a)]
+    others = [e for e in ends if e not in set(named)]
+    shown = named[:MAX_SOURCE_ROWS] + others[:MAX_ENDPOINTS]
+    hidden = named[MAX_SOURCE_ROWS:] + others[MAX_ENDPOINTS:]
+    out = ['<a id="sources-at-a-glance"></a>', "",
+           "One row per end point: source columns first (requested boundary and declared terminals, then "
+           "unresolved), then constants, variables and open points. Files, constants and variables are labelled "
+           "in the first column and never shown as databases.", "",
+           "| Kind | Database | Schema | Table / source | Column | Routes | Family | Why it stops | "
+           "Proof of the step reaching it |",
+           "|---|---|---|---|---|---|---|---|---|"]
+    for node_id in shown:
         fams = a.families_by_end.get(node_id, [])
         cells = list(_endpoint_cells(a, node_id))
         stop_kinds = {f["stop"] for f in fams}
@@ -1781,12 +1885,15 @@ def _section_sources(a: Analysis, detailed: str) -> list[str]:
         if steps:
             proof += " (" + _step_refs(a, steps, detailed, 2) + ")"
         family = ", ".join(_fam_link(f, detailed) for f in fams[:3]) + (", …" if len(fams) > 3 else "")
-        out.append("| " + " | ".join(_cell(c) for c in cells + [family, why, proof]) + " |")
-    if len(ends) > MAX_ENDPOINTS:
-        rest = Counter(_short_kind(a, n, a.end_kind(n)) for n in ends[MAX_ENDPOINTS:])
-        out += ["", f"And {len(ends) - MAX_ENDPOINTS} more end points ("
-                + ", ".join(f"{_end_short(k)}: {v}" for k, v in sorted(rest.items())) + f") — see the "
-                f"[route families]({detailed}#route-families) and the JSON."]
+        out.append("| " + " | ".join(_cell(c) for c in cells + [str(routes.get(node_id, "—")), family, why, proof])
+                   + " |")
+    if hidden:
+        rest = Counter(_short_kind(a, n, a.end_kind(n)) for n in hidden)
+        out += ["", f"And {len(hidden)} more end points ("
+                + ", ".join(f"{_end_short(k)}: {v}" for k, v in sorted(rest.items())) + f") — every source "
+                f"column is listed under [source columns]({detailed}#source-columns) on the detailed page; see also "
+                f"[where proof ends]({detailed}#where-proof-ends), the [route families]({detailed}#route-families) "
+                "and the JSON."]
     return out
 
 
@@ -2181,11 +2288,32 @@ def render_overview(data: dict, json_name: str | None = None, glossary: list[dic
 
 # --------------------------------------------------------------------------- detailed page: family list
 
+def detailed_source_columns(a: Analysis) -> list[str]:
+    """The "Source columns" subsection of the detailed page: every named column where value routes end."""
+    columns = source_columns(a)
+    if not columns:
+        return []
+    out = ['<a id="source-columns"></a>', "", "### Source columns", "",
+           "Every named column where value routes end, once however many routes reach it. A requested boundary "
+           "or declared terminal is where the run stopped; an unresolved origin is where no writer, producer or "
+           "caller was found. Mapping status is that of the steps that read the column.", "",
+           "| Column | How its routes end | Routes | Mapping status | Role |", "|---|---|---|---|---|"]
+    for c in columns:
+        role = "decides between values only" if c["condition_only"] else "value"
+        status = ", ".join(c["statuses"]) or "—"
+        if c["open_routes"]:
+            status += " (open points on the way)"
+        out.append("| " + " | ".join(_cell(x) for x in (_code(c["name"]), c["label"], str(c["routes"]), status, role))
+                   + " |")
+    return out + [""]
+
+
 def detailed_family_lines(data: dict, t: _Trace) -> list[str]:
     """The "Route families" subsection of the detailed page: every family with an anchor and its member
     routes (capped per family; the JSON ``route_families`` block keeps them all)."""
     a = Analysis(data)
-    out = ['<a id="route-families"></a>', "", "### Route families", ""]
+    out = detailed_source_columns(a)
+    out += ['<a id="route-families"></a>', "", "### Route families", ""]
     if not a.families:
         return out + ["No value route could be followed from this field."]
     out += [f"{_plural(len(a.families), 'family', 'families')}, "

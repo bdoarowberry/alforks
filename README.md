@@ -75,7 +75,9 @@ For each `--column`, in `--output`:
 - `<column>.overview.md` — a short page for a business reader (no SQL needed; list lengths are
   capped, with links to the detailed page). Its first screen answers "what feeds this field, where
   does proof stop, and what is assumed": field and definition (approval status), a one- or
-  two-sentence plain answer, a coverage line, at most three evidence requests, a small Mermaid
+  two-sentence plain answer with every source column named in full (`db.schema.table.column`,
+  grouped by requested boundary / declared terminal / unresolved origin, with route counts and the
+  verified / inferred / asserted status of each mapping), a coverage line, at most three evidence requests, a small Mermaid
   diagram of *route families* (alternatives drawn side by side) with a family table, and a sources
   table (database | schema | table | column; files and constants in their own rows). Then what
   changes the value (CASE, fallbacks, overrides, merges, aggregations, package transformations),

@@ -79,6 +79,17 @@ flowchart RL
 
 </details>
 
+<a id="source-columns"></a>
+
+### Source columns
+
+Every named column where value routes end, once however many routes reach it. A requested boundary or declared terminal is where the run stopped; an unresolved origin is where no writer, producer or caller was found. Mapping status is that of the steps that read the column.
+
+| Column | How its routes end | Routes | Mapping status | Role |
+|---|---|---|---|---|
+| `staging.demo.source.input_a` | **Requested boundary reached** | 2 | verified | value |
+| `staging.demo.source.input_b` | **Requested boundary reached** | 1 | verified | value |
+
 <a id="route-families"></a>
 
 ### Route families
@@ -194,6 +205,8 @@ Ordered target-first, then upstream by depth.
 ### Steps that are not verified
 
 - [S2](#step-a92b7a4a25e85778) `reporting.demo.output.result_value` — **partial** (update in reporting.demo.apply_overrides under IF @apply_override = 1)
+
+<a id="where-proof-ends"></a>
 
 ### Where proof ends
 
