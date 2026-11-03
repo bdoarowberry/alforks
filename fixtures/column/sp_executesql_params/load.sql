@@ -86,3 +86,11 @@ GO
 CREATE PROCEDURE dbo.load_default AS
     EXEC sp_executesql N'INSERT INTO dbo.t_default (id, x) SELECT s.id, @d FROM dbo.src s', N'@d int = 9', @d = DEFAULT;
 GO
+-- Commas inside a comment and a string default of the parameter list are not separators.
+CREATE TABLE dbo.t_comment (id int, x int, y varchar(10));
+GO
+CREATE PROCEDURE dbo.load_comment AS
+    EXEC sp_executesql N'INSERT INTO dbo.t_comment (id, x, y) SELECT s.id, @a, @d FROM dbo.src s',
+         N'@a int, -- first, note
+           @d varchar(10) = ''a,b'' /* x, y */', 4;
+GO

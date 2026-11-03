@@ -73,3 +73,10 @@ def test_nested_exec_does_not_see_the_callers_variable(tmp_path):
 def test_default_argument_takes_the_declared_default(tmp_path):
     t = trace(ROOT, "demo.dbo.t_default.x", tmp_path, *DB)
     assert t.complete and ends(t) == {"constant:9"}
+
+
+def test_commas_in_comments_and_string_defaults_do_not_split_the_parameter_list(tmp_path):
+    t = trace(ROOT, "demo.dbo.t_comment.x", tmp_path / "x", *DB)
+    assert t.complete and ends(t) == {"constant:4"}
+    t = trace(ROOT, "demo.dbo.t_comment.y", tmp_path / "y", *DB)
+    assert t.complete and ends(t) == {"constant:'a,b'"}

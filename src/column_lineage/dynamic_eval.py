@@ -266,15 +266,17 @@ class Evaluator:
         texts = self.eval(params, unit, statement, statement.scope, 0, None)
         if len(texts) != 1 or not isinstance(texts[0].value, str):
             raise Unknown("sp_executesql's parameter list is not one known text")
-        declared, depth, current = [], 0, ""
-        for ch in texts[0].value:
+        # Split on top-level commas of the code (not inside comments or string defaults), comments dropped.
+        code = re.sub(r"N?'(?:[^']|'')*'|--[^\n]*|/\*.*?\*/",
+                      lambda m: m.group() if m.group().endswith("'") else " ", texts[0].value, flags=re.S)
+        masked = mask_noncode(code)
+        declared, depth, begin = [], 0, 0
+        for i, ch in enumerate(masked):
             depth += {"(": 1, ")": -1}.get(ch, 0)
             if ch == "," and depth == 0:
-                declared.append(current)
-                current = ""
-            else:
-                current += ch
-        declared.append(current)
+                declared.append(code[begin:i])
+                begin = i + 1
+        declared.append(code[begin:])
         bindings: dict[str, exp.Expression] = {}
         for index, item in enumerate(d.strip() for d in declared):
             if not item:
