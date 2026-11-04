@@ -675,8 +675,14 @@ tester found no remaining sentence implying how those rows were produced.
 Saved 178-target comparison against the unconstrained run of the same build: regular rebuild removes
 6 steps (two variable, two constant, two fallback-expression) from excluded branches in 2 traces,
 `via` changes only there; interim rebuild changes nothing; both keep 47 / 3 / 128 and every gap-kind
-count. Still open: the cross-build comparison (unconstrained, current build vs the last saved batch
-before 83f62d1) for the sp_executesql, scalar-inlining, `via` and CROSS APPLY id changes.
+count.
+Cross-build comparison (unconstrained, current build vs the last batch before 83f62d1; 3,002 files,
+35,378 statements): 47 / 3 / 128 both, every gap-kind count equal, dynamic_sql reasons unchanged
+(23 object name passed / not evaluated, 39 table or metadata read, 2 expression not evaluated), 0 step
+ids added or removed, `via` set on 1,278 step instances (4 spot-checks correct). The sqlleaf-derived
+rules found nothing to act on in this corpus: no opaque scalar functions, no sp_executesql parameter
+lists on the blocking paths, no inline TVF derived nodes under CROSS APPLY. Next lever: what keeps the
+23 + 2 "expression not evaluated" cases from evaluating (invented shapes requested).
 
 ## T-SQL construct probe and sqlleaf comparison (tests/test_column_tsql_constructs.py)
 
