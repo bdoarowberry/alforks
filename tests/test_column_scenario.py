@@ -75,6 +75,12 @@ def test_reuse_reads_the_existing_result_and_does_not_claim_its_origin(tmp_path)
     evidence = overview[overview.index("## Main evidence needed"):]
     evidence = evidence[:evidence.index("\n## ", 5)]
     assert "No further source definition is needed" not in evidence
+    for claim in ("values are copied or renamed", "No open points on the value routes", "No filters or joins were found",
+                  "It has no writer to follow", "Uncertainty:** none recorded"):
+        assert claim not in overview and claim not in detailed, claim
+    for title in ("What changes the value", "Which rows?", "Evidence and uncertainty"):
+        body = overview[overview.index(f"## {title}"):]
+        assert body.split("\n\n", 2)[1].startswith("Not assessed for this invocation"), title
     assert ("**Where did the existing rows of `demo.dbo.saved_result.value_col` come from?** Under the assumed "
             "values this invocation only reads them") in evidence and "evidence from the run that populated them" in evidence
     excluded = t.data["scan"]["scenario"]["procedures"][0]["excluded_statements"]

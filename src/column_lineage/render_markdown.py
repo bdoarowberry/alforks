@@ -345,6 +345,15 @@ def assertion_provenance_text(data: dict) -> str:
     return f"{records} assertion record{'' if records == 1 else 's'}: {fmt(made)}; {fmt(review)}"
 
 
+NOT_ASSESSED = ("Not assessed for this invocation: under the assumed values it writes nothing here, it only reads "
+                "rows that existed before. How those rows were produced (sources, value rules, filters, joins and "
+                "open points) is unknown until the run that populated them is identified.")
+
+
+def not_written_in_scenario(data: dict) -> bool:
+    return (data.get("completeness") or {}).get("result") == "not_written_in_scenario"
+
+
 def _short_proc(name: str | None) -> str:
     parts = [p for p in re.split(r"\.", (name or "").lower()) if p]
     return ".".join(parts[-2:])
@@ -534,6 +543,10 @@ def _section_short_answer(t: _Trace) -> list[str]:
 
     if not t.steps:
         stops = t.stops_by_node.get(t.target_id, [])
+        if not_written_in_scenario(t.data):
+            return [f"{target} is **not written in this scenario**: under the assumed values the invocation only "
+                    "reads rows that existed before (see Scenario). No route to their origin was followed.", "",
+                    f"- **Uncertainty:** {NOT_ASSESSED}"]
         if stops:
             reasons = ", ".join(STOP_LABEL.get(s.get("reason"), _text(s.get("reason"))) for s in stops)
             out.append(f"No mapping step leads into {target}: the trace stops at the target itself "
@@ -912,7 +925,8 @@ def _section_row_selection(t: _Trace) -> list[str]:
                 _code(t.location(ev)) if ev else "—")) + " |")
         out.append("")
     if not any_rows:
-        out.append("No row-selection dependencies were recorded for the steps in this trace.")
+        out.append(NOT_ASSESSED if not_written_in_scenario(t.data) else
+                   "No row-selection dependencies were recorded for the steps in this trace.")
     elif out[-1] == "":
         out.pop()
     return out
@@ -1214,6 +1228,9 @@ def _section_gaps(t: _Trace, json_name: str | None) -> list[str]:
                         rendered = _code(value, EXCERPT_LIMIT)
                     out.append(f"  - {_text(key)}: {rendered}")
             out.append("")
+    elif not_written_in_scenario(t.data):
+        out += ["No gaps were recorded for this invocation. The origin of the existing rows it reads is open (see "
+                "Where proof ends): that is a question for the run that populated them, not a gap in this trace.", ""]
     else:
         out += ["No gaps were recorded.", ""]
 

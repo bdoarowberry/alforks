@@ -256,7 +256,11 @@ WHILE, BEGIN...END, TRY/CATCH, RETURN), with an environment of the supplied valu
   itself stops there (and nothing else is open), `completeness.result` is `not_written_in_scenario`, never
   `complete_within_selected_scope`: no lineage is claimed for the existing rows. The overview's "Main
   evidence needed" then asks where the existing rows came from (evidence from the run that populated
-  them) and never says that no further source definition is needed.
+  them) and never says that no further source definition is needed. Sections that would describe the
+  traced routes (value rules, row selection, evidence and uncertainty, open points; on the detailed
+  page the short answer's uncertainty, row selection and gaps) say instead that they are not assessed
+  for this invocation: how the existing rows were produced is unknown until the run that populated
+  them is identified.
 - JSON: `scan.scenario` = `{note, procedures: [{procedure, definition, values, excluded_statements:
   [{path, line, statement, what, reason, writes}], uncertain_conditions,
   parameters_changed_in_procedure, calls, notes}]}`; also in `scan-diagnostics.json`.

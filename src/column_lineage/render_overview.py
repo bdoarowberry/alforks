@@ -55,7 +55,7 @@ from pathlib import Path
 import re
 import sys
 
-from .render_markdown import (via_text, scenario_lines, NEXT_EVIDENCE, SECTION_ANCHORS, _anchor, _cell, _code, _link_target, _one_line,
+from .render_markdown import (via_text, scenario_lines, NOT_ASSESSED, not_written_in_scenario, NEXT_EVIDENCE, SECTION_ANCHORS, _anchor, _cell, _code, _link_target, _one_line,
                               _plural, _status_rank, _text, _Trace, _truncate, assertion_provenance_text)
 
 INDEX_SCHEMA = "column-lineage-routes/1.0"
@@ -1729,6 +1729,9 @@ def _validation_requests(a: Analysis, detailed: str) -> list[str]:
     return out
 
 
+SEE_ABOVE = "Not assessed for this invocation (see What changes the value)."
+
+
 def _scenario_requests(a: Analysis) -> list[str]:
     """Columns the scenario's invocation does not write: their existing rows' origin needs run evidence."""
     nodes = sorted({s["node"] for s in a.t.stops if s.get("reason") == "scenario_not_written"})
@@ -2356,6 +2359,7 @@ def render_overview(data: dict, json_name: str | None = None, glossary: list[dic
     detailed = _link_target(detailed_page or detailed_name(json_name))
     entry, others = glossary_entry(glossary, a.data)
     out = [f"# Column overview: {_code(a.t.display(a.t.target_id))}", ""]
+    unwritten = not_written_in_scenario(a.data)
     sections = (
         ("Field and definition", _section_field(a, entry, others)),
         *((("Scenario (assumed values)", scenario_lines(a.data, detailed, 5)),) if scenario_lines(a.data) else ()),
@@ -2364,11 +2368,12 @@ def render_overview(data: dict, json_name: str | None = None, glossary: list[dic
         ("Main evidence needed", _section_evidence_needed(a, detailed)),
         ("Route families", _section_families(a, detailed)),
         ("Sources at a glance", _section_sources(a, detailed)),
-        ("What changes the value", _section_changes(a, detailed)),
-        ("Which rows?", _section_rows(a, detailed)),
-        ("Evidence and uncertainty", _section_uncertainty(a, detailed)),
+        ("What changes the value", [NOT_ASSESSED] if unwritten else _section_changes(a, detailed)),
+        ("Which rows?", [SEE_ABOVE] if unwritten else _section_rows(a, detailed)),
+        ("Evidence and uncertainty", [SEE_ABOVE] if unwritten else _section_uncertainty(a, detailed)),
         ("Routes: how the value arrives", _section_routes(a, detailed)),
-        ("Open points", _section_open(a, detailed)),
+        ("Open points", ["The open question is where the existing rows came from (see Main evidence needed); "
+                         "nothing else is assessed for this invocation."] if unwritten else _section_open(a, detailed)),
         ("Links", _section_links(a, json_name, detailed, index)),
     )
     for title, body in sections:
