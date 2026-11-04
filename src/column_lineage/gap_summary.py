@@ -408,7 +408,9 @@ def dynamic_reason(gap: dict) -> str:
     detail = gap.get("detail") or {}
     message = gap.get("message") or ""
     site = next((r for p, r in DYNAMIC_SITE_PATTERNS if re.search(p, message)), "other_site")
-    if detail.get("evaluation") == "open":
+    if detail.get("evaluation") == "open" and detail.get("row_selection_only"):
+        why = "known_except_a_filter_value"
+    elif detail.get("evaluation") == "open":
         why = "evaluated_but_callers_outside_scan_may_pass_other_texts"
     else:
         pieces = list(detail.get("unknown_pieces") or [])

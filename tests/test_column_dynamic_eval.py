@@ -269,4 +269,7 @@ def test_parenthesized_result_set_query_is_read_as_a_select(tmp_path):
     gaps = t.gaps("dynamic_sql")
     assert t.complete and all(g["affects"] == "row_selection" for g in gaps)
     assert not any("is not analysed" in p for g in gaps for p in g["detail"].get("unknown_pieces", []))
-    assert gaps and all("known except a value used only in a filter" in g["message"] for g in gaps)
+    assert gaps and all("known except a value used only in a filter" in g["message"]
+                        and "it writes nothing here" in g["message"] for g in gaps)
+    from column_lineage.gap_summary import dynamic_reason
+    assert {dynamic_reason(g) for g in gaps} == {"object_name_passed_to_a_dynamic_procedure/known_except_a_filter_value"}

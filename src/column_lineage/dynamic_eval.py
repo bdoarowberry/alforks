@@ -124,6 +124,10 @@ class Evaluation:
             if self.status == "open" and all(PLACEHOLDER_NOTE in p for p in self.open):
                 # Only filter literals are not known: which rows are selected is open, not where values come from.
                 out["row_selection_only"] = True
+        if self.usable and not any(
+                not (isinstance(st.tree, (exp.Select, exp.Union)) and not st.tree.args.get("into"))
+                for alt in self.alternatives for st in alt.statements):
+            out["writes_nothing"] = True       # every text only returns rows
         return out
 
 

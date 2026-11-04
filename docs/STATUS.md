@@ -702,6 +702,12 @@ Rerun (2b54c93): 47 / 3 / 128; 0 step-id changes; the 23 traces now stop at "the
 '(' which is not analysed": the built SQL is one parenthesized result-set query, `(SELECT DISTINCT ...
 WHERE ... = '<date>')`. Fixed: such a string is unwrapped before indexing; the gap for an object name
 passed to a procedure whose SQL is known except a filter value now says so (row selection only).
+Rerun (56e2c40): 47 / 3 / 128 (the former 23 stay incomplete for other value-source gaps); dynamic SQL
+blocks 43 traces instead of 56; 86 gaps (190 occurrences, 23 traces) are row_selection_only; the date
+sits only in the WHERE equality and the query only returns rows. Wording: the gap said the statements
+are "analysed as writers" and gap-summary.json filed them under "callers outside scan may pass other
+texts"; now `detail.writes_nothing` says when every evaluated text only returns rows, the message says
+"it writes nothing here", and the reason is `known_except_a_filter_value`.
 
 ## T-SQL construct probe and sqlleaf comparison (tests/test_column_tsql_constructs.py)
 
