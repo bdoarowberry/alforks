@@ -78,6 +78,7 @@ def test_reuse_reads_the_existing_result_and_does_not_claim_its_origin(tmp_path)
     for claim in ("values are copied or renamed", "No open points on the value routes", "No filters or joins were found",
                   "It has no writer to follow", "Uncertainty:** none recorded"):
         assert claim not in overview and claim not in detailed, claim
+    assert "No production route assessed for this invocation" in overview and "1 object route" not in overview
     for title in ("What changes the value", "Which rows?", "Evidence and uncertainty"):
         body = overview[overview.index(f"## {title}"):]
         assert body.split("\n\n", 2)[1].startswith("Not assessed for this invocation"), title

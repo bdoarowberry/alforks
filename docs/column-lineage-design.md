@@ -257,7 +257,8 @@ WHILE, BEGIN...END, TRY/CATCH, RETURN), with an environment of the supplied valu
   `complete_within_selected_scope`: no lineage is claimed for the existing rows. The overview's "Main
   evidence needed" then asks where the existing rows came from (evidence from the run that populated
   them) and never says that no further source definition is needed. Sections that would describe the
-  traced routes (value rules, row selection, evidence and uncertainty, open points; on the detailed
+  traced routes (value rules, row selection, evidence and uncertainty, open points, the routes list
+  — "No production route assessed for this invocation"; on the detailed
   page the short answer's uncertainty, row selection and gaps) say instead that they are not assessed
   for this invocation: how the existing rows were produced is unknown until the run that populated
   them is identified.

@@ -2371,7 +2371,9 @@ def render_overview(data: dict, json_name: str | None = None, glossary: list[dic
         ("What changes the value", [NOT_ASSESSED] if unwritten else _section_changes(a, detailed)),
         ("Which rows?", [SEE_ABOVE] if unwritten else _section_rows(a, detailed)),
         ("Evidence and uncertainty", [SEE_ABOVE] if unwritten else _section_uncertainty(a, detailed)),
-        ("Routes: how the value arrives", _section_routes(a, detailed)),
+        ("Routes: how the value arrives", ["No production route assessed for this invocation: it reads the existing "
+                                           "rows and writes nothing here (see Scenario)."]
+         if unwritten else _section_routes(a, detailed)),
         ("Open points", ["The open question is where the existing rows came from (see Main evidence needed); "
                          "nothing else is assessed for this invocation."] if unwritten else _section_open(a, detailed)),
         ("Links", _section_links(a, json_name, detailed, index)),
