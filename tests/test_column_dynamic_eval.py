@@ -241,3 +241,22 @@ def test_exec_without_semicolon_ends_before_the_next_line_statement(tmp_path):
     [gap] = t.gaps("dynamic_sql")                                  # the real reason: the SQL comes from a function
     assert any("dbo.build_index_script" in p for p in gap["detail"]["unknown_pieces"])
     assert any("(SELECT COUNT(*) FROM dbo.target_table)" in s["expression"] for s in t.steps)   # SET: own statement
+
+
+def test_unknown_date_inside_a_filter_literal_is_read_with_a_placeholder(tmp_path):
+    """fixtures/column/dynamic/literal_placeholder (invented from a tester trial): a long concatenation used to
+    stop with "call chain is deeper than 8 procedures" (the expression depth was counted); the remaining unknown,
+    a date converted to text inside a quoted WHERE literal, can only change which rows are selected."""
+    root, db = dyn("literal_placeholder"), ("--default-database", "demo")
+    t = trace(root, "demo.dbo.out_latest.d", tmp_path / "a", *db)
+    assert "demo.dbo.events_a.d" in t.all_ids() and "deeper than" not in json.dumps(t.data)
+    gaps = t.gaps("dynamic_sql")                        # kept, open: the filter date is not known
+    assert gaps and all(g["detail"]["evaluation"] == "open" and g["detail"]["row_selection_only"]
+                        and g["affects"] == "row_selection" for g in gaps)
+    assert t.complete                                   # the value route itself is traced
+    assert any("only in a WHERE, ON or HAVING literal" in p for g in gaps for p in g["detail"]["open_pieces"])
+    steps = [s for s in t.steps if any(i["node"] == "demo.dbo.events_a.d" for i in s["inputs"])]
+    assert steps and all(s["status"] == "inferred" for s in steps)
+    for column in ("out_select.d", "out_name.v", "out_table.v"):      # value, quote-able text, code: refused
+        t = trace(root, f"demo.dbo.{column}", tmp_path / column, *db)
+        assert t.gaps("dynamic_sql") and not t.complete, column

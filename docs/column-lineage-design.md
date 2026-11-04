@@ -363,7 +363,14 @@ After loading, every `dynamic_sql` statement issue (other than dead dynamic SQL)
   negated condition. Arms of the same IF exclude each other, so variables set together stay paired.
   The declared length of the variable truncates the value.
 - A procedure parameter takes what each caller in the scanned files passes (evaluated in the caller,
-  recursively, at most 8 calls deep), or its default for callers that omit it. With no caller the
+  recursively, at most 8 procedure calls deep; expressions themselves may nest up to 120 levels, so a
+  long concatenation is not mistaken for a deep call chain), or its default for callers that omit it.
+- A conversion to text of a value that cannot contain a quote (a date or number parameter or
+  variable, GETDATE() and similar) whose value is not known becomes a placeholder. It is accepted only
+  when it lands inside a quoted literal of the built SQL and that literal sits under a WHERE, HAVING or
+  join ON; the evaluation is then **open**, its reason says the value was read with a placeholder, and
+  the gap's `detail.row_selection_only` makes it a row-selection gap (it can change which rows are
+  selected, not where values come from). Anywhere else (a selected value, a name, code) it stays unknown. With no caller the
   default is the only known value and the evaluation is **open**.
 - Anything else makes the evaluation **unknown**: a value from a query, FETCH, UPDATE or OUTPUT; an
   assignment in a WHILE loop; an unparsed statement that may assign the variable; control flow that

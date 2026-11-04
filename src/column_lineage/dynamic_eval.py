@@ -35,7 +35,11 @@ from .control import control_regions, header_end
 
 MAX_ALTERNATIVES = 16
 MAX_LENGTH = 200_000
-MAX_DEPTH = 8
+MAX_DEPTH = 8                # procedure calls followed back to find a parameter's value
+MAX_EXPRESSION_DEPTH = 120   # nesting of one expression (a long concatenation is a deep tree of +)
+# Stands for a value that is not known but can only be text inside a quoted literal of the built SQL.
+UNKNOWN_LITERAL = "\u2047unknown\u2047"
+PLACEHOLDER_NOTE = "the evaluated SQL uses it only in a WHERE, ON or HAVING literal, so it was read with a placeholder"
 MAX_NESTING = 3
 
 EXEC_PAREN = re.compile(r"\s*EXEC(?:UTE)?\s*\(", re.I)
@@ -44,6 +48,9 @@ EXEC_SP = re.compile(r"\s*EXEC(?:UTE)?\s+(?:@[\w$#@]+\s*=\s*)?(?:(?:\[[^\]]*\]|\
 EXEC_VARIABLE = re.compile(r"\s*EXEC(?:UTE)?\s+@[\w$#@]+", re.I)
 CONTROL_WORDS = re.compile(r"(?<![\w@#$])(?:IF|WHILE|GOTO|BEGIN\s+TRY|BEGIN\s+CATCH|RETURN|BREAK|CONTINUE)(?![\w$#@])", re.I)
 STRING_TYPES = {"CHAR": 1, "NCHAR": 1, "VARCHAR": 1, "NVARCHAR": 1, "TEXT": None, "NTEXT": None}
+NO_QUOTE_TYPES = {"DATE", "DATETIME", "DATETIME2", "SMALLDATETIME", "DATETIMEOFFSET", "TIME", "BIT", "TINYINT",
+                  "SMALLINT", "INT", "BIGINT", "DECIMAL", "NUMERIC", "MONEY", "SMALLMONEY", "FLOAT", "REAL"}
+TIME_FUNCTIONS = {"GETDATE", "GETUTCDATE", "SYSDATETIME", "SYSUTCDATETIME", "SYSDATETIMEOFFSET", "CURRENT_TIMESTAMP"}
 HEADER_TYPE = r"\s+(?:AS\s+)?(?P<type>\[?[A-Za-z_]\w*\]?(?:\s*\.\s*\[?[A-Za-z_]\w*\]?)?)(?:\s*\(\s*(?P<length>\d+|max)\s*(?:,\s*\d+\s*)?\))?"
 
 
@@ -114,6 +121,9 @@ class Evaluation:
             out["unknown_pieces"] = list(self.unknown)
         if self.open:
             out["open_pieces"] = list(self.open)
+            if self.status == "open" and all(PLACEHOLDER_NOTE in p for p in self.open):
+                # Only filter literals are not known: which rows are selected is open, not where values come from.
+                out["row_selection_only"] = True
         return out
 
 
@@ -188,10 +198,13 @@ class Evaluator:
         self._active: set[tuple] = set()
         self._declared: dict[str, dict] = {}
         self._open: list[str] = []
+        self._calls = 0                       # procedure calls being followed for parameter values
+        self._literal_unknowns: list[str] = []
 
     # ---------------------------------------------------------------- entry
     def evaluate(self, issue) -> Evaluation:
         self._open = []
+        self._calls = 0     # (the placeholder list is kept: memoized values refer to it by index)
         self._sp_call = None
         self._bindings = {}
         unit, statement = issue.unit, issue.statement
@@ -435,7 +448,7 @@ class Evaluator:
 
     # ----------------------------------------------------------- expressions
     def eval(self, node, unit, point, scope, depth, env) -> list[Alt]:
-        if depth > MAX_DEPTH * 4:
+        if depth > MAX_EXPRESSION_DEPTH:
             raise Unknown("the expression is nested too deeply")
         if isinstance(node, exp.Paren):
             return self.eval(node.this, unit, point, scope, depth + 1, env)
@@ -500,10 +513,23 @@ class Evaluator:
             left = isinstance(node, exp.Left)
             return self.combine(self.collect(args, node.this, node.expression),
                                 lambda vs: left_right(vs[0], vs[1], left), sql_text(node))
-        if isinstance(node, (exp.Cast, exp.TryCast)):
-            return self.convert(node.this, node.args.get("to"), args, node)
-        if isinstance(node, exp.Convert) and not node.args.get("style"):
-            return self.convert(node.expression, node.this, args, node)
+        if isinstance(node, (exp.Cast, exp.TryCast, exp.Convert)):
+            inner, to = (node.expression, node.this) if isinstance(node, exp.Convert) else \
+                (node.this, node.args.get("to"))
+            try:
+                if isinstance(node, exp.Convert) and node.args.get("style"):
+                    raise Unknown(f"{shorten(sql_text(node))}: CONVERT with a style is not evaluated")
+                return self.convert(inner, to, args, node)
+            except Unknown as exc:
+                if type_length(to)[0] == "string" and self.holds_no_quote(inner, unit, scope):
+                    # Text of a date or number never contains a quote: inside a quoted literal of the built SQL it
+                    # can only change that literal. pieces() checks where it lands.
+                    piece = shorten(sql_text(node))
+                    why = exc.reasons[0]
+                    why = why[len(piece) + 2:] if why.startswith(piece + ": ") else why
+                    self._literal_unknowns.append(f"{piece} ({why})")
+                    return [Alt(f"\u2047{len(self._literal_unknowns) - 1}\u2047")]
+                raise
         if isinstance(node, exp.Anonymous):
             name = str(node.this).upper()
             if name == "QUOTENAME" and 1 <= len(node.expressions) <= 2:
@@ -512,6 +538,23 @@ class Evaluator:
                 return self.combine(self.collect(args, node.expressions[0]), char_of, sql_text(node))
         raise Unknown(f"{shorten(sql_text(node))}: not built from literals (only literals, variables, parameters, "
                       "+, CONCAT, QUOTENAME, REPLACE, CHAR, CAST/CONVERT and a few string functions are evaluated)")
+
+    def holds_no_quote(self, node, unit, scope) -> bool:
+        """Whether the value of ``node`` is a date or number (its text can never contain a quote)."""
+        if isinstance(node, exp.Paren):
+            return self.holds_no_quote(node.this, unit, scope)
+        if isinstance(node, (exp.CurrentTimestamp, exp.CurrentDate, exp.CurrentDatetime)):
+            return True
+        if isinstance(node, exp.Anonymous) and str(node.this).upper() in TIME_FUNCTIONS:
+            return True
+        if isinstance(node, exp.Parameter) and unit is not None and scope is not None:
+            from .catalog import restore_variable
+            name = restore_variable(sql_text(node)).lower()
+            return self.declared_types(scope, unit).get(name, ("unknown",))[0] == "other"
+        if isinstance(node, (exp.Cast, exp.TryCast)):
+            to = node.args.get("to")
+            return isinstance(to, exp.DataType) and type_length(to)[0] == "other"
+        return False
 
     @staticmethod
     def collect(args, *nodes) -> list[list[Alt]]:
@@ -587,8 +630,10 @@ class Evaluator:
             if isinstance(alts, Unknown):
                 raise alts
             return alts
-        if key in self._active or depth > MAX_DEPTH * 4:
+        if key in self._active:
             raise Unknown(f"{name}: its value depends on itself through procedure calls")
+        if depth > MAX_EXPRESSION_DEPTH:
+            raise Unknown(f"{name}: the expression is nested too deeply")
         self._active.add(key)
         before = len(self._open)
         try:
@@ -715,6 +760,8 @@ class Evaluator:
                 elif type_name in STRING_TYPES:
                     found[param] = ("string", None if (length or "").upper() == "MAX" or STRING_TYPES[type_name] is None
                                     else int(length) if length else 1)
+                elif type_name in NO_QUOTE_TYPES:
+                    found[param] = ("other", None)    # a date or number: its text never holds a quote
         self._declared[scope] = found
         return found
 
@@ -722,7 +769,7 @@ class Evaluator:
         catalog = self.catalog
         proc = catalog.proc_by_scope[scope]
         label = proc.ref.display if hasattr(proc.ref, "display") else proc.key
-        if depth > MAX_DEPTH:
+        if self._calls >= MAX_DEPTH:
             raise Unknown(f"{name}: the call chain is deeper than {MAX_DEPTH} procedures")
         calls = list(catalog.calls_by_callee.get(proc.key, []))
         if proc.ref.database:
@@ -768,7 +815,11 @@ class Evaluator:
                 cond = Cond(key, arm, f"called at {at} with {name} = {shorten(sql_text(value))}",
                             (call.unit.path, call.statement.start))
                 try:
-                    values = self.eval(value, call.unit, call.statement, call.caller_scope, depth + 1, None)
+                    self._calls += 1
+                    try:
+                        values = self.eval(value, call.unit, call.statement, call.caller_scope, depth + 1, None)
+                    finally:
+                        self._calls -= 1
                     values = self.relative_to(values, call.unit, call.statement)
                 except Unknown as exc:
                     reasons.extend(f"{name}: passed by the call at {at}; {r}" for r in exc.reasons)
@@ -823,6 +874,12 @@ class Evaluator:
         if nesting == 0:
             sql = self.bind_parameters(sql, issue)
         masked = mask_noncode(sql)
+        if "\u2047" in sql:
+            # A date or number not known: it must land inside a quoted literal (masked away), never in code.
+            for match in re.finditer("\u2047([^\u2047]*)\u2047", sql):
+                if masked[match.start():match.end()].strip():
+                    raise Unknown(f"{self.literal_piece(match.group(1))}: its value is not known and it is not "
+                                  "inside a quoted literal of the built SQL")
         control = CONTROL_WORDS.search(masked)
         if control:
             raise Unknown(f"the evaluated SQL contains {control.group().upper()} control flow, which is not evaluated")
@@ -879,6 +936,33 @@ class Evaluator:
             if outputs:
                 raise Unknown("the evaluated SQL has an OUTPUT ... INTO clause, which is not analysed")
 
+    def literal_piece(self, index: str) -> str:
+        i = int(index) if index.isdigit() else -1
+        return self._literal_unknowns[i] if 0 <= i < len(self._literal_unknowns) else "a value"
+
+    def check_unknown_literals(self, tree) -> None:
+        """A literal holding an unknown value may only decide which rows are selected (WHERE, ON, HAVING)."""
+        marked = [n for n in tree.find_all(exp.Literal, exp.National) if "\u2047" in str(n.this or "")]
+        if not marked:
+            return
+        pieces = [self.literal_piece(m) for n in marked for m in re.findall("\u2047([^\u2047]*)\u2047", str(n.this))]
+        for literal in marked:
+            node, ok = literal, False
+            while node is not None and node is not tree:
+                parent = node.parent
+                if isinstance(parent, (exp.Where, exp.Having)) or (isinstance(parent, exp.Join)
+                                                                    and node is parent.args.get("on")):
+                    ok = True
+                    break
+                node = parent
+            if not ok:
+                raise Unknown(f"{'; '.join(dict.fromkeys(pieces))}: its value is not known and would be a value or "
+                              "name in the evaluated SQL, not only a filter")
+        reason = (f"{'; '.join(dict.fromkeys(pieces))}: not known; {PLACEHOLDER_NOTE} "
+                  "(it can change which rows are selected, not where values come from)")
+        if reason not in self._open:
+            self._open.append(reason)
+
     def piece(self, text: str, tree, env, nesting: int = 0) -> list[tuple[str, exp.Expression]]:
         if isinstance(tree, exp.Declare):
             for item in tree.expressions:
@@ -905,6 +989,8 @@ class Evaluator:
         if variables:
             raise Unknown(f"the evaluated SQL reads {', '.join(variables)}; variables inside dynamic SQL belong to its "
                           "own batch (or to sp_executesql parameters) and are not traced")
+        if isinstance(tree, exp.Expression):
+            self.check_unknown_literals(tree)
         if isinstance(tree, exp.Select) and not tree.args.get("into"):
             return []   # a result set: no column is written
         if isinstance(tree, (exp.Delete, exp.TruncateTable, exp.Drop)):

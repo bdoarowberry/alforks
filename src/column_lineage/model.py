@@ -381,7 +381,9 @@ class TraceResult:
         effects = {}
         for gap in self.gaps.values():
             node = gap.node.id if gap.node else None
-            if gap.id in value_ids or (node and node in value_nodes):
+            if gap.detail.get("row_selection_only"):
+                effects[gap.id] = "row_selection"   # e.g. dynamic SQL whose only unknown is a filter literal
+            elif gap.id in value_ids or (node and node in value_nodes):
                 effects[gap.id] = "value"
             elif gap.id in row_ids or (node and node in row_nodes) or gap.detail.get("raised_in_row_selection"):
                 effects[gap.id] = "row_selection"

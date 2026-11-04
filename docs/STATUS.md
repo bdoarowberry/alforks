@@ -690,6 +690,14 @@ ended at RAISERROR/RETURN/IF/ELSE/BEGIN/END), and the evaluator read the SET as 
 ends an EXEC; the "runs elsewhere" reason is now given only for AT/AS. Fixture
 `fixtures/column/dynamic/exec_then_set`; 801 fixture traces: only that fixture's 3 changed; corpus 48/48
 identical.
+Rerun (4063159): 47 / 3 / 128 unchanged; 0 step-id changes; statements 35,378 -> 35,728; the false
+reason is gone. The 23 traces now say "call chain deeper than 8 procedures" (a defect: the check
+counted expression nesting, so a long concatenation looked like a deep call chain) plus a date
+converted inside a quoted WHERE literal; 4 traces show SQL assembled in a WHILE loop and one EXEC runs
+SQL returned by a helper (both genuinely not evaluable). Fixed: procedure calls are counted separately
+(expressions may nest 120 deep), and an unknown date or number inside a quoted WHERE/ON/HAVING literal
+is read with a placeholder (open evaluation, row-selection gap). Fixture
+`fixtures/column/dynamic/literal_placeholder`.
 
 ## T-SQL construct probe and sqlleaf comparison (tests/test_column_tsql_constructs.py)
 
