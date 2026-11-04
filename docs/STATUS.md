@@ -698,6 +698,10 @@ SQL returned by a helper (both genuinely not evaluable). Fixed: procedure calls 
 (expressions may nest 120 deep), and an unknown date or number inside a quoted WHERE/ON/HAVING literal
 is read with a placeholder (open evaluation, row-selection gap). Fixture
 `fixtures/column/dynamic/literal_placeholder`.
+Rerun (2b54c93): 47 / 3 / 128; 0 step-id changes; the 23 traces now stop at "the evaluated SQL contains
+'(' which is not analysed": the built SQL is one parenthesized result-set query, `(SELECT DISTINCT ...
+WHERE ... = '<date>')`. Fixed: such a string is unwrapped before indexing; the gap for an object name
+passed to a procedure whose SQL is known except a filter value now says so (row selection only).
 
 ## T-SQL construct probe and sqlleaf comparison (tests/test_column_tsql_constructs.py)
 

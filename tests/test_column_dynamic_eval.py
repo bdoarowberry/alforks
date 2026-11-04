@@ -260,3 +260,13 @@ def test_unknown_date_inside_a_filter_literal_is_read_with_a_placeholder(tmp_pat
     for column in ("out_select.d", "out_name.v", "out_table.v"):      # value, quote-able text, code: refused
         t = trace(root, f"demo.dbo.{column}", tmp_path / column, *db)
         assert t.gaps("dynamic_sql") and not t.complete, column
+
+
+def test_parenthesized_result_set_query_is_read_as_a_select(tmp_path):
+    """Tester trial shape: EXEC of '(SELECT ... WHERE created_at = ''<date>'')' with the source table passed by a
+    caller. The query only returns rows, so the table passed to it is not written by it."""
+    t = trace(dyn("literal_placeholder"), "demo.dbo.out_c.v", tmp_path, "--default-database", "demo")
+    gaps = t.gaps("dynamic_sql")
+    assert t.complete and all(g["affects"] == "row_selection" for g in gaps)
+    assert not any("is not analysed" in p for g in gaps for p in g["detail"].get("unknown_pieces", []))
+    assert gaps and all("known except a value used only in a filter" in g["message"] for g in gaps)

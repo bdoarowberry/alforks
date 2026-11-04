@@ -57,3 +57,31 @@ BEGIN
     EXEC dbo.filter_label @source_table = N'dbo.events_b', @label = @label;
 END
 GO
+-- Tester trial shape: the built SQL is one parenthesized result-set query (T-SQL runs it as a SELECT).
+CREATE TABLE dbo.load_audit (load_id int, source_id int, created_at datetime);
+CREATE TABLE dbo.sources_c (id int, v int);
+CREATE TABLE dbo.out_c (v int);
+GO
+CREATE PROCEDURE dbo.list_loads @source_table sysname, @as_of datetime AS
+BEGIN
+    DECLARE @sql nvarchar(max);
+    SET @sql = N'(SELECT DISTINCT load_id FROM dbo.load_audit '
+             + N'WHERE source_id IN (SELECT id FROM ' + @source_table + N') '
+             + N'AND created_at = ''' + CONVERT(varchar, @as_of, 21) + N''')';
+    EXEC (@sql);
+END
+GO
+CREATE PROCEDURE dbo.run_list @as_of datetime AS
+    EXEC dbo.list_loads @source_table = N'dbo.sources_c', @as_of = @as_of;
+GO
+CREATE PROCEDURE dbo.load_c AS
+    INSERT INTO dbo.out_c (v) SELECT v FROM dbo.sources_c;
+GO
+-- Two parenthesized queries joined by UNION: left as it is (not one enclosing pair).
+CREATE PROCEDURE dbo.list_union @source_table sysname AS
+BEGIN
+    DECLARE @sql nvarchar(max);
+    SET @sql = N'(SELECT id FROM ' + @source_table + N') UNION (SELECT id FROM ' + @source_table + N')';
+    EXEC (@sql);
+END
+GO

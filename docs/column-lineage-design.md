@@ -388,6 +388,8 @@ After loading, every `dynamic_sql` statement issue (other than dead dynamic SQL)
   statement, and a batch that names a caller variable an argument passes (its own variable of that
   name would be confused with the caller's). Caller variables are accepted only in the top-level
   batch, never in nested `EXEC (...)`.
+- A string that is one parenthesized query, `(SELECT ...)` (T-SQL runs it as a result-set query), is
+  unwrapped before indexing; `(SELECT ...) UNION (SELECT ...)` is left as it is.
 - Each string is split and parsed like a file. It is refused (unknown) if it reads a variable other
   than a bound sp_executesql parameter (variables belong to the dynamic batch), contains control flow (IF, WHILE, ...),
   a statement the indexer does not recognise (USE, CREATE PROCEDURE, GRANT, ...), or one that is not

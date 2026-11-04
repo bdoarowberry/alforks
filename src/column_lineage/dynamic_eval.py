@@ -873,6 +873,7 @@ class Evaluator:
             return []
         if nesting == 0:
             sql = self.bind_parameters(sql, issue)
+        sql = unwrap_query(sql)
         masked = mask_noncode(sql)
         if "\u2047" in sql:
             # A date or number not known: it must land inside a quoted literal (masked away), never in code.
@@ -1013,6 +1014,27 @@ HARMLESS = re.compile(
     r"ALTER\s+INDEX\b.*|DBCC\b.*|UPDATE\s+STATISTICS\b.*)", re.I)
 # Maintenance statements with no column lineage that SQLGlot does not parse.
 MAINTENANCE = re.compile(r"\s*(?:UPDATE\s+STATISTICS|ALTER\s+INDEX|DBCC)\b", re.I)
+
+
+def unwrap_query(sql: str) -> str:
+    """``(SELECT ...)`` run as a whole batch is a result-set query; T-SQL accepts the parentheses. Strip
+    parentheses that enclose the entire text around a SELECT or WITH (matched outside literals and comments),
+    so the query is indexed like any other. ``(SELECT ...) UNION (SELECT ...)`` is left as it is."""
+    while True:
+        masked = mask_noncode(sql)
+        start = len(masked) - len(masked.lstrip())
+        end = len(masked.rstrip().rstrip(";").rstrip())
+        if start >= end or masked[start] != "(" or masked[end - 1] != ")":
+            return sql
+        depth = 0
+        for i in range(start, end):
+            depth += {"(": 1, ")": -1}.get(masked[i], 0)
+            if depth == 0 and i < end - 1:
+                return sql          # the first parenthesis closes before the end: not one enclosing pair
+        inner = sql[start + 1:end - 1]
+        if not re.match(r"\s*(?:SELECT|WITH)\b", mask_noncode(inner), re.I):
+            return sql
+        sql = inner
 
 
 def uncovered_text(masked: str, statements) -> str:

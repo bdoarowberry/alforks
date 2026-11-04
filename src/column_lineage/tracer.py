@@ -665,12 +665,16 @@ class Tracer:
             issues.extend(i for i in self.catalog.issues_by_target.get(name, [])
                           if i not in issues and self.catalog.issue_reaches(i, ref))
         for call, issue in self.catalog.dynamic_literal_args().get(ref.name, []):
+            detail = self.dynamic_detail(issue)
+            effect = ("its text is known except a value used only in a filter, and the statements it runs are "
+                      "analysed as writers; which rows they select is open." if detail.get("row_selection_only")
+                      else "it may write this object.")
             gaps.append(Gap("dynamic_sql", f"{call.statement.procedure or call.unit.rel_path} passes {ref.name} to "
                             f"{issue.statement.procedure or 'a procedure'}, which builds and runs dynamic SQL; "
-                            "it may write this object.", node,
+                            + effect, node,
                             [self.catalog.evidence(call.unit, call.statement, role="call"),
                              self.catalog.evidence(issue.unit, issue.statement, role="dynamic_sql")],
-                            self.dynamic_detail(issue)))
+                            detail))
         for issue in issues:
             if self.catalog.dead_dynamic(issue) or self.catalog.dynamic_resolved(issue):
                 continue
