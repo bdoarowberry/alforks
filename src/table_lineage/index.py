@@ -87,7 +87,11 @@ def _next_statement_boundary(text: str, masked: str, start: int, limit: int, mat
                     i = match.end()
                     continue
                 leading = not line_has_code
-                if kind in ('EXEC', 'EXECUTE') and keyword not in ('RAISERROR', 'RETURN', 'IF', 'ELSE', 'BEGIN', 'END'):
+                if kind in ('EXEC', 'EXECUTE') and keyword not in ('RAISERROR', 'RETURN', 'IF', 'ELSE', 'BEGIN', 'END') \
+                        and not (leading and not malformed_comparison and keyword in (
+                            'SELECT', 'INSERT', 'UPDATE', 'DELETE', 'MERGE', 'EXEC', 'EXECUTE', 'SET', 'DECLARE')):
+                    # Inside an EXEC call (its arguments); a statement keyword that starts a line begins the next
+                    # statement (EXEC (@sql) <newline> SET @x = ... without a semicolon).
                     pass
                 elif kind == 'WITH' and not cte_consumer_seen and keyword in ('SELECT', 'INSERT', 'UPDATE', 'DELETE', 'MERGE'):
                     cte_consumer_seen = True

@@ -227,8 +227,11 @@ class Evaluator:
             if close is None:
                 raise Unknown("the EXEC (...) text could not be delimited")
             rest = masked[close + 1:].strip(" \t\r\n;")
-            if rest:
+            if rest and rest.split()[0].upper() in ("AT", "AS"):
                 raise Unknown(f"EXEC (...) {rest.split()[0].upper()} ... runs elsewhere or as another user; not evaluated")
+            if rest:
+                raise Unknown(f"the EXEC (...) statement also holds {shorten(' '.join(rest.split()), 40)!r} (no "
+                              "statement boundary was found); not evaluated")
             return self.parse_expression(text[match.end():close])
         match = EXEC_SP.match(masked)
         if match:

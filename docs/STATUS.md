@@ -683,6 +683,13 @@ ids added or removed, `via` set on 1,278 step instances (4 spot-checks correct).
 rules found nothing to act on in this corpus: no opaque scalar functions, no sp_executesql parameter
 lists on the blocking paths, no inline TVF derived nodes under CROSS APPLY. Next lever: what keeps the
 23 + 2 "expression not evaluated" cases from evaluating (invented shapes requested).
+Answer: one cause for all 25 traces (86 + 1 gap records at two EXEC sites). `EXEC (@sql)` without a
+semicolon, a comment, then `SET @x = ...` on the next line was indexed as one statement (an EXEC only
+ended at RAISERROR/RETURN/IF/ELSE/BEGIN/END), and the evaluator read the SET as an `AT`/`AS` suffix
+("runs elsewhere or as another user"). Fixed in the shared index: a statement keyword at a line start
+ends an EXEC; the "runs elsewhere" reason is now given only for AT/AS. Fixture
+`fixtures/column/dynamic/exec_then_set`; 801 fixture traces: only that fixture's 3 changed; corpus 48/48
+identical.
 
 ## T-SQL construct probe and sqlleaf comparison (tests/test_column_tsql_constructs.py)
 

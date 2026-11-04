@@ -228,3 +228,16 @@ def test_compound_assignment_ending_in_a_literal(tmp_path):
     assert inputs(step, "value") == [SOURCE_A]
     assert_evaluated_step(step)
     assert t.complete
+
+
+def test_exec_without_semicolon_ends_before_the_next_line_statement(tmp_path):
+    """EXEC (@sql) <comment> SET @x = ... (fixtures/column/dynamic/exec_then_set, invented from a tester trial):
+    the SET was read as an EXEC suffix ("runs elsewhere or as another user") and nothing was evaluated."""
+    t = trace(dyn("exec_then_set"), "demo.dbo.out_stamp.stamp", tmp_path / "a", "--default-database", "demo")
+    assert t.complete and not t.gaps("dynamic_sql")
+    assert "demo.dbo.audit_log.stamp" in t.all_ids()
+    t = trace(dyn("exec_then_set"), "demo.dbo.out_count.n", tmp_path / "b", "--default-database", "demo")
+    assert "runs elsewhere" not in json.dumps(t.data)
+    [gap] = t.gaps("dynamic_sql")                                  # the real reason: the SQL comes from a function
+    assert any("dbo.build_index_script" in p for p in gap["detail"]["unknown_pieces"])
+    assert any("(SELECT COUNT(*) FROM dbo.target_table)" in s["expression"] for s in t.steps)   # SET: own statement
