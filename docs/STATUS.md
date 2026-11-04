@@ -710,6 +710,7 @@ texts"; now `detail.writes_nothing` says when every evaluated text only returns 
 "it writes nothing here", and the reason is `known_except_a_filter_value`. Verified on fd3da1b
 (190 occurrences, 86 gaps, 23 traces; nothing else changed). The reason was not visible in
 gap-summary.json (its table covered value-path gaps only): `row_selection_gap_traces_by_reason` added.
+Verified on 02d0c97: 23 traces under dynamic_sql / known_except_a_filter_value; everything else unchanged.
 
 ## T-SQL construct probe and sqlleaf comparison (tests/test_column_tsql_constructs.py)
 
