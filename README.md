@@ -337,7 +337,7 @@ If you can't share the source or the traces, run with `--gap-summary` and share 
 - `totals`: `outcomes` and `results` (completeness status and result per trace),
   `value_path_ends_by_meaning`, `declared_terminal_ends`, `assertions` (use, origin and review, as
   counts), `no_writer_stops` (writer-search categories), `earlier_content`,
-  `traces_blocked_by_gap_kind`, `value_gap_traces_by_reason`,
+  `traces_blocked_by_gap_kind`, `value_gap_traces_by_reason`, `row_selection_gap_traces_by_reason`,
   `wildcard_traces_by_unexpanded_star_reason`, `writer_steps_by_job_context`,
   `writer_order_gaps_by_writers_in_job_scripts`, gaps and distinct gap statements by kind, and
   `statements_blocking_most_traces` (counts only);

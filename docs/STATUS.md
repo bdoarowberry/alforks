@@ -707,7 +707,9 @@ blocks 43 traces instead of 56; 86 gaps (190 occurrences, 23 traces) are row_sel
 sits only in the WHERE equality and the query only returns rows. Wording: the gap said the statements
 are "analysed as writers" and gap-summary.json filed them under "callers outside scan may pass other
 texts"; now `detail.writes_nothing` says when every evaluated text only returns rows, the message says
-"it writes nothing here", and the reason is `known_except_a_filter_value`.
+"it writes nothing here", and the reason is `known_except_a_filter_value`. Verified on fd3da1b
+(190 occurrences, 86 gaps, 23 traces; nothing else changed). The reason was not visible in
+gap-summary.json (its table covered value-path gaps only): `row_selection_gap_traces_by_reason` added.
 
 ## T-SQL construct probe and sqlleaf comparison (tests/test_column_tsql_constructs.py)
 

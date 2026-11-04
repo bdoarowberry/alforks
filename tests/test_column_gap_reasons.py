@@ -42,3 +42,14 @@ def test_assertion_use_is_summarised_as_counts(tmp_path):
     assert block["traces_per_assertion"][0] == 1
     assert block["traces_relying_on_unreviewed"] == (1 if block["by_review"].get("reviewed", 0) < block["used"] else 0)
     assert "demo" not in json.dumps(block).lower()
+
+
+def test_row_selection_only_gaps_have_their_own_reason_table(tmp_path):
+    """Dynamic SQL known except a filter value affects which rows are selected: it is counted under
+    row_selection_gap_traces_by_reason, not value_gap_traces_by_reason."""
+    root = FIXTURES / "dynamic" / "literal_placeholder"
+    assert run_cli(cli_args(root, "demo.dbo.out_c.v", tmp_path, *DB, "--gap-summary")) in (0, 3)
+    totals = json.loads((tmp_path / "gap-summary.json").read_text(encoding="utf-8"))["totals"]
+    assert totals["row_selection_gap_traces_by_reason"]["dynamic_sql"] == {
+        "object_name_passed_to_a_dynamic_procedure/known_except_a_filter_value": 1}
+    assert "dynamic_sql" not in totals["value_gap_traces_by_reason"]

@@ -482,7 +482,9 @@ file names. It includes:
   `value_path_ends_by_meaning`, `declared_terminal_ends`, `assertions` (used, by origin and
   review, traces relying on unreviewed ones), `no_writer_stops` (writer-search categories),
   `earlier_content`, `traces_blocked_by_gap_kind`, `wildcard_traces_by_unexpanded_star_reason`,
-  `value_gap_traces_by_reason`, `writer_steps_by_job_context`,
+  `value_gap_traces_by_reason`, `row_selection_gap_traces_by_reason` (the same for gaps that only
+  affect which rows are selected, e.g. dynamic SQL `known_except_a_filter_value`),
+  `writer_steps_by_job_context`,
   `writer_order_gaps_by_writers_in_job_scripts`, `gaps_by_kind`,
   `distinct_gap_statements_by_kind`, `statements_blocking_most_traces` (counts only);
 - `traces`: one entry per trace with its completeness counts, steps by status and writer kind,

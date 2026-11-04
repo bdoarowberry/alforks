@@ -211,6 +211,7 @@ def _totals(traces: list[dict]) -> dict:
     near: Counter = Counter()
     star_reasons: Counter = Counter()   # traces whose value-path * gaps have each reason
     gap_reasons: dict[str, Counter] = {}   # gap kind -> reason -> traces (value-path and context gaps)
+    row_reasons: dict[str, Counter] = {}   # the same for gaps that affect row selection only
     run_context: dict[str, str] = {}       # step id -> job-script run status (each writing step once)
     in_jobs: Counter = Counter()            # writer-order gaps: are their writers run by the job scripts?
     assertion_traces: dict[str, set[int]] = {}   # assertion id -> traces using it
@@ -267,14 +268,15 @@ def _totals(traces: list[dict]) -> dict:
             if step.get("run_context"):
                 run_context[step["id"]] = step["run_context"]["status"]
         seen_reasons: set[tuple[str, str]] = set()
+        seen_row_reasons: set[tuple[str, str]] = set()
         for g in data.get("gaps", []):
-            if g.get("affects") == "row_selection":
-                continue
             reason = gap_reason(g)
             if reason:
-                seen_reasons.add((g["kind"], reason))
+                (seen_row_reasons if g.get("affects") == "row_selection" else seen_reasons).add((g["kind"], reason))
         for kind, reason in seen_reasons:
             gap_reasons.setdefault(kind, Counter())[reason] += 1
+        for kind, reason in seen_row_reasons:
+            row_reasons.setdefault(kind, Counter())[reason] += 1
         for gap in data.get("gaps", []):
             gaps[gap["kind"]] += 1
             for ev in gap.get("evidence", [])[:1]:
@@ -308,12 +310,16 @@ def _totals(traces: list[dict]) -> dict:
         "traces_blocked_by_gap_kind": dict(sorted(blocked.items())),
         "wildcard_traces_by_unexpanded_star_reason": dict(sorted(star_reasons.items())),
         "value_gap_traces_by_reason": {k: dict(sorted(v.items())) for k, v in sorted(gap_reasons.items())},
+        "row_selection_gap_traces_by_reason": {k: dict(sorted(v.items())) for k, v in sorted(row_reasons.items())},
         "writer_steps_by_job_context": dict(sorted(Counter(run_context.values()).items())),
         "writer_order_gaps_by_writers_in_job_scripts": dict(sorted(in_jobs.items())),
         "gaps_by_kind": dict(sorted(gaps.items())),
         "distinct_gap_statements_by_kind": {k: len(v) for k, v in sorted(statements.items())},
         "statements_blocking_most_traces": shared[:10],
-        "note": "statements_blocking_most_traces lists, for the ten statements behind value or context gaps "
+        "note": "value_gap_traces_by_reason counts traces per gap reason for gaps on the value path or its context; "
+                "row_selection_gap_traces_by_reason does the same for gaps that only affect which rows are selected "
+                "(e.g. dynamic SQL known except a filter value). "
+                "statements_blocking_most_traces lists, for the ten statements behind value or context gaps "
                 "in the most traces, how many traces each blocks (counts only). earlier_content counts reads "
                 "of a column's or variable's own earlier value: loops_cut_traced end where that value's writes "
                 "are traced (stop prior_state); update_only_untraced end where nothing in the selected sources "
