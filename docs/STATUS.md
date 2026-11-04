@@ -669,6 +669,14 @@ treated as falling through, so the statements after the TRY/CATCH looked reached
 path like RETURN. Verified by the tester: 0 calls and 1 read after the RETURN; regular and interim
 runs unchanged. Their remaining point: reuse traces were labelled `complete_within_selected_scope`;
 the result is now `not_written_in_scenario` when the target itself is not written.
+Wording follow-ups (fba7692, 20134f0, 9529385): reuse pages ask for evidence from the run that
+populated the existing rows and make no route, value-rule, row-selection or open-point claims; the
+tester found no remaining sentence implying how those rows were produced.
+Saved 178-target comparison against the unconstrained run of the same build: regular rebuild removes
+6 steps (two variable, two constant, two fallback-expression) from excluded branches in 2 traces,
+`via` changes only there; interim rebuild changes nothing; both keep 47 / 3 / 128 and every gap-kind
+count. Still open: the cross-build comparison (unconstrained, current build vs the last saved batch
+before 83f62d1) for the sp_executesql, scalar-inlining, `via` and CROSS APPLY id changes.
 
 ## T-SQL construct probe and sqlleaf comparison (tests/test_column_tsql_constructs.py)
 
